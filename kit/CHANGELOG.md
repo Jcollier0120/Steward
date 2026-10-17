@@ -30,6 +30,20 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing for an agent. Only the keeper (the Smith, else Reeve) changes the file. Every agent's kit carries the build (295 KB) in `src\kit\geniex\`.
 
+## 2.80.3
+
+**spec/NPU-VENDORS.md says why the Smith's check picture read "Tally 827" on the Snapdragon X2's Qwen3-VL-2B, and why the kit doesn't change pictures for it.**
+
+### What changed
+
+- **spec/NPU-VENDORS.md** (Large greyscale text on whole squares): the 2B misreads large greyscale-smoothed text on a picture whose sides are both a whole number of 32 px, which llama.cpp passes to the model as it is. Every font, size and text drawn so read wrong; a pixel off whole squares, or drawn in ClearType, it read right 8 times in 8. The Smith draws its picture 513 × 512 from its 0.8.45.
+- It says why the kit doesn't make such pictures a pixel wider, as `sides-of-32` does for FastFlowLM: crisp screen text sent as it was read 15 of 18 questions right, and 12 of 18 a pixel wider.
+- spec/ACCELERATORS.md points there from the cards' Qwen3-VL-2B measurement.
+
+### Before you update
+
+- Nothing: no code changed.
+
 ## 2.80.2
 
 **Pictures fit the Snapdragon X2's Qwen3-VL-2B. It reads a picture at its own size, a token for each 32 × 32 px, so a 3840 × 2160 screen came to about 8,160 tokens and GenieX refused it, while the kit counted every picture as 400. Now a picture over 1,024 of its tokens is redrawn to fit before it's sent, and counted as 1,024 against the NPU's cap. And its window is 2,560 tokens instead of 4,096, 168 MB less memory.**

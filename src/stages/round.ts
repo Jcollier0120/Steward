@@ -9,13 +9,15 @@ import { keptSigningDown, noteSigningWaits, signsWith } from '../signing.ts';
 import { clearTastingHold } from '../tasting.ts';
 import { takeFreshStart } from '../fresh-start.ts';
 import { withRepo } from './slots.ts';
+import { mainGate } from './mainbuild.ts';
 
 /**
- * The Steward's round (`steward round`, and on duty every few minutes when Settings say it merges and releases
- * by itself): the merge stage with --yes --team, each merged PR's steps after it, and then a release for every
- * employee whose branch carries a version with no GitHub release yet, whatever kit it pins; then the Steward's own new
- * versions (stages/self.ts) and a new kit rolled out to each employee behind it (stages/rollout.ts). A round with
- * nothing done or failed is not recorded: last-stage.json and stages.log keep what last happened.
+ * The Steward's round (`steward round`, and on duty every few minutes when Settings say it releases by itself): at a
+ * build (pipeline.ts), the Steward's own new versions (stages/self.ts), a new kit rolled out to each employee behind it
+ * (stages/rollout.ts), and a release for every employee whose branch carries a version with no GitHub release yet,
+ * whatever kit it pins, its commit tested once first unless a vouch covers it (stages/mainbuild.ts). The Steward merges
+ * no one's PRs: their authors do. A round with nothing done or failed is not recorded: last-stage.json and stages.log
+ * keep what last happened.
  *
  * A release that fails isn't tried again at the same commit, round after round: the commit is kept in
  * round-failed.json, and the round says so until a person releases it (Release on the page, or `steward
@@ -61,7 +63,10 @@ export async function buildReleases<R>(employees: Employee[], parallel: number, 
   return employees.map((e) => (signers.includes(e) ? a[signers.indexOf(e)] : b[rest.indexOf(e)]));
 }
 
-/** Each employee's unreleased version, released from its branch; not a commit whose release failed in a round before. */
+/**
+ * Each employee's unreleased version, released from its branch, that very commit tested first (mainbuild.ts's mainGate);
+ * not a commit whose release failed in a round before.
+ */
 export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promise<EmployeeResult[]> {
   const failed = readJson<Record<string, string>>(roundFailuresFile(), {});
   if (!employees.length) return [];
@@ -78,6 +83,7 @@ export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promis
         releaseOne(ctx, e, {
           kit: null,
           kitOnly: true,
+          gate: (commit, since) => mainGate(ctx, e, commit, since),
           unless: (commit, version) => (failed[e.id] === commit.slice(0, 7) && !retry.has(e.id) ? `v${version} at ${commit.slice(0, 7)} failed to release in an earlier round, so the rounds leave it to you: Release on the page, or a new commit` : null),
         }),
       );

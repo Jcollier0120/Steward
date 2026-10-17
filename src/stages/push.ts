@@ -1,14 +1,15 @@
 import { existsSync } from 'node:fs';
 import { changelogBetween } from '../kitfiles.ts';
-import { aheadOf, branchExists, commitOf, fetchBranch, git, gitMaybe, showFile } from '../git.ts';
+import { aheadOf, branchExists, commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { TOOL } from '../kitsource.ts';
 import type { Employee } from '../settings.ts';
 import { readVersion } from '../versions.ts';
-import { bumpBranch, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, forgetGlance, NOT_ON_KIT, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
 import { readPin } from './staff.ts';
 import { noteOpened } from '../strangers.ts';
 import { hostFor, must } from '../hosts/index.ts';
 import { withRepo } from './slots.ts';
+import { mergeOwn, prNumberOf } from './mainbuild.ts';
 
 /**
  * Stage 2, `steward push`: each bump prepared here (the branch steward/kit-<version>) is pushed, never
@@ -17,6 +18,9 @@ import { withRepo } from './slots.ts';
  *
  * A fold (the rollout's: a newer kit onto the Steward's kit PR still open for an older one) is pushed onto that PR's
  * branch the same way, once GitHub says the PR is still open, and the PR's title and description become the new kit's.
+ *
+ * The rollout's (PushOptions' `merge`, Steward 0.36.124) are merged at once too, by the Steward itself (mainbuild.ts's
+ * mergeOwn): their checks passed in the bump, and no one else merges the Steward's PRs. The build releases them.
  */
 
 export const prTitle = (e: Employee, version: string, kit: string) => `${e.name} ${version}: the Steward's kit ${kit}`;
@@ -40,6 +44,8 @@ export interface PushOptions {
   changelog: string | null;
   /** By employee id: the kit PR its bump went onto (bump.ts's folds). */
   folds?: Record<string, KitFold>;
+  /** Each PR merged as soon as it is open (the rollout's); a person's `steward push` leaves it open. */
+  merge?: boolean;
 }
 
 export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<EmployeeResult> {
@@ -64,6 +70,20 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
   const pushed = await gitMaybe(run, repo, 'ls-remote', '--heads', 'origin', `refs/heads/${branch}`);
   const remoteSha = pushed?.trim().split(/\s+/)[0] ?? '';
   const localSha = (await commitOf(run, repo, `refs/heads/${branch}`)) ?? '';
+  /** Words for the PR merged at the commit pushed, when the rollout asks: "; merged it", or why it is open still. */
+  const merged = async (n: number | null): Promise<string> => {
+    if (!o.merge || !n) return '';
+    const why = await mergeOwn(ctx, e, { number: n, head: localSha });
+    if (why) return `; it is open still (${why}): the next build tries again`;
+    // Its branch has moved: read afresh from here on, not from the glance. And the bump's worktree and branch are done with.
+    forgetGlance(ctx, e);
+    try {
+      for (const line of await removeWorktree(run, repo, bumpDirOf(ctx.settings, e), branch)) ctx.log(`[${e.id}] ${line}`);
+    } catch (err) {
+      ctx.log(`[${e.id}] couldn't tidy up after #${n}: ${(err as Error).message}`);
+    }
+    return '; merged it';
+  };
   if (remoteSha !== localSha) {
     // Another PC's turn here now (lease.ts): it rolls the kit out there. The bump stays on this PC's branch.
     if (ctx.lease && !(await ctx.lease.ok(e))) return result(e, 'skipped', `${branch} is ready here, but another PC publishes ${e.name} now, so it wasn't pushed`);
@@ -74,7 +94,7 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
   }
   // Watched from now on, so a merge that isn't this Steward's is seen (strangers.ts).
   if (open.length) noteOpened(e, open[0].url, localSha);
-  if (open.length && !fold) return result(e, 'done', `PR #${open[0].number} was already open${remoteSha !== localSha ? '; pushed the new commits to it' : ''}`, { url: open[0].url });
+  if (open.length && !fold) return result(e, 'done', `PR #${open[0].number} was already open${remoteSha !== localSha ? '; pushed the new commits to it' : ''}${await merged(open[0].number)}`, { url: open[0].url });
 
   const versionFile = e.versionFiles[0];
   // Both asked at once, so git reads them in one command (showFile).
@@ -90,13 +110,13 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
     must(await host.editPr(e.repo, fold.number, { title, body }));
     const url = open[0]?.url;
     ctx.log(`[${e.id}] kit ${o.kit} onto #${fold.number}`);
-    return result(e, 'done', `put kit ${o.kit} onto its open PR #${fold.number}, now "${title}"`, { ...(url ? { url } : {}), version });
+    return result(e, 'done', `put kit ${o.kit} onto its open PR #${fold.number}, now "${title}"${await merged(fold.number)}`, { ...(url ? { url } : {}), version });
   }
   const out = must(await host.createPr(e.repo, { base: e.branch, head: branch, title, body }));
   const url = out.trim().split('\n').pop() ?? '';
   ctx.log(`[${e.id}] opened ${url}`);
   noteOpened(e, url, localSha);
-  return result(e, 'done', `opened "${title}"`, { url, version });
+  return result(e, 'done', `opened "${title}"${await merged(prNumberOf(url))}`, { url, version });
 }
 
 export async function push(ctx: Ctx, employees: Employee[], o: PushOptions): Promise<EmployeeResult[]> {

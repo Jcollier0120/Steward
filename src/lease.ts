@@ -265,7 +265,7 @@ export async function turnOne(run: Runner, r: RemoteRepo, e: Pick<Employee, 'nam
 }
 
 /** The words for a repository another PC publishes. */
-export const doneBy = (e: Pick<Employee, 'name'>, holder: string) => `merging and releasing for ${e.name}: done by ${holder || 'another PC'}`;
+export const doneBy = (e: Pick<Employee, 'name'>, holder: string) => `releasing for ${e.name}: done by ${holder || 'another PC'}`;
 
 /** Before each publishing act: whether this PC may still publish to an employee's repository. */
 export interface LeaseGuard {
@@ -421,7 +421,7 @@ export async function handOver(e: Employee, o: { run: Runner; settings: Settings
           ? `This PC keeps ${e.name}${from}: other PCs leave it alone while this PC is around.`
           : o.pin === false
             ? `${e.name} isn't kept on this PC any more: it stays here until another PC's turn comes.`
-            : `This PC merges and releases ${e.name} now${from}.`;
+            : `This PC releases ${e.name} now${from}.`;
       return { ok: true, message: words };
     }
   }

@@ -7,15 +7,14 @@ import { after, test } from 'node:test';
 import type { Employee } from '../src/settings.ts';
 
 // A .NET employee, as Heiward is: C#, its branch master, its version a .csproj's <VersionPrefix>, no package.json,
-// and its kit\ filled by a PowerShell script of its own. It goes through every stage (bump, push, merge, release,
-// staff) with git for real and gh standing in, and gets nothing of a Node agent's: no npm, no tools/kit.ts. A bump's
+// and its kit\ filled by a PowerShell script of its own. It goes through every stage (bump, push and its merge,
+// release, staff) with git for real and gh standing in, and gets nothing of a Node agent's: no npm, no tools/kit.ts. A bump's
 // version is claimed (claims.ts), in a Steward home of the test's own.
 const tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'steward-dotnet-'))); // its real path, as git spells it (a Dev Drive mounted in a folder)
 after(() => rmSync(tmp, { recursive: true, force: true }));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
 const { bumpOne, needsNpmCi } = await import('../src/stages/bump.ts');
-const { mergeOne } = await import('../src/stages/merge.ts');
 const { pushOne } = await import('../src/stages/push.ts');
 const { releaseOne } = await import('../src/stages/release.ts');
 const { staffRow } = await import('../src/stages/staff.ts');
@@ -114,7 +113,7 @@ test('npm ci only for a Node project without node_modules: never for one with no
   assert.equal(at(['kit.json', 'Heiward.sln']), false);
 });
 
-test('a .NET employee on master, through every stage: bump, push, merge, release and staff', async () => {
+test('a .NET employee on master, through every stage: bump, push and its merge, release and staff', async () => {
   const dir = path.join(tmp, 'cycle');
   const f = fakeDotnetEmployee(dir);
   const released = path.join(dir, 'released.json');
@@ -154,11 +153,21 @@ test('a .NET employee on master, through every stage: bump, push, merge, release
   assert.equal(sh(f.checkout, 'branch', '--show-current'), 'master', "the person's checkout is as it was");
   assert.equal(sh(f.checkout, 'status', '--porcelain'), '');
 
-  // push: the branch to origin, and a PR against master.
-  const p = runner((args) => (args[1] === 'list' ? ok([]) : args[1] === 'create' ? ok('https://github.com/Jcollier0120/Heiward/pull/60\n') : undefined));
-  const pushed = await pushOne({ ...ctx, run: p.run }, e, { kit: '1.0.1', changelog: '## 1.0.1\n\n- new vectors\n' });
+  // push, as the rollout's: the branch to origin, a PR against master, and that PR merged by the Steward at once
+  // (mainbuild.ts's mergeOwn), at the commit pushed: GitHub (standing in) merges it into master.
+  const bumpedAt = sh(f.checkout, 'rev-parse', branch);
+  const p = runner((args) => {
+    if (args[1] === 'list') return ok([]);
+    if (args[1] === 'create') return ok('https://github.com/Jcollier0120/Heiward/pull/60\n');
+    if (args[1] === 'merge') {
+      sh(f.checkout, 'push', '--quiet', 'origin', `${branch}:master`);
+      return ok('');
+    }
+  });
+  const pushed = await pushOne({ ...ctx, run: p.run }, e, { kit: '1.0.1', changelog: '## 1.0.1\n\n- new vectors\n', merge: true });
   assert.equal(pushed.outcome, 'done', pushed.message);
-  assert.equal(sh(f.origin, 'rev-parse', `refs/heads/${branch}`), sh(f.checkout, 'rev-parse', branch));
+  assert.equal(pushed.message, `opened "Heiward 1.7.1: the Steward's kit 1.0.1"; merged it`);
+  assert.equal(sh(f.origin, 'rev-parse', `refs/heads/${branch}`), bumpedAt);
   const create = p.gh.find((a) => a[1] === 'create')!;
   assert.equal(create[create.indexOf('--base') + 1], 'master');
   assert.equal(create[create.indexOf('--repo') + 1], 'Jcollier0120/Heiward');
@@ -167,20 +176,7 @@ test('a .NET employee on master, through every stage: bump, push, merge, release
   assert.match(body, /the version is 1\.7\.1 in HEI\.Agent\/HEI\.Agent\.csproj\. The kit itself isn't in the repo: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\\kit\.ps1` fills it/);
   assert.doesNotMatch(body, /tools\/kit\.ts/);
   assert.match(body, /- new vectors/);
-
-  // merge --yes: GitHub (standing in) merges the PR into master, and the Steward's worktree goes.
-  const pr = { number: 60, title: "Heiward 1.7.1: the Steward's kit 1.0.1", url: 'https://github.com/Jcollier0120/Heiward/pull/60', headRefName: branch, baseRefName: 'master', isCrossRepository: false, author: { login: 'Jcollier0120', is_bot: false }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }] };
-  const m = runner((args) => {
-    if (args[1] === 'list') return ok([pr]);
-    if (args[1] === 'merge') {
-      sh(f.checkout, 'push', '--quiet', 'origin', `${branch}:master`);
-      return ok('');
-    }
-  });
-  const merged = await mergeOne({ ...ctx, run: m.run }, e, { yes: true });
-  assert.equal(merged.outcome, 'done', merged.message);
-  assert.deepEqual(m.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '60', '--repo', 'Jcollier0120/Heiward', '--merge', '--delete-branch']]);
-  assert.ok(!existsSync(workTree), "the bump's worktree is removed after the merge");
+  assert.deepEqual(p.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '60', '--repo', 'Jcollier0120/Heiward', '--merge', '--match-head-commit', bumpedAt, '--delete-branch']]);
 
   // release: from origin/master at the merged commit, in a worktree of its own, with its release command.
   // GitHub has v1.7.1 once its release command has run.

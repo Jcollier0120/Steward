@@ -5,9 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// A team PR its author vouched for (stages/vouch.ts): its checks ran and passed in the author's clone at its head, and
-// a team member's account said so on GitHub. The Steward merges it without testing it again; anyone else's word, a
-// newer failure, the Wright's PR or a head pushed since, and it is tested here as before. And `steward vouch` itself.
+// A PR its author vouched for (stages/vouch.ts): its checks ran and passed in the author's clone at its head, and a team
+// member's account said so on GitHub. Its author merges it, and the build that releases main doesn't test that code
+// again (stages/mainbuild.ts); anyone else's word, a newer failure or none, and main is tested at the build. And
+// `steward vouch` itself, which says to merge it yourself.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-vouch-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 // The Assayer's record of checks, never the person's own.
@@ -15,13 +16,15 @@ process.env.ASSAYER_HOME = path.join(tmp, 'assayer');
 mkdirSync(process.env.ASSAYER_HOME, { recursive: true });
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { mergeOne } = await import('../src/stages/merge.ts');
+const { coveredBy } = await import('../src/stages/mainbuild.ts');
 const { checksOf, VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
-const { askRoundSoon, passingTrouble, setVouch, STATUS_WAITS_MS, vouch } = await import('../src/stages/vouch.ts');
+const { MERGE_IT_YOURSELF, passingTrouble, setVouch, STATUS_WAITS_MS, vouch, vouchedBy, vouchOn } = await import('../src/stages/vouch.ts');
 const { assayerChecksFile, ASSAYED_MS, choseOf, covers, whyShort } = await import('../src/stages/assayed.ts');
 const { noteVouchTime, vouchLimit, vouchTimes, vouchTimesFile } = await import('../src/stages/vouchtime.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 const { freePort } = await import('../kit/test/free-port.ts');
+const { claimsFile } = await import('../src/claims.ts');
+type PrInfo = import('../src/stages/staff.ts').PrInfo;
 
 const vouchStatus = { __typename: 'StatusContext', context: VOUCH_CONTEXT, state: 'SUCCESS' };
 
@@ -33,49 +36,59 @@ test("a vouch isn't a check GitHub runs: alone, a PR's checks are none; beside r
   assert.equal(checksOf([{ __typename: 'StatusContext', context: 'ci/build', state: 'SUCCESS' }]), 'passing');
 });
 
-test('a team PR vouched for by a team member at its head is merged without being tested here; anything less, and it is tested', async () => {
-  const f = fakeEmployee(path.join(tmp, 'merge'), { version: '0.4.0' });
-  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/thing');
-  writeFileSync(path.join(f.checkout, 'thing.txt'), 'a thing\n');
-  sh(f.checkout, 'add', '-A');
-  sh(f.checkout, 'commit', '--quiet', '-m', 'a thing');
-  const head = sh(f.checkout, 'rev-parse', 'HEAD');
-  sh(f.checkout, 'push', '--quiet', 'origin', `${head}:refs/pull/7/head`);
-  sh(f.checkout, 'switch', '--quiet', 'main');
-  // Its checks here always fail: a merge proves they weren't run.
-  const e = employee(f.checkout, { fill: '', test: ['node -e process.exit(1)'] });
-  const listed = (o: Record<string, unknown> = {}) => [{ number: 7, title: 'a thing', url: 'https://github.com/Jcollier0120/Fake/pull/7', headRefName: 'claude/thing', headRefOid: head, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [vouchStatus], body: '', labels: [], ...o }];
-  const look = async (statuses: unknown[], o: Record<string, unknown> = {}) => {
-    const r = runner((a) => {
-      if (a[0] === 'pr' && a[1] === 'list') return ok(listed(o));
-      if (a[0] === 'release' && a[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
-      if (a[0] === 'api' && a[1] === `repos/Jcollier0120/Fake/commits/${head}/statuses?per_page=100`) return ok(statuses);
-      if (a[0] === 'pr' && a[1] === 'merge') return ok('');
-    });
-    const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
-    const m = await mergeOne(ctx, e, { yes: true, team: true });
-    return { m, r, lines: ctx.lines.join('\n') };
+test("a build trusts a team member's vouch on main's head, or on the PR head a merge commit brought in unchanged; anyone else's word, a newer failure or none, and it tests main itself", async () => {
+  const f = fakeEmployee(path.join(tmp, 'main'), { version: '0.4.0' });
+  const commit = (file: string) => {
+    writeFileSync(path.join(f.checkout, file), `${file}\n`);
+    sh(f.checkout, 'add', '-A');
+    sh(f.checkout, 'commit', '--quiet', '-m', file);
+    return sh(f.checkout, 'rev-parse', 'HEAD');
   };
+  // PR #7, merged by its author while up to date with main: the merge commit's tree is the PR head's.
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/thing');
+  const prHead = commit('thing.txt');
+  sh(f.checkout, 'switch', '--quiet', 'main');
+  sh(f.checkout, 'merge', '--quiet', '--no-ff', '-m', 'Merge #7', 'claude/thing');
+  const merge = sh(f.checkout, 'rev-parse', 'HEAD');
+  // PR #8, merged after main moved on: the merge commit's code is neither parent's.
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/other');
+  const otherHead = commit('other.txt');
+  sh(f.checkout, 'switch', '--quiet', 'main');
+  commit('beside.txt');
+  sh(f.checkout, 'merge', '--quiet', '--no-ff', '-m', 'Merge #8', 'claude/other');
+  const moved = sh(f.checkout, 'rev-parse', 'HEAD');
+  const e = employee(f.checkout);
   const byTeam = { context: VOUCH_CONTEXT, state: 'success', creator: { login: 'jcollier0120' } };
+  /** A ctx whose gh answers each commit's statuses from `statuses` (none for any other); `down`: GitHub doesn't answer. */
+  const look = (statuses: Record<string, unknown[]>, down = false) => {
+    const r = runner((a) => {
+      const at = a[0] === 'api' ? /^repos\/Jcollier0120\/Fake\/commits\/([0-9a-f]{40})\/statuses\?per_page=100$/.exec(a[1]) : null;
+      if (at && !down) return ok(statuses[at[1]] ?? []);
+    });
+    return ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
+  };
 
-  const vouched = await look([byTeam, { context: 'other', state: 'failure', creator: { login: 'someone' } }]);
-  assert.equal(vouched.m.outcome, 'done', vouched.m.message);
-  assert.equal(vouched.m.message, `merged #7 (checks passed at ${head.slice(0, 7)} in jcollier0120's clone, vouched for)`);
-  assert.doesNotMatch(vouched.lines, /testing it here/);
-  assert.deepEqual(vouched.r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', head]]);
+  assert.equal(await vouchOn(look({ [merge]: [byTeam, { context: 'other', state: 'failure', creator: { login: 'someone' } }] }), e.repo, merge, ['Jcollier0120']), 'jcollier0120');
+  assert.equal(await coveredBy(look({ [merge]: [byTeam] }), e, merge), `jcollier0120 vouched for ${merge.slice(0, 7)}`);
+  assert.equal(await coveredBy(look({ [prHead]: [byTeam] }), e, merge), `jcollier0120 vouched for ${prHead.slice(0, 7)}, which ${merge.slice(0, 7)} merged unchanged`);
+  assert.equal(await coveredBy(look({ [otherHead]: [byTeam] }), e, moved), null, "a PR head's vouch doesn't cover a merge that changed its code");
 
-  // Someone outside the team, a newer failure, the Wright's PR, or no answer from GitHub: tested here, and so not merged.
-  for (const [why, statuses, o] of [
-    ['a stranger vouched', [{ ...byTeam, creator: { login: 'stranger' } }], {}],
-    ['a newer failure', [{ ...byTeam, state: 'failure' }, byTeam], {}],
-    ["the Wright's", [byTeam], { headRefName: 'wright/12-thing' }],
-    ['no vouch', [], {}],
+  // Someone outside the team, a newer failure, no vouch, or no answer from GitHub: main is tested at the build.
+  for (const [why, statuses, down] of [
+    ['a stranger vouched', [{ ...byTeam, creator: { login: 'stranger' } }], false],
+    ['a newer failure', [{ ...byTeam, state: 'failure' }, byTeam], false],
+    ['no vouch', [], false],
+    ['GitHub not answering', [byTeam], true],
   ] as const) {
-    const t = await look([...statuses], { ...o });
-    // Tested here (the first time; then the same commit's result, kept), so it fails, and waits.
-    assert.match(t.m.message, /its checks failed here at/, why);
-    assert.ok(!t.r.gh.some((a) => a[1] === 'merge'), why);
+    assert.equal(await coveredBy(look({ [merge]: [...statuses], [prHead]: [...statuses] }, down), e, merge), null, why);
   }
+
+  // A PR's own vouch: a team PR's head, never the Wright's (the Bailiff reviews those, and they are always tested).
+  const pr: PrInfo = { number: 7, title: 'a thing', url: 'https://github.com/Jcollier0120/Fake/pull/7', head: 'claude/thing', base: 'main', author: 'Jcollier0120', whose: 'team', headOid: prHead, after: null, afterError: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'none', labels: [], changed: 1, files: ['thing.txt'], fork: false };
+  const ctx = look({ [prHead]: [byTeam] });
+  assert.equal(await vouchedBy(ctx, e, pr, ['Jcollier0120']), 'jcollier0120');
+  assert.equal(await vouchedBy(ctx, e, { ...pr, head: 'wright/12-thing' }, ['Jcollier0120']), null, "the Wright's");
+  assert.equal(await vouchedBy(ctx, e, { ...pr, fork: true }, ['Jcollier0120']), null, "a fork's");
 });
 
 test('steward vouch: the checks run at the PR\'s head, and only once they pass is the status set; a dirty clone, another head or a failure sets none', async () => {
@@ -87,9 +100,9 @@ test('steward vouch: the checks run at the PR\'s head, and only once they pass i
   const head = sh(f.checkout, 'rev-parse', 'HEAD');
   // The clone of a GitHub repository, as a session's is.
   sh(f.checkout, 'remote', 'set-url', 'origin', 'https://github.com/Jcollier0120/Fake.git');
-  const go = (o: { test?: string; prHead?: string } = {}) => {
+  const go = (o: { test?: string; prHead?: string; noPr?: boolean } = {}) => {
     const r = runner((a) => {
-      if (a[0] === 'pr' && a[1] === 'view') return ok({ number: 9, state: 'OPEN', headRefOid: o.prHead ?? head, isCrossRepository: false });
+      if (a[0] === 'pr' && a[1] === 'view') return o.noPr ? { code: 1, out: '', err: 'no pull requests found for branch "claude/vouched"' } : ok({ number: 9, state: 'OPEN', headRefOid: o.prHead ?? head, isCrossRepository: false });
       if (a[0] === 'api') return ok('{}');
     });
     const e = employee(f.checkout, { fill: '', test: [o.test ?? 'node -e process.exit(0)'] });
@@ -101,6 +114,26 @@ test('steward vouch: the checks run at the PR\'s head, and only once they pass i
   assert.equal(passed.v.ok, true, passed.v.message);
   assert.deepEqual(passed.r.gh.find((a) => a[0] === 'pr' && a[1] === 'view')?.slice(0, 3), ['pr', 'view', 'claude/vouched'], 'the PR for its branch');
   assert.deepEqual(passed.r.gh.find((a) => a[0] === 'api'), ['api', '-X', 'POST', `repos/Jcollier0120/Fake/statuses/${head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`, '-f', `description=node -e process.exit(0) passed at ${head.slice(0, 7)}`]);
+  // Its author merges it: the Steward merges no one's PRs.
+  assert.equal(passed.v.message, `#9's checks passed at ${head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): ${MERGE_IT_YOURSELF(9, 'Jcollier0120/Fake')}. Push to it again, and vouch again.`);
+  assert.equal(MERGE_IT_YOURSELF(9, 'Jcollier0120/Fake'), "merge it yourself now, once GitHub says it merges cleanly (gh pr merge 9 --repo Jcollier0120/Fake --merge): the Steward merges no one's PRs, and the next build releases main");
+  assert.match(MERGE_IT_YOURSELF(null, 'Jcollier0120/Fake'), /gh pr merge <number> --repo Jcollier0120\/Fake --merge/);
+
+  // A branch with no PR yet: vouched for as pushed once a version is claimed for it; its author then opens the PR and
+  // merges it. (origin's GitHub address reads the fake origin here.)
+  const unclaimed = await go({ noPr: true });
+  assert.equal(unclaimed.v.ok, false);
+  assert.match(unclaimed.v.message, /^claude\/vouched has no PR, and no version is claimed for it: claim one \(claim-version fake --branch claude\/vouched/);
+  assert.ok(!unclaimed.r.gh.some((a) => a[0] === 'api'));
+  sh(f.checkout, 'config', `url.${f.origin.replace(/\\/g, '/')}.insteadOf`, 'https://github.com/Jcollier0120/Fake.git');
+  sh(f.checkout, 'push', '--quiet', 'origin', 'claude/vouched');
+  mkdirSync(path.dirname(claimsFile()), { recursive: true });
+  writeFileSync(claimsFile(), JSON.stringify([{ repo: 'Jcollier0120/Fake', version: '0.4.1', branch: 'claude/vouched', by: 'claude', for: 'v', at: new Date().toISOString() }]));
+  const branch = await go({ noPr: true });
+  assert.equal(branch.v.ok, true, branch.v.message);
+  assert.equal(branch.v.message, `claude/vouched's checks passed at ${head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): open its PR (v0.4.1) from that commit, and ${MERGE_IT_YOURSELF(null, 'Jcollier0120/Fake')}`);
+  assert.equal(branch.r.gh.find((a) => a[0] === 'api')?.[3], `repos/Jcollier0120/Fake/statuses/${head}`);
+  rmSync(claimsFile(), { force: true });
 
   const failed = await go({ test: 'node -e process.exit(1)' });
   assert.equal(failed.v.ok, false);
@@ -238,21 +271,6 @@ test("an affected vouch reaching more test files than its usual ones gets that m
   assert.deepEqual(vouchTimes().t, { affected: [60_000, { ms: 2 * min, files: 30 }], whole: [4 * min] }, 'what it can read, and the new runs');
 });
 
-test("after a vouch, the Steward running here is asked for a round now, with its server.json's token; nothing it says fails the vouch", async () => {
-  const file = path.join(tmp, 'home', 'server.json');
-  rmSync(file, { force: true });
-  assert.equal(await askRoundSoon({ fetch: async () => assert.fail('nothing to ask') }), "The Steward's page isn't running on this PC: it merges at its next round instead.");
-  mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({ pid: 1, port: 21012, token: 'tok', since: '' }));
-  const asked: [string, RequestInit][] = [];
-  const answer = (status: number, body: unknown) => async (url: any, init: any) => (asked.push([String(url), init]), new Response(JSON.stringify(body), { status }));
-  assert.equal(await askRoundSoon({ fetch: answer(200, { started: true, message: "The Steward's round has started." }) as typeof fetch }), "The Steward's round has started.");
-  assert.equal(asked[0][0], 'http://127.0.0.1:21012/api/round/soon');
-  assert.equal(asked[0][1].method, 'POST');
-  assert.equal((asked[0][1].headers as Record<string, string>)['x-token'], 'tok');
-  assert.equal(await askRoundSoon({ fetch: answer(403, { error: 'forbidden' }) as typeof fetch }), "The Steward's page answered HTTP 403: it merges at its next round instead.");
-  assert.equal(await askRoundSoon({ fetch: (async () => { throw new Error('connect ECONNREFUSED'); }) as typeof fetch }), "The Steward's page didn't answer (connect ECONNREFUSED): it merges at its next round instead.");
-});
 test("steward vouch takes the Assayer's passing check of exactly HEAD's tree, and runs nothing; anything less, and the checks run", async () => {
   const f = fakeEmployee(path.join(tmp, 'assayed'), { version: '0.4.0' });
   sh(f.checkout, 'switch', '--quiet', '-c', 'claude/assayed');

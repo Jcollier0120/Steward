@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -104,7 +104,7 @@ test("another PC's turn is left to it, said with its name; run out, it is taken"
   const clerk = emp('clerk', r);
   let t = await L.takeTurns([clerk], { run: realRun, settings, deps: deps({ clerk: r }) });
   assert.deepEqual(t.acting, []);
-  assert.deepEqual(t.elsewhere.map((x) => x.message), ['merging and releasing for Clerk: done by DESKTOP-ABC']);
+  assert.deepEqual(t.elsewhere.map((x) => x.message), ['releasing for Clerk: done by DESKTOP-ABC']);
   assert.equal(await t.guard!.ok(clerk), false);
   assert.deepEqual(L.turnsView([clerk], T0)?.rows.map((x) => [x.status, x.holder]), [['elsewhere', 'DESKTOP-ABC']]);
   t = await L.takeTurns([clerk], { run: realRun, settings, deps: deps({ clerk: r }, T0 + TTL + 3 * MIN) });
@@ -212,7 +212,7 @@ test('Do it here, Keep it on this PC and Unpin write the turn to this PC', async
   await write(r, { pc: B.id });
   const e = emp('clerk', r);
   const d = deps({ clerk: r });
-  assert.deepEqual(await L.handOver(e, { run: realRun, settings, deps: d }), { ok: true, message: 'This PC merges and releases Clerk now from DESKTOP-ABC.' });
+  assert.deepEqual(await L.handOver(e, { run: realRun, settings, deps: d }), { ok: true, message: 'This PC releases Clerk now from DESKTOP-ABC.' });
   let rec = await recordOf(r);
   assert.deepEqual([rec?.pc, rec?.pinned], [A.id, false]);
   assert.equal((await L.handOver(e, { run: realRun, settings, deps: d, pin: true })).ok, true);
@@ -226,57 +226,86 @@ test('Do it here, Keep it on this PC and Unpin write the turn to this PC', async
 
 // ---- Whole rounds on a fake employee ----
 
-function roundSetup(name: string) {
+/** A version raised in every version file of the checkout's branch, committed: its commit. */
+function raise(checkout: string, from: string, to: string): string {
+  for (const file of ['package.json', 'package-lock.json', 'src/app.ts']) writeFileSync(path.join(checkout, file), readFileSync(path.join(checkout, file), 'utf8').replaceAll(from, to));
+  sh(checkout, 'commit', '--quiet', '-am', `Fake ${to}`);
+  return sh(checkout, 'rev-parse', 'HEAD');
+}
+
+/**
+ * A fake employee whose main carries 0.4.1, not released yet (v0.4.0 is): the team's PR #7, merged by its author once
+ * vouched (`vouched`: its head's steward/tested status by a team account), as the Steward merges no one's PRs (Steward
+ * 0.36.124). Its release command notes each version it releases: GitHub's releases, as the stand-in answers them.
+ */
+function roundSetup(name: string, o: { vouched: boolean }) {
   const f = fakeEmployee(path.join(home, name), { version: '0.4.0' });
+  const notes = path.join(home, `${name}-released.txt`);
+  const releaseCmd = `node -e "const fs=require('fs');fs.appendFileSync(process.argv[1],JSON.parse(fs.readFileSync('package.json','utf8')).version+'\\n')" ${notes}`;
   writeFileSync(
     path.join(home, 'settings.json'),
     JSON.stringify({
-      employees: [{ id: 'fake', name: 'Fake', repo: 'Jcollier0120/Fake', checkout: f.checkout, branch: 'main', usesKit: true, parts: ['node'], fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: '', install: '', approve: '' }],
+      employees: [{ id: 'fake', name: 'Fake', repo: 'Jcollier0120/Fake', checkout: f.checkout, branch: 'main', usesKit: true, parts: ['node'], fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: releaseCmd, install: '', approve: '' }],
       team: ['Jcollier0120'],
       workRoot: path.join(home, 'work'),
     }),
   );
   sh(f.checkout, 'switch', '--quiet', '-c', 'fix/thing');
-  writeFileSync(path.join(f.checkout, 'README.md'), 'a fix\n');
-  sh(f.checkout, 'add', '-A');
-  sh(f.checkout, 'commit', '--quiet', '-m', 'a fix');
-  const sha = sh(f.checkout, 'rev-parse', 'HEAD');
-  sh(f.checkout, 'push', '--quiet', 'origin', `${sha}:refs/pull/7/head`);
+  const prHead = raise(f.checkout, '0.4.0', '0.4.1');
   sh(f.checkout, 'switch', '--quiet', 'main');
+  sh(f.checkout, 'merge', '--quiet', '--no-ff', '-m', 'Merge pull request #7 from Jcollier0120/fix/thing', 'fix/thing');
+  const head = sh(f.checkout, 'rev-parse', 'HEAD');
+  sh(f.checkout, 'push', '--quiet', 'origin', 'main');
+  const vouched = new Set(o.vouched ? [prHead] : []);
+  const released = () => (existsSync(notes) ? readFileSync(notes, 'utf8').split('\n').filter(Boolean) : []);
   const r = runner((args) => {
-    if (args[0] === 'pr' && args[1] === 'list') return ok(args.includes('Jcollier0120/Fake') ? [{ number: 7, title: 'a fix', url: 'https://github.com/Jcollier0120/Fake/pull/7', headRefName: 'fix/thing', headRefOid: sha, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [], body: '' }] : []);
-    if (args[0] === 'pr' && args[1] === 'merge') return ok('');
-    if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
+    if (args[0] === 'pr' && args[1] === 'list') return ok([]);
+    // A commit's statuses (vouch.ts's vouchOn), and the Steward's own vouch set on one that passed here (setVouch).
+    const on = args[0] === 'api' ? /^repos\/Jcollier0120\/Fake\/(?:commits\/([0-9a-f]{40})\/statuses|statuses\/([0-9a-f]{40}))/.exec(args.find((a) => a.startsWith('repos/')) ?? '') : null;
+    if (on?.[1]) return ok(vouched.has(on[1]) ? [{ context: 'steward/tested', state: 'success', creator: { login: 'Jcollier0120' } }] : []);
+    if (on?.[2]) return (vouched.add(on[2]), ok({}));
+    if (args[0] === 'release' && args[1] === 'list') return ok([...released().map((v) => ({ tagName: `v${v}`, isDraft: false })), { tagName: 'v0.4.0', isDraft: false }]);
   });
   const remoteRepo: RemoteRepo = { key: 'jcollier0120/fake', url: f.origin, scratch };
-  return { f, r, sha, remoteRepo, merges: () => mergesOf(r.gh) };
+  return { f, r, head, released, remoteRepo, merges: () => mergesOf(r.gh) };
 }
-const MERGE7 = ['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge'];
+/** A round's outcomes but the skipped, each commit as (…). */
+const doneIn = (out: { results: { outcome: string; message: string }[] }) => out.results.filter((x) => x.outcome !== 'skipped').map((x) => [x.outcome, x.message.replace(/\([0-9a-f]{7}\)/, '(…)')]);
 
-test("a round with no ref anywhere merges exactly as before, and takes the turn; another PC's turn, it publishes nothing", async () => {
+test("a round with no ref anywhere releases main exactly as before, and takes the turn; another PC's turn, it publishes nothing", async () => {
   fresh();
-  const s = roundSetup('round-fresh');
+  const s = roundSetup('round-fresh', { vouched: true });
   const d = { device: A, now: () => T0, remote: async () => s.remoteRepo };
   const first = await runStage('round', { full: true }, { run: s.r.run, turns: d });
   assert.equal(first.error, undefined);
-  assert.deepEqual(s.merges(), [MERGE7], 'merged as before');
+  assert.deepEqual(doneIn(first), [['done', 'release: released v0.4.1 from origin/main (…), with kit 1.0.0']], first.log.join('\n'));
+  assert.deepEqual(s.released(), ['0.4.1'], 'released as before');
+  assert.deepEqual(s.merges(), [], "no one's PR merged by the Steward");
   assert.equal((await recordOf(s.remoteRepo))?.pc, A.id, "and the turn is this PC's now");
-  // The desktop presses Do it here: this PC's next round publishes nothing there.
+  // The desktop presses Do it here: this PC's next round publishes nothing there, though main carries a new version.
   await write(s.remoteRepo, { pc: B.id, until: new Date(T0 + TTL).toISOString() });
+  sh(s.f.checkout, 'switch', '--quiet', 'main');
+  sh(s.f.checkout, 'push', '--quiet', 'origin', `${raise(s.f.checkout, '0.4.1', '0.4.2')}:refs/heads/main`);
   const second = await runStage('round', { full: true }, { run: s.r.run, turns: d });
-  assert.deepEqual(s.merges(), [MERGE7], 'nothing more merged');
-  assert.ok(second.results.some((y) => y.id === 'fake' && y.message === 'merging and releasing for Fake: done by DESKTOP-ABC'), JSON.stringify(second.results));
+  assert.deepEqual(s.released(), ['0.4.1'], 'nothing more released');
+  assert.ok(second.results.some((y) => y.id === 'fake' && y.message === 'releasing for Fake: done by DESKTOP-ABC'), JSON.stringify(second.results));
+  assert.ok(!second.results.some((y) => y.id === 'fake' && y.message.startsWith('release: ')), JSON.stringify(second.results));
+  assert.deepEqual(s.merges(), []);
 });
 
 test('offline (the remote out of reach), a round still builds and tests: nothing local waits for a turn', async () => {
   fresh();
-  const s = roundSetup('round-offline');
+  const s = roundSetup('round-offline', { vouched: false });
   const out = await runStage('round', { full: true }, { run: s.r.run, turns: { device: A, now: () => T0, remote: async () => gone() } });
   assert.equal(out.error, undefined);
-  // The team PR GitHub runs no checks on was built and tested here, at its head, as always.
-  assert.ok(out.log.some((l) => l.includes(`#7 has no checks on GitHub: testing it here at ${s.sha.slice(0, 7)}`)), out.log.join('\n'));
-  assert.ok(out.results.some((y) => y.id === 'fake' && /checks passed here/.test(y.message)), JSON.stringify(out.results));
-  assert.ok(out.log.some((l) => l.includes('releasing Fake waits until this PC can reach its remote')));
+  assert.ok(out.log.some((l) => l.includes('releasing Fake waits until this PC can reach its remote')), out.log.join('\n'));
+  // Main's head, which no vouch covers, was built and tested here before its release, as always.
+  const sha = s.head.slice(0, 7);
+  assert.ok(out.log.some((l) => l.startsWith(`[fake] testing main at ${sha} before its release`)), out.log.join('\n'));
+  assert.ok(out.log.some((l) => l.startsWith(`[fake] checks passed here at ${sha}`)), out.log.join('\n'));
+  // Only publishing waits on a turn, and one this PC can't ask about isn't held: released.
+  assert.deepEqual(doneIn(out), [['done', 'release: released v0.4.1 from origin/main (…), with kit 1.0.0']], out.log.join('\n'));
+  assert.deepEqual(s.merges(), []);
 });
 
 // ---- Version claims through refs/manor/claims ----
@@ -337,7 +366,7 @@ test('the claims ref out of reach: claimed here as before; shared on the next re
   await C.shareClaims(realRun, rows, [{ repo: 'Jcollier0120/Fake', remote: s.remoteRepo, sha: await shaOf(s.remoteRepo, C.CLAIMS_REF) }]);
   assert.deepEqual((await sharedClaims(s.remoteRepo)).map((c) => [c.version, c.branch]), [['0.4.13', 'claude/desk'], ['0.4.12', 'claude/offline']], "this PC's free one went up");
   assert.deepEqual(C.claimClashes(), ["Jcollier0120/Fake 0.4.13 was claimed on another PC too (for the desktop's fix) while this PC couldn't reach the remote: claude/second gets a new version when it merges"]);
-  // The merge stage sees the desktop's claim, so a PR from claude/second that sets 0.4.13 is held and caught up.
+  // The desktop's claim is kept here too, beside this PC's own.
   assert.ok(C.claimsOn('Jcollier0120/Fake').some((c) => c.version === '0.4.13' && c.branch === 'claude/desk'));
 });
 

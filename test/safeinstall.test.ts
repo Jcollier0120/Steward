@@ -325,7 +325,6 @@ test("an install that changed nothing flags nothing, and a first install or --no
 test("a flagged version is an alarm at once, saying how to allow it again", () => {
   const conditions = roundConditions({
     round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] },
-    held: [],
     failedReleases: {},
     employees: [],
     settings: { alarms: { waitingHours: 24, tastingHours: 6 }, rollout: false, releaseSelf: false, tasteBeforeRelease: false } as any,

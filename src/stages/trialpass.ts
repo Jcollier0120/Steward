@@ -38,7 +38,7 @@ export const blobOf = (text: string): string => {
 };
 
 /**
- * The kept trial (by its key, "<PR>@<head>") that passed this employee bumped from `base` with kit `kit`, where the
+ * The kept trial (by its key, "main@<commit>"; "<PR>@<head>" in one kept before Steward 0.36.124) that passed this employee bumped from `base` with kit `kit`, where the
  * kit released is the tree it tried (`tree`) and the tools/kit.ts handed out (`tool`: its blob, or undefined for an
  * agent that fills its kit otherwise) is the one it tried. Null when there is none. Pure.
  */
@@ -92,7 +92,7 @@ export async function releasedTool(ctx: Ctx, kit: string): Promise<string | null
 
 /**
  * Why the rollout's bump of `e` to `kit`, from `base`, needn't run its checks again ("kit 1.2.0's trial passed it from
- * abc1234, in #7"), or null when it must: no trial passed it from that commit, or the kit released or the tools/kit.ts
+ * abc1234, on main at def5678"), or null when it must: no trial passed it from that commit, or the kit released or the tools/kit.ts
  * handed out (`tool`, its text; undefined for an agent that fills its kit otherwise) isn't the one tried.
  */
 export async function trialPassOf(ctx: Ctx, e: Employee, o: { kit: string; base: string; tool?: string }): Promise<string | null> {
@@ -101,5 +101,5 @@ export async function trialPassOf(ctx: Ctx, e: Employee, o: { kit: string; base:
   const tree = await releasedTree(ctx, o.kit);
   if (!tree) return null;
   const key = passedInTrial(trials, { id: e.id, kit: o.kit, base: o.base, tree, ...(o.tool !== undefined ? { tool: blobOf(o.tool) } : {}) });
-  return key ? `kit ${o.kit}'s trial passed it from ${o.base.slice(0, 7)}, in #${key.split('@')[0]}` : null;
+  return key ? `kit ${o.kit}'s trial passed it from ${o.base.slice(0, 7)}, ${key.startsWith('main@') ? `on main at ${key.slice(5, 12)}` : `in #${key.split('@')[0]}`}` : null;
 }

@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ago, Badge, Card, Notes, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
 import type { Alarm, AlarmState } from '../alarms.ts';
-import type { ConflictLook, ConflictOutcome } from '../conflicts.ts';
 import type { TendState } from '../tend.ts';
 import type { TurnRow, TurnsView } from '../lease.ts';
 import type { Host } from '../scm.ts';
 import type { EmployeeResult, StageResult } from '../stages/common.ts';
 import type { WholeJob } from '../stages/wholesuite.ts';
-import type { HeldQueue } from '../version-queue.ts';
 import type { FoundView, PrView, RoundView, StaffRowView, StaffView, StewardView } from './types.ts';
 import { askedWords } from './asked.ts';
 
@@ -53,7 +51,7 @@ function ReleaseCell({ r }: { r: StaffRowView }) {
 }
 
 /** One of the Steward's PRs or the team's, as a line of its repository's PR table: a team member's says whose. */
-function Pr({ p, branch, look }: { p: PrView; branch: string; look?: ConflictLook }) {
+function Pr({ p, branch }: { p: PrView; branch: string }) {
   const team = p.whose === 'team';
   return (
     <tr>
@@ -62,7 +60,7 @@ function Pr({ p, branch, look }: { p: PrView; branch: string; look?: ConflictLoo
         {team && (
           <>
             {' '}
-            <Badge title={`Opened by ${p.author}: merged by "Merge the team's PRs", or merge --team`} label="team" />
+            <Badge title={`Opened by ${p.author}: whoever opened it merges it once it is vouched`} label="team" />
           </>
         )}
       </td>
@@ -101,12 +99,6 @@ function Pr({ p, branch, look }: { p: PrView; branch: string; look?: ConflictLoo
             <Badge tone="caution" title={`Merge only takes a PR into ${branch}`} label={<>into {p.base}</>} />
           </>
         )}
-        {look && (
-          <>
-            {' '}
-            <LookBadge l={look} />
-          </>
-        )}
       </td>
     </tr>
   );
@@ -116,14 +108,14 @@ function Pr({ p, branch, look }: { p: PrView; branch: string; look?: ConflictLoo
 const PRS_CALLED: Record<Host, string> = { github: 'Pull requests', gitlab: 'Merge requests', azure: 'Pull requests', gitea: 'Pull requests', bitbucket: 'Pull requests', git: 'Branches' };
 
 /** A repository's open PRs under a small heading in its host's words, and a branch prepared here and not pushed, as a small table under its row. */
-function PrTable({ r, looks }: { r: StaffRowView; looks: Map<string, ConflictLook> }) {
+function PrTable({ r }: { r: StaffRowView }) {
   return (
     <>
       {r.prs.length > 0 && <div className="pr-head">{PRS_CALLED[r.host ?? 'github']}</div>}
       <table className="pr-table">
         <tbody>
           {r.prs.map((p) => (
-            <Pr key={p.number} p={p} branch={r.branch} look={looks.get(lookKey(r.repo, p.number))} />
+            <Pr key={p.number} p={p} branch={r.branch} />
           ))}
           {r.prepared && (
             <tr>
@@ -138,11 +130,10 @@ function PrTable({ r, looks }: { r: StaffRowView; looks: Map<string, ConflictLoo
   );
 }
 
-/** What Settings let the Steward do with a repository: merge its ready PRs, release it. Off until the person says yes. */
+/** What Settings let the Steward do with a repository: release it. Off until the person says yes. Its PRs are merged by whoever wrote them. */
 function Allowed({ r }: { r: StaffRowView }) {
   return (
     <>
-      <Badge tone={r.merges ? 'success' : 'neutral'} title={r.merges ? 'Merges your ready PRs to it' : 'Its PRs are left to you: switch on "Merges your ready PRs" for it in Settings'} label={r.merges ? 'merges' : 'PRs left to you'} />{' '}
       <Badge tone={r.releases ? 'success' : 'neutral'} title={r.releases ? 'Releases each new version on its branch' : 'Not released by the Steward: Settings name no way to (Release it)'} label={r.releases ? 'releases' : 'not released'} />
     </>
   );
@@ -155,7 +146,7 @@ const shownNotes = (r: StaffRowView) => r.notes.filter((n) => n !== 'not using t
  * One repository's row: its repository, checkout, branch, kit (on Castellan's own PC), release, release PC and notes
  * (`notes` false: no row has any, so no column). Its open PRs, when it has some, in a small table on a line under it.
  */
-function StaffRow({ r, kit, castellan, turn, notes: notesColumn, looks }: { r: StaffRowView; kit: string | null; castellan: boolean; turn?: TurnRow | null; notes: boolean; looks: Map<string, ConflictLook> }) {
+function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRowView; kit: string | null; castellan: boolean; turn?: TurnRow | null; notes: boolean }) {
   const co = r.checkout;
   const notes = shownNotes(r);
   const hasPrs = r.prs.length > 0 || !!r.prepared;
@@ -209,7 +200,7 @@ function StaffRow({ r, kit, castellan, turn, notes: notesColumn, looks }: { r: S
       {hasPrs && (
         <tr className="prs-row">
           <td colSpan={3}>
-            <PrTable r={r} looks={looks} />
+            <PrTable r={r} />
           </td>
           <td colSpan={rest} />
         </tr>
@@ -218,98 +209,11 @@ function StaffRow({ r, kit, castellan, turn, notes: notesColumn, looks }: { r: S
   );
 }
 
-const lookKey = (repo: string, n: number) => `${repo}#${n}`;
-
-const LOOK: Record<ConflictOutcome, { tone: BadgeTone; label: string }> = {
-  'caught-up': { tone: 'success', label: 'caught up' },
-  'sent-back': { tone: 'caution', label: 'sent back' },
-  closed: { tone: 'neutral', label: 'closed' },
-  couldnt: { tone: 'danger', label: "couldn't" },
-};
-
-/** What the rounds last did with a PR that conflicts with its branch: a badge, with its words on hover. */
-function LookBadge({ l }: { l: ConflictLook }) {
-  return <Badge tone={LOOK[l.outcome].tone} title={l.note} label={LOOK[l.outcome].label} />;
-}
-
-/**
- * Each PR that conflicted with its branch that the rounds looked at in the last two weeks (conflicts.ts), and what
- * they did: caught it up (its version lines, changelog or kit pin resolved, and a merge commit pushed), sent it back to
- * its author, closed it, or couldn't. The newest first; one no longer open says so.
- */
-function ConflictsCard({ looks, s, now, tour }: { looks: ConflictLook[]; s: StaffView | null; now: number; tour?: string }) {
-  if (!looks.length)
-    return (
-      <Card className="empty" tour={tour}>
-        No PR the rounds looked at has conflicted with its branch in the last two weeks. When one does, it's here with
-        what the Steward did: caught it up, where only version lines or a changelog's new entry conflict, or
-        sent it back to whoever wrote it.
-      </Card>
-    );
-  const open = s ? new Set(s.rows.flatMap((r) => r.prs.map((p) => lookKey(r.repo, p.number)))) : null;
-  return (
-    <Card tour={tour}>
-      <table className="conflicts">
-        <thead>
-          <tr>
-            <th>PR</th>
-            <th>What the Steward did</th>
-            <th>When</th>
-          </tr>
-        </thead>
-        <tbody>
-          {looks.map((l) => (
-            <tr key={lookKey(l.repo, l.number)}>
-              <td>
-                <strong>{l.name}</strong> <Link url={l.url}>#{l.number}</Link>
-                <br />
-                {l.title}
-                <br />
-                <Text variant="muted">
-                  {l.head}, {l.author}'s
-                </Text>
-              </td>
-              <td>
-                <LookBadge l={l} /> {l.note}
-                {l.files.length > 0 && (
-                  <>
-                    <br />
-                    <Text variant="muted">
-                      Conflicted in {l.files.join(', ')}
-                      {l.needs.length > 0 && l.needs.length < l.files.length ? `; ${l.needs.join(', ')} needed a person` : ''}
-                    </Text>
-                  </>
-                )}
-              </td>
-              <td className="when">
-                {ago(l.at, now)}
-                {l.lookedAt !== l.at && (
-                  <>
-                    <br />
-                    <Text variant="muted">looked again {ago(l.lookedAt, now)}</Text>
-                  </>
-                )}
-                {open && !open.has(lookKey(l.repo, l.number)) && (
-                  <>
-                    <br />
-                    <Text variant="muted">no longer open</Text>
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
-  );
-}
-
 /**
  * The staff's table, with each repository's release PC (lease.ts) in it once a turn was taken: who merges and releases
  * it, with Do it here and Keep it on this PC. Turns for no row here, and claims another PC made too (claims.ts), under it.
  */
-function StaffTable({ s, castellan, turns, clashes, looks }: { s: StaffView | null; castellan: boolean; turns: TurnsView | null | undefined; clashes?: string[]; looks: ConflictLook[] }) {
-  const lookOf = new Map(looks.map((l) => [lookKey(l.repo, l.number), l]));
+function StaffTable({ s, castellan, turns, clashes }: { s: StaffView | null; castellan: boolean; turns: TurnsView | null | undefined; clashes?: string[] }) {
   const rows = s?.rows ?? [];
   const turnOf = new Map((turns?.rows ?? []).map((x) => [x.id, x]));
   const loose = (turns?.rows ?? []).filter((x) => !rows.some((r) => r.id === x.id));
@@ -354,7 +258,7 @@ function StaffTable({ s, castellan, turns, clashes, looks }: { s: StaffView | nu
         </thead>
         <tbody>
           {rows.map((r) => (
-            <StaffRow key={r.id} r={r} kit={s.kit} castellan={castellan} turn={showTurns ? (turnOf.get(r.id) ?? null) : undefined} notes={showNotes} looks={lookOf} />
+            <StaffRow key={r.id} r={r} kit={s.kit} castellan={castellan} turn={showTurns ? (turnOf.get(r.id) ?? null) : undefined} notes={showNotes} />
           ))}
         </tbody>
       </table>
@@ -469,8 +373,8 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
   const more = [r.releaseSelf ? 'releases its own new versions' : '', r.rollout ? 'rolls a new kit out to each employee behind it' : ''].filter(Boolean);
   const repoWork =
     r.castellan === false
-      ? 'merges each ready PR of yours in the repositories you said yes to (Merges your ready PRs), with what each asks for after, then releases each new version on a branch, where Settings say how'
-      : `merges every PR of its own and the team's that is ready, with what each asks for after, then releases each employee whose branch carries a version with no release, ${more.length ? `${more.join(', ')}, ` : ''}and approves the jobs whose installed scripts are the merged ones`;
+      ? 'releases each new version on a branch in the repositories you said yes to, where Settings say how (you merge your own PRs)'
+      : `releases each employee whose branch carries something new (everyone merges their own PRs), ${more.length ? `${more.join(', ')}, ` : ''}and approves the jobs whose installed scripts are the released ones`;
   const tend = "opens again, through Manor, the page of any agent that is on duty but doesn't answer, and installs again, once, an update rolled back only because the PC was offline for a moment";
   const noRepos = r.repos === false;
   const what = noRepos
@@ -487,13 +391,13 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
       : "Nothing to do: there are no repositories to look after on this PC, and \"Keeps the staff's pages up\" is off in Settings (or Manor's page isn't named under Alarms). Pick a repository of yours to look after, or switch it on."
     : !r.on
       ? r.tend
-        ? `It merges and releases only when asked, until you say yes: "Merges and releases by itself" is off in Settings. A round every ${r.minutes} minutes while on duty only ${tend}.${after} Run now does a whole round.`
-        : 'It merges and releases only when asked, until you say yes: "Merges and releases by itself" is off in Settings. Run now does one round.'
+        ? `It releases only when asked, until you say yes: "Builds and releases by itself" is off in Settings. A round every ${r.minutes} minutes while on duty only ${tend}.${after} Run now does a whole round.`
+        : 'It releases only when asked, until you say yes: "Builds and releases by itself" is off in Settings. Run now does one round.'
       : r.build
         ? `It builds at set times (${r.build.times.join(', ')}; Settings: Build pipeline): a build ${what}, each repository released once. ${r.build.building ? 'A build is under way now.' : r.build.next ? `The next build is at ${buildAt(r.build.next, now)}.` : 'No build time is set to come.'}${r.build.late ? ` ${r.build.late.charAt(0).toUpperCase()}${r.build.late.slice(1)}.` : ''}${r.build.wakes ? ' Plugged in, the PC is woken a few minutes before each build, and kept up until it closes.' : ''} Between builds, a round every ${r.minutes} minutes only looks, except for an urgent fix (a ready PR whose changelog entry starts "**Urgent fix:"): that builds at once, for its repository alone.${after}`
         : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${after}`;
-  // Where the last build's time went (buildtimes.ts), and that ready PRs merge ahead of the next one (stages/prepare.ts).
-  const took = r.on && !noRepos && r.build?.took ? ` ${r.build.took} Between builds, ready PRs merge ahead of the next build, beside the rounds, and are released at it.` : '';
+  // Where the last build's time went (buildtimes.ts), and that what is merged between builds is released at the next.
+  const took = r.on && !noRepos && r.build?.took ? ` ${r.build.took} Between builds, whoever wrote a PR merges it once vouched, and the next build releases it.` : '';
   return { what, when: `${when}${took}` };
 }
 
@@ -685,7 +589,7 @@ function TurnLine({ x }: { x: TurnRow }) {
           </>
         ) : (
           <>
-            Merging and releasing for {x.name}: {x.status === 'here' ? 'this PC' : <>done by <strong>{x.holder}</strong></>}
+            Releasing for {x.name}: {x.status === 'here' ? 'this PC' : <>done by <strong>{x.holder}</strong></>}
             {x.pinned ? ' (kept there)' : ''}
             {x.quiet ? <Text variant="muted">{`. ${x.holder} has gone quiet: after a day without it, another PC may take it`}</Text> : null}
           </>
@@ -711,7 +615,7 @@ function PickAll({ count, of, onChange }: { count: number; of: number; onChange:
 
 /**
  * The stages, for the ticked employees: one that doesn't take the kit starts unticked. The Steward's own row isn't one:
- * its rounds merge and release it (stages/selfmerge.ts, stages/self.ts).
+ * its builds release it (stages/self.ts).
  */
 function Stages({ v }: { v: StewardView }) {
   const s = v.staff;
@@ -726,17 +630,12 @@ function Stages({ v }: { v: StewardView }) {
   const offKit = rows.filter((r) => !r.usesKit);
   const who = `the ticked employees (${onKit.length} take the kit)`;
   const noKit = noSlot(v) || !kit;
-  const team = v.team;
-  const teamAsk = `Merge the open PRs the team opened (${team.join(', ')}), and the Steward's, for the ticked employees: those that merge cleanly into the employee's branch and have no failing or running checks, with merge commits? Then each merged PR's steps from its steward block: release, install, and approving the jobs it names (merging counts as reading their scripts). The team's branches are left as they are.`;
-  // Settings name a team (teamNote is null only then): the account gh is signed in as alone is no team to merge for.
-  const teamSet = team.length > 0 && !v.teamNote;
   const one = offKit.length === 1;
-  const offKitNote = offKit.length ? ` ${offKit.map((r) => r.name).join(' and ')} ${one ? "doesn't" : "don't"} take the kit yet: the stages pass over ${one ? 'it' : 'them'}${teamSet ? `, but the team's PRs to ${one ? 'it' : 'them'} can be merged` : ''}.` : '';
+  const offKitNote = offKit.length ? ` ${offKit.map((r) => r.name).join(' and ')} ${one ? "doesn't" : "don't"} take the kit yet: the stages pass over ${one ? 'it' : 'them'}.` : '';
   const stage = (label: string, path: string, confirm: string, disabled: boolean, tooltip?: string) => (
     <PostButton title={label} path={`/api/stage/${path}`} body={ask} confirm={confirm} disabled={disabled} tooltip={tooltip} />
   );
   if (!castellan) {
-    const mine = `Merge your open PRs (${team.join(', ')}) to the ticked repositories you said yes to (Merges your ready PRs, in Settings): those that merge cleanly into the branch and have no failing or running checks, with merge commits? One with no checks on GitHub is tested here first. Then what each merged PR's steward block asks for. Your branches are left as they are.`;
     return (
       <Card tour="stages">
         <div className="picks">
@@ -748,12 +647,11 @@ function Stages({ v }: { v: StewardView }) {
           ))}
         </div>
         <div className="row stages">
-          {stage('Merge your ready PRs', 'merge-team', mine, noSlot(v) || !team.length, v.teamNote ?? (team.length ? undefined : 'No team in Settings'))}
           {stage('Release', 'release', 'Release each ticked repository whose branch carries a version with no release yet, the way Settings say for it?', noSlot(v))}
           <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
         </div>
         <Text variant="muted" as="p">
-          Each asks first, works through the ticked repositories, and reports for each below. Nothing is merged in a repository until you say yes for it, nor released until Settings say how.{v.teamNote ? ` ${v.teamNote}` : ''}
+          Each asks first, works through the ticked repositories, and reports for each below. Nothing is released until Settings say how. The Steward merges no PRs: merge your own once vouched, and each build releases what is on the branch.
         </Text>
         <div className="row round">
           <Text variant="muted">{roundWords(v.round).when}</Text>
@@ -766,7 +664,7 @@ function Stages({ v }: { v: StewardView }) {
       <div className="picks">
         {all}
         {rows.map((r) => (
-          <label key={r.id} className="pick" title={r.usesKit ? undefined : teamSet ? "Doesn't take the kit yet: only the team's PRs are merged for it" : "Doesn't take the kit yet"}>
+          <label key={r.id} className="pick" title={r.usesKit ? undefined : "Doesn't take the kit yet"}>
             <input type="checkbox" name="employees" value={r.id} checked={isTicked(r)} onChange={(e) => setTicked({ ...ticked, [r.id]: e.target.checked })} /> {r.name}
           </label>
         ))}
@@ -774,13 +672,11 @@ function Stages({ v }: { v: StewardView }) {
       <div className="row stages">
         {stage('1. Bump', 'bump', `Bump ${who} to kit ${kit}? For each: a worktree of its branch, kit.json pinned to ${kit}, its patch version up, its kit filled and its checks run, then a commit. Nothing is pushed.`, noKit)}
         {stage('2. Push', 'push', `Push the bumps to kit ${kit} and open their PRs? Nothing is force-pushed.`, noKit)}
-        {stage('3. Merge', 'merge', "Merge the Steward's PRs that merge cleanly and have no failing or running checks, with merge commits? Then any steps a merged PR's steward block asks for.", noSlot(v))}
-        {stage('4. Release', 'release', `Release each ticked employee whose branch has kit ${kit} and an unreleased version, from that branch?`, noKit)}
-        {teamSet && stage("Merge the team's PRs", 'merge-team', teamAsk, noSlot(v))}
+        {stage('3. Release', 'release', `Release each ticked employee whose branch has kit ${kit} and an unreleased version, from that branch?`, noKit)}
         <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
       </div>
       <Text variant="muted" as="p">
-        Each stage asks first, works through the ticked employees, and reports for each below. Merge takes only the Steward's PRs{teamSet ? "; Merge the team's PRs takes those the team opened as well (Team, in Settings)" : ''}.{offKitNote}
+        Each stage asks first, works through the ticked employees, and reports for each below. The Steward merges no one's PRs but its own kit PRs: each build merges those it rolls out, and releases each branch.{offKitNote}
       </Text>
       <div className="row round">
         <Text variant="muted">{roundWords(v.round).when}</Text>
@@ -791,7 +687,7 @@ function Stages({ v }: { v: StewardView }) {
 
 /**
  * The repositories Reeve found on this PC that you can push to and the Steward doesn't look after yet (found.ts), each
- * with Look after: added to Settings with merging and releasing as ticked here, both off unless you tick them. Several
+ * with Look after: added to Settings with releasing as ticked here, off unless you tick it. Several
  * picked (their boxes, or All) are looked after in one go, each with its own ticks.
  */
 function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; finding: boolean; now: number; tour?: string }) {
@@ -822,7 +718,7 @@ function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; findin
         ) : (
           <>
             <Text variant="muted" as="p">
-              Your repositories on GitHub that Reeve found here and you can push to. Look after one to have its versions claimed, and its PRs and releases watched, or tick several and look after them in one go. It merges your ready PRs, or releases its new versions, only if you tick that.{f.into === 'manor' ? " It goes into Manor's Repositories, the one list every agent reads: change or remove it there." : ''}
+              Your repositories on GitHub that Reeve found here and you can push to. Look after one to have its versions claimed, and its PRs and releases watched, or tick several and look after them in one go. It releases its new versions only if you tick that; you merge your own PRs.{f.into === 'manor' ? " It goes into Manor's Repositories, the one list every agent reads: change or remove it there." : ''}
             </Text>
             <div className="row pick-bar">
               <label className="pick">
@@ -852,10 +748,6 @@ function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; findin
                       </Text>
                     </td>
                     <td>
-                      <label className="pick">
-                        <input type="checkbox" checked={of(r.repo).merges} onChange={(e) => set(r.repo, 'merges', e.target.checked)} /> Merge my ready PRs
-                      </label>
-                      <br />
                       <label className="pick">
                         <input type="checkbox" checked={of(r.repo).release} onChange={(e) => set(r.repo, 'release', e.target.checked)} /> Release each new version
                       </label>
@@ -893,7 +785,6 @@ td.pick-cell { width: 1%; padding-right: 0; }
 .pr-head { font-size: 12px; font-weight: 600; color: var(--muted); margin: 2px 0; }
 .pr-table { font-size: 13px; }
 .pr-table td { padding: 3px 12px 3px 0; border-bottom: 0; }
-.conflicts .when { white-space: nowrap; }
 .pr-table .pr-num, .pr-table .pr-state { white-space: nowrap; }
 .turn-cell button { white-space: nowrap; }
 .alarms { border-left: 3px solid var(--alert, #c0392b); }
@@ -956,42 +847,6 @@ function KitCard({ s, now, handsOut }: { s: StaffView | null; now: number; hands
   );
 }
 
-/**
- * What holds each version queue the Steward merges (version-queue.ts's queueHold): the lowest version that isn't ready,
- * the ready PRs waiting their turn behind it, why, and since when. Its alarm comes once it has held an hour (alarms.ts).
- * Move it past the others, asked first, frees the queue now (move-past.ts), with the drafts that would hold it next.
- */
-export function QueueHoldsCard({ holds, now }: { holds: HeldQueue[]; now: number }) {
-  if (!holds.length) return null;
-  return (
-    <Section title="What holds the version queues" count={holds.length}>
-      <Card>
-        <Notes
-          items={holds.map((q) => {
-            const behind = q.hold.behind.map((n) => `#${n}`).join(', ');
-            const moving = [q.hold.number, ...(q.hold.drafts ?? [])].map((n) => `#${n}`).join(', ');
-            return (
-              <span key={`${q.repo}#${q.hold.number}`}>
-                <Badge tone={q.hold.draft ? 'caution' : 'danger'} label={q.hold.draft ? 'draft' : 'not ready'} /> <strong>{q.name}</strong> <Link url={q.hold.url}>#{q.hold.number}</Link> (v{q.hold.version}) holds {behind}, ready and waiting their turn behind it since {ago(q.hold.since, now)}: {q.hold.why}.
-                {q.hold.drafts?.length ? ` ${q.hold.drafts.map((n) => `#${n}`).join(', ')}, a draft${q.hold.drafts.length === 1 ? '' : ' each'}, would hold it next.` : ''}
-                <br />
-                <Text variant="muted">{q.hold.title}</Text>{' '}
-                <PostButton
-                  title="Move it past the others"
-                  variant="secondary"
-                  path="/api/queue/move"
-                  body={{ repo: q.repo, number: q.hold.number }}
-                  confirm={`Give ${moving} a version above the rest of ${q.name}'s queue, so ${behind} can merge? The authors are told on GitHub; nothing is pushed to their branches.`}
-                />
-              </span>
-            );
-          })}
-        />
-      </Card>
-    </Section>
-  );
-}
-
 /** The whole suite before a kit's release, while it runs beside the rounds (stages/wholesuite.ts): the kit waits for it, the merges don't. */
 export function WholeSuiteCard({ w, now }: { w: WholeJob | null | undefined; now: number }) {
   if (!w || w.state !== 'running') return null;
@@ -999,7 +854,7 @@ export function WholeSuiteCard({ w, now }: { w: WholeJob | null | undefined; now
     <Card className="row">
       <Badge tone="info" label="Whole suite" />{' '}
       <span>
-        Before {w.tag}'s release, the Steward's whole suite runs at {w.commit.slice(0, 7)}, beside the rounds, since {ago(w.startedAt, now)}. The rounds go on merging meanwhile; the first after it passes releases the kit.
+        Before {w.tag}'s release, the Steward's whole suite runs at {w.commit.slice(0, 7)}, beside the rounds, since {ago(w.startedAt, now)}. The rounds go on meanwhile; the first after it passes releases the kit.
       </span>
     </Card>
   );
@@ -1030,7 +885,6 @@ export function StewardBody({ v }: { v: StewardView }) {
       ))}
       <WholeSuiteCard w={v.wholeSuite} now={now} />
       <AlarmsCard a={v.alarms} now={now} />
-      <QueueHoldsCard holds={v.queueHolds ?? []} now={now} />
       {v.round.repos === false && (
         <Card>
           <Text variant="muted" as="p">
@@ -1045,15 +899,10 @@ export function StewardBody({ v }: { v: StewardView }) {
       <TendingCard t={v.tending} r={v.round} now={now} />
       {foundOnPage(v.found) && <FoundCard f={v.found} finding={!!v.finding} now={now} tour="found" />}
       <Section title={castellan ? 'Staff' : 'Your repositories'} count={s?.rows.length}>
-        <StaffTable s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} looks={v.conflicts ?? []} />
+        <StaffTable s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} />
       </Section>
-      {conflictsOnPage(v) && (
-        <Section title="Merge conflicts" count={v.conflicts?.length}>
-          <ConflictsCard looks={v.conflicts ?? []} s={s} now={now} tour="conflicts" />
-        </Section>
-      )}
       {hasEmployees(v) && (
-        <Section title={castellan ? 'Roll out the kit' : 'Merge and release'}>
+        <Section title={castellan ? 'Roll out the kit' : 'Release'}>
           <Stages v={v} />
         </Section>
       )}
@@ -1066,17 +915,9 @@ const hasEmployees = (v: StewardView) => v.staff?.rows.some((r) => !r.self) ?? f
 /** Found on this PC is on the page while there's something to do with it: repositories to look after, a first look, or one that failed. */
 const foundOnPage = (f: FoundView | undefined) => !!f && (!f.at || f.offered.length > 0 || !!f.error);
 
-/** Merge conflicts is on the page while a PR it lists is still open; the record of settled ones is read in About. */
-function conflictsOnPage(v: StewardView): boolean {
-  if (!hasEmployees(v) || !v.conflicts?.length || !v.staff) return false;
-  const open = new Set(v.staff.rows.flatMap((r) => r.prs.map((p) => lookKey(r.repo, p.number))));
-  return v.conflicts.some((l) => open.has(lookKey(l.repo, l.number)));
-}
-
 /**
  * The About view, beside Settings in the title bar (the kit's Page about): what's read now and then rather than acted
- * on. The kit it hands out, Found on this PC with nothing to offer, and the record of merge conflicts it settled (the
- * last stage is on the page). No tour names: the tour shows the page.
+ * on. The kit it hands out, and Found on this PC with nothing to offer (the last stage is on the page). No tour names: the tour shows the page.
  */
 export function StewardAbout({ v }: { v: StewardView }) {
   const now = useNow();
@@ -1093,11 +934,6 @@ export function StewardAbout({ v }: { v: StewardView }) {
         </Section>
       )}
       {v.found && !foundOnPage(v.found) && <FoundCard f={v.found} finding={!!v.finding} now={now} />}
-      {hasEmployees(v) && !conflictsOnPage(v) && (
-        <Section title="Merge conflicts" count={v.conflicts?.length || undefined}>
-          <ConflictsCard looks={v.conflicts ?? []} s={s} now={now} />
-        </Section>
-      )}
     </>
   );
 }

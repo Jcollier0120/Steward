@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
 import { whileAwake } from '../kit/awake.ts';
@@ -16,6 +16,9 @@ import { linkSharedModules } from './modules.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor, must } from '../hosts/index.ts';
 import { settleWholeSuite, wholeSuiteBefore } from './wholesuite.ts';
+import { kitTrialAtMain } from './trial.ts';
+import { stewardEmployee } from './selfmerge.ts';
+import { mainGate } from './mainbuild.ts';
 
 /**
  * The Steward's own releases, in a round. The Steward's repository isn't an employee's, so this is kept apart from
@@ -32,9 +35,11 @@ import { settleWholeSuite, wholeSuiteBefore } from './wholesuite.ts';
  * A version that isn't above the newest release of its kind is never released (a person sees to that), and a Steward
  * version waits for the kit version on main to be released first. A release that fails is kept in self-failed.json
  * by its tag, with the commit: an alarm at once, and the rounds don't try it again until a new commit lands on main.
- * A kit, which every agent takes, is released only once the Steward's whole suite has passed at its commit
- * (wholesuite.ts), since its PRs ran only the tests each change reached; one that fails is held the same way. On the
- * Steward's page the suite runs beside the rounds: the round that starts it goes on at once, and the kit waits for it.
+ * A kit, which every agent takes, is released only once it has been tried on every agent at that commit (trial.ts: one
+ * that fails holds the kit, and the Steward's version behind it, with an alarm of its own) and the Steward's whole suite
+ * has passed there (wholesuite.ts), since its PRs ran only the tests each change reached; one that fails is held the same
+ * way. On the Steward's page the suite runs beside the rounds: the round that starts it goes on at once, and the kit
+ * waits for it. A Steward version is released once main's head is tested, or a vouch covers it (mainbuild.ts).
  */
 
 export const selfFailedFile = () => dataFile('self-failed.json');
@@ -178,6 +183,7 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
   // One held for the network or GitHub's own failing (before common.ts's passingFailure knew a 5xx) is let go.
   for (const [tag, f] of Object.entries(failed)) if (passingFailure(f.message)) delete failed[tag];
   const plan = planSelf({ on: ctx.settings.releaseSelf, main: o.main, tags: o.tags, failed });
+  const kitStep = plan.steps.find((s) => s.what === 'kit');
   for (const n of plan.notes) ctx.log(`[${APP.id}] ${n}`);
   // A whole suite beside the rounds for code main has moved on from, or for a kit no longer waiting, is stopped (wholesuite.ts).
   if (o.main?.head && o.tags) await settleWholeSuite(ctx, plan.steps.find((s) => s.what === 'kit') ?? null);
@@ -194,8 +200,8 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
     if (why) results.push(selfResult('refused', `${plan.steps.map((s) => s.tag).join(' and ')} not released: ${why}`));
     else {
       for (const step of plan.steps) {
-        if (step.what === 'steward' && results.some((r) => r.outcome === 'failed')) {
-          results.push(selfResult('skipped', `${step.tag} waits for the kit's release, which failed`));
+        if (step.what === 'steward' && kitStep && !results.some((r) => r.outcome === 'done' && r.version === kitStep.version)) {
+          results.push(selfResult('skipped', `${step.tag} waits for ${kitStep.tag}'s release`));
           continue;
         }
         // Another PC took its turn here meanwhile (lease.ts): it releases this.
@@ -204,6 +210,21 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
           await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
           results.push(selfResult('skipped', `${step.tag} is left to another PC, whose turn it is now`));
           break;
+        }
+        const steward = stewardEmployee(ctx.settings, repo);
+        const at = step.commit.slice(0, 7);
+        if (step.what === 'kit') {
+          // Tried on every agent first (trial.ts): one still going holds the round's kit, and one failing holds the kit
+          // alone (its alarm is the trial's own); the employees' releases go on either way.
+          const tried = await kitTrialAtMain(ctx, steward, { commit: step.commit, kit: step.version }).catch((err: Error) => ({ state: 'going' as const, why: `its trial couldn't go on: ${err.message}` }));
+          if (tried.state === 'going') {
+            results.push(selfResult('skipped', `${step.tag} waits: ${tried.why}`, { version: step.version, commit: at, kitWaits: step.version }));
+            break;
+          }
+          if (tried.state === 'failed') {
+            results.push(selfResult('skipped', `${step.tag} isn't released: ${tried.why}`, { version: step.version, commit: at }));
+            continue;
+          }
         }
         let r: EmployeeResult;
         try {
@@ -215,7 +236,13 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
             break;
           }
           // The PC kept awake while it releases (the kit's awake.ts).
-          r = held ? selfResult('failed', `${held.why}, so ${step.tag} wasn't released`, { version: step.version, commit: step.commit.slice(0, 7) }) : await whileAwake(`the Steward's ${step.tag}`, () => releaseStep(ctx, repo, step), ctx.log);
+          // A Steward version once main's head is tested here, or a vouch covers it (mainbuild.ts).
+          const untested = step.what === 'steward' ? await mainGate(ctx, steward, step.commit, newestOf(o.tags ?? [], 'v')) : null;
+          r = held
+            ? selfResult('failed', `${held.why}, so ${step.tag} wasn't released`, { version: step.version, commit: at })
+            : untested
+              ? selfResult('failed', `${step.tag} wasn't released: ${untested}`, { version: step.version, commit: at })
+              : await whileAwake(`the Steward's ${step.tag}`, () => releaseStep(ctx, repo, step), ctx.log);
         } catch (err) {
           r = selfResult('failed', `${step.tag}: ${(err as Error).message}`, { version: step.version, commit: step.commit.slice(0, 7) });
         }
@@ -228,4 +255,23 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
   }
   if (JSON.stringify(failed) !== before) writeJson(selfFailedFile(), failed);
   return results;
+}
+
+/**
+ * Main's new kit tried ahead of the next build (trial.ts), a slice a round between builds, so the build finds it tried:
+ * while Settings say the Steward releases itself, main's kit has no release, and isn't held by a release that failed at
+ * this commit. A line to log, or null when there is nothing to try. Never throws.
+ */
+export async function trialAhead(ctx: Ctx, o: { checkout: string; main: StewardMain | null; tags: string[] | null }): Promise<string | null> {
+  const plan = planSelf({ on: ctx.settings.releaseSelf, main: o.main, tags: o.tags, failed: loadSelfFailures() });
+  const step = plan.steps.find((s) => s.what === 'kit');
+  if (!step) return null;
+  const repo = selfCheckoutOf(o.checkout);
+  if (!existsSync(path.join(repo, '.git'))) return null;
+  try {
+    const tried = await kitTrialAtMain(ctx, stewardEmployee(ctx.settings, repo), { commit: step.commit, kit: step.version });
+    return tried.state === 'passed' ? `kit ${step.version} on ${STEWARD_BRANCH} passed its trial on the agents: the next build releases it` : `${step.tag}: ${tried.why}`;
+  } catch (err) {
+    return `${step.tag}: its trial ahead of the next build couldn't go on: ${(err as Error).message}`;
+  }
 }

@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { commitOf, git, removeWorktree, showFile } from '../git.ts';
+import { commitOf, removeWorktree, showFile } from '../git.ts';
 import { readLsRemote } from '../scm.ts';
 import { stayAwake } from '../kit/awake.ts';
 import { combinedEntry } from '../kit/notes.ts';
@@ -18,7 +18,7 @@ import { recordTested } from '../tested.ts';
 import { guardPackages, installPackages } from './modules.ts';
 import { readPin } from './staff.ts';
 import { noteReleased } from '../strangers.ts';
-import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, freshWorktree, type Ctx, type EmployeeResult } from './common.ts';
 import { hostFor } from '../hosts/index.ts';
 import { runWhenReleased } from './gitevents.ts';
 import { withRepo } from './slots.ts';
@@ -91,6 +91,10 @@ export function releaseDecision(c: ReleaseCandidate, kit: string | null): { rele
   }
   if (!c.version) return { release: false, why: 'no version found on its branch' };
   if (c.released.includes(c.version)) return { release: false, why: `v${c.version} is already released` };
+  // Merged out of order (Steward 0.36.124: PRs merge as their authors merge them): a version below one released isn't
+  // released. claim-version hands out one above main's and every release's, for the work that brings it up.
+  const newest = [...c.released].sort(compareVersions).at(-1);
+  if (newest && compareVersions(c.version, newest) < 0) return { release: false, why: `v${c.version} on its branch is below v${newest}, released already: a version above it (claim-version) releases what is merged` };
   return { release: true };
 }
 
@@ -115,7 +119,11 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: ReleaseOptions): Prom
  * `kitOnly`: a round's release, which holds a version that is a new kit alone unless it changes what the agent runs (once
  * a day), or the kit says it is urgent or a fix for it (kitonly.ts). A person's Release isn't held.
  */
-type ReleaseOptions = { kit: string | null; unless?: (commit: string, version: string) => string | null; hire?: boolean; kitOnly?: boolean };
+/**
+ * `gate`: a build's test of the very commit it releases (mainbuild.ts's mainGate), asked once the release is decided on,
+ * before the signing and the tasting: why not, which fails the release, or null.
+ */
+type ReleaseOptions = { kit: string | null; unless?: (commit: string, version: string) => string | null; hire?: boolean; kitOnly?: boolean; gate?: (commit: string, since: string | null) => Promise<string | null> };
 
 async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what: string) => void): Promise<EmployeeResult> {
   const { run } = ctx;
@@ -164,6 +172,9 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   }
   const kitWords = alone?.kitOnly ? `; ${alone.why}` : '';
   const daily = () => void (alone?.kitOnly && alone.release && alone.daily && noteKitOnlyRelease(e.id, version));
+  // A build tests the commit it releases, once, unless a vouch covers it (mainbuild.ts).
+  const untested = o.gate && !o.hire ? await o.gate(commit, since) : null;
+  if (untested) return result(e, 'failed', `v${version} wasn't released: ${untested}`, { version, commit: commit.slice(0, 7) });
   // A release that signs waits while this PC can't (SimplySign Desktop not connected): nothing is built, nothing fails,
   // and the next round looks again (signing.ts). Before the tasting, which it would only have to do again.
   const signs = e.release === TAG_RELEASE ? null : signsWith({ kitJson: pinText, signTs: await showFile(run, repo, remote, 'tools/sign.ts'), release: e.release });

@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { dismiss, getJson, loadAlarms, queueAlarmOf, type GetJson } from './alarms.ts';
-import { movePast } from './move-past.ts';
+import { dismiss, getJson, loadAlarms, type GetJson } from './alarms.ts';
 import { APP, dataDir, port } from './app.ts';
 import { duty } from './kit/duty.ts';
 import { LockTimeout } from './kit/lock.ts';
@@ -9,14 +8,13 @@ import { every } from './kit/schedule.ts';
 import { updateHold } from './kit/update-hold.ts';
 import { serve, type Handler } from './kit/server.ts';
 import { currentWork, inWork, startWork, workTasks } from './kit/work-tasks.ts';
-import { workBlocks } from './work-status.ts';
 import { afterWords } from './after.ts';
 import { gate, loadBudget } from './budget.ts';
 import { run as realRun, type Runner } from './run.ts';
 import { teamOf, type Owner } from './team.ts';
 import { agentPages, loadSettings, SETTINGS_SPEC } from './settings.ts';
 import type { Staff, StaffRow } from './stages/staff.ts';
-import { approveJobsNow, conflictsNow, context, loadLastStage, loadStaff, refreshStaff, reposHere, runStage, type StageAsk } from './steward.ts';
+import { approveJobsNow, context, loadLastStage, loadStaff, refreshStaff, reposHere, runStage, type StageAsk } from './steward.ts';
 import { loadTending } from './tend.ts';
 import type { StaffView, StewardView } from './web/types.ts';
 import { allowUpdate } from './safeinstall.ts';
@@ -24,20 +22,15 @@ import { loadClaims } from './claims.ts';
 import { testedView } from './tested.ts';
 import { findRepos, foundStale, foundView, loadFound, lookAfterAll } from './found.ts';
 import { handOver, turnsView, type TurnsDeps } from './lease.ts';
-import { claimClashes, employeeFor } from './claims.ts';
-import { loadConflicts } from './conflicts.ts';
+import { claimClashes } from './claims.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { rolloutsBeside } from './stages/rollout.ts';
-import { preparesBeside } from './stages/prepare.ts';
-import { selfTestsBeside } from './stages/selftests.ts';
 import { buildTimeLine } from './buildtimes.ts';
-import { trialsOnTheirOwn } from './stages/trial.ts';
 import { endWholeOrphans, endWholeSuite, loadWholeJob, wholeSuitesBeside } from './stages/wholesuite.ts';
 import { githubReady, hostOf, loadScm, type Host } from './scm.ts';
-import { heldQueues, loadVersionQueues } from './version-queue.ts';
 import { DEVELOPER_ONLY, PLAIN_ROLE, stewardActs } from './maker.ts';
 import { noteFreshStart, watchWake } from './fresh-start.ts';
-import { buildWhen, lateLine, loadPipeline, pipelineMode, pipelineView } from './pipeline.ts';
+import { lateLine, loadPipeline, pipelineView } from './pipeline.ts';
 import { holdForBuilds } from './build-hold.ts';
 import { wakesPc } from './kit/wake.ts';
 import { keepHeads } from './heads.ts';
@@ -79,12 +72,6 @@ export const FIRST_ROUND_MS = 30_000;
 export const SOON_MS = 2 * 60_000;
 /** At most this many rounds in a row come sooner; then one at Settings' interval, so checks that never end don't keep the rounds quick. */
 export const SOON_IN_A_ROW = 3;
-
-/**
- * How often the Steward looks for ready PRs that conflict with their branch, beside the rounds (steward.ts's
- * conflictsNow); not within this long of a round beginning, whose own look just did the same.
- */
-export const CONFLICTS_EVERY_MS = 5 * 60_000;
 
 /** How often the Steward may ask the Seneschal for work beside the rounds (stages/others.ts), and the wait after an error. */
 export const OTHERS_TICK_MS = 2_000;
@@ -184,7 +171,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   };
   /** A round asked for (POST /api/round/soon) while one ran, or every slot was taken: it comes once it can. */
   let roundAfter = false;
-  /** Employees the next round looks at whatever GitHub's glance says: a branch just vouched for with no PR (branchesin.ts). */
+  /** Employees the next round looks at whatever GitHub's glance says: those whose rollout bump or push failed. */
   let lookNext: string[] = [];
   /** What waited for a stage to end: jobs to approve, then a round asked for, each once a slot is free. */
   const afterRunning = () => {
@@ -228,7 +215,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     return refreshing;
   };
 
-  const start = (stage: 'bump' | 'push' | 'merge' | 'release', ask: StageAsk) => {
+  const start = (stage: 'bump' | 'push' | 'release', ask: StageAsk) => {
     if (slotsFull()) return { json: { started: false, message: `${runningWords()} ${isAre()} running, as many stages as Settings allow at once (Stages at once); wait for one to finish.` } };
     const end = begin(stage);
     void inStage(end, () => runStage(stage, ask, { run: o.run, owner: o.owner, log: (line) => console.log(`${stage}: ${line}`) }))
@@ -249,7 +236,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   };
   if (staleTable()) void refresh();
   /**
-   * Whether the rounds are keeping the table current: scheduled, merging and releasing by itself with repositories to
+   * Whether the rounds are keeping the table current: scheduled, building and releasing by itself with repositories to
    * look at (a round that only keeps the staff's pages up asks GitHub nothing), on duty, and the last one not long ago.
    */
   const roundsKeepIt = () => {
@@ -260,17 +247,13 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
 
   /** The wait before the next round, when the last asked for it sooner (soonAfter); null: Settings' interval. */
   let sooner: number | null = null;
-  /** When the last round began (Date.now()), for the looks at the conflicts beside the rounds; 0 before the first. */
-  let roundBegan = 0;
   /** The rounds in a row that came sooner: after SOON_IN_A_ROW, one at Settings' interval (soonAfter). */
   let soonRun = 0;
-  // The round (stages/round.ts): merge what's ready, the team's too, with what each PR asks for after; then
-  // release what isn't. It passes while a round runs, here or in a terminal, or every stage's slot is taken (stages/slots.ts).
+  // The round (stages/round.ts): between builds it only looks; a build's rounds release each repository's main. It passes while a round runs, here or in a terminal, or every stage's slot is taken (stages/slots.ts).
   const roundJob = async (full = false, extra: Pick<StageAsk, 'buildNow' | 'employees'> = {}) => {
     // Off the maker's laptop with Developer options off, no round runs: a developer's work (maker.ts).
     if (rounding() || slotsFull() || !stewardActs()) return;
     const end = begin('round');
-    roundBegan = Date.now();
     sooner = null;
     try {
       // A scheduled round looks only at what's new on GitHub; Run now looks at everyone. Scheduled while Settings say it
@@ -297,53 +280,6 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     if (updateHold()) return;
     void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
   };
-  /**
-   * A PR moved past the others in its version queue (move-past.ts), and then a round, as POST /api/round/soon brings one,
-   * so the PRs that waited behind it merge in minutes: one running or every slot taken, once it can.
-   */
-  const moveNow = async (repo: string, number: number): Promise<{ json: unknown; status?: number }> => {
-    const log = (line: string) => console.log(`move: ${line}`);
-    try {
-      const ctx = await context({ run: o.run, owner: o.owner, glance: false, log });
-      const e = employeeFor(ctx.settings, repo);
-      if (!e) return { json: { error: `${repo} isn't one the Steward looks after` }, status: 404 };
-      const r = await movePast(ctx, e, number);
-      log(`[${e.id}] ${r.message}`);
-      if (r.status !== 200) return { json: { error: r.message }, status: r.status };
-      const s = loadSettings();
-      const soon = s.byItself && duty().onDuty && pipelineMode(s.buildPipeline, loadPipeline(), new Date()).kind !== 'between';
-      if (soon && (rounding() || slotsFull())) roundAfter = true;
-      else if (soon) startRound();
-      return { json: { ok: true, message: r.message, moved: r.moved } };
-    } catch (err) {
-      return { json: { error: `couldn't move it: ${(err as Error).message}` }, status: 502 };
-    }
-  };
-  // Beside the rounds (steward.ts's conflictsNow): every few minutes, while a stage's slot is free, the ready PRs that
-  // conflict with their branch are caught up, rather than waiting for a round to reach their repository; a long round
-  // (a vouch's tests, a kit trial) left them waiting for hours. It takes a slot only once it finds one to catch up, and
-  // none at all while every slot is taken: the rounds' own work goes first. One caught up brings a round, to merge it.
-  let conflictsGoing = false;
-  const conflictsJob = async () => {
-    const s = loadSettings();
-    if (conflictsGoing || !s.byItself || !s.catchUp || slotsFull() || !duty().onDuty || !stewardActs() || updateHold()) return;
-    if (Date.now() - roundBegan < CONFLICTS_EVERY_MS) return;
-    conflictsGoing = true;
-    try {
-      const done = await conflictsNow({ run: o.run, owner: o.owner, log: (line) => console.log(`conflicts: ${line}`), begin: () => begin('conflicts') });
-      for (const r of done) console.log(`conflicts: [${r.id}] ${r.message}`);
-      if (done.some((r) => r.outcome === 'done')) {
-        if (rounding() || slotsFull()) roundAfter = true;
-        else startRound();
-      }
-    } catch (e) {
-      if (!(e instanceof LockTimeout)) console.error(`${new Date().toISOString()} conflicts: ${(e as Error).message}`);
-    } finally {
-      conflictsGoing = false;
-    }
-  };
-  // Not under node --test: a test asks for a look itself.
-  if (!process.env.NODE_TEST_CONTEXT) setInterval(() => void conflictsJob(), CONFLICTS_EVERY_MS).unref();
   // Beside the rounds (stages/others.ts): one of the Seneschal's workers, where it's on this PC (Seneschal 0.2.0). A PR
   // check or whole suite of a repository the Steward looks after, waiting for room here or on another PC on the licence,
   // runs here, one at a time; asked for again as soon as the Seneschal says to.
@@ -364,15 +300,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     }
   };
   if (!process.env.NODE_TEST_CONTEXT) setInterval(() => void othersJob(), OTHERS_TICK_MS).unref();
-  // A kit trial runs beside the rounds here (stages/trial.ts): once it ends, a round settles its PR at once, rather than
-  // at the next tick. One the network cut short waits for the next tick, as before.
-  trialsOnTheirOwn(({ cut }) => {
-    if (cut || !loadSettings().byItself || !duty().onDuty || !stewardActs()) return;
-    if (rounding() || slotsFull()) roundAfter = true;
-    else startRound();
-  });
-  // So does the whole suite before a kit's release (stages/wholesuite.ts), never holding a round's merges: once it ends,
-  // a round releases the kit, or holds it, at once. A run a Steward that is gone left behind is ended first.
+  // The whole suite before a kit's release runs beside the rounds (stages/wholesuite.ts): once it ends, a round releases
+  // the kit, or holds it, at once. A run a Steward that is gone left behind is ended first.
   endWholeOrphans((line) => console.log(`whole suite: ${line}`));
   wholeSuitesBeside({
     log: (line) => console.log(`whole suite: ${line}`),
@@ -382,24 +311,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       else startRound();
     },
   });
-  // And the next build's tests between builds (stages/prepare.ts): run beside the rounds, so the build only merges. Not
-  // under node --test, where a page's round tests what it asks for alone.
-  if (!process.env.NODE_TEST_CONTEXT) preparesBeside({ log: (line) => console.log(`merge ahead: ${line}`) });
-  // And in a build, the Steward's own PRs that moved since they were tested for it (stages/selftests.ts): tested beside the
-  // rounds, which go on merging the agents'. Once their tests end, a round at once: it merges what passed. Not under
-  // node --test either.
-  if (!process.env.NODE_TEST_CONTEXT)
-    selfTestsBeside({
-      log: (line) => console.log(`self tests: ${line}`),
-      ended: () => {
-        if (!loadSettings().byItself || !duty().onDuty || !stewardActs()) return;
-        if (rounding() || slotsFull()) roundAfter = true;
-        else startRound();
-      },
-    });
-  // And a kit's rollout (stages/rollout.ts): its bumps, checks and pushes run beside the rounds, which go on merging. Once
-  // it ends, a round at once: it merges the kit PRs opened, reports what the rollout did, and looks again at the
-  // employees whose bump or push failed.
+  // And a kit's rollout (stages/rollout.ts): its bumps, checks, pushes and merges run beside the rounds. Once it ends, a
+  // round at once: it reports what the rollout did, looks again at the employees whose bump or push failed, and releases
+  // the build once it has settled.
   rolloutsBeside({
     log: (line) => console.log(`rollout: ${line}`),
     ended: ({ results }) => {
@@ -410,7 +324,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       else startRound();
     },
   });
-  // On duty, every few minutes while Settings say it merges and releases by itself, or keeps the staff's pages up; the
+  // On duty, every few minutes while Settings say it builds and releases by itself, or keeps the staff's pages up; the
   // kit's every() pauses off duty. Saving Settings starts, stops or re-times it. The first comes within a minute of the
   // start, not the kit's 2 to 15 minutes at a gentle pace: the Steward starts again whenever Manor updates it, often
   // halfway through a release and its rollout, which shouldn't stand still meanwhile (0.35.29). Outside the kit's work
@@ -469,7 +383,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
     const scm = loadScm();
-    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), conflicts: loadConflicts(), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined, queueHolds: heldQueues(loadVersionQueues(), undefined, loadClaims()), wholeSuite: loadWholeJob() };
+    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined, wholeSuite: loadWholeJob() };
     return { shell: pageShell({ busy, title: runs.length ? `(${runs.map((r) => r.stage).join(', ')}) ${APP.name}` : APP.name }), body };
   };
 
@@ -480,8 +394,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     onStop: () => endWholeSuite(),
     ping: () => ({ busy: runs.length > 0, stage: runs.length ? runs.map((r) => r.stage).join(', ') : null, tour: hasTour() }),
     // Its work status (GET /api/peer/work, the kit's work-status.ts), for Manor's Work page: its stages' slots beside the
-    // kit's, and what holds a repository's work up (workBlocks).
-    work: () => ({ slots: [{ kind: 'stage', name: 'Stages at once', of: loadSettings().stagesAtOnce, used: runs.length }], blocked: workBlocks() }),
+    // kit's. Nothing holds a repository's work up here: no PR waits for the Steward (Steward 0.36.124).
+    work: () => ({ slots: [{ kind: 'stage', name: 'Stages at once', of: loadSettings().stagesAtOnce, used: runs.length }], blocked: [] }),
     get: gateGets({
       // The page is drawn in the browser (src/web, the kit's react part): its first data comes with it, and it asks
       // /api/page again every few seconds while a stage runs, and after each button.
@@ -495,8 +409,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       // The versions claimed up front and not yet landed (claims.ts): claim one with cli.ts claim-version.
       '/api/versions': () => ({ json: { claims: loadClaims(), claim: 'node %USERPROFILE%\\.steward\\app\\src\\cli.ts claim-version <employee> --branch <b> --for "<what>"' } }),
       '/api/last-stage': () => ({ json: loadLastStage() }),
-      // Each repository's version on its branch and the PR versions queued above it, lowest first (version-queue.ts): Manor's.
-      '/api/version-queues': () => ({ json: loadVersionQueues() }),
+      // The version queues are gone (Steward 0.36.124: everyone merges their own PRs). Answered empty, as Manor reads it.
+      '/api/version-queues': () => ({ json: { at: '', repos: [] } }),
       // The commits whose tests passed here, the last 20 of each employee's (tested.ts): the Surveyor's, for its daily runs.
       '/api/tested': () => ({ json: testedView(loadSettings()) }),
       // What needs the person (alarms.ts): Manor shows the open ones that aren't dismissed.
@@ -511,9 +425,6 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     post: gatePosts({
       '/api/stage/bump': stagePost('bump'),
       '/api/stage/push': stagePost('push'),
-      // The page's buttons asked first: that is merge --yes, and merge --yes --team.
-      '/api/stage/merge': ({ body }) => start('merge', { ...askOf(body), yes: true }),
-      '/api/stage/merge-team': ({ body }) => start('merge', { ...askOf(body), yes: true, team: true }),
       '/api/stage/release': stagePost('release'),
       // A round now, as the schedule would run one (the button asks first), on duty or not.
       '/api/run': () => {
@@ -535,31 +446,19 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         void roundJob(true, { buildNow: { toCustomers: body?.toCustomers === true }, employees }).catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
         return { json: { started: true, message: `A build has begun${employees.length ? ` for ${employees.join(', ')}` : ''}${body?.toCustomers === true ? ': its releases go out to customers at once' : ''}.` } };
       },
-      // `steward vouch`, once a PR's checks passed and GitHub has its status (stages/vouch.ts): a round now, as the schedule
-      // runs one, so the PR merges in minutes when its turn has come, not at the next round. Its glance sees the status
-      // (the PR's checks are in what it compares), so the round looks at that repository. While a round runs, or every
-      // slot is taken, once it can. Only while the Steward merges by itself and is on duty: otherwise its rounds would merge nothing.
-      '/api/round/soon': ({ body }) => {
-        // A branch vouched for with no PR yet: its employee is looked at, though nothing GitHub's glance shows has changed.
-        const look: string[] = Array.isArray(body?.look) ? body.look.filter((x: unknown): x is string => typeof x === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(x)).slice(0, 20) : [];
-        lookNext = [...new Set([...lookNext, ...look])];
-        if (!loadSettings().byItself) return { json: { started: false, message: "The Steward doesn't merge by itself (Settings), so nothing merges until you press Run now." } };
-        if (!duty().onDuty) return { json: { started: false, message: 'The Steward is off duty: it merges the PR at its first round once it is back.' } };
-        // No build under way (pipeline.ts): the PR goes into the next build, unless it is an urgent fix, which the round
-        // asked for here boards at once, as a build of its own (stages/urgent.ts). Otherwise that round only looks.
-        const mode = pipelineMode(loadSettings().buildPipeline, loadPipeline(), new Date());
-        const waits =
-          mode.kind === 'between'
-            ? `The Steward builds at set times (Settings: Build pipeline): the PR goes into the next build${mode.next ? `, at ${buildWhen(mode.next, new Date())}` : ''}, unless it is an urgent fix (its changelog entry starting "**Urgent fix:"), which builds at once`
-            : null;
+      // An older `steward vouch` asks for a round once it has vouched. The Steward merges no PRs now (Steward 0.36.124):
+      // whoever wrote one merges it once vouched, and the next build releases main. A round now only looks, and takes an
+      // urgent fix (its changelog entry starting "**Urgent fix:") into a build of its own at once (stages/urgent.ts).
+      '/api/round/soon': () => {
+        const merge = 'The Steward merges no PRs: merge it yourself once vouched, and the next build releases main';
+        if (!loadSettings().byItself || !duty().onDuty) return { json: { started: false, message: `${merge}.` } };
         if (rounding() || slotsFull()) {
           roundAfter = true;
-          return { json: { started: false, queued: true, message: waits ? `${waits}: a round looks for one as soon as it can.` : `The Steward's ${runningWords()} ${isAre()} running: a round comes as soon as it can.` } };
+          return { json: { started: false, queued: true, message: `${merge}: a round looks for an urgent fix as soon as it can.` } };
         }
-        // Manor's automatic update due (startRound): the round waits for it, a few minutes at most.
-        if (updateHold()) return { json: { started: false, queued: true, message: waits ? `${waits}: a round looks for one once Manor has updated the Steward, in a few minutes.` : 'Manor is about to update the Steward, so its rounds wait a few minutes for it: a round comes after.' } };
+        if (updateHold()) return { json: { started: false, queued: true, message: `${merge}: a round looks for an urgent fix once Manor has updated the Steward.` } };
         startRound();
-        return { json: { started: true, message: waits ? `${waits}: a round looks for one now.` : "The Steward's round has started: it merges the PR now if its turn has come." } };
+        return { json: { started: true, message: `${merge}: a round looks for an urgent fix now.` } };
       },
       // Manor, right after it installs an update: the jobs whose scripts it changed, approved now when they are exactly
       // what was merged (stages/jobs.ts), not at the next round's end. While every slot is taken, once one is free.
@@ -578,23 +477,14 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         if (id.startsWith('unsafe:')) allowUpdate(id.slice('unsafe:'.length));
         return dismiss(id) ? { json: { ok: true } } : { json: { error: 'no such alarm open' }, status: 404 };
       },
-      // An alarm's button (its `action`), on the page or Manor's Needs you, asked first: { id }. A queue's alarm moves the
-      // PR holding it past the others (move-past.ts); none other has one yet.
-      '/api/alarms/act': async ({ body }) => {
+      // An alarm's button (its `action`), on the page or Manor's Needs you, asked first: { id }. None has one now (the
+      // version queues' Move it past went with them, Steward 0.36.124): each is only dismissed.
+      '/api/alarms/act': ({ body }) => {
         const id = typeof body?.id === 'string' ? body.id.slice(0, 300) : '';
         const a = loadAlarms().open.find((x) => x.id === id);
-        const q = queueAlarmOf(id);
-        if (!a || !a.action || !q) return { json: { error: a ? 'that alarm has nothing to do but be dismissed' : 'no such alarm open' }, status: 404 };
-        return moveNow(q.repo, q.number);
+        return { json: { error: a ? 'that alarm has nothing to do but be dismissed' : 'no such alarm open' }, status: 404 };
       },
-      // The Version queues card's button, asked first: { repo, number } moves that PR past the others (move-past.ts).
-      '/api/queue/move': async ({ body }) => {
-        const repo = typeof body?.repo === 'string' ? body.repo.trim().slice(0, 140) : '';
-        const number = Number(body?.number);
-        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !Number.isInteger(number) || number < 1) return { json: { error: 'Send { "repo": "owner/name", "number": <the PR\'s number> }.' }, status: 400 };
-        return moveNow(repo, number);
-      },
-      // Look after repositories Reeve found (found.ts): added to Settings, merging and releasing only as ticked. One
+      // Look after repositories Reeve found (found.ts): added to Settings, releasing only as ticked. One
       // ({ repo, merges, release }), or several at once ({ repos: [{ repo, merges, release }, …] }).
       '/api/repos/look-after': ({ body }) => {
         const many = Array.isArray(body?.repos);

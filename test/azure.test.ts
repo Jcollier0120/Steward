@@ -15,9 +15,8 @@ const { hostFor, must } = await import('../src/hosts/index.ts');
 const { mergeStatesOf, prOf, whereAzure } = await import('../src/hosts/azure.ts');
 const { autoWords, hostOf, isAzureRepo, isGitlabRepo, repoFromUrl } = await import('../src/scm.ts');
 const { resolveCommand } = await import('../src/run.ts');
-const { merge } = await import('../src/stages/merge.ts');
 const { parsePrs } = await import('../src/stages/staff.ts');
-const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+const { ok } = await import('./helpers.ts');
 type Ran = import('../src/run.ts').Ran;
 type ScmLook = import('../src/scm.ts').ScmLook;
 
@@ -190,46 +189,6 @@ test('releases are v<version> tags; issues are not filed on Azure DevOps yet', a
   assert.equal(issues.code, 1);
   assert.match(issues.err, /work items/);
   assert.equal((await host.downloadRelease(R, 'v0.4.0', { patterns: ['*.zip'], dir: tmp })).code, 1);
-});
-
-test("a merge round on Azure DevOps: the team's pull request, its checks passed, completed at the head it read", async () => {
-  const f = fakeEmployee(path.join(tmp, 'round'), { version: '0.4.0' });
-  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/feature');
-  for (const file of ['package.json', 'package-lock.json', 'src/app.ts']) writeFileSync(path.join(f.checkout, file), readFileSync(path.join(f.checkout, file), 'utf8').split('0.4.0').join('0.4.1'));
-  writeFileSync(path.join(f.checkout, 'feature.txt'), 'a feature\n');
-  sh(f.checkout, 'add', '-A');
-  sh(f.checkout, 'commit', '--quiet', '-m', 'A feature');
-  const head = sh(f.checkout, 'rev-parse', 'HEAD');
-  sh(f.checkout, 'push', '--quiet', 'origin', 'claude/feature');
-  sh(f.checkout, 'switch', '--quiet', 'main');
-
-  const az: { args: string[]; body?: any }[] = [];
-  const gh = runner();
-  const run = async (cmd: string, args: string[], opts?: any): Promise<Ran> => {
-    if (cmd !== 'az') return gh.run(cmd, args, opts);
-    const i = args.indexOf('--body');
-    az.push({ args, ...(i >= 0 ? { body: JSON.parse(readFileSync(args[i + 1].replace(/^@/, ''), 'utf8')) } : {}) });
-    const [m, at] = call(args);
-    if (at === '/pullrequests?searchCriteria.status=active&$top=100') return list([pull({ lastMergeSourceCommit: { commitId: head } })]);
-    if (at === '/pullrequests/7/iterations') return list([{ id: 1 }]);
-    if (at === '/pullrequests/7/iterations/1/changes?$top=1000') return ok({ changeEntries: [{ item: { path: '/feature.txt' } }, { item: { path: '/package.json' } }] });
-    if (at === '/pullrequests/7/statuses') return list([]);
-    if (at === `/commits/${head}/statuses?latestOnly=true`) return list([{ id: 1, context: { genre: 'ci', name: 'test' }, state: 'succeeded' }]);
-    if (at === '/refs?filter=tags/v&peelTags=true') return list([{ name: 'refs/tags/v0.4.0', objectId: 't0', peeledObjectId: 'c0' }]);
-    if (m === 'PATCH' && at === '/pullrequests/7') return ok(pull({ status: 'completed', lastMergeSourceCommit: { commitId: head } }));
-    if (m === 'POST') return ok({});
-    return { code: 1, out: '', err: `404 Not Found: ${m} ${at}` };
-  };
-  // Checks that would fail, were they run here: Azure DevOps' checks passed, so they aren't.
-  const e = employee(f.checkout, { repo: R, fill: '', test: ['node -e process.exit(1)'] });
-  const ctx = { ...ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run, neutralDir: tmp }), host: () => 'azure' as const };
-  const [m] = await merge(ctx, [e], { yes: true, team: true });
-  assert.equal(m.outcome, 'done', `${m.message}\n${ctx.lines.join('\n')}`);
-  assert.match(m.message, /merged #7/);
-  assert.deepEqual(gh.gh, [], 'GitHub is never asked');
-  const completed = az.find((a) => call(a.args)[0] === 'PATCH' && call(a.args)[1] === '/pullrequests/7');
-  assert.ok(completed, 'completed through Azure DevOps');
-  assert.deepEqual(completed.body.lastMergeSourceCommit, { commitId: head });
 });
 
 test('completing waits for Azure DevOps to finish; a policy that holds it is a failure', async () => {

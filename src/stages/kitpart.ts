@@ -1,8 +1,7 @@
 /**
  * The kit, as a second version in the Steward's own repository: kit/VERSION, with its own changelog
  * (kit/CHANGELOG.md), its own releases (kit-v<version>) and its own claims (claims.ts, under `<repo>#kit`). A PR that
- * changes the kit raises both, the Steward's and the kit's, and a catch-up (stages/catchup.ts) settles both the same
- * way: the PR's own while it's still new, else the next free one above the branch's.
+ * changes the kit raises both, the Steward's and the kit's (or writes kit/changes/, which a build stamps: stages/stamp.ts).
  */
 
 export const KIT_VERSION_FILE = 'kit/VERSION';
@@ -11,18 +10,6 @@ export const KIT_CHANGELOG = 'kit/CHANGELOG.md';
 const norm = (f: string) => f.replace(/\\/g, '/').toLowerCase();
 export const isKitVersionFile = (f: string) => norm(f) === KIT_VERSION_FILE.toLowerCase();
 export const isKitChangelog = (f: string) => norm(f) === KIT_CHANGELOG.toLowerCase();
-
-/**
- * How a PR's hold goes on when its kit.json pins a kit that will never be released (prtest.ts's kitReleaseHold): a
- * release, or the Steward's main, is past it already, and no open Steward PR brings it.
- */
-export const NEVER_RELEASED = ', which will never be released: ';
-
-/**
- * The kit a PR's hold says will never be released, or null when it says none. A draft's hold says it after its own
- * words ("a draft; it pins kit …"). Pure.
- */
-export const deadKitIn = (why: string): string | null => new RegExp(`\\bpins kit (\\d+\\.\\d+\\.\\d+)${NEVER_RELEASED}`).exec(why)?.[1] ?? null;
 
 /** The claims ledger's key for a repository's kit, beside the repository's own. */
 export const kitClaimKey = (repo: string) => `${repo}#kit`;

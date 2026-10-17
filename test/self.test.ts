@@ -6,19 +6,25 @@ import { after, test } from 'node:test';
 
 // The Steward's own releases in a round (stages/self.ts): what to release, as pure decisions; then releases from a
 // fake Steward repository (a bare origin and a clone, its scripts standing in for the real ones, which only note what
-// they were asked). Nothing reaches GitHub, the live ~/.steward or the real checkout.
+// they were asked). The kit is tried on the agents at main first (stages/trial.ts: here, none), and the Steward's version
+// waits for main's head to be tested or vouched for (stages/mainbuild.ts: here, gh says the team vouched). Nothing
+// reaches GitHub, the live ~/.steward or the real checkout.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-self-'));
 process.env.STEWARD_HOME = home;
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { planSelf, releaseSelf, loadSelfFailures, SELF_COMMANDS } = await import('../src/stages/self.ts');
+const { planSelf, releaseSelf, loadSelfFailures, selfFailedFile, SELF_COMMANDS, trialAhead } = await import('../src/stages/self.ts');
+const { kitTrialsFile, mainKeyOf, TRIAL_NO_ROOM } = await import('../src/stages/trial.ts');
+const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
+const { APP } = await import('../src/app.ts');
+const { writeJson } = await import('../src/kit/store.ts');
 const { readGlance, glanceQuery, stewardMainFrom } = await import('../src/glance.ts');
 const { roundConditions } = await import('../src/alarms.ts');
 const { releasedSomething, runStage } = await import('../src/steward.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
-const { ctxFor, runner, sh } = await import('./helpers.ts');
+const { ctxFor, ok, runner, sh } = await import('./helpers.ts');
 
 const H1 = 'a'.repeat(40);
 const H2 = 'b'.repeat(40);
@@ -61,10 +67,10 @@ test("one of the Steward's own releases that failed is an alarm at once; none wi
   const round = { stage: 'round' as const, started: '', finished: '', kit: null, asked: {}, results: [], log: [] };
   const failedSelf = { 'v0.8.1': { commit: H1, message: 'npm run release -- --publish failed (exit 1), so v0.8.1 wasn\'t released' } };
   const settings = structuredClone(DEFAULT_SETTINGS);
-  const c = roundConditions({ round, held: [], failedReleases: {}, failedSelf, employees: [], settings });
+  const c = roundConditions({ round, failedReleases: {}, failedSelf, employees: [], settings });
   assert.deepEqual(c.map((x) => [x.id, x.who, x.afterMs]), [['self:v0.8.1:aaaaaaa', 'steward', 0]]);
   assert.match(c[0].title, /couldn't release v0\.8\.1 at aaaaaaa/);
-  assert.deepEqual(roundConditions({ round, held: [], failedReleases: {}, failedSelf, employees: [], settings: { ...settings, releaseSelf: false } }), []);
+  assert.deepEqual(roundConditions({ round, failedReleases: {}, failedSelf, employees: [], settings: { ...settings, releaseSelf: false } }), []);
 });
 
 // A fake Steward: its origin a bare repository GitHub's URL stands for (git's insteadOf), and its scripts noting what ran.
@@ -99,7 +105,10 @@ sh(checkout, 'commit', '--quiet', '-m', 'Steward 0.9.0, kit 1.1.0');
 sh(checkout, 'push', '--quiet', 'origin', 'main');
 const head = () => sh(origin, 'rev-parse', 'main');
 
-const r = runner();
+/** A commit's statuses on GitHub: the team's vouch on each (stages/vouch.ts), so main's head isn't tested again before the Steward's release. */
+const statuses = (a: string[]) => a[0] === 'api' && /\/statuses\b/.test(a[1] ?? '');
+const VOUCHED = [{ context: VOUCH_CONTEXT, state: 'success', creator: { login: 'Jcollier0120' } }];
+const r = runner((a) => (statuses(a) ? ok(VOUCHED) : undefined));
 const ctx = ctxFor({ employees: [], workRoot: path.join(home, 'work'), run: r.run, neutralDir: home });
 const lines = () => (existsSync(ran) ? readFileSync(ran, 'utf8').trim().split('\n') : []);
 const facts = (tags: string[]) => ({ checkout, main: main('1.1.0', '0.9.0', head()), tags });
@@ -115,6 +124,10 @@ test("main's new versions are released from a clean worktree of it, kit first, w
   assert.ok(out.some(releasedSomething), "the Steward's release tells Manor, as an employee's does");
   assert.equal(sh(checkout, 'status', '--porcelain'), '', 'the checkout untouched');
   assert.ok(!existsSync(path.join(home, 'work', '_steward-release')), 'the worktree removed');
+  // The kit tried on the agents at that commit first (none here), and the Steward's version released on the team's vouch.
+  assert.equal(JSON.parse(readFileSync(kitTrialsFile(), 'utf8'))[mainKeyOf(head())].passed, 0);
+  assert.ok(r.gh.some((a) => statuses(a) && a[1].includes(`/commits/${head()}/statuses`)), "the vouch on main's head asked of GitHub");
+  assert.match(ctx.lines.join('\n'), /\[steward\] Jcollier0120 vouched for .{7}: not tested again before its release/);
 
   unlinkSync(ran);
   assert.deepEqual(await releaseSelf(ctx, facts(['v0.9.0', 'kit-v1.1.0'])), [], 'released already: nothing');
@@ -126,7 +139,7 @@ test('a release that fails is held until a new commit on main, and the Steward v
   const out = await releaseSelf(ctx, facts(['v0.8.0', 'kit-v1.0.0']));
   assert.deepEqual(out.map((x) => [x.outcome, x.message]), [
     ['failed', "self: node tools/kit-release.ts --publish failed (exit 1), so kit-v1.1.0 wasn't released"],
-    ['skipped', "self: v0.9.0 waits for the kit's release, which failed"],
+    ['skipped', "self: v0.9.0 waits for kit-v1.1.0's release"],
   ]);
   assert.deepEqual(Object.keys(loadSelfFailures()), ['kit-v1.1.0']);
   assert.equal(loadSelfFailures()['kit-v1.1.0'].commit, head());
@@ -145,6 +158,48 @@ test('a release that fails is held until a new commit on main, and the Steward v
   assert.deepEqual(loadSelfFailures(), {});
 });
 
+test("main's kit is released only once tried on every agent at that commit: one it fails holds the kit and the Steward's version behind it; one still going holds the round's", async () => {
+  const at = head();
+  writeJson(kitTrialsFile(), { [mainKeyOf(at)]: { kit: '1.1.0', failed: [{ id: 'bad', name: 'Bad', message: 'node check.mjs failed (exit 1)' }], passed: 3, at: new Date().toISOString(), commit: at, steward: APP.version } });
+  if (existsSync(ran)) unlinkSync(ran);
+  const held = await releaseSelf(ctx, facts(['v0.8.0', 'kit-v1.0.0']));
+  assert.deepEqual(held.map((x) => [x.outcome, x.message]), [
+    ['skipped', "self: kit-v1.1.0 isn't released: kit 1.1.0 fails 1 agent's checks here (Bad), so it isn't released: fix the kit on main, or the agents on theirs"],
+    ['skipped', "self: v0.9.0 waits for kit-v1.1.0's release"],
+  ]);
+  assert.deepEqual(lines(), [], 'nothing released');
+  assert.deepEqual(loadSelfFailures(), {}, "no release failed: the trial's alarm is its own");
+
+  // Still being tried (here, waiting for room): the kit waits, and the round's kit with it.
+  writeJson(kitTrialsFile(), { [mainKeyOf(at)]: { kit: '1.1.0', failed: [], passed: 0, at: new Date().toISOString(), commit: at, pending: ['gone'] } });
+  const going = await releaseSelf({ ...ctx, memoryInUse: () => 0.9 }, facts(['v0.8.0', 'kit-v1.0.0']));
+  assert.deepEqual(going.map((x) => [x.outcome, x.message, x.kitWaits]), [['skipped', `self: kit-v1.1.0 waits: ${TRIAL_NO_ROOM}`, '1.1.0']]);
+  assert.deepEqual(lines(), []);
+  rmSync(kitTrialsFile(), { force: true });
+});
+
+test("main's new kit tried ahead of the next build: nothing once it is released, or with no checkout; else what its trial came to", async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  assert.equal(await trialAhead(ctx, facts(['v0.9.0', 'kit-v1.1.0'])), null, 'released already');
+  assert.equal(await trialAhead(ctx, { ...facts(['v0.8.0', 'kit-v1.0.0']), checkout: path.join(home, 'nowhere') }), null, 'no checkout');
+  assert.equal(await trialAhead(ctx, facts(['v0.8.0', 'kit-v1.0.0'])), 'kit 1.1.0 on main passed its trial on the agents: the next build releases it');
+  const at = head();
+  writeJson(kitTrialsFile(), { [mainKeyOf(at)]: { kit: '1.1.0', failed: [{ id: 'bad', name: 'Bad', message: 'x' }], passed: 3, at: new Date().toISOString(), commit: at, steward: APP.version } });
+  assert.equal(await trialAhead(ctx, facts(['v0.8.0', 'kit-v1.0.0'])), "kit-v1.1.0: kit 1.1.0 fails 1 agent's checks here (Bad), so it isn't released: fix the kit on main, or the agents on theirs");
+  rmSync(kitTrialsFile(), { force: true });
+});
+
+test("without a vouch, the Steward's version waits for main's head to be tested here: one whose checks fail isn't released", async () => {
+  const bare = ctxFor({ employees: [], workRoot: path.join(home, 'work'), run: runner().run, neutralDir: home });
+  if (existsSync(ran)) unlinkSync(ran);
+  const out = await releaseSelf(bare, facts(['v0.8.0', 'kit-v1.1.0']));
+  assert.deepEqual(out.map((x) => x.outcome), ['failed'], bare.lines.join('\n'));
+  assert.match(out[0].message, /^self: v0\.9\.0 wasn't released: its checks failed/);
+  assert.deepEqual(lines(), [], 'nothing released');
+  assert.ok(bare.lines.some((l) => l.startsWith(`[steward] testing main at ${head().slice(0, 7)} before its release`)), bare.lines.join('\n'));
+  rmSync(selfFailedFile(), { force: true });
+});
+
 test('never from a tree with anything uncommitted in it, and never from a checkout whose origin is another repository', async () => {
   if (existsSync(ran)) unlinkSync(ran);
   writeFileSync(strayFlag, '');
@@ -160,8 +215,8 @@ test('never from a tree with anything uncommitted in it, and never from a checko
 });
 
 test("under node --test a round leaves the Steward's own releases alone unless a test names the checkout", async () => {
-  writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [], workRoot: path.join(home, 'work'), stewardCheckout: checkout }));
-  const gh = runner((a) => a[0] === 'pr' && a[1] === 'list' ? { code: 0, out: '[]', err: '' } : ({ code: 0, out: JSON.stringify({ data: { steward: { releases: { nodes: [] }, main: { target: { oid: head() } }, kitVersion: { text: '1.1.0' }, packageJson: { text: '{"version":"0.9.0"}' } } } }), err: '' }));
+  writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [], team: ['Jcollier0120'], workRoot: path.join(home, 'work'), stewardCheckout: checkout }));
+  const gh = runner((a) => a[0] === 'pr' && a[1] === 'list' ? { code: 0, out: '[]', err: '' } : statuses(a) ? ok(VOUCHED) : a[0] === 'release' && a[1] === 'list' ? ok([]) : ({ code: 0, out: JSON.stringify({ data: { steward: { releases: { nodes: [] }, main: { target: { oid: head() } }, kitVersion: { text: '1.1.0' }, packageJson: { text: '{"version":"0.9.0"}' } } } }), err: '' }));
   if (existsSync(ran)) unlinkSync(ran);
   const out = await runStage('round', {}, { run: gh.run });
   assert.deepEqual(out.results, []);
@@ -181,8 +236,8 @@ test("under node --test a round leaves the Steward's own releases alone unless a
 test('a Steward that is also its own employee still releases itself when the rounds take turns', async () => {
   // takeTurns keeps one entry per id, so the employee comes back in place of the Steward's own entry.
   const own = { id: 'steward', name: 'Steward', repo: 'Jcollier0120/Steward', checkout, merges: true };
-  writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [own], workRoot: path.join(home, 'work'), stewardCheckout: checkout }));
-  const gh = runner((a) => a[0] === 'pr' && a[1] === 'list' ? { code: 0, out: '[]', err: '' } : ({ code: 0, out: JSON.stringify({ data: { steward: { releases: { nodes: [] }, main: { target: { oid: head() } }, kitVersion: { text: '1.1.0' }, packageJson: { text: '{"version":"0.9.0"}' } } } }), err: '' }));
+  writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [own], team: ['Jcollier0120'], workRoot: path.join(home, 'work'), stewardCheckout: checkout }));
+  const gh = runner((a) => a[0] === 'pr' && a[1] === 'list' ? { code: 0, out: '[]', err: '' } : statuses(a) ? ok(VOUCHED) : a[0] === 'release' && a[1] === 'list' ? ok([]) : ({ code: 0, out: JSON.stringify({ data: { steward: { releases: { nodes: [] }, main: { target: { oid: head() } }, kitVersion: { text: '1.1.0' }, packageJson: { text: '{"version":"0.9.0"}' } } } }), err: '' }));
   if (existsSync(ran)) unlinkSync(ran);
   const out = await runStage('round', {}, { run: gh.run, self: { checkout }, turns: { remote: async () => null } });
   assert.deepEqual(out.results.filter((x) => x.message.startsWith('self: ')).map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [

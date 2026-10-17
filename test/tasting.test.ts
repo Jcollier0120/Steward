@@ -16,7 +16,6 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const { aletasterVacant, clearTastingHold, isAletaster, loadTastingHolds, tasteFirst } = await import('../src/tasting.ts');
 const { releaseOne } = await import('../src/stages/release.ts');
 const { releaseUnreleased } = await import('../src/stages/round.ts');
-const { afterRound } = await import('../src/stages/changes.ts');
 const { roundConditions } = await import('../src/alarms.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
 const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
@@ -186,11 +185,11 @@ test('the setting off: no gate and nothing said; on by default', async () => {
 test('(d) a hold that lasts its while is an alarm, with the reason and the link; not while the setting is off', () => {
   const round = { stage: 'round' as const, started: '', finished: '', kit: null, asked: {}, results: [], log: [] };
   const hold = { commit: COMMIT, version: '0.4.13', since: '2026-10-04T08:00:00.000Z', why: "v0.4.13 at 4c1d2e9 waits for the Aletaster's tasting: fail: versions disagree", url: 'http://aletaster.localhost:19191/api/taste?id=51b0e6d3c9a4' };
-  const c = roundConditions({ round, held: [], failedReleases: {}, tastingHolds: { porter: hold, gone: hold }, employees: DEFAULT_EMPLOYEES, settings });
+  const c = roundConditions({ round, failedReleases: {}, tastingHolds: { porter: hold, gone: hold }, employees: DEFAULT_EMPLOYEES, settings });
   assert.equal(c.length, 1, 'one for an employee the Steward still has');
   assert.deepEqual([c[0].id, c[0].who, c[0].since, c[0].afterMs, c[0].url, c[0].detail[0]], ['tasting:porter:4c1d2e9:0.4.13', 'porter', hold.since, 6 * HOUR, hold.url, hold.why]);
   assert.equal(c[0].title, "Porter v0.4.13 has waited 6 hours or more for the Aletaster's tasting");
-  assert.equal(roundConditions({ round, held: [], failedReleases: {}, tastingHolds: { porter: hold }, employees: DEFAULT_EMPLOYEES, settings: { ...settings, tasteBeforeRelease: false } }).length, 0);
+  assert.equal(roundConditions({ round, failedReleases: {}, tastingHolds: { porter: hold }, employees: DEFAULT_EMPLOYEES, settings: { ...settings, tasteBeforeRelease: false } }).length, 0);
 });
 
 test("in a release: a hold publishes nothing and asks again next round; a pass releases and says it was tasted", async () => {
@@ -198,18 +197,22 @@ test("in a release: a hold publishes nothing and asks again next round; a pass r
   const { checkout } = fakeEmployee(dir, { version: '0.4.1', kit: '1.0.0' });
   const marker = path.join(dir, 'released');
   const e = employee(checkout, { release: `node -e "require('fs').writeFileSync(process.argv[1], '')" "${marker}"` });
-  const { run } = runner((a) => (a[0] === 'release' && a[1] === 'list' ? ok([...(existsSync(marker) ? [{ tagName: 'v0.4.1', isDraft: false }] : []), { tagName: 'v0.4.0', isDraft: false }]) : undefined));
+  // main's head is vouched for by the team, so the build's test of it before its release (mainbuild.ts's mainGate) is
+  // already done: the tasting comes next.
+  const vouch = [{ context: 'steward/tested', state: 'success', creator: { login: 'Jcollier0120' } }];
+  const { run } = runner((a) => {
+    if (a[0] === 'release' && a[1] === 'list') return ok([...(existsSync(marker) ? [{ tagName: 'v0.4.1', isDraft: false }] : []), { tagName: 'v0.4.0', isDraft: false }]);
+    if (a[0] === 'api' && /^repos\/Jcollier0120\/Fake\/commits\/[0-9a-f]{40}\/statuses/.test(a[1])) return ok(vouch);
+  });
   const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
 
   ctx.tasting = deps(aletasterHttp({ post: { status: 200, body: tasting({ repo: e.repo, verdict: 'fail', reason: 'versions disagree', release: false }) } }).http);
   const held = await releaseUnreleased(ctx, [e]);
-  assert.deepEqual([held[0].outcome, held[0].again], ['skipped', true]);
+  assert.deepEqual([held[0].outcome, held[0].again], ['skipped', true], `${held[0].message}\n${ctx.lines.join('\n')}`);
   assert.match(held[0].message, /^v0\.4\.1 at [0-9a-f]{7} waits for the Aletaster's tasting: fail: versions disagree$/);
+  assert.match(ctx.lines.join('\n'), /\[fake\] Jcollier0120 vouched for [0-9a-f]{7}: not tested again before its release/);
   assert.ok(!existsSync(marker), 'its release command never ran');
   assert.ok(loadTastingHolds().fake, 'kept for the alarms');
-  // The round looks at it again, whatever GitHub says.
-  const plan = { full: false, why: null, look: [e], quiet: [], sigs: { fake: 'sig' } };
-  assert.equal(afterRound({ full: null, ok: true, repos: {} }, { plan, results: held, held: [] }).repos.fake, undefined);
 
   ctx.tasting = deps(aletasterHttp({ post: { status: 200, body: tasting({ repo: e.repo }) } }).http);
   const done = await releaseOne(ctx, e, { kit: null });

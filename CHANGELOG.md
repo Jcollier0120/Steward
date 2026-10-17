@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.123
+## 0.36.125
 
 **The Steward hands out kit 2.81.0: on a Snapdragon X2, the NPU's model holds about 2 GB less of the PC's memory, and starts in half the time.**
 
@@ -24,6 +24,45 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. To keep GenieX's own file, add `"npuPatch": false` to the keeper's config.json; the next look puts it back.
+
+## 0.36.124
+
+**The Steward stops merging pull requests. Whoever writes a PR merges it once it is vouched, and each build releases what is on main.**
+
+### What's new
+
+- **Each build releases main.** At each build time (Settings, Build pipeline), on Build now, and for an urgent fix, the Steward takes the newest commit on each repository's branch. If it carries something not yet released, the Steward tests that commit once and releases it. It skips the test when a vouch already covers that exact commit.
+- **Entries in changes/ are put together at the build.** A repository that keeps one changes/ file per branch gets them put together on main into one version and one changelog entry. The Steward opens a PR for that and merges it itself before it releases.
+- **A new kit is tried once, on main.** When main carries a kit newer than the last kit release, the kit is tried on every agent first, between builds where it can. Then it is released and rolled out. If it fails an agent, only the kit waits, with one alarm that names the agent and what failed. Every other repository releases as usual.
+- **An urgent fix builds at once.** A commit on main whose changelog entry starts "**Urgent fix:" builds its repository straight away, without waiting for the next build time.
+
+### What changed
+
+- The Steward no longer looks through open PRs, brings them up to date with their branch, keeps them in a version queue, or tests several together. The Merge conflicts card, the version queue card with its "Move it past the others" button, and the Merge buttons are gone from its page.
+- `steward vouch` still records its pass on the PR's commit. It now tells you to merge the PR yourself once GitHub says it merges cleanly, and that the next build releases it.
+- A version merged below one already released isn't released. claim-version hands out versions above main's, so take a new one if yours was passed.
+- The Steward still merges the PRs it opens itself: the kit rollout's PRs to each agent, and the PRs that put changes/ entries together.
+- Settings that only applied to merging are no longer used and are hidden: Merges PRs, a PR's minimum age, catching PRs up, merging ready PRs together, and finding the PR that breaks a build. Your values are kept.
+- On a repository worked with plain git, "When a branch is ready" is no longer run: land your branch yourself. Its changes/ entries aren't put together by the Steward either, since there's no PR to do it through: put them into one version on a branch, and land it.
+- A repository whose Settings give it no checks is released without a test, as before.
+
+### Before you update
+
+- **The Steward no longer merges PRs: merge your own once vouched, and each build releases main.** For a PR on GitHub, once its checks pass and it merges cleanly: `gh pr merge <number> --repo <owner/name> --merge`.
+- PRs that were waiting for the Steward to merge them stay open until you merge them.
+- Otherwise nothing: it updates itself as usual.
+
+## 0.36.122
+
+**The Steward hands out kit 2.80.3: its notes on the Snapdragon X2's model say why the Smith's vision check failed there.**
+
+### What changed
+
+- Kit 2.80.3 records why the Smith's check picture read "Tally 827" on the X2's Qwen3-VL-2B: the model misreads large smoothed text on a picture whose sides are both a whole number of 32 px. The Smith 0.8.45 draws its picture a pixel wider, and it reads right. Nothing in the kit's code changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.36.120
 
