@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Kit version to claim on the main laptop
+## 2.78.15
 
 **The local models take less of a PC's memory. llama-server keeps no RAM cache of earlier prompts: by default each server keeps up to 8 GB of them in the PC's memory, beside what its card holds, for prompts that start the same way, and the manor's rarely do. On a Core Ultra 5 225U's Intel Graphics, the chat server held 3.59 GB instead of 4.54 GB after 34 of the manor's kind of requests, and gave the same answers a little faster. And Intel's integrated graphics on a PC with under 32 GB chat on their vision server: one Qwen3-VL-4B for both, 5.0 GB of the PC's memory where Qwen3-4B beside it made 8.5 GB. On text it is as fast and passes the Smith's checks, but it got one of 18 of the manor's kind of tasks wrong that Qwen3-4B got right. A PC set up before gets both at the keeper's next look; nothing to download, nothing to set up again.**
 
@@ -21,7 +21,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **Setup** (`acceleratorEntry`) writes the variable into the `env` of every llama-server it sets up: chat, vision, embeddings and a reranker.
 - **Setup on such a card** (`planSetup`) downloads no Qwen3-4B, gives vision no port, and writes chat with vision's model and flags on chat's port. The vision endpoint has only its model and time, so requests and the keeper find it on chat's server (`endpointFor`). Setting up again on a PC set up before gives chat the port its vision server had. Its plan says "chat and vision on 18191 (one qwen3-vl-4b-instruct server)".
 - **A PC set up before** keeps its servers running: the vision server takes chat as it is, and the Qwen3-4B server on chat's old port is no configured server's, so the keeper stops it as an orphan after 5 minutes.
-- **spec/ACCELERATORS.md** says why, with the measurements.
+- **spec/ACCELERATORS.md** says why, with the measurements, and why not the smaller Qwen3-VL-2B: it read the Smith's check picture, TALLY 4827, as "Tally 827".
 
 ### Before you update
 
