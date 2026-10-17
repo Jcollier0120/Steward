@@ -10,10 +10,11 @@ import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
 import { checksLogOf, kitTrialLogOf, trialDirOf } from './stages/bump.ts';
 import { latestTrial, standingFailures, trialFails } from './stages/trial.ts';
-import { bumpBranch, bumpDirOf, checkoutOf, releaseDirOf, type StageResult } from './stages/common.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, installedRelease, releaseDirOf, type StageResult } from './stages/common.ts';
+import { roundFailuresFile } from './stages/round.ts';
 import { showFile } from './git.ts';
 import { compareVersions } from './kitfiles.ts';
-import { readPin } from './stages/staff.ts';
+import { appReleasesIn, readPin, type ReleaseInfo } from './stages/staff.ts';
 import { hostFor } from './hosts/index.ts';
 
 /**
@@ -47,7 +48,10 @@ import { hostFor } from './hosts/index.ts';
  *   repository, today's issues all filed, gh refusing): then it is an alarm as before, saying why.
  *
  * A bump issue whose failure is gone (the employee's branch pins that kit or a newer one now) is closed by itself
- * (closeResolved), rather than left for the Wright to find nothing to fix and get stuck on.
+ * (closeResolved), rather than left for the Wright to find nothing to fix and get stuck on. So is a release issue once
+ * round-failed.json no longer names its commit: the employee has released since, or a newer commit's release failed
+ * and has its own issue (closeRelease). Before Steward 0.36.105 those stayed open, some stuck, for days after the
+ * agent's next release.
  *
  * Kept in work-filed.json: each issue filed, by its id, with when; the Settings switch is fileWork.
  */
@@ -557,16 +561,27 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
  * Each bump issue filed whose failure is gone, closed: the employee's branch on origin now pins that kit or a newer one
  * (a later bump passed, or a fix landed and its bump merged), so there is nothing left to do. Left open, it waits in the
  * Wright's queue for the Wright to find nothing to fix, make no commit, and get stuck: an alarm for nothing. Not one
- * this round's failures still name (`items`), and only bump issues: a release's failure ends with a new commit, which
- * says nothing of the old one. And each conflict issue whose PR no longer needs it (closeConflict). Forgotten in
- * work-filed.json once closed, or found closed already.
+ * this round's failures still name (`items`). And each release issue whose commit round-failed.json no longer names
+ * (closeRelease), each conflict issue whose PR no longer needs it (closeConflict), and each kit trial's whose kit no
+ * longer waits for the agent (closeKitTrial). Forgotten in work-filed.json once closed, or found closed already.
  */
 export async function closeResolved(o: { items: WorkItem[]; employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }): Promise<void> {
   const filed = readJson<Record<string, FiledWork>>(workFiledFile(), {});
   const current = new Set(o.items.map((i) => i.id));
   let changed = false;
+  // round-failed.json, read once, and only when a release issue is open: null when it can't be read.
+  let failed: Record<string, string> | null | undefined;
   for (const [id, f] of Object.entries(filed)) {
     if (current.has(id)) continue;
+    const rel = /^release:([^:]+):([0-9a-f]+)$/i.exec(id);
+    if (rel) {
+      if (failed === undefined) failed = readFailedReleases();
+      if (await closeRelease(o, f, { failed, filed, agent: rel[1], commit: rel[2] })) {
+        delete filed[id];
+        changed = true;
+      }
+      continue;
+    }
     const pr = /^conflict:([^#]+)#(\d+):/.exec(id);
     if (pr) {
       if (await closeConflict(o, f, pr[1], Number(pr[2]))) {
@@ -600,6 +615,66 @@ export async function closeResolved(o: { items: WorkItem[]; employees: Employee[
     if (r.code === 0) o.log(`work: closed ${f.url}: ${e.name} carries kit ${pin.kit} now`);
   }
   if (changed) writeJson(workFiledFile(), filed);
+}
+
+/** round-failed.json as the rounds keep it (each employee's failed release, by its commit), or null when it can't be read: missing, or not such a record. */
+export function readFailedReleases(file = roundFailuresFile()): Record<string, string> | null {
+  try {
+    const j = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+    if (!j || typeof j !== 'object' || Array.isArray(j) || !Object.values(j).every((v) => typeof v === 'string')) return null;
+    return j as Record<string, string>;
+  } catch {
+    return null;
+  }
+}
+
+/** An employee's newest release, as its host lists it, or its installed copy's when it is released only on this PC (as releasedOf counts them); null when there's none, or they can't be listed. */
+async function newestRelease(o: { run: Runner; cwd: string }, e: Employee): Promise<ReleaseInfo | null> {
+  const r = await hostFor({ run: o.run, neutralDir: o.cwd }).listReleases(e.repo, 'tagName,isDraft,publishedAt');
+  let listed: ReleaseInfo[] = [];
+  try {
+    if (r.code === 0) listed = appReleasesIn(r.out);
+  } catch {
+    listed = [];
+  }
+  const here = installedRelease(e);
+  const all = here && !listed.some((x) => x.version === here.version) ? [{ tag: `v${here.version}`, version: here.version, published: here.built }, ...listed] : listed;
+  return all.sort((a, b) => compareVersions(b.version, a.version))[0] ?? null;
+}
+
+/**
+ * A release issue whose failure no longer stands, closed: round-failed.json, read, no longer names its commit for the
+ * employee. Either the employee has released since (its newest release published after the issue was filed), or a newer
+ * commit's release failed, and that one's issue has it now. Never on what can't be told: the record missing or
+ * unreadable, the employee gone from Settings, or no release since to name (its releases not listed, or one that waits
+ * for the signing key not made yet). True once it is closed, or found closed already.
+ */
+async function closeRelease(o: { employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }, f: FiledWork, x: { failed: Record<string, string> | null; filed: Record<string, FiledWork>; agent: string; commit: string }): Promise<boolean> {
+  if (!x.failed) return false;
+  const now = x.failed[x.agent];
+  if (now && now.toLowerCase() === x.commit.toLowerCase()) return false;
+  const e = o.employees.find((y) => y.id === x.agent);
+  if (!e) return false;
+  let why: string;
+  let comment: string;
+  if (now) {
+    const newer = x.filed[`release:${e.id}:${now}`];
+    why = `${e.name}'s release at ${now} has failed since${newer ? ` (${newer.url})` : ''}`;
+    comment = `Superseded: ${e.name}'s release has failed since at a newer commit, ${now}${newer ? `, and ${newer.url} has it now` : ''}. Closed by the ${APP.name}.`;
+  } else {
+    const rel = await newestRelease(o, e);
+    if (!rel?.published || !(Date.parse(rel.published) > Date.parse(f.at))) return false;
+    why = `${e.name} has released ${rel.tag} since`;
+    comment = `Nothing left to do: ${e.name} has released ${rel.tag} from ${e.branch} since, so its failed release at ${x.commit} holds nothing up any more. Closed by the ${APP.name}.`;
+  }
+  const r = await hostFor({ run: o.run, neutralDir: o.cwd }).closeIssue(f.repo, f.number, { reason: 'completed', comment });
+  const gone = r.code === 0 || /already closed/i.test(`${r.out}\n${r.err}`);
+  if (!gone) {
+    o.log(`work: couldn't close ${f.url}, whose release failure no longer stands: ${redact(lastLine(r))}`);
+    return false;
+  }
+  if (r.code === 0) o.log(`work: closed ${f.url}: ${why}`);
+  return true;
 }
 
 /**
