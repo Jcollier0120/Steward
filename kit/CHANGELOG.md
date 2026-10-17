@@ -2,6 +2,10 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.10
+
+**On a PC set up before, a card's embedding server is brought down to setup's smaller context: about 0.6 GB less of the graphics' memory, with the same vectors, from its next start.**
+
 ## 2.78.9
 
 **Setup keeps a report of how this PC's NPU did, for its owner to send if they choose (spec/NPU-REPORTS.md). It measures every NPU it sets up now, verified or not: three short requests and a 1,000-token read, a few seconds in the NPU's turn. Only an unverified generation is calibrated from them, as before; a verified one is used whatever they say. The report holds hardware ids, versions and times, and never a file, a path, a name or the licence. Nothing in the kit sends it: the app shows it to its owner and sends it only on their word. `npu-reports.ts` turns the Exchequer's count of the reports into the patch for npu-vendors.json that they support.**
@@ -22,6 +26,11 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### What changed
 
 - **setup.ts:**
+  - **`withSmallerEmbedServer(raw)`:** a graphics card's (`kind: 'gpu'`) llama-server embedding command still at the context and micro-batch setup wrote from 2.11.0 (`-c 8192 … -ub 2048`) gets setup's own: `-c` `EMBED_CONTEXT` (4096) and `-ub 512`. Its `embed.maxContextTokens` becomes `EMBED_CAP` (1,365), or stays lower if it already was. A command with any other context or micro-batch, changed by hand, is left as it is.
+  - **`refreshCardVision`** now runs it after `withEncoderOnProcessor`, so the keeper's look at the cards' commands, once for each kit version (keeper.ts), changes both. Its log line names the cards whose embedding server changed and what it saves.
+  - Measured on an AMD Radeon 860M with Qwen3-Embedding-0.6B: 1,874 MB of the graphics' memory before, 1,274 MB after.
+- **What an agent must do:** nothing. The change reaches config.json once the keeper runs this kit, and the server takes it at its next start.
+
   - **`setupCommand`:** keeps the NPU's report (`npuReportFile`, the accelerators folder's `npu-report.json` by default; none with a given detection unless a file is given). It writes one whenever it set the NPU up or left it out, and none when it left a configured NPU alone. `app` names the app in it ("manor 0.16.200").
   - **`setUpNpu`:** measures every NPU after its test request. Its result has `failed`, the step's code, and `speeds`. `measureNpu` also reads a prompt of about 1,000 tokens (`readTokens`, `readMs`). `fillerPrompt` moved here from npu-check.ts, which exports it still.
   - **Code that fakes `NpuIo.measure`:** it is now called for a verified generation too. A fake that returns null there leaves the NPU on the route's values, as before.

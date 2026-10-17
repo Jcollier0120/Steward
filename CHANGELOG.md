@@ -2,6 +2,16 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.81
+
+**The Steward hands out kit 2.78.10: on a PC set up before, the graphics card's embedding server now takes about 0.6 GB less of its memory, with the same vectors.**
+
+### What changed
+
+- Setup has written a smaller embedding server for the graphics card since kit 2.77.2: a 4,096-token context with a 512-token micro-batch, its requests capped at 1,365 tokens. A PC set up before that kept the old one, 8,192 tokens with a 2,048-token micro-batch, because nothing went back over a setup's commands except the vision ones. Now the keeper's look at the cards' commands, once for each kit version, brings the embedding server down too. It takes effect from the server's next start.
+- On an AMD Radeon 860M, Qwen3-Embedding-0.6B took 1,874 MB of the graphics' memory before and 1,274 MB after.
+- It applies to every card route that runs llama.cpp's embedding server: AMD Radeon, Intel graphics and the Snapdragon's Adreno. An embedding server whose command was changed by hand is left as it is.
+
 ## 0.36.80
 
 **The Steward hands out kit 2.78.9: setup and the NPU check keep a report of how this PC's NPU did, for its owner to send if they choose, and nothing is sent by itself.**
@@ -13,6 +23,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
 
 ## 0.36.79
 

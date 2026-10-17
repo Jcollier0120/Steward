@@ -614,6 +614,79 @@ test("the keeper's look adds it once for each kit version: config.json written, 
   assert.ok(existsSync(cardRefreshFile(file)));
 });
 
+// This PC's Radeon embedding server, as the kit set it up before (WEASELDEV03, 2026-10-15): -c 8192 -ub 2048.
+const AMD_ID = 'gpu-amd-radeon-860m-graphics';
+const oldEmbed = () => ({
+  baseUrl: 'http://127.0.0.1:18191',
+  model: 'qwen3-embedding-0.6b-gguf',
+  startCommand: [VK, '--host', '127.0.0.1', '--port', '18191', '--device', 'Vulkan0', '-ngl', '99', '-m', `${MODELS}\\Qwen3-Embedding-0.6B-Q8_0.gguf`, '--embeddings', '--pooling', 'last', '-c', '8192', '-b', '2048', '-ub', '2048', '--parallel', '1', '--alias', 'qwen3-embedding-0.6b-gguf'],
+});
+const amdConfig = (embed: any = oldEmbed(), more: Record<string, unknown> = {}) => ({ accelerators: [npuEntry, { id: AMD_ID, kind: 'gpu', slots: 1, maxContextTokens: 4096, quirks: [], memoryGb: 0.4, embed, ...more }], acceleratorOrder: 'auto' });
+
+test("a PC set up before: a card's embedding server gets setup's smaller context and micro-batch, and the cap that fits them; a person's own values stay", async () => {
+  const { withSmallerEmbedServer } = await import('./fixture/src/kit/setup.ts');
+  const raw = amdConfig();
+  const r = withSmallerEmbedServer(raw);
+  assert.deepEqual(r.changed, [AMD_ID]);
+  const want = oldEmbed().startCommand;
+  want[want.indexOf('-c') + 1] = '4096';
+  want[want.indexOf('-ub') + 1] = '512';
+  assert.deepEqual(r.raw.accelerators[1].embed.startCommand, want, '-b and everything else as they were');
+  assert.equal(r.raw.accelerators[1].embed.maxContextTokens, 1365, "setup's cap: an input fits -c 4096");
+  assert.deepEqual({ ...r.raw.accelerators[1], embed: undefined }, { ...raw.accelerators[1], embed: undefined });
+  assert.deepEqual(r.raw.accelerators[0], npuEntry);
+  assert.equal((raw.accelerators[1] as any).embed.startCommand.includes('512'), false, 'the config read is not changed in place');
+  assert.deepEqual(withSmallerEmbedServer(r.raw).changed, [], 'again: nothing to do');
+
+  // A smaller cap already there stays; a larger one comes down.
+  assert.equal(withSmallerEmbedServer(amdConfig({ ...oldEmbed(), maxContextTokens: 1000 })).raw.accelerators[1].embed.maxContextTokens, 1000);
+  assert.equal(withSmallerEmbedServer(amdConfig({ ...oldEmbed(), maxContextTokens: 8192 })).raw.accelerators[1].embed.maxContextTokens, 1365);
+
+  // Left alone: a person's own context or micro-batch, setup's command already, another server, not an embedding
+  // server, no command, the NPU's own, no list.
+  const changed = (embed: any, more: Record<string, unknown> = {}) => withSmallerEmbedServer(amdConfig(embed, more)).changed;
+  const set = (flag: string, value: string) => { const e = oldEmbed(); e.startCommand[e.startCommand.indexOf(flag) + 1] = value; return e; };
+  assert.deepEqual(changed(set('-c', '6144')), []);
+  assert.deepEqual(changed(set('-ub', '1024')), []);
+  assert.deepEqual(changed({ ...oldEmbed(), startCommand: want }), []);
+  assert.deepEqual(changed({ ...oldEmbed(), startCommand: ['C:\\o\\ollama.exe', ...oldEmbed().startCommand.slice(1)] }), []);
+  assert.deepEqual(changed({ ...oldEmbed(), startCommand: oldEmbed().startCommand.filter((s) => s !== '--embeddings') }), []);
+  assert.deepEqual(changed({ baseUrl: 'http://127.0.0.1:18191', model: 'qwen3-embedding-0.6b-gguf' }), [], 'started by someone else');
+  assert.deepEqual(changed(oldEmbed(), { kind: 'npu', id: 'npu' }), []);
+  assert.deepEqual(withSmallerEmbedServer({ embedEndpoint: { baseUrl: 'http://127.0.0.1:18191' } }).changed, [], 'an old config with no list');
+});
+
+test("the keeper's card look brings the embedding server down too, once for each kit version, and says so", async () => {
+  const { readCardRefresh, refreshCardVision } = await import('./fixture/src/kit/setup.ts');
+  const dir = mkdtempSync(path.join(process.env.REEVE_HOME!, 'card-embed-'));
+  const file = path.join(dir, 'config.json');
+  writeFileSync(file, JSON.stringify(amdConfig(), null, 2));
+  const log: string[] = [];
+  const look = (kit: string, validate?: (raw: unknown) => string[]) => refreshCardVision({ configFile: file, kit, now: () => Date.parse('2026-10-16T22:00:00Z'), log: (l) => log.push(l), ...(validate ? { validate } : {}) });
+  const embed = () => JSON.parse(readFileSync(file, 'utf8')).accelerators[1].embed;
+
+  // Not written when it doesn't validate: the record and the log say why, and the next kit tries again.
+  assert.deepEqual(look('2.79.0', () => ['nope']), []);
+  assert.ok(embed().startCommand.includes('8192'));
+  assert.match(log.at(-1)!, /^the embedding server of gpu-amd-radeon-860m-graphics keeps its command: config\.json wasn't written: nope$/);
+
+  assert.deepEqual(look('2.80.0'), [AMD_ID]);
+  assert.ok(embed().startCommand.includes('4096') && embed().startCommand.includes('512') && !embed().startCommand.includes('8192'));
+  assert.equal(embed().maxContextTokens, 1365);
+  assert.match(log.at(-1)!, /^gpu-amd-radeon-860m-graphics: the embedding server now starts at -c 4096 -ub 512, its requests capped at 1365 tokens \(kit 2\.80\.0\)/);
+  assert.equal(log.filter((l) => /vision/.test(l)).length, 0, 'no vision to change on this card');
+  assert.deepEqual(readCardRefresh(file), { kit: '2.80.0', at: '2026-10-16T22:00:00.000Z', changed: [AMD_ID] });
+  assert.deepEqual(look('2.80.0'), [], 'this kit looked already');
+
+  // An Intel card with both: one write, a line for each, the card counted once.
+  writeFileSync(file, JSON.stringify({ ...intelConfig(), accelerators: [npuEntry, { ...intelConfig().accelerators[1], embed: oldEmbed() }] }, null, 2));
+  const before = log.length;
+  assert.deepEqual(look('2.81.0'), [INTEL_ID]);
+  assert.equal(log.length, before + 2);
+  const card = JSON.parse(readFileSync(file, 'utf8')).accelerators[1];
+  assert.ok(card.vision.startCommand.includes('--no-mmproj-offload') && card.embed.startCommand.includes('512'));
+});
+
 test('a reranker: set up only when asked for, as an add-on that keeps what its accelerator serves, on its own port; the keeper keeps it', async () => {
   const { keepingAddOns, keptKinds } = await import('./fixture/src/kit/setup.ts');
   const { reapedServers } = await import('./fixture/src/kit/keeper.ts');
