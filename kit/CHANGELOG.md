@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Version to claim on the main laptop
+## 2.78.20
 
 **The NPU benchmark sets up chat alone, so `--no-setup` downloads nothing. Before, it set up the route's embedding server too, and its check for what was missing counted only the route's models. On an Intel NPU 3720, whose chat model was there and embedder wasn't, `--no-setup` went on and pulled Qwen3-Embedding (428 MB) through OpenVINO Model Server.**
 

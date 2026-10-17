@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.101
+
+**The Steward hands out kit 2.78.20: the NPU benchmark sets up chat alone, so `--no-setup` downloads nothing. Before, it set up the route's embedding server too. On an Intel NPU 3720 that had its chat model but not its embedder, `--no-setup` pulled Qwen3-Embedding (428 MB) without asking.**
+
+### What changed
+
+- **The NPU benchmark** (kit/node/npu-bench.ts) leaves the route's embedding server and its model out of its plan, since its questions never ask for an embedding. `--no-setup` stops, exit 1, whenever the plan would fetch anything, and the download prompt names the plan's whole size: on a fresh PC about 2.4 GB on Intel, 4.4 GB on a Snapdragon X and 1.9 GB on an X2.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's benchmark changes once it takes kit 2.78.20.
+
 ## 0.36.95
 
 **The Steward hands out kit 2.78.14: on every staff page, the status pill sits on the line under the name, after the role, so the title bar stays one row in a normal desktop window.**
