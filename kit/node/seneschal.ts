@@ -33,7 +33,7 @@ import path from 'node:path';
  * A whole suite may be cut into shards by test file (kit 2.78.22): each its own task (`shard`, part of its key), so the
  * PCs whose workers run it (`seneschalSiblings`) each take a part.
  *
- * The Wright's jobs and Reeve's heavy background work ask too (Seneschal 0.3.0, kit 2.79.0): the turn kinds. Only their
+ * The Wright's jobs and Reeve's heavy background work ask too (Seneschal 0.3.0, kit 2.80.0): the turn kinds. Only their
  * asker can run them, so the Seneschal hands out a turn and nothing else. Such a task is named by its `job` (an issue,
  * a job, an index), never by code, so it needs no commit, and it says what it `needs` of the room (`light`: no
  * processor slot; `line`: a line of the PC's own, Claude Code's). An asker that can come back later (`defer`) is told

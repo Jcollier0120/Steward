@@ -380,7 +380,7 @@ test('the other PCs whose workers run a kind for a repository, as the Seneschal 
   assert.equal(await seneschalSiblings({ ...ask, env: { KIT_CHECKS_TURN: '1' } }), null, "inside another's turn");
 });
 
-// The Wright's jobs and Reeve's heavy work (Seneschal 0.3.0, kit 2.79.0): turns only their asker can run, named by job.
+// The Wright's jobs and Reeve's heavy work (Seneschal 0.3.0, kit 2.80.0): turns only their asker can run, named by job.
 const wrightJob = { kind: 'wright-job' as const, repo: 'Jcollier0120/Reeve', job: '#212', lane: 'background' as const, needs: { clone: true, memoryMb: 2048, line: 'claude-code' as const }, tries: 1, what: "the Wright's job #212 in Reeve", by: 'wright' };
 const reeveFill = { kind: 'reeve-job' as const, repo: 'Jcollier0120/Heiward', job: 'index:Heiward:1a2b3c4d:embed', lane: 'background' as const, needs: { light: true, accelerator: 'npu', memoryMb: 512 }, tries: 2, by: 'reeve' };
 const noRoom = { json: { task: null, why: 'no room: 3 tasks running', state: 'waiting' } };

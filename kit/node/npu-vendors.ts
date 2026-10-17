@@ -242,6 +242,8 @@ export interface NpuIdleStop {
   smallPcGb: number;
   floorMinutes: number;
   coldStartTimes: number;
+  /** llama.cpp's start to the first answer on a card that shares the PC's memory, for its servers' idle stop on a small PC (cardIdleStopMinutes). */
+  cardColdStartMs: number;
   about: string;
 }
 
@@ -756,6 +758,19 @@ export function npuIdleStopMinutes(o: { program: string; kind: ServeKind; ramByt
   if (!smallPc(o.ramBytes, catalog.idleStop)) return o.otherwise;
   const stop = routeOfServer(o.program, o.kind, catalog)?.idleStop;
   return stop?.minutes[o.kind] ?? stop?.minutes.chat ?? o.otherwise;
+}
+
+/**
+ * The minutes a graphics card's llama.cpp servers may sit unused before the keeper stops them, when config.json gives no
+ * gpuIdleStopMinutes: on a PC with little memory (smallPc), a card that shares the PC's memory (under OWN_MEMORY_GB of
+ * its own: integrated graphics, whose models hold the PC's own memory, as an NPU's do) by the NPU's rule, from llama.cpp's
+ * cold start (idleStop.cardColdStartMs); a card with memory of its own, one whose memory isn't known, or any card on a
+ * bigger PC, `otherwise` (rules.json's keeper.gpuIdleStopMinutes, as before).
+ */
+export function cardIdleStopMinutes(o: { memoryGb: number | null | undefined; ramBytes: number | null | undefined; otherwise: number; catalog?: NpuCatalog }): number {
+  const rule = (o.catalog ?? NPU_CATALOG).idleStop;
+  if (!smallPc(o.ramBytes, rule) || o.memoryGb === null || o.memoryGb === undefined || o.memoryGb >= OWN_MEMORY_GB) return o.otherwise;
+  return idleMinutesFor(rule.cardColdStartMs, rule);
 }
 
 /** What setup measured on the NPU: the first start to an answer (its compile included), a short answer warm, and writing speed. */
