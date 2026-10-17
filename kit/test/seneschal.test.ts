@@ -220,7 +220,7 @@ test('the same commands: in order, trimmed; none asked for, and any pass stands'
   assert.ok(sameCommands(undefined, undefined));
 });
 
-// Other PCs on the licence (Seneschal 0.2.0, kit 2.78.16): a task runs on another PC, a failure is tried once more on one.
+// Other PCs on the licence (Seneschal 0.2.0, kit 2.78.22): a task runs on another PC, a failure is tried once more on one.
 const { jobOf, seneschalWork } = await import('./fixture/src/kit/seneschal.ts');
 const LAPTOP = { id: 'bbbbbbbb-0000-4000-8000-000000000002', name: 'LAPTOP' };
 /** A clock that moves only as the client sleeps between asks: a minute a sleep. */

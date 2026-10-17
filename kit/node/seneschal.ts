@@ -22,7 +22,7 @@ import path from 'node:path';
  * A failure the Seneschal holds is never taken for this run's: it is asked for again (`again`), and run. Never throws:
  * a Seneschal that stops answering midway leaves the agent running its work as before.
  *
- * With other PCs on the licence (Seneschal 0.2.0, kit 2.78.16), a task may run on another of them: while it runs there
+ * With other PCs on the licence (Seneschal 0.2.0, kit 2.78.22), a task may run on another of them: while it runs there
  * (`leased`) its wait isn't counted against SENESCHAL_WAIT_MS, only against SENESCHAL_RUN_MS, and the result it comes to
  * names that PC (`pc`). A failure is tried once more on another PC: a pass there is `flaky` (the first failure was the
  * PC's, not the change's), and a failure there too `confirmed`. One confirmed while this agent waited for its turn is
@@ -30,7 +30,7 @@ import path from 'node:path';
  * turn's `elsewhere()` waits for the try on another PC. And `seneschalWork` is a worker's side: any task of the kinds
  * and repositories it runs, this PC's or another's, at its turn.
  *
- * A whole suite may be cut into shards by test file (kit 2.78.16): each its own task (`shard`, part of its key), so the
+ * A whole suite may be cut into shards by test file (kit 2.78.22): each its own task (`shard`, part of its key), so the
  * PCs whose workers run it (`seneschalSiblings`) each take a part.
  */
 
@@ -565,7 +565,7 @@ export async function seneschalWork(o: SeneschalWorkOptions): Promise<{ job: Sen
 
 /**
  * The other PCs on the licence whose workers run `kind` for `repo` now (Seneschal 0.2.0: each sibling's `works`, as
- * this PC's Seneschal last read it): what a whole suite may be cut for (kit 2.78.16). Empty when none does, or the
+ * this PC's Seneschal last read it): what a whole suite may be cut for (kit 2.78.22). Empty when none does, or the
  * Seneschal shares no work; null when there's no Seneschal to ask, or it doesn't answer. Never throws.
  */
 export async function seneschalSiblings(o: { kind: SeneschalKind; repo: string; at?: SeneschalAt | null; env?: NodeJS.ProcessEnv }): Promise<SeneschalPc[] | null> {
