@@ -31,6 +31,15 @@
 // its name last while any server runs, and a server outlives the launcher. A server that can't join it (one that
 // couldn't leave a job of another family) gets a job of its own with the same cap; and if neither takes, it runs as
 // before.
+//
+// The manor's ceiling (kit 2.78.7): each family's job has its own cap, so agents, check runs and servers busy at once
+// could together take the whole PC. So a command or a server first joins one job above them all
+// (Local\kit-manor-ceiling, KIT_CEILING its cap: the manor's ceiling, 85%), and then its family's job, which Windows
+// nests inside it: the ceiling's cap holds everything in it together. Agents' pages join it too (named.cs). The ceiling
+// is only ever made for a program in no job, so it is a root of its own: never inside the job tree of whatever started
+// a launcher (a Claude session's, Task Scheduler's), whose end could end what joined it later. A program that couldn't
+// leave such a job can't join it, and keeps its family's cap alone, as before. It ends nothing and limits nothing else;
+// each program in it holds a handle to it, so it lasts while any runs. KIT_CEILING unset or 0: no ceiling, as before.
 using System;
 using System.Runtime.InteropServices;
 
@@ -92,8 +101,11 @@ public static class KitChecksPace
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReleaseMutex(IntPtr h);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool DuplicateHandle(IntPtr fromProcess, IntPtr h, IntPtr toProcess, out IntPtr copy, uint access, bool inherit, uint options);
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr OpenJobObject(uint access, bool inherit, string name);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsProcessInJob(IntPtr p, IntPtr job, out bool result);
 
     const int JobObjectExtendedLimitInformation = 9, JobObjectCpuRateControlInformation = 15;
+    const uint JOB_OBJECT_ALL_ACCESS = 0x1F001F, JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x800;
     const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000, JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x100, JOB_OBJECT_LIMIT_JOB_MEMORY = 0x200;
     const uint WAIT_OBJECT_0 = 0, WAIT_ABANDONED_0 = 0x80;
     /// <summary>How long a launcher waits for a turn before it runs its command without one: 20 minutes.</summary>
@@ -118,6 +130,54 @@ public static class KitChecksPace
     {
         string n = Environment.GetEnvironmentVariable("KIT_APART_JOB_NAME");
         return @"Local\" + (string.IsNullOrEmpty(n) || n.IndexOf('\\') >= 0 ? ApartJobName : n);
+    }
+
+    /// <summary>The job above every family's, one for the PC (per sign-in session), kit 2.78.7.</summary>
+    public const string CeilingJobName = "kit-manor-ceiling";
+
+    // The ceiling's name: KIT_CEILING_JOB_NAME's, so a test's programs share a ceiling of their own, never the PC's.
+    static string CeilingJob(out bool tests)
+    {
+        string n = Environment.GetEnvironmentVariable("KIT_CEILING_JOB_NAME");
+        tests = !string.IsNullOrEmpty(n) && n.IndexOf('\\') < 0;
+        return @"Local\" + (tests ? n : CeilingJobName);
+    }
+
+    /// <summary>The ceiling's cap in hundredths of a percent (KIT_CEILING, which the kit sets: pace.ts ceilingCap()); 0, none.</summary>
+    public static int CeilingCap()
+    {
+        int cap;
+        return int.TryParse(Environment.GetEnvironmentVariable("KIT_CEILING"), out cap) && cap > 0 ? Math.Min(cap, 10000) : 0;
+    }
+
+    // Puts process `p`, started suspended, in the manor's ceiling, before its family's job, which then nests inside it:
+    // true once it is in it. A program in no job may make it (it is then a root); one already in a job only joins it, and
+    // Windows lets it only when the ceiling is in its own job tree (a program the ceiling's agents started, that couldn't
+    // leave). A test's own ceiling (KIT_CEILING_JOB_NAME) may be made anywhere: its programs are the test's.
+    static bool InCeiling(IntPtr p)
+    {
+        int cap = CeilingCap();
+        if (cap <= 0) return false;
+        bool tests, inAny;
+        string name = CeilingJob(out tests);
+        if (!IsProcessInJob(p, IntPtr.Zero, out inAny)) return false;
+        IntPtr job = inAny && !tests ? OpenJobObject(JOB_OBJECT_ALL_ACCESS, false, name) : CreateJobObject(IntPtr.Zero, name);
+        if (job == IntPtr.Zero) return false;
+        try
+        {
+            bool already;
+            if (IsProcessInJob(p, job, out already) && already) return true;
+            // Programs in it may leave it, as they leave an agent's own job: a check run or a server an agent starts leaves
+            // the agent's jobs, then joins the ceiling again, and its own family's job inside it.
+            var limit = new ExtendedLimit();
+            limit.Basic.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+            SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref limit, Marshal.SizeOf(typeof(ExtendedLimit)));
+            var rate = new CpuRateControl { ControlFlags = CPU_RATE_ENABLE | CPU_RATE_HARD_CAP, CpuRate = (uint)Math.Max(100, cap) };
+            SetInformationJobObject(job, JobObjectCpuRateControlInformation, ref rate, Marshal.SizeOf(typeof(CpuRateControl)));
+            IntPtr kept;
+            return AssignProcessToJobObject(job, p) && DuplicateHandle(GetCurrentProcess(), job, p, out kept, 0, false, DUPLICATE_SAME_ACCESS);
+        }
+        finally { CloseHandle(job); }
     }
 
     /// <summary>`apart` (no cap: no job) or `apart:<cap>`; -1 when the word is neither.</summary>
@@ -226,6 +286,14 @@ public static class KitChecksPace
         return held < 0 ? IntPtr.Zero : turns[held];
     }
 
+    // The checks' job: KIT_CHECKS_JOB_NAME's, so a test's runs share a job of their own and never set the PC's real one's
+    // limits.
+    static string ChecksJob()
+    {
+        string n = Environment.GetEnvironmentVariable("KIT_CHECKS_JOB_NAME");
+        return string.IsNullOrEmpty(n) || n.IndexOf('\\') >= 0 ? JobName : @"Local\" + n;
+    }
+
     // The turns' name: KIT_CHECKS_TURN_NAME, so a test's turns are its own and never wait on the PC's real check runs.
     static string TurnName()
     {
@@ -250,9 +318,10 @@ public static class KitChecksPace
             Console.Error.WriteLine("checks-pace: couldn't start " + line + " (Windows error " + err + ")");
             return err == 2 || err == 3 ? 127 : 126;
         }
-        // The shared job, else one of its own; and if neither takes, the command runs as it is at below-normal priority:
-        // the pace never fails a check.
-        IntPtr job = Joined(CreateJobObject(IntPtr.Zero, JobName), pi.hProcess, limits);
+        // The manor's ceiling first, then the shared job (inside it), else one of its own; and if none takes, the command
+        // runs as it is at below-normal priority: the pace never fails a check.
+        InCeiling(pi.hProcess);
+        IntPtr job = Joined(CreateJobObject(IntPtr.Zero, ChecksJob()), pi.hProcess, limits);
         if (job == IntPtr.Zero) job = Joined(CreateJobObject(IntPtr.Zero, null), pi.hProcess, limits);
         ResumeThread(pi.hThread);
         CloseHandle(pi.hThread);
@@ -266,14 +335,16 @@ public static class KitChecksPace
 
     // Starts `line` detached and out of the jobs that let it leave (CREATE_BREAKAWAY_FROM_JOB: it leaves each job up to
     // the first that doesn't allow it, and stays in that one); if Windows refuses, as the launcher's own child. With a
-    // cap, it starts suspended and runs once it is in the servers' job (Contained). Its standard output and error are the
-    // launcher's standard error. The exit code is its process id, 0 when it couldn't start.
+    // cap or a ceiling, it starts suspended and runs once it is in the manor's ceiling and the servers' job (Contained).
+    // Its standard output and error are the launcher's standard error. The exit code is its process id, 0 when it
+    // couldn't start.
     static int Apart(string line, int cap)
     {
         IntPtr err = GetStdHandle(-12);
         var si = new StartupInfo { cb = Marshal.SizeOf(typeof(StartupInfo)), dwFlags = STARTF_USESTDHANDLES, hStdInput = IntPtr.Zero, hStdOutput = err, hStdError = err };
         ProcessInformation pi;
-        uint flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | (cap > 0 ? CREATE_SUSPENDED : 0);
+        bool held = cap > 0 || CeilingCap() > 0;
+        uint flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | (held ? CREATE_SUSPENDED : 0);
         bool ok = CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, flags | CREATE_BREAKAWAY_FROM_JOB, IntPtr.Zero, null, ref si, out pi)
             || CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, flags, IntPtr.Zero, null, ref si, out pi);
         if (!ok)
@@ -281,10 +352,12 @@ public static class KitChecksPace
             Console.Error.WriteLine("checks-pace: couldn't start " + line + " (Windows error " + Marshal.GetLastWin32Error() + ")");
             return 0;
         }
-        if (cap > 0)
+        if (held)
         {
-            // The PC's servers' job, else one of its own; if neither takes, it runs as it is: the cap never stops a server.
-            if (!Contained(CreateJobObject(IntPtr.Zero, ApartJob()), pi.hProcess, cap)) Contained(CreateJobObject(IntPtr.Zero, null), pi.hProcess, cap);
+            // The manor's ceiling first, then the PC's servers' job (inside it), else one of its own; if none takes, it runs
+            // as it is: the cap never stops a server.
+            InCeiling(pi.hProcess);
+            if (cap > 0 && !Contained(CreateJobObject(IntPtr.Zero, ApartJob()), pi.hProcess, cap)) Contained(CreateJobObject(IntPtr.Zero, null), pi.hProcess, cap);
             ResumeThread(pi.hThread);
         }
         CloseHandle(pi.hThread);
