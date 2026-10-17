@@ -2,6 +2,26 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.138
+
+**A release that reaches GitHub but can't reach the Exchequer is no longer left failed: the Steward publishes it to the Exchequer itself, as soon as it can.**
+
+### What's new
+
+- **The Steward finishes a publish to the Exchequer that a release missed.** Manor installs your staff from the Exchequer alone, so a release that only reached GitHub wasn't offered to anyone. Now:
+  - If the Exchequer couldn't be reached (a timeout, or the Exchequer failing on its side), the release counts as done. The rounds publish it to the Exchequer from the release already on GitHub, without building it again: 15 minutes later, then further apart each time, up to every three hours. This happens in every round, not only at a build.
+  - If the Exchequer refused it (it doesn't sell that agent, say, or turned the upload down), an alarm tells you at once. Once you've fixed that, press Release for that agent on the Steward's page: it publishes the release to the Exchequer, again without building it.
+  - If the Exchequer still can't be reached after the hours set in Settings under **Something waiting for** (24 by default), an alarm tells you that too. It clears by itself once the release is there.
+
+### What changed
+
+- **No "another Steward or person seems to be releasing" alarm for such a release.** The Steward now knows the release on GitHub is its own. On 2026-10-17 the Exchequer timed out for Bridgeward 0.2.26: the release was counted as failed, nothing tried the Exchequer again, and the next round took the release on GitHub for someone else's.
+- **A newer release that reaches the Exchequer replaces one still waiting**, so an older version is never published after it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.137
 
 **A Release pressed while a new kit is still being rolled out now releases every repository you ticked, not only the ones the rollout had reached.**
