@@ -10,7 +10,7 @@ import { readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bumpOne, checksLogOf, runChecks, trialBranch, trialDirOf, WITHOUT_THE_KIT } from './bump.ts';
 import { mergeChangelogs, resolveVersionConflicts, sameButVersions } from './catchup.ts';
-import { checkoutOf, glanceOf, mapLimit, networkFailure, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { buildUnderWay, checkoutOf, glanceOf, mapLimit, networkFailure, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { isKitChangelog, isKitVersionFile, KIT_VERSION_FILE, kitVersionText } from './kitpart.ts';
 import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
@@ -313,9 +313,10 @@ export const nextBuildWords = (sha: string, [key, t]: [string, KitTrial]): strin
  * head was tried, or is covered by kit PRs tried together, or carries a trial from an earlier head (kitTrialHold).
  */
 export async function trialWaitsForNextBuild(ctx: Ctx, steward: Employee, pr: PrInfo, line: PrInfo[] = []): Promise<string | null> {
-  if (!ctx.build || ctx.build.ahead || steward.id !== APP.id || !raisesKit(pr) || !pr.headOid) return null;
+  const due = buildUnderWay(ctx);
+  if (!due || steward.id !== APP.id || !raisesKit(pr) || !pr.headOid) return null;
   const kept = readJson<Record<string, KitTrial>>(kitTrialsFile(), {});
-  const begun = begunIn(kept, ctx.build.due);
+  const begun = begunIn(kept, due);
   if (!begun || kept[keyOf(pr)] || bisects(begun, pr)) return null;
   const repo = checkoutOf(steward);
   await fetchFor(ctx.run, repo, pr.headOid, `refs/pull/${pr.number}/head`);
@@ -968,7 +969,8 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
       t = { kit, failed: s.failed, passed: s.passed, at: s.at, ...tried, mains: { ...s.mains }, ...(s.untouched ? { untouched: s.untouched } : {}), ...(s.own?.length ? { own: s.own } : {}), steward: s.steward, content: content!, from: k };
     } else {
       // A build tries one kit (begunIn): this head waits for the trial between builds.
-      const begun = ctx.build && !ctx.build.ahead ? begunIn(kept, ctx.build.due) : undefined;
+      const due = buildUnderWay(ctx);
+      const begun = due ? begunIn(kept, due) : undefined;
       if (begun && !bisects(begun, pr)) return nextBuildWords(sha, begun);
       const whole = wholeGoing();
       if (whole) {
@@ -993,7 +995,7 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
         ctx.log(`[${APP.id}] #${pr.number} raises the kit to ${kit}: trying it on ${employees.length} agents before it merges, ${how}`);
         t = { kit, failed: [], passed: 0, at: new Date().toISOString(), ...tried, mains: {}, pending: employees.map((e) => e.id), steward: APP.version, ...(content ? { content } : {}) };
       }
-      if (ctx.build && !ctx.build.ahead) t.build = ctx.build.due;
+      if (due) t.build = due;
     }
   }
   const at: TrialAt = { key, pr, commit: t.commit ?? pr.headOid };

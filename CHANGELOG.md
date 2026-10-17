@@ -2,6 +2,17 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.82
+
+**In a build, the Steward's own pull requests are tested beside its rounds, which no longer wait for them.**
+
+### What changed
+
+- In a build, the Steward's own pull requests that moved since the Steward last looked at them for it are tested beside the build's rounds. The rounds go on merging the agents' pull requests and the kit's rollout pull requests meanwhile, rather than each one lasting as long as the Steward's tests.
+- While those tests run, the build stays open for them, and a kit pull request among them holds the rollout for its newer kit, as before. Once they end, a round comes at once and merges what passed, without testing it again.
+- A build still tries its kit once, whether the Steward's pull requests are tested beside the rounds or in them: its kit pull requests wait for its other pull requests and are tried together, and one pushed to after that trial waits for the next build's.
+- The build's timings count those tests as the build's own time.
+
 ## 0.36.81
 
 **The Steward hands out kit 2.78.10: on a PC set up before, the graphics card's embedding server now takes about 0.6 GB less of its memory, with the same vectors.**
@@ -23,6 +34,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
 
 
 ## 0.36.79

@@ -50,7 +50,7 @@ export interface Prepared {
 export const AGAIN_MS = 30 * 60_000;
 
 /** A PR as the glance has it (gh pr list's JSON): what says whether it moved. */
-type GlancedPr = { number?: number; headRefOid?: string; isDraft?: boolean };
+export type GlancedPr = { number?: number; headRefOid?: string; isDraft?: boolean };
 
 /**
  * What a repository is prepared at: its branch's head and each ready PR's head, with the newest kit (a PR may wait for
@@ -78,6 +78,23 @@ export function toPrepare<T extends { id: string }>(repos: { e: T; key: string |
       return !!k.brief || now - Date.parse(k.at) >= AGAIN_MS;
     })
     .map((r) => r.e);
+}
+
+/**
+ * Whether employee `id`'s repository needs no new look for the build at `due` (build-prepared.json): looked at at `key`
+ * for it, within AGAIN_MS, and nothing it left waited briefly (toPrepare).
+ */
+export const preparedFor = (id: string, key: string, due: string): boolean => !toPrepare([{ e: { id }, key }], readJson<Record<string, Prepared>>(buildPreparedFile(), {}), due).length;
+
+/** What employee `id`'s repository was looked at at for the build at `due`, kept in build-prepared.json. Never throws. */
+export function notePrepared(id: string, o: { key: string; due: string; line: string; brief?: boolean }): void {
+  try {
+    const all = readJson<Record<string, Prepared>>(buildPreparedFile(), {});
+    all[id] = { key: o.key, due: o.due, at: new Date().toISOString(), line: o.line.slice(0, 500), ...(o.brief ? { brief: true } : {}) };
+    writeJson(buildPreparedFile(), all);
+  } catch {
+    // Not kept: it is looked at again, its tests' results kept by head.
+  }
 }
 
 /** Set by the Steward's page (agent.ts): merging ahead runs beside the rounds there, its lines to `log`. Unset, nothing is. */
@@ -163,10 +180,7 @@ export function prepareBeside(ctx: Ctx, o: { next: Date; employees: Employee[]; 
         try {
           const r = await withRepo(log, e.id, () => mergeOne(ahead, e, { yes: true, team: true }));
           log(`[${e.id}] ahead of ${name}: ${r.message}`);
-          const all = readJson<Record<string, Prepared>>(buildPreparedFile(), {});
-          const brief = r.held.some((h) => !h.draft && waitsBriefly(h.why));
-          all[e.id] = { key: keys.get(e.id)!, due, at: new Date().toISOString(), line: r.message.slice(0, 500), ...(brief ? { brief } : {}) };
-          writeJson(buildPreparedFile(), all);
+          notePrepared(e.id, { key: keys.get(e.id)!, due, line: r.message, brief: r.held.some((h) => !h.draft && waitsBriefly(h.why)) });
         } catch (err) {
           log(`[${e.id}] couldn't merge it ahead of ${name}: ${(err as Error).message}`);
         }

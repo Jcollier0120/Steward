@@ -20,7 +20,7 @@ import { heldQueues, keepVersionQueues, loadVersionQueues } from './version-queu
 import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
 import { checkoutOf, pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
-import { conflictsWaiting, joinLooks, merge, mergeOne, NO_CONFLICTS, waitsBriefly, type MergeLook } from './stages/merge.ts';
+import { conflictsWaiting, joinLooks, merge, mergeOne, NO_CONFLICTS, TESTED_BESIDE, waitsBriefly, type MergeLook } from './stages/merge.ts';
 import { waitsForKit } from './stages/prtest.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
@@ -56,6 +56,7 @@ import { loadBuildLeft, noteReady } from './stages/build.ts';
 import { keepPhases, phaseOf, timed } from './buildtimes.ts';
 import { kitComing } from './stages/buildkit.ts';
 import { buildBegins, prepareBeside } from './stages/prepare.ts';
+import { selfTestBeside } from './stages/selftests.ts';
 
 /**
  * The stages, as the command line and the page both run them: Settings' stagesAtOnce at a time on this PC, each
@@ -768,6 +769,15 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // rollout, which waits for a kit coming in this build (buildkit.ts) or takes the one just released, and the
           // build's release. Out of a build, the Steward's own first, as before.
           const selfBeside = mode.kind === 'build' && !!self;
+          // On the Steward's page, its PRs moved since they were tested for this build are tested beside the rounds
+          // instead (stages/selftests.ts, Steward 0.36.77), and the round doesn't wait for them: it, and those after it
+          // until they end, leave the Steward's own repository alone, its merges and releases, and its ready PRs wait.
+          // Once they end, a round merges what passed (agent.ts).
+          const testing = selfBeside && round && self ? await selfTestBeside(ctx, self, { kit: latestKit(ctx.kit) }) : null;
+          if (testing) {
+            log(`[${APP.id}] ${testing.line.message}`);
+            if (testing.held.length) held.push({ employee: self!, prs: testing.held });
+          }
           const kitBefore = latestKit(ctx.kit);
           let selfLine: EmployeeResult | null = null;
           let selfReleases: EmployeeResult[] = [];
@@ -795,7 +805,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           let merged: MergeLook[];
           if (selfBeside) {
             // Both at once, and neither one's failure thrown before the other has ended.
-            const [mine, others] = await Promise.allSettled([apart('self merge', selfPart), theirs(employees)]);
+            const [mine, others] = await Promise.allSettled([testing ? Promise.resolve({ line: testing.line, releases: [] }) : apart('self merge', selfPart), theirs(employees)]);
             if (mine.status === 'rejected') throw mine.reason;
             if (others.status === 'rejected') throw others.reason;
             ({ line: selfLine, releases: selfReleases } = mine.value);
@@ -833,9 +843,11 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           if (plan) held.push(...heldBefore(seen!, plan.quiet));
           // A PR that waits only on something settling within minutes: the next round comes sooner (agent.ts).
           const brief = held.flatMap((h) => h.prs.filter((p) => !p.draft && waitsBriefly(p.why)).map((p) => `${h.employee.name} #${p.number}`));
-          if (round && brief.length) {
+          // Not for a Steward PR tested beside the rounds alone: a round comes once its tests end (agent.ts).
+          const sooner = held.flatMap((h) => h.prs.filter((p) => !p.draft && waitsBriefly(p.why) && !p.why.startsWith(TESTED_BESIDE)).map((p) => `${h.employee.name} #${p.number}`));
+          if (round && sooner.length) {
             out.soon = true;
-            log(`the next round comes sooner: ${brief.join(', ')} ${brief.length === 1 ? 'waits' : 'wait'} only on checks running, a head just caught up, GitHub working out whether it merges, or being just opened`);
+            log(`the next round comes sooner: ${sooner.join(', ')} ${sooner.length === 1 ? 'waits' : 'wait'} only on checks running, a head just caught up, GitHub working out whether it merges, or being just opened`);
           }
           const done = merged.filter((r) => r.merged.length).map((r) => r.id);
           if (yes && done.length) {
@@ -905,8 +917,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               }
               else {
                 // A rollout beside the rounds alone: no round sooner, as the one after it comes once it ends (agent.ts).
-                // Nor a kit whose whole suite runs beside them: a round comes once it ends (wholesuite.ts).
-                if (brief.length || opened.length) out.soon = true;
+                // Nor a kit whose whole suite runs beside them: a round comes once it ends (wholesuite.ts). Nor the Steward's
+                // PRs tested beside them (selftests.ts), likewise.
+                if (sooner.length || opened.length) out.soon = true;
                 log(`the build releases once it has settled${brief.length ? `: ${brief.join(', ')} ${brief.length === 1 ? 'waits' : 'wait'} on something brief` : !opened.length && rolled.beside ? ": the kit's rollout goes on beside the rounds" : rolled.waits ? `: ${rolled.waits}` : ''}`);
               }
               out.results.push(...selfReleases);
