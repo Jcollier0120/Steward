@@ -60,9 +60,9 @@ export async function withStageSlot<T>(name: string, slots: number, fn: () => Pr
 
 /**
  * Runs `fn` holding employee `id`'s repository: at once when it's free, or already held here; else after a line in the
- * stage's log, once the stage holding it has finished with it.
+ * stage's log, once the stage holding it has finished with it. `waitMs`: wait that long at most, then LockTimeout.
  */
-export async function withRepo<T>(log: (line: string) => void, id: string, fn: () => Promise<T>): Promise<T> {
+export async function withRepo<T>(log: (line: string) => void, id: string, fn: () => Promise<T>, o: { waitMs?: number } = {}): Promise<T> {
   const mine = held.getStore();
   if (mine?.has(id)) return fn();
   if (existsSync(repoLock(id))) {
@@ -81,7 +81,7 @@ export async function withRepo<T>(log: (line: string) => void, id: string, fn: (
         holders.delete(id);
       }
     },
-    { waitMs: STAGE_STALE_MS, staleMs: STAGE_STALE_MS },
+    { waitMs: o.waitMs ?? STAGE_STALE_MS, staleMs: STAGE_STALE_MS },
   );
 }
 
