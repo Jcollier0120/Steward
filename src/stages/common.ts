@@ -112,8 +112,13 @@ export interface Ctx {
    * One of a build's rounds (pipeline.ts): its build time, and its name in words ("the 13:00 build"). A repository's
    * ready PRs are then stacked as one batch, and a batch that fails is halved to find the PR that broke it
    * (stages/build.ts). Absent between builds, and without the pipeline.
+   *
+   * `ahead`: between builds, the merge pass ahead of the next build (stages/prepare.ts), whose build time `due` is. Its
+   * ready PRs merge as in a build (stacked, tested once, halved to find the one that broke it, a kit's trial first), and
+   * nothing is released: the build releases them. A PR it leaves out is tried again by the build itself, and a kit's
+   * trial in it is not the build's one kit (trial.ts).
    */
-  build?: { due: string; name: string } | null;
+  build?: { due: string; name: string; ahead?: boolean } | null;
   /**
    * Between builds, the next build prepared for (stages/prepare.ts): its build time, and its name in words. A repository's
    * ready PRs are then tested as that build would test them (each at its head, stacked as its train or batch, a kit's

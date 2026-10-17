@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.7
 
-**Everything the manor runs now stays within 85% of the PC together. The agents, their check runs and the model servers each had a cap of 85%, so all three busy at once could take the whole processor; now they share one. And the NPU check's and the NPU benchmark's server starts apart, as an agent's does, so they measure the server an agent gets. It also brings what wasn't released before: pictures on the AMD route read right. FastFlowLM 1.0.7 misread a picture 720 px tall or less when a side was a whole number of 32 px, so the kit now makes such a side a pixel longer before sending it. And if kit 2.78.0 to 2.78.3 weren't released on their own, this release brings them too: their entries follow.**
+**Everything the manor runs now stays within 85% of the PC together. The agents, their check runs and the model servers each had a cap of 85%, so all three busy at once could take the whole processor; now they share one. And the NPU check's and the NPU benchmark's server starts apart, as an agent's does, so they measure the server an agent gets. And if kit 2.78.0 to 2.78.3 weren't released on their own, this release brings them too: their entries follow.**
 
 ### What's new
 
@@ -25,10 +25,6 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
     Windows' accounting read the ceiling a point or two above its 85% hard cap in each of five runs (86.5% to 87.7%). The check run, at its low priority, got almost nothing while the other two were busy, in both rounds.
   - **Under test**, with a ceiling of 10%: a check run and a server started apart, each keeping every processor busy at its family's cap of 10%, took under 14% together. With no ceiling the same two took 23.8%, a cap each.
 - **checks-pace.cs:** `KIT_CHECKS_JOB_NAME` names the check runs' job, so a test's runs share a job of their own. Before, a test's launcher set the PC's real job's limits to the test's.
-- **Pictures on the AMD route** (not released before):
-  - **A quirk, `sides-of-32`** (accelerator-config.ts' and the core's `QUIRKS`), on the AMD route (spec/npu-vendors.json). A PC set up before it gets it from the keeper's refresh of the NPU's entry, after the refresh's usual test.
-  - **accelerators.ts:** `fitPicture(acc, image)` gives the picture as `acc`'s server should get it; `sidesOff32(size)` the size it should have, or null; `pictureSize(bytes)` a PNG's, JPEG's, GIF's or BMP's size, from its header; `redrawPicture(from, to, size)` redraws with System.Drawing's high-quality bicubic.
-  - **npu-refresh.ts:** a refresh that changes an entry's quirks names them in its `changes` and its log line.
 
 ### What changed
 
@@ -42,10 +38,6 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **Checked on an 18-thread Snapdragon X2 Elite.**
   - Outside node --test, `startServer`'s server was in `Local\kit-apart-pace`, whose rate control read flags 5 (enabled, hard cap) and cap 8500.
   - Under test, at a cap of 10% (`KIT_APART_CAP=1000`), a server keeping every processor busy took no more than that. Started the old way, the same server took 62.5%.
-- **Pictures on the AMD route** (not released before):
-  - **`Npu.vision`, setup's vision test, and the NPU check's and benchmark's requests** (npu-server.ts' `serverClient`) fit each picture first. On the AMD route, three of the benchmark's four pictures go a pixel larger. The benchmark's log names the quirk, and its times leave out the redraw. This covers Smith's audit's 512×512 vision check and a 1280×720 picture.
-  - **spec/NPU-VENDORS.md:** the measurements, in "FastFlowLM's pictures with sides of 32 px".
-  - `visionBody` is unchanged and stays synchronous.
 
 ### Before you update
 
@@ -53,11 +45,20 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - The checks launcher, the agents' launchers and the pace helper changed, so each PC builds them once more. An agent joins the ceiling at its next start through its launcher.
 - A page that leaves Task Scheduler's job is no longer ended when Manor's task is ended in Task Scheduler. It already outlived Manor's own process.
 - It updates itself as usual. An NPU benchmark run after it is measured at the manor's ceiling. A route whose server leans on the processor (a llama.cpp one, the processor's own) may score a little lower than before. One that runs on the NPU, like FastFlowLM's, scores the same.
-- An agent that asks for pictures through `Npu.vision` has nothing to do. One that builds its own vision requests with `visionBody` awaits `fitPicture(acc, image)` first.
 
 ## 2.78.3
 
-**A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%.**
+**A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%. It also brings what wasn't released before: Pictures on the AMD route read right. FastFlowLM 1.0.7 misread a picture 720 px tall or less when a side was a whole number of 32 px, including Smith's audit's 512×512 vision check and a 1280×720 picture. The kit now makes such a side a pixel longer before sending the picture.**
+
+### What's new
+
+- **A quirk, `sides-of-32`** (accelerator-config.ts' and the core's `QUIRKS`), on the AMD route (spec/npu-vendors.json). A PC set up before it gets it from the keeper's refresh of the NPU's entry, after the refresh's usual test.
+- **accelerators.ts:**
+  - `fitPicture(acc, image)`: the picture as `acc`'s server should get it.
+  - `sidesOff32(size)`: the size it should have, or null.
+  - `pictureSize(bytes)`: a PNG's, JPEG's, GIF's or BMP's size, from its header.
+  - `redrawPicture(from, to, size)`: System.Drawing's high-quality bicubic.
+- **npu-refresh.ts:** a refresh that changes an entry's quirks names them in its `changes` and its log line.
 
 ### What changed
 
@@ -99,6 +100,13 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **schedule.ts:** every() takes a `room` option, so tests can stand in for the memory in use.
 - **work-status.ts:** the checks' turns come from `checksAtOnce()`.
 - **spec/ROUND.md:** the Pace section now describes the manor's ceiling and what full means.
+- **`Npu.vision`, setup's vision test, and the NPU check's and benchmark's requests** (npu-server.ts' `serverClient`) fit each picture first. On the AMD route, three of the benchmark's four pictures go a pixel larger. The benchmark's log names the quirk, and its times leave out the redraw.
+- **spec/NPU-VENDORS.md:** the measurements, in "FastFlowLM's pictures with sides of 32 px".
+- `visionBody` is unchanged and stays synchronous.
+
+### What an agent must do
+
+Nothing, if it asks through `Npu.vision`. An agent that builds its own vision requests with `visionBody` awaits `fitPicture(acc, image)` first.
 
 ### Before you update
 

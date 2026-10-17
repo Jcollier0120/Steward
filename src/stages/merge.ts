@@ -11,15 +11,15 @@ import { changeFiles, changeVersion, CHANGES_DIR, fragmentFiles } from '../entri
 import { stamp, usesChanges, type StampResult } from './stamp.ts';
 import { openVouchedBranches } from './branchesin.ts';
 import { handInBranches } from './gitevents.ts';
-import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
+import { catchUp, isKitPr, type CaughtUp, type KitSetter } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
 import { runTrain, trainCars, type TrainRun } from './train.ts';
-import { buildCars, forgetEarlierBuilds, leftIn, loadReadySince, runBatch, type BuildBatch } from './build.ts';
+import { buildCars, forgetEarlierBuilds, leftFor, leftIn, leftKey, loadReadySince, runBatch, type BuildBatch } from './build.ts';
 import { loadRolloutFailures } from './rollout.ts';
-import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, trialGoingAt, TRIAL_GOING } from './trial.ts';
+import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, trialGoingAt, trialWaitsForNextBuild, TRIAL_GOING } from './trial.ts';
 import { claimsOn, movedTo, reclaim, type Claim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
@@ -123,7 +123,14 @@ export const CAUGHT_UP = 'caught up by the Steward';
  * its kit being tried on the agents a few each round (trial.ts).
  */
 export const waitsBriefly = (why: string) =>
-  why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`) || why.startsWith(JUST_OPENED) || why.startsWith(TRIAL_GOING);
+  why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`) || why.startsWith(JUST_OPENED) || why.startsWith(TRIAL_GOING) || why.startsWith(KIT_GATHERS);
+
+/**
+ * How a kit PR's hold begins in a build while the build's other PRs still merge (a brief wait: the build stays open for
+ * its kit, buildkit.ts), and ahead of a build (prepare.ts): its kit is tried once, with every kit PR ready then.
+ */
+export const KIT_GATHERS = "its kit is tried once the build's other PRs have merged, together with every kit PR ready then, in one trial";
+export const KIT_WAITS_FOR_BUILD = 'its kit is tried in the build, together with every kit PR ready then, in one trial';
 
 /** How a PR's hold begins while it is younger than Settings' mergeMinAgeMinutes. */
 export const JUST_OPENED = 'opened ';
@@ -522,16 +529,17 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   const ready: { pr: PrInfo; sets: string | null; stamps?: boolean }[] = [];
   // A kit PR a build left out for breaking its checks (stages/build.ts): never merged at that head, in a build or not.
   const kitHeld = loadRolloutFailures()[e.id];
-  // In a build, the PRs it dropped or kept for the next build: not merged on their own meanwhile.
-  if (ctx.build) forgetEarlierBuilds(e.id, ctx.build.due);
-  const left = ctx.build ? leftIn(e.id, ctx.build.due) : [];
+  // In a build, the PRs it dropped or kept for the next build: not merged on their own meanwhile. Those the merge pass
+  // ahead of a build left out board the build itself (leftKey).
+  if (ctx.build) forgetEarlierBuilds(e.id, leftKey(ctx.build));
+  const left = ctx.build ? leftIn(e.id, leftKey(ctx.build)) : [];
   for (const pr of mergeable) {
     if (kitHeld?.stage === 'build' && isKitPr(pr) && kitHeld.head === pr.headOid) {
       hold.push({ pr, why: `it broke a build's checks (${kitHeld.message}): it waits for a newer kit, or Bump` });
       continue;
     }
     if (left.includes(pr.number)) {
-      hold.push({ pr, why: `left out of ${ctx.build!.name}: it waits for the next build` });
+      hold.push({ pr, why: `left out of ${ctx.build!.name}: it waits for ${leftFor(ctx.build!)}` });
       continue;
     }
     const c = await check(pr);
@@ -577,7 +585,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       if (b.tested && ctx.build) {
         const words = `${ctx.build.name} merged none of ${numbers}: ${b.note}`;
         const why = (pr: PrInfo) => b.dropped.find((d) => d.pr.number === pr.number)?.why;
-        const held = [...b.dropped.map((d) => d.pr), ...b.kept].map((pr) => heldOf(pr, why(pr) ? `dropped from ${ctx.build!.name}: ${why(pr)}` : `left out of ${ctx.build!.name}: it waits for the next build`));
+        const held = [...b.dropped.map((d) => d.pr), ...b.kept].map((pr) => heldOf(pr, why(pr) ? `dropped from ${ctx.build!.name}: ${why(pr)}` : `left out of ${ctx.build!.name}: it waits for ${leftFor(ctx.build!)}`));
         return { ...result(e, 'failed', words, { url: cars[0].pr.url }), merged: [], held, did: [words], waits: [], lookAgain: true };
       }
       ctx.log(`[${e.id}] no batch for ${numbers}: ${b.note}`);
@@ -616,8 +624,35 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // A conflict handed on to its author gives up its turn (givesWay): the queue goes on without it.
   const gaveWay = givesWay(e, hold);
   for (const h of hold) if (gaveWay.has(h.pr.number)) h.why = GAVE_WAY;
-  // So does a kit PR its trial fails (trialGivesWay): it is still looked at below, and merges once its trial passes.
+  // So does a kit PR its trial fails (trialGivesWay): it is still looked at below, and merges once its trial passes. And,
+  // in a build that tried a kit already, one at a head that trial didn't try (trialWaitsForNextBuild, a catch-up's head
+  // carrying its verdict being one it did): it waits for the next build's.
   const trialWay = trialGivesWay(e, prs);
+  const nextBuild = new Map<number, string>();
+  if (ctx.build && !ctx.build.ahead) {
+    const kits = prs.filter((p) => raisesKit(p) && !p.draft).sort((a, b) => compareVersions(pending.get(a.number) ?? '0.0.0', pending.get(b.number) ?? '0.0.0') || a.number - b.number);
+    for (const pr of kits) {
+      const why = await trialWaitsForNextBuild(ctx, e, pr, kits).catch(() => null);
+      if (!why) continue;
+      nextBuild.set(pr.number, why);
+      trialWay.add(pr.number);
+    }
+  }
+  // Kit PRs last, in one trial (Steward 0.36.73): in a build, each waits while the build's other PRs still merge, test or
+  // are caught up, so the build then tries every kit PR ready by then together, once (trial.ts's combineKits); ahead of
+  // a build, each waits for the build. Meanwhile it gives up its turn, so the PRs above it merge first. On 2026-10-16 one
+  // build tried #302's kit three times, as catch-ups moved it and the PRs stacked on it.
+  const gather = new Map<number, string>();
+  if (ctx.build && merge.some(raisesKit)) {
+    const failsHere = (p: PrInfo) => untested(p) && testedBefore(e, p)?.ok === false;
+    const settling = merge.some((p) => !raisesKit(p) && !failsHere(p)) || hold.some((h) => !raisesKit(h.pr) && !h.pr.draft && waitsBriefly(h.why));
+    const why = ctx.build.ahead ? KIT_WAITS_FOR_BUILD : settling ? KIT_GATHERS : null;
+    for (const p of merge) {
+      if (!why || !raisesKit(p) || nextBuild.has(p.number)) continue;
+      gather.set(p.number, why);
+      trialWay.add(p.number);
+    }
+  }
   // And one moved past the others (movedPast): not ready, it gives up its turn; ready, it waits its turn at the version
   // it was moved to.
   const moves = movedPast(claimsOn(e.repo), prs, pending);
@@ -712,6 +747,14 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         continue;
       }
     }
+    // A kit PR whose kit is tried once the build's other PRs have merged, or in the build: not tested yet either.
+    const gathers = gather.get(pr.number);
+    if (gathers) {
+      const why = `${gathers}; meanwhile it gives up its turn, so the PRs above it merge first`;
+      waits.push(`${describe(pr)} waits: ${why}`);
+      held.push(heldOf(pr, why));
+      continue;
+    }
     // Its author ran its checks and saw them pass at this very head (stages/vouch.ts): not tested here again.
     // Its vouch set here, once its checks passed here (prtest.ts): what this PC's test said.
     const vouched = untested(pr) ? await vouchedBy(ctx, e, pr, ctx.settings.team) : null;
@@ -724,6 +767,14 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       if (kitWaits) {
         waits.push(`${describe(pr)} waits: ${kitWaits}`);
         held.push(heldOf(pr, kitWaits));
+        continue;
+      }
+      // A kit PR at a head this build's one trial didn't try isn't tested in it either: it waits for the next build.
+      const later = nextBuild.get(pr.number);
+      if (later) {
+        const why = `${later}; meanwhile it gives up its turn, so the PRs above it merge first`;
+        waits.push(`${describe(pr)} waits: ${why}`);
+        held.push(heldOf(pr, why));
         continue;
       }
       const before = testedBefore(e, pr);
@@ -958,7 +1009,8 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
   let testedHere = false;
   let gaveWay = false;
   let done = 0;
-  const kitTaken: string[] = [];
+  // The kit versions the PRs caught up before this one now carry, and who carries them.
+  const kitTaken: KitSetter[] = [];
   let kitReleases: string[] | null = null;
   const kitReleased = async () => (kitReleases ??= (await kitInfo(ctx.run, ctx.neutralDir, e.repo).catch(() => ({ released: [] as string[] }))).released);
   for (const pr of [...o.catchable.values()].sort((a, b) => a.number - b.number)) {
@@ -968,8 +1020,15 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
       const claimed = claimsOn(e.repo).filter((x) => x.branch !== pr.head).map((x) => x.version);
       // The kit's too, in the Steward's own repository (stages/kitpart.ts): its releases, and the kit versions other
       // PRs name and other work has claimed.
+      // Who sets each, so a version this PR shares with the PR that sets it (stacked) is kept (catchUp).
+      const setters: KitSetter[] = [
+        ...kitTaken,
+        ...o.ready.filter((r) => r.pr.number !== pr.number && !merged.has(r.pr.number)).flatMap((r) => kitTitleVersions([r.pr.title]).map((version) => ({ version, branch: r.pr.head, ...(r.pr.headOid ? { head: r.pr.headOid } : {}) }))),
+      ];
+      const claims = claimsOn(kitClaimKey(e.repo)).filter((x) => x.branch !== pr.head);
+      for (const x of claims) if (x.branch) setters.push({ version: x.version, branch: x.branch });
       const kit = existsSync(path.join(checkoutOf(e), KIT_VERSION_FILE))
-        ? { released: await kitReleased(), taken: [...kitTaken, ...kitTitleVersions(o.ready.filter((r) => r.pr.number !== pr.number && !merged.has(r.pr.number)).map((r) => r.pr.title)), ...claimsOn(kitClaimKey(e.repo)).filter((x) => x.branch !== pr.head).map((x) => x.version)] }
+        ? { released: await kitReleased(), taken: [...setters.map((s) => s.version), ...claims.filter((x) => !x.branch).map((x) => x.version)], setters }
         : undefined;
       // One moved past the others (move-past.ts) is caught up to the version it was moved to.
       c = await catchUp(ctx, e, pr, { released, taken: [...taken, ...claimed], ...(kit ? { kit } : {}), carry: await standingOf(ctx, e, pr), own: movedTo(claimsOn(e.repo), pr) });
@@ -977,7 +1036,7 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
       c = { done: false, note: `couldn't: ${(err as Error).message}` };
     }
     if (c.version) taken.push(c.version);
-    if (c.kitVersion) kitTaken.push(c.kitVersion);
+    if (c.kitVersion) kitTaken.push({ version: c.kitVersion, branch: pr.head, ...(c.head ? { head: c.head } : {}) });
     // Its branch's claims follow the versions it now carries, so no one is handed them, and its worker asking again gets them.
     if (c.done && c.version) await reclaim(e.repo, pr.head, c.version).catch(() => {});
     if (c.done && c.kitVersion) await reclaim(kitClaimKey(e.repo), pr.head, c.kitVersion).catch(() => {});

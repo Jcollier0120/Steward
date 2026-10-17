@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.72
+## 0.36.78
 
 **The 85% limit now holds for everything the manor runs at once, not for each part on its own. And the NPU check and the NPU benchmark measure the local AI's server as the agents get it.**
 
@@ -16,6 +16,66 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - On a busy hour, with agents, checks and AI servers all working at once, the manor's work may take a little longer than before: it now gets 85% of the processor together, where it could take all of it. Each agent joins the shared limit when it next starts.
 - Nothing: it updates itself as usual. A benchmark run after the update is measured within the limit, so on a PC whose AI server leans on the processor, it may score a little lower than the same PC did before.
+
+## 0.36.73
+
+**A build tests the kit once: kit pull requests go last, all together, in one trial on the agents, and a trial's result stays with the kit it tried.**
+
+### What changed
+
+- **Kit pull requests wait for the rest of the build.** In a build, a pull request that raises the kit no longer starts a trial on the agents as soon as it's ready.
+  - It waits while the build's other pull requests merge, test and are caught up, and gives up its turn meanwhile, so they don't wait for it.
+  - Then the build stacks every kit pull request ready by then, in version order, and tries that stack once on every agent.
+  - If the stack passes, they all merge with no trial each. If it fails an agent, each is tried alone in turn, in the same build, to find whose kit it was.
+  - Between builds, when the Steward merges ahead of the build, a kit pull request now waits for the build instead of being tried on its own.
+  - A kit pull request that turns up after the build's trial has started still waits for the next build, as before.
+- **A trial's result stays with the kit, not with the pull request's commit.** What decides it is what the agents get: the kit's parts and its install script.
+  - A catch-up, a new kit version number or a new changelog keeps the result, and the agents aren't tried again. So does another pull request that carries the very same kit, such as one stacked on a kit pull request.
+  - On 16 October one build tried the same kit on all 35 agents three times. Only catch-ups and new version numbers had moved the pull requests that carried it.
+- **A pull request stacked on a kit pull request keeps that kit's version.** The Steward no longer counts a kit version inherited from the pull request below as a second claim and renumbers it.
+  - On 16 October this renumbered three stacked pull requests' kit entries to 2.78.4, 2.78.5 and 2.78.6. Once the pull request below merged, those entries conflicted with main.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.70
+
+**Builds do less work: ready pull requests merge between builds and wait on main to be released at the build, one kit is tried and rolled out per build, an agent is released for a new kit alone only when the kit changes what it runs, and the whole suite is never tested beside a kit's trial.**
+
+### What's new
+
+- **Ready pull requests merge ahead of the build.** Between builds, beside the rounds and at the checks' gentle pace, the Steward now does the build's merge pass ahead of time:
+  - Each ready pull request merges into main in version order, as in a build: stamped, tested once with the others, the one that broke a stack found and left out, a kit pull request after its trial on the agents, and the rest caught up.
+  - Nothing is released and no kit is rolled out. What merged waits on main until the build.
+  - At the build, the Steward merges whatever is left and releases each repository once. A repository with several pull requests merged since the last build gets one release, and its notes bring every version merged ahead. A new kit merged ahead is released, and rolled out to the agents, at the build alone.
+  - Nothing merges ahead once a build has begun, so main never moves under a build. A pull request left out ahead of a build is tried again by the build itself.
+  - Build now and urgent fixes work as before.
+  - For customers, updates still come at the build times, and builds end sooner.
+- **A new kit alone no longer releases every agent.** When the only change in an agent's version since its last release is the Steward's kit bump, the Steward releases it only:
+  - if a file the new kit changes is one the agent runs: its own code, what that code imports, the kit scripts and lists it names, and the folders it reads. At most one such release a day per agent; or
+  - if the kit's changelog entry says it's urgent, or names a fix for that agent (a line starting "**Fix for Reeve, Crier: …**").
+
+  Otherwise the bump is merged and waits. It goes out with the agent's next release of its own, and that release's notes carry the bump's entry too. Since Monday 12 October, 447 of the 601 agent releases were a new kit alone. Most kits change files every agent runs, so the one-a-day limit does most of the saving: about 140 of those 447 would have gone out.
+  - For customers, this means fewer updates of agents in which nothing they'd notice changed. A kit fix for an agent, or an urgent one, still reaches them at once.
+  - Release on the Steward's page still releases such a version at once.
+
+### What changed
+
+- **A build tries one kit.** A build stacks every kit pull request that's ready when it begins, tries that stack on the agents once, and rolls that one kit out.
+  - A kit pull request pushed to during the build no longer starts a second trial in it. It gives up its turn, so the pull requests above it merge, and its kit is tried between builds, for the next one.
+  - A catch-up that only changes versions keeps its trial, as before.
+  - The 08:00 build of 16 October tried two kits on 34 agents each, 30 minutes apart, because one pull request was pushed to after the first trial began.
+- **The whole suite never runs beside a kit's trial.**
+  - The whole suite that a kit's release waits for now waits while a kit's trial, or a rollout's checks, run beside the rounds.
+  - A kit's trial waits while the whole suite runs.
+  - The round after one ends starts the other.
+  - Before, a whole suite run beside a trial could hit its 20-minute limit and then run again: 35 minutes in all on 16 October.
+- How many agents a trial tries at once is unchanged. On an 18-core laptop, four at once checked 25 agents in 43 seconds, against 61 for two at once.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On the Steward's page, an agent's version that is a new kit alone, held, shows as skipped with the reason.
 
 ## 0.36.69
 

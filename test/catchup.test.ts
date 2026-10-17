@@ -647,6 +647,39 @@ test("a kit version still new is kept, and the kit's files left as the PR wrote 
   assert.equal(sh(checkout, 'show', 'origin/claude/feature:kit/VERSION'), '2.1.1');
 });
 
+test('a kit version it shares with the open PR that sets it (stacked on it) is kept, and claims nothing; one another PR sets apart is still given another', async () => {
+  const files = { 'src/feature.ts': 'export const feature = 1;\n', 'kit/VERSION': '2.1.1\n' };
+  for (const shared of [true, false]) {
+    const { dir, checkout, pr } = moved(`kit-${shared ? 'shared' : 'apart'}`, files, { base: { 'kit/VERSION': '2.1.0\n' } });
+    // #22 sets kit 2.1.1: at the very commit this PR has it from (this one stacked on it), or in a commit of its own.
+    if (shared) sh(checkout, 'push', '--quiet', 'origin', `${pr.headOid}:refs/heads/claude/sets-kit`);
+    else {
+      sh(checkout, 'switch', '--quiet', '-c', 'claude/sets-kit', 'main~1');
+      writeFileSync(path.join(checkout, 'kit', 'VERSION'), '2.1.1\n');
+      sh(checkout, 'commit', '--quiet', '-am', 'Kit 2.1.1 of its own');
+      sh(checkout, 'push', '--quiet', 'origin', 'claude/sets-kit');
+      sh(checkout, 'switch', '--quiet', 'main');
+    }
+    const setter = sh(checkout, 'rev-parse', 'refs/remotes/origin/claude/sets-kit');
+    const { run } = runner(() => ok(''));
+    const e = employee(checkout);
+    const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+    const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [], kit: { released: ['2.1.0'], taken: ['2.1.1'], setters: [{ version: '2.1.1', branch: 'claude/sets-kit', head: setter }] } });
+    assert.equal(c.done, true, c.note);
+    sh(checkout, 'fetch', '--quiet', 'origin');
+    const kit = sh(checkout, 'show', 'origin/claude/feature:kit/VERSION');
+    if (shared) {
+      assert.equal(kit, '2.1.1');
+      assert.equal(c.kitVersion, undefined, "#22's claim, not this one's: it isn't claimed again");
+      assert.doesNotMatch(c.note, /kit 2/);
+    } else {
+      assert.equal(kit, '2.1.2');
+      assert.equal(c.kitVersion, '2.1.2');
+      assert.match(c.note, /kit 2\.1\.2, since another PR sets kit 2\.1\.1/);
+    }
+  }
+});
+
 test('a PR that leaves the kit alone carries no kit version, so it claims none', async () => {
   const { dir, checkout, pr } = moved('kit-untouched', { 'src/feature.ts': 'export const feature = 1;\n' }, { base: { 'kit/VERSION': '2.1.0\n' } });
   const { run } = runner(() => ok(''));
