@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased (its version needs claiming on the main laptop)
+
+**The keeper's NPU refresh starts the server it tests again. In kit 2.78.12 it never did, so every refresh was refused and the PC kept its old command for the whole kit. Its test's servers now print to a log, and a test whose server went away is made again an hour later.**
+
+### What changed
+
+- **setup.ts `testNpuEntry` starts its server whoever asks.** Kit 2.78.9 wrote `o.onReady?.(await ensureServer(…))`. With no `onReady`, the optional call skips its arguments, so `ensureServer` was never called.
+  - **Who passed none:** the keeper's NPU refresh, which stops the NPU's servers first and so was refused on every PC (`/v1/chat/completions on … refused the connection (ECONNREFUSED)`). Also npu-check's kit-test, harden-timeout, harden-nonsense and calibrate steps, which stop the server first too.
+  - **Setup passes one,** so Set up local AI was never affected.
+  - On WEASELDEV03, Smith 0.8.42 (kit 2.78.12) recorded `did: 'failed'` this way at 2026-10-17 01:32Z, which kept the PC on qwen3-it:4b and qwen3vl-it:4b instead of qwen3.5:2b.
+  - A PC whose `npu-refresh.json` says `failed` for 2.78.12 looks again with this kit, as with any newer kit.
+- **The refresh's test servers print to `<tools>\servers\logs\npu-refresh.log`** (keeper.ts `npuRefreshLog`), each test after a line naming its command. A failed test's line in the keeper's log names that file.
+  - `testNpuEntry` and `testNpuEmbed` take a `logFile`, passed to `ensureServer`. Nothing else passes one, so their other callers keep no log, as before.
+- **A test whose server went away is made again** (npu-refresh.ts `serverWentAway`). That's a server that refused the connection, or exited while starting.
+  - The record keeps `tries` and `retryAt`, an hour on, and a look from then on tests again, up to `NPU_REFRESH_TRIES` (3) tests for a kit.
+  - An answer that makes no sense, vectors that don't, or a config.json that won't be written stay final for the kit, as before.
+  - A look that finds the NPU in use writes nothing, so a test that's due stays due.
+- **Tests:** npu-refresh.test.ts runs `testNpuEntry` with no `onReady` against a real server program, one that answers and one that exits while starting. The first fails on main's setup.ts with the refusal above. The tests also cover the retries, their record and log lines, and which failures count as the server going away.
+
 ## 2.78.12
 
 **npu-reports.ts counts a report against the model its generation runs (`routeFor`), so an X2's reports on its 2B count, and its reports on the route's 4B are stale. tools/kit.ts warns when a pin is a kit that has no release. Also brings 2.78.10, which wasn't released on its own.**

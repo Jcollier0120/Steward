@@ -14,9 +14,26 @@ import { mergeEntries, portablePath, type NpuRefreshRecord, readNpuRefresh, reme
  * what setup would write on this PC's NPU, beside what config.json has. When they differ and nothing has to be
  * downloaded, it waits until nobody uses the NPU, then, holding the NPU's turn, stops its servers and asks the new
  * command the test question (and a test embedding, when the NPU makes them). Only when it answers properly is the new
- * command written; otherwise the old one stays, the next request starts it again, and this kit doesn't try again. A
- * command written by a newer kit is never taken back, and an entry a person pointed at another server is left alone.
+ * command written; otherwise the old one stays, the next request starts it again, and this kit doesn't try again,
+ * unless the test's server went away (serverWentAway): then a look an hour later tests it again, NPU_REFRESH_TRIES
+ * tests in all. A command written by a newer kit is never taken back, and an entry a person pointed at another server
+ * is left alone.
  */
+
+/** The tests one kit makes of a new command whose server keeps going away, the first included. */
+export const NPU_REFRESH_TRIES = 3;
+
+/** How long after such a test the next look tests again. */
+export const NPU_REFRESH_RETRY_MS = 60 * 60_000;
+
+/**
+ * Whether a test failed for its server, not its answers: it refused the connection (nothing listening, or it went away
+ * mid-request), or it exited while starting (the core's connectionRefused and exitedWhileStarting). That may be the PC's
+ * moment rather than the command (memory short while the model loaded, say), and one such failure kept a PC on its old
+ * command for the whole kit. An answer that doesn't make sense ("chat answered nonsense", vectors that don't) is the
+ * command's own, and stays final.
+ */
+export const serverWentAway = (problems: string[]) => problems.length > 0 && problems.every((p) => /refused the connection|exited \(code [^)]*\) and .* isn't answering/.test(p));
 
 /** What a look did: written to `npu-refresh.json` (setup's `set-up` included), except `looked`, `newer-kit`, `busy` and `unreadable`. */
 export type NpuRefreshDid = NpuRefreshRecord['did'] | 'looked' | 'newer-kit' | 'busy' | 'unreadable';
@@ -26,6 +43,8 @@ export interface NpuRefreshOutcome {
   problems?: string[];
   /** The arguments that changed, for the keeper's log: `--plugin_config {…} added`. */
   changes?: string[];
+  /** A failed test's server went away (serverWentAway): a look from then on tests again. */
+  retryAt?: string;
 }
 
 export interface NpuRefreshDeps {
@@ -52,6 +71,8 @@ export interface NpuRefreshDeps {
   testChat: (e: AcceleratorEntry) => Promise<string[]>;
   /** A test embedding, the same way. */
   testEmbed: (e: AcceleratorEntry, dims?: number) => Promise<string[]>;
+  /** Where the test's servers print, named in the log when a test fails. */
+  serverLog?: string;
   log: (line: string) => void;
 }
 
@@ -102,10 +123,12 @@ const portOf = (url: string | undefined) => {
 /** One look (refreshNpu above). Never throws for a PC that can't be looked at: the outcome says why. */
 export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> {
   const had = readNpuRefresh(d.configFile);
-  if (had?.kit === d.kit) return { did: 'looked' };
+  // This kit's test whose server went away is made again once its time comes; anything else this kit found stands.
+  const again = had?.kit === d.kit && had.did === 'failed' && typeof had.retryAt === 'string';
+  if (had?.kit === d.kit && !(again && d.now() >= Date.parse(had.retryAt!))) return { did: 'looked' };
   if (had?.kit && compareVersions(had.kit, d.kit) > 0) return { did: 'newer-kit' };
-  const done = (did: NpuRefreshRecord['did'], more: Omit<NpuRefreshOutcome, 'did'> = {}): NpuRefreshOutcome => {
-    rememberNpuRefresh(d.configFile, { kit: d.kit, at: new Date(d.now()).toISOString(), did, ...(more.problems?.length ? { problems: more.problems } : {}) });
+  const done = (did: NpuRefreshRecord['did'], more: Omit<NpuRefreshOutcome, 'did'> = {}, tries?: number): NpuRefreshOutcome => {
+    rememberNpuRefresh(d.configFile, { kit: d.kit, at: new Date(d.now()).toISOString(), did, ...(more.problems?.length ? { problems: more.problems } : {}), ...(tries ? { tries } : {}), ...(more.retryAt ? { retryAt: more.retryAt } : {}) });
     return { did, ...more };
   };
 
@@ -159,8 +182,11 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
     throw e;
   }
   if (problems.length) {
-    d.log(`the NPU's servers keep their command: this kit's (${d.kit}: ${changes.join('; ') || 'its caps'}) didn't answer its test: ${problems.join('; ')}`);
-    return done('failed', { problems, changes });
+    const tries = (again ? (had!.tries ?? 1) : 0) + 1;
+    const retryAt = serverWentAway(problems) && tries < NPU_REFRESH_TRIES ? new Date(d.now() + NPU_REFRESH_RETRY_MS).toISOString() : undefined;
+    const then = retryAt ? `; its server went away, so a look from ${retryAt} tests it again (test ${tries} of ${NPU_REFRESH_TRIES})` : tries > 1 ? ` (test ${tries} of ${NPU_REFRESH_TRIES}: this kit doesn't try again)` : '';
+    d.log(`the NPU's servers keep their command: this kit's (${d.kit}: ${changes.join('; ') || 'its caps'}) didn't answer its test: ${problems.join('; ')}${then}${d.serverLog ? `. What its servers printed: ${d.serverLog}` : ''}`);
+    return done('failed', { problems, changes, ...(retryAt ? { retryAt } : {}) }, tries);
   }
   // Written over config.json as it is now, unless the NPU's entry changed while the test ran: then the next kit's look decides.
   const now = readConfigFile(d.configFile);

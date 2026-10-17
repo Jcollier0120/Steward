@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { type AddressInfo, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -13,7 +14,8 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseNpus } = await import('./fixture/src/kit/detect.ts');
-const { argChanges, refreshNpu } = await import('./fixture/src/kit/npu-refresh.ts');
+const { argChanges, refreshNpu, serverWentAway } = await import('./fixture/src/kit/npu-refresh.ts');
+const core = await import('../core/index.js');
 const { npuRefreshFile, portablePath, readNpuRefresh } = await import('./fixture/src/kit/setup.ts');
 type Deps = Parameters<typeof refreshNpu>[0];
 
@@ -171,11 +173,151 @@ test("a new command that doesn't answer: the old one stays, its servers stopped,
   const rec = readNpuRefresh(pc.configFile)!;
   assert.equal(rec.did, 'failed');
   assert.match(rec.problems!.join(), /nonsense/);
+  assert.equal(rec.retryAt, undefined, 'an answer that makes no sense is the command, not its server');
+  assert.equal(r.retryAt, undefined);
   assert.deepEqual(await refreshNpu(pc.deps), { did: 'looked' });
+  pc.deps.now = () => Date.parse('2026-10-15T12:00:00Z');
+  assert.deepEqual(await refreshNpu(pc.deps), { did: 'looked' }, 'nor a day later');
   // An embedding that fails fails it the same way.
   const pc2 = fakePc(olderEntry(), { embeds: ['the vectors are all zero'] });
   assert.equal((await refreshNpu(pc2.deps)).did, 'failed');
   assert.deepEqual(pc2.npu(), old);
+});
+
+const REFUSED = core.say.connectionRefused('/v1/chat/completions', 'http://127.0.0.1:18185', 'ECONNREFUSED');
+const EXITED = core.say.exitedWhileStarting('ovms.exe', 1, 'http://127.0.0.1:18185');
+
+/** A PC whose tests answer `said` in turn (the last one again after), with its clock in the test's hands. */
+function retryingPc(said: string[][], o: { serverLog?: string } = {}) {
+  const pc = fakePc(olderEntry());
+  let t = Date.parse('2026-10-14T12:00:00Z');
+  let i = 0;
+  pc.deps.now = () => t;
+  pc.deps.testChat = async (e) => (pc.did.push(`test chat ${capOf(e)}`), said[Math.min(i++, said.length - 1)]);
+  if (o.serverLog) pc.deps.serverLog = o.serverLog;
+  const tests = () => pc.did.filter((x) => x.startsWith('test chat')).length;
+  return { ...pc, tests, later: (ms: number) => void (t += ms) };
+}
+
+test('a test whose server went away: tested again at a look an hour on, three tests in all, and the old command kept meanwhile', async () => {
+  const serverLog = path.join(tools, 'servers', 'logs', 'npu-refresh.log');
+  const pc = retryingPc([[REFUSED], [EXITED], [REFUSED]], { serverLog });
+  const before = readFileSync(pc.configFile, 'utf8');
+  const r = await refreshNpu(pc.deps);
+  assert.equal(r.did, 'failed');
+  assert.equal(r.retryAt, '2026-10-14T13:00:00.000Z');
+  assert.deepEqual(readNpuRefresh(pc.configFile), { kit: '2.75.0', at: '2026-10-14T12:00:00.000Z', did: 'failed', problems: [REFUSED], tries: 1, retryAt: '2026-10-14T13:00:00.000Z' });
+  assert.equal(pc.log.length, 1);
+  assert.ok(pc.log[0].startsWith("the NPU's servers keep their command: this kit's (2.75.0: "), pc.log[0]);
+  assert.ok(pc.log[0].endsWith(`didn't answer its test: ${REFUSED}; its server went away, so a look from 2026-10-14T13:00:00.000Z tests it again (test 1 of 3). What its servers printed: ${serverLog}`), pc.log[0]);
+  assert.equal(pc.did.filter((d) => d.startsWith('stop')).length, 4, "its servers stopped after the test, so the old command starts at the next request");
+
+  // Before its hour: looked at, nothing asked or stopped.
+  pc.later(59 * 60_000);
+  const did = pc.did.length;
+  assert.deepEqual(await refreshNpu(pc.deps), { did: 'looked' });
+  assert.equal(pc.did.length, did);
+
+  // An hour on: tested again, and gone again (exited while starting, this time).
+  pc.later(60_000);
+  assert.equal((await refreshNpu(pc.deps)).did, 'failed');
+  assert.equal(pc.tests(), 2);
+  assert.deepEqual(readNpuRefresh(pc.configFile), { kit: '2.75.0', at: '2026-10-14T13:00:00.000Z', did: 'failed', problems: [EXITED], tries: 2, retryAt: '2026-10-14T14:00:00.000Z' });
+  assert.match(pc.log[1], /tests it again \(test 2 of 3\)/);
+
+  // The third: this kit's last.
+  pc.later(60 * 60_000);
+  const last = await refreshNpu(pc.deps);
+  assert.equal(last.did, 'failed');
+  assert.equal(last.retryAt, undefined);
+  assert.equal(pc.tests(), 3);
+  assert.deepEqual(readNpuRefresh(pc.configFile), { kit: '2.75.0', at: '2026-10-14T14:00:00.000Z', did: 'failed', problems: [REFUSED], tries: 3 });
+  assert.match(pc.log[2], /\(test 3 of 3: this kit doesn't try again\)/);
+  pc.later(24 * 60 * 60_000);
+  assert.deepEqual(await refreshNpu(pc.deps), { did: 'looked' });
+  assert.equal(pc.tests(), 3);
+  assert.equal(readFileSync(pc.configFile, 'utf8'), before, 'config.json untouched throughout');
+});
+
+test('a test made again: written when it answers; final when its answer makes no sense; while the NPU is busy, still due', async () => {
+  const ok = retryingPc([[REFUSED], []]);
+  assert.equal((await refreshNpu(ok.deps)).did, 'failed');
+  ok.later(60 * 60_000);
+  ok.deps.idle = () => false;
+  assert.deepEqual(await refreshNpu(ok.deps), { did: 'busy' });
+  assert.equal(ok.tests(), 1);
+  assert.equal(readNpuRefresh(ok.configFile)?.retryAt, '2026-10-14T13:00:00.000Z', 'nothing written: the next look tries');
+  ok.deps.idle = () => true;
+  ok.later(60_000);
+  assert.equal((await refreshNpu(ok.deps)).did, 'refreshed');
+  assert.equal(capOf(ok.npu()), capOf(setUpEntry()));
+  assert.deepEqual(readNpuRefresh(ok.configFile), { kit: '2.75.0', at: '2026-10-14T13:01:00.000Z', did: 'refreshed' });
+  ok.later(2 * 60 * 60_000);
+  assert.deepEqual(await refreshNpu(ok.deps), { did: 'looked' });
+
+  const nonsense = retryingPc([[REFUSED], ['chat answered nonsense ("?option?option"), not "ready"']]);
+  await refreshNpu(nonsense.deps);
+  nonsense.later(60 * 60_000);
+  assert.equal((await refreshNpu(nonsense.deps)).did, 'failed');
+  const rec = readNpuRefresh(nonsense.configFile)!;
+  assert.equal(rec.tries, 2);
+  assert.equal(rec.retryAt, undefined);
+  nonsense.later(2 * 60 * 60_000);
+  assert.deepEqual(await refreshNpu(nonsense.deps), { did: 'looked' });
+  assert.equal(nonsense.tests(), 2);
+
+  // A newer kit's look starts afresh: three tests of its own.
+  const next = retryingPc([[REFUSED]]);
+  await refreshNpu(next.deps);
+  next.deps.kit = '2.76.0';
+  assert.equal((await refreshNpu(next.deps)).did, 'failed');
+  assert.deepEqual([readNpuRefresh(next.configFile)?.kit, readNpuRefresh(next.configFile)?.tries], ['2.76.0', 1]);
+});
+
+test('which failures are the server going away: refused, or exited while starting; never an answer, a timeout, or one beside an answer', () => {
+  assert.equal(serverWentAway([REFUSED]), true);
+  assert.equal(serverWentAway([EXITED]), true);
+  assert.equal(serverWentAway([core.say.exitedWhileStarting('flm.exe', null, 'http://127.0.0.1:18184')]), true, 'started apart: no exit code');
+  assert.equal(serverWentAway([core.say.connectionRefused('/v1/models', 'http://127.0.0.1:18184', 'it stopped answering while busy')]), true);
+  assert.equal(serverWentAway([]), false);
+  assert.equal(serverWentAway(['chat answered nonsense ("?option?option"), not "ready": the model doesn\'t run properly on this NPU']), false);
+  assert.equal(serverWentAway(['the vectors are all zero']), false);
+  assert.equal(serverWentAway([`didn't answer in time (900 s): ${core.say.requestTimedOut('/v1/chat/completions', 'http://127.0.0.1:18184', 900)}`]), false);
+  assert.equal(serverWentAway([core.say.didNotAnswer('flm.exe', 'http://127.0.0.1:18184', 120)]), false);
+  assert.equal(serverWentAway(['vision gave no answer ({})', REFUSED]), false);
+});
+
+const freePort = () =>
+  new Promise<number>((resolve) => {
+    const s = createServer().listen(0, '127.0.0.1', () => {
+      const p = (s.address() as AddressInfo).port;
+      s.close(() => resolve(p));
+    });
+  });
+
+test("the refresh's test starts its server with no onReady to tell (kit 2.78.12's never did, so every refresh was refused), printing to the log it's given; one that exits while starting reads as gone away", async () => {
+  const { testNpuEntry } = await import('./fixture/src/kit/setup.ts');
+  const logFile = path.join(home, 'logs', 'npu-refresh.log');
+  const npu = (port: number, script: string) => ({ id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: `http://127.0.0.1:${port}`, model: 'm', startCommand: [process.execPath, '-e', script] } }) as any;
+
+  // A server that answers, then exits by itself once it has (30 s at most).
+  const port = await freePort();
+  const serves = `setTimeout(() => process.exit(0), 30000);
+require('node:http').createServer((req, res) => {
+  res.setHeader('content-type', 'application/json');
+  if (req.url === '/v1/models') return res.end('{"data":[{"id":"m"}]}');
+  req.resume();
+  req.on('end', () => res.end(JSON.stringify({ choices: [{ message: { content: 'ready' } }] }), () => setTimeout(() => process.exit(0), 50)));
+}).listen(${port}, '127.0.0.1', () => console.log('serving on ${port}'));`;
+  assert.deepEqual(await testNpuEntry(npu(port, serves), { held: true, timeoutMs: 20_000, logFile }), []);
+  assert.match(readFileSync(logFile, 'utf8'), new RegExp(`serving on ${port}`));
+
+  const exits = await testNpuEntry(npu(await freePort(), "console.log('[ERROR]  Failed to load model: the test said so'); process.exit(3)"), { held: true, timeoutMs: 20_000, logFile });
+  assert.equal(exits.length, 1, exits.join('; '));
+  assert.match(exits[0], /exited \(code 3\)/);
+  assert.equal(serverWentAway(exits), true);
+  assert.match(readFileSync(logFile, 'utf8'), /Failed to load model: the test said so/, 'appended');
+  assert.match(readFileSync(logFile, 'utf8'), new RegExp(`serving on ${port}`));
 });
 
 test("a newer kit's record: never taken back", async () => {

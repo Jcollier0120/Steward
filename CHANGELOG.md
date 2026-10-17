@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## Unreleased (its version needs claiming on the main laptop)
+
+**Hands out a kit whose NPU refresh starts the server it tests again, so a PC set up on an older kit gets its route's new command. In kit 2.78.12 every refresh was refused.**
+
+### What changed
+
+- The kit's `testNpuEntry` starts its server for a caller that passes no `onReady`, the keeper's NPU refresh among them. The refresh's test servers print to `npu-refresh.log`, and a test whose server went away is made again an hour later, three tests in all. kit/CHANGELOG.md has the details.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.91
 
 **A vouched PR whose kit.json pins a kit with no release waits for it, as any PR does. Before, a vouch let it skip that hold, so it could merge pinned to a kit that will never be released.**
