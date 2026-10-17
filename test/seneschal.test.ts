@@ -190,6 +190,72 @@ test('the Seneschal off duty, on a PC without Developer Pro, or not there at all
   }
 });
 
+// Other PCs on the licence (Seneschal 0.2.0): a pass run there stands in as that PC's, a failure there and here is the
+// change's, and a failure here is tried once more there.
+const LAPTOP = { id: 'bbbbbbbb-0000-4000-8000-000000000002', name: 'LAPTOP' };
+const { stoodInDescription } = await import('../src/stages/vouch.ts');
+type FailedChecks = import('../src/stages/bump.ts').FailedChecks;
+
+test("a pass run on another PC stands in, said as that PC's, and vouched for as passed there", async () => {
+  routes['/api/tasks/submit'] = () => ({ json: { task: { id: 't5', state: 'waiting' }, existing: false, reused: false } });
+  routes['/api/tasks/lease'] = () => ({ json: { task: null, why: 'it passed', state: 'done', result: { ok: true, at: '2026-10-16T20:00:00.000Z', by: 'steward on LAPTOP', ms: 9000, commands: ['node check.mjs'], pc: LAPTOP } } });
+  const stoodIn: StoodIn = {};
+  const said: string[] = [];
+  assert.equal(await runChecks(ctx, e, dir, { say: (l) => said.push(l), stoodIn }), null);
+  assert.deepEqual(ran(dir), [], 'not run here');
+  assert.deepEqual([stoodIn.by, stoodIn.where, stoodIn.pc], ['seneschal', 'on LAPTOP', 'LAPTOP']);
+  assert.ok(said.some((l) => /a pass of exactly these checks on this code, on LAPTOP \(the Seneschal's t5\): not run again/.test(l)), said.join('\n'));
+  assert.equal(stoodInDescription(e, stoodIn, head), `node check.mjs passed on LAPTOP at ${head.slice(0, 7)}`);
+});
+
+test("a failure confirmed on two PCs while they waited is the change's: not run here, and the caller told", async () => {
+  routes['/api/tasks/submit'] = () => ({ json: { task: { id: 't6', state: 'waiting' }, existing: false, reused: false } });
+  routes['/api/tasks/lease'] = () => ({
+    json: { task: null, why: 'it failed', state: 'done', result: { ok: false, at: '', by: 'steward on LAPTOP', ms: 9000, note: 'node check.mjs failed (exit 1)', commands: ['node check.mjs'], pc: LAPTOP, confirmed: { on: 'STUDIO' } } },
+  });
+  const seen: FailedChecks = {};
+  const f = await runChecks(ctx, e, dir, { say: () => {}, failed: seen });
+  assert.equal(f, 'node check.mjs failed (exit 1) (on LAPTOP, and on STUDIO before it)');
+  assert.equal(seen.confirmed, 'on LAPTOP, and on STUDIO before it');
+  assert.deepEqual(ran(dir), [], 'not run here');
+});
+
+test('a failure here, tried once more on another PC: a pass there stands in as this PC\'s failure; a failure there too is the change\'s', async () => {
+  process.env.FAIL_CHECK = '1';
+  try {
+    const flaky = { ok: true, at: '2026-10-16T20:00:00.000Z', by: 'steward on LAPTOP', ms: 9000, commands: ['node check.mjs'], pc: LAPTOP, flaky: { on: 'DESKTOP', note: 'node check.mjs failed' } };
+    leaseNow('t7');
+    routes['/api/tasks/lease'] = (_b, n) => (n === 1 ? { json: { task: { id: 't7', state: 'leased' }, lease: { token: 'd'.repeat(24), until: '', heartbeatMs: 15_000 }, usualMs: 1 } } : { json: { task: null, why: 'it passed', state: 'done', result: flaky } });
+    routes['/api/tasks/report'] = () => ({ json: { task: { id: 't7', state: 'waiting' }, retry: 'elsewhere' } });
+    const stoodIn: StoodIn = {};
+    const said: string[] = [];
+    assert.equal(await runChecks(ctx, e, dir, { say: (l) => said.push(l), stoodIn, elsewhere: true }), null);
+    assert.deepEqual(ran(dir), ['1'], 'run here once, and failed');
+    assert.deepEqual([stoodIn.by, stoodIn.where, stoodIn.pc], ['seneschal', 'on LAPTOP', 'LAPTOP']);
+    assert.match(stoodIn.flaky!, /node check\.mjs failed \(exit 1\)/);
+    assert.ok(said.some((l) => /they failed here and passed on LAPTOP \(the Seneschal's t7\): this PC's failure, not the change's/.test(l)), said.join('\n'));
+
+    rmSync(path.join(dir, 'ran.txt'));
+    resetResults();
+    asked.length = 0;
+    routes['/api/tasks/lease'] = (_b, n) =>
+      n === 1 ? { json: { task: { id: 't7', state: 'leased' }, lease: { token: 'd'.repeat(24), until: '', heartbeatMs: 15_000 }, usualMs: 1 } } : { json: { task: null, why: 'it failed', state: 'done', result: { ...flaky, ok: false, flaky: undefined, confirmed: { on: 'DESKTOP' } } } };
+    const seen: FailedChecks = {};
+    const f = await runChecks(ctx, e, dir, { say: () => {}, failed: seen, elsewhere: true });
+    assert.match(f!, /node check\.mjs failed \(exit 1\).*\(here, and on LAPTOP\)$/);
+    assert.equal(seen.confirmed, 'here, and on LAPTOP');
+    // Unwaited for: the failure here, as before.
+    asked.length = 0;
+    rmSync(path.join(dir, 'ran.txt'));
+    resetResults();
+    const plain = await runChecks(ctx, e, dir, { say: () => {} });
+    assert.match(plain!, /node check\.mjs failed \(exit 1\)$/);
+    assert.equal(asked.filter((a) => a.route === '/api/tasks/lease').length, 1, 'not asked for by name after its report');
+  } finally {
+    delete process.env.FAIL_CHECK;
+  }
+});
+
 test("a lease that runs out while the checks run: they run on, and the result is still reported", async () => {
   leaseNow();
   routes['/api/tasks/lease'] = () => ({ json: { task: { id: 't1', state: 'leased' }, lease: { token: 'd'.repeat(24), until: '', heartbeatMs: 5 }, usualMs: 60_000 } });

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
 import { commitOf } from '../git.ts';
-import type { SeneschalKind, SeneschalLane, SeneschalTask } from '../kit/seneschal.ts';
+import type { SeneschalKind, SeneschalLane, SeneschalShard, SeneschalTask } from '../kit/seneschal.ts';
 import type { Employee } from '../settings.ts';
 import type { AffectedScope } from './bump.ts';
 import type { Ctx } from './common.ts';
@@ -14,8 +14,8 @@ import type { Ctx } from './common.ts';
  * order the Seneschal keeps for the developer agents' work, and a pass of the same checks on the same code that the
  * Seneschal holds stands in for running them. Without it, they run as before, at the checks pace.
  *
- * A run is one task: a PR check (its PR and branch), the whole suite before a kit's release, or a kit trial (one per
- * agent and kit). Its lane says who waits on it:
+ * A run is one task: a PR check (its PR and branch), the whole suite before a kit's release (or one shard of it, where
+ * other PCs run it too: wholesuite.ts), or a kit trial (one per agent and kit). Its lane says who waits on it:
  *
  * - **person**: a person, now: `steward vouch`, a round started by Run now or Build now;
  * - **blocking**: a merge or a release: a PR's test as the merge stage reaches it (the head of its version queue), the
@@ -79,7 +79,7 @@ export async function checksTask(
   ctx: Pick<Ctx, 'run'>,
   e: Pick<Employee, 'id' | 'repo'>,
   dir: string,
-  o: { commit?: string; tree?: string; clean: boolean; env?: Record<string, string>; here?: boolean; affected?: AffectedScope; task?: CheckTask | false },
+  o: { commit?: string; tree?: string; clean: boolean; env?: Record<string, string>; here?: boolean; affected?: AffectedScope; task?: CheckTask | false; shard?: SeneschalShard },
 ): Promise<SeneschalTask | { not: string }> {
   if (o.task === false) return { not: 'not asked for this run' };
   if (o.here) return { not: 'it runs on this PC, whatever passed' };
@@ -87,6 +87,7 @@ export async function checksTask(
   const kitDir = o.env?.STEWARD_KIT;
   if (Object.keys(o.env ?? {}).some((k) => k !== 'STEWARD_KIT')) return { not: 'it runs with settings of its own' };
   const kind = kitDir ? 'kit-trial' : (o.task?.kind ?? 'pr-check');
+  if (o.shard && kind !== 'full-suite') return { not: 'only a whole suite is cut into shards' };
   let kit: string | null = null;
   if (kitDir) {
     kit = await kitIdOf(ctx, kitDir);
@@ -104,6 +105,7 @@ export async function checksTask(
     // A kit trial's checkout has the kit's files in it: named by its commit and the kit, never its tree.
     ...(kitDir ? { kit: kit!, agent: e.id } : { tree: o.tree! }),
     ...(base ? { base } : {}),
+    ...(o.shard ? { shard: o.shard } : {}),
     ...(o.task && o.task.pr ? { pr: o.task.pr } : {}),
     ...(o.task && o.task.branch ? { branch: o.task.branch } : {}),
     lane: urgentOf(laneHere(), o.task && o.task.lane ? o.task.lane : kind === 'kit-trial' ? 'background' : 'normal'),
