@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.122
+
+**The Steward hands out kit 2.80.3: its notes on the Snapdragon X2's model say why the Smith's vision check failed there.**
+
+### What changed
+
+- Kit 2.80.3 records why the Smith's check picture read "Tally 827" on the X2's Qwen3-VL-2B: the model misreads large smoothed text on a picture whose sides are both a whole number of 32 px. The Smith 0.8.45 draws its picture a pixel wider, and it reads right. Nothing in the kit's code changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.120
 
 **The Steward hands out kit 2.80.2: pictures fit the Snapdragon X2's Qwen3-VL-2B. A 4K screen is read instead of refused, and the small text on a screen reads right.**
