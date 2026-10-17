@@ -84,14 +84,19 @@ test('a scene moves only while busy, and keeps time across reloads', () => {
   assert.match(svg, /^<svg class="scene" viewBox="0 0 64 40" width="64" height="40" aria-hidden="true" focusable="false">/);
 });
 
-test('the title bar: icon, name, role, scene, the status pill, Settings, Theme, and a place for Run now', () => {
+test('the title bar: icon, name, role with the status pill, scene, Settings, Theme, and a place for Run now', () => {
   setDuty(true);
   const html = page({ token: 'tok', body: '<button data-post="/api/run">Run now</button>' });
   assert.match(html, /<header class="titlebar" data-agent="fixture">/);
-  assert.match(html, new RegExp(`<h1>${APP.name}</h1><p class="role">`));
   assert.match(html, /<img class="brand-mark" src="\/favicon\.svg" alt=""/);
   assert.ok(html.includes(sceneSvg(DEFAULT_LOOK)), 'the fixture is not a listed agent: the default scene');
   assert.match(html, /<span class="status-pill on"[^>]*>On duty<\/span>/);
+  // The pill on the role's line, after the role (its whole text its title), plain text in the brand's link; the tools
+  // start with Settings.
+  const role = APP.role.replace(/'/g, '&#39;').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(html, new RegExp(`<h1>${APP.name}</h1><p class="role-line"><span class="role" title="${role}">${role}</span><span class="status-pill on" title="[^"]+">On duty</span></p></div></a>`));
+  assert.match(html, /<div class="tools">\s*<a class="tool-link" id="settings-link"/);
+  assert.equal((html.match(/class="status-pill/g) ?? []).length, 1);
   assert.match(html, /<span class="titlebar-action" id="titlebar-action"><\/span>/);
   assert.ok(html.includes(`button[data-post="/api/run"]:not([data-form]):not([data-body])`), 'the script lifts a plain Run now');
   assert.ok(html.includes('button[data-titlebar]'), 'or a button the agent marks');
@@ -130,7 +135,7 @@ test('the title bar stays at the top as the page scrolls, and a jump to a #secti
   assert.match(rule('.titlebar.stuck'), /border-bottom-color: var\(--line\); box-shadow: var\(--shadow\);/);
   assert.match(rule('html'), /scroll-padding-top: calc\(var\(--titlebar-h\) \+ 8px\);/);
   assert.match(html, /--titlebar-h: 57px;/);
-  assert.match(html, /:root \{ --titlebar-h: 97px; \}/, 'two rows in a narrow window');
+  assert.match(html, /:root \{ --titlebar-h: 109px; \}/, 'two rows in a narrow window, the pill under the role');
   assert.match(html, /max-height: calc\(100vh - var\(--titlebar-h\) - 16px\)/, 'the Theme menu fits below it');
   assert.ok(html.includes(`root.style.setProperty('--titlebar-h'`), 'the script keeps it to the bar');
   assert.ok(html.includes(`bar.classList.toggle('stuck', window.scrollY > 0)`));
@@ -153,14 +158,19 @@ test('the page uses the width of the window: no column for text, panels or Setti
     '.brand max-content',
     '.theme-menu calc(100vw - 24px)',
     ':where(input:not([type=checkbox], [type=radio], [type=range]), select, textarea) 100%',
-    // On a phone: a long status pill is cut, and a wide table scrolls inside itself.
+    // In a narrow window: a long status pill is cut, and a wide table scrolls inside itself.
     '.status-pill 100%',
     'main.view table 100%',
   ]);
   assert.doesNotMatch(html, /max-width: [\d.]+(ch|em|rem)\b/, 'no measure in characters');
-  // The role: one line, up to its own width, cut with an ellipsis only when the bar has no room for it.
-  assert.match(rule('.brand'), /flex: 1 1 220px; min-width: 0; max-width: max-content;/);
-  assert.match(rule('.brand .role'), /overflow: hidden; text-overflow: ellipsis; white-space: nowrap;/);
+  // The role: one line, up to its own width, cut with an ellipsis only when the bar has no room for it. The pill beside
+  // it stays whole, and the brand is never narrower than the pill and a little of the role, so the bar wraps first.
+  assert.match(rule('.brand'), /flex: 1 1 220px; min-width: min-content; max-width: max-content;/);
+  assert.match(rule('.brand .role-line'), /display: grid; grid-template-columns: minmax\(96px, max-content\) max-content;/);
+  assert.match(rule('.brand .role'), /min-width: 0;.* overflow: hidden; text-overflow: ellipsis; white-space: nowrap;/);
+  // No taller than the role's line (16.2px), so the bar keeps its 57px.
+  assert.match(rule('.status-pill'), /line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;/);
+  assert.doesNotMatch(rule('.status-pill'), /padding: [1-9]/);
   // The Settings panel's sheet: a text box is the one thing it holds to a width.
   const sheet = readFileSync(new URL('../web/settings-panel.css', import.meta.url), 'utf8');
   const sheetCaps = [...sheet.matchAll(/([^{}\n]+)\{[^{}]*?(?<![-\w])(max-width|width): ([^;]+);/g)].map((m) => `${m[1].trim()} ${m[2]}: ${m[3]}`);

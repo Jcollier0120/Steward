@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.94
+## 0.36.99
 
 **The Steward hands out kit 2.78.15: the local models take less of a PC's memory. Each llama.cpp server keeps no RAM cache of earlier prompts, and Intel's integrated graphics on a PC with under 32 GB answer chat and pictures from one Qwen3-VL-4B server, 5.0 GB where two servers took 8.5 GB.**
 
@@ -15,6 +15,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.95
+
+**The Steward hands out kit 2.78.14: on every staff page, the status pill sits on the line under the name, after the role, so the title bar stays one row in a normal desktop window.**
+
+### What changed
+
+- **The status pill** ("On duty · next round in 5 min", "Working", "Off duty") moved from beside About and Settings to the line under the name, after the role. When there isn't room for the whole role, it's cut short: hover over it to read it all. The pill always shows whole, and the title bar stays one row unless the window is narrower than about 1,000 pixels.
+- **In a narrow window,** the pill goes under the role, and About, Settings, the theme and Run now sit on their own row, at its end.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.78.14.
 
 ## 0.36.91
 

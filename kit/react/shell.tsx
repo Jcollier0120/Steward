@@ -10,8 +10,8 @@ import { Button, PostButton, ReloadProvider } from './ui.tsx';
 
 /**
  * The kit's frame of every React page, as page.ts draws it for a string-built one, element for element and class for
- * class (page.ts's CSS styles both): the title bar (back to the manor, the agent's icon, name and role, its scene, the
- * status pill, About, Settings, the Theme menu, and the agent's own action, Run now), the off-duty notice, the page,
+ * class (page.ts's CSS styles both): the title bar (back to the manor, the agent's icon, name, and role with the status
+ * pill after it, its scene, About, Settings, the Theme menu, and the agent's own action, Run now), the off-duty notice, the page,
  * the About view at #/about (what's read once: the agent's own, then "Where its work runs"), the Settings view at
  * #/settings (the Settings panel), and the footer. About and Settings are where Manor's title bar has them.
  *
@@ -211,14 +211,19 @@ function TitleBar({ shell, route, about, action }: { shell: PageShell; route: Ro
         <img className="brand-mark" src="/favicon.svg" alt="" width="28" height="28" />
         <div className="brand-text">
           <h1>{shell.app.name}</h1>
-          <p className="role">{shell.app.role}</p>
+          {/* The status pill on the role's line, so it never takes a row of its own: plain text in the link, nothing to press. */}
+          <p className="role-line">
+            <span className="role" title={shell.app.role}>
+              {shell.app.role}
+            </span>
+            <span className={`status-pill ${shell.pill.kind}`} title={shell.pill.title} data-tour="status">
+              {shell.pill.text}
+            </span>
+          </p>
         </div>
       </a>
       <Markup html={shell.scene} />
       <div className="tools">
-        <span className={`status-pill ${shell.pill.kind}`} title={shell.pill.title} data-tour="status">
-          {shell.pill.text}
-        </span>
         {about && (
           <a className="tool-link" id="about-link" href="#/about" title="About" aria-current={route === 'about' ? 'page' : 'false'} data-tour="about">
             <Info />
