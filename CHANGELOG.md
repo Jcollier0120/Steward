@@ -12,6 +12,43 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - On Intel's integrated graphics, whose memory is the PC's, chat runs on the vision server's Qwen3-VL-4B instead of on a Qwen3-4B server of its own, on a PC with under 32 GB. It got one of 18 text tasks wrong that Qwen3-4B got right. The smaller Qwen3-VL-2B misread the Smith's check picture, so it isn't used.
 - A PC set up before gets both at the keeper's next look once it has the kit. Nothing is downloaded or set up again, and the old chat server stops on its own after 5 minutes.
 
+## 0.36.98
+
+**The Steward runs your other PCs' checks: with the Seneschal on each PC, a PR check, whole suite or kit trial waiting for room on one runs on another of your PCs that has room, a PR's failure is tried once more on another PC before it counts, and the whole suite before a kit's release is shared out between them.**
+
+### What's new
+
+- **It works for the Seneschal beside its rounds** (stages/others.ts). Every few seconds it asks the Seneschal on this PC for a PR check or whole suite, of a repository it looks after, waiting for room here or on another PC on your licence. It runs it as its own PR test would, and the result goes back to the PC that asked.
+  - **The code:** only the task's commit, fetched from the repository's own origin, and only when it's on one of the repository's own branches (the PR's branch, or main). A fork's commit, or one on no branch, isn't run. The task never names a command: the checks are this PC's Settings for that agent.
+  - **Where:** a worktree of its own (`<agent>-others` in the work folder), removed after.
+  - **When:** one at a time, never for a repository a stage holds right then (a round holds an agent's repository while it waits for its own turn), and stopped after 90 minutes.
+  - **A task it can't take now** (its clone busy) goes back to the Seneschal unstarted. A run that couldn't finish (stopped, packages held, Windows ended it) is reported as such, and the Seneschal tries it elsewhere.
+- **A pass on another PC stands in.** When the PC that asked has the same checks in Settings, it takes the pass as its own, says "passed on LAPTOP", and vouches for the PR with that.
+- **A PR's failure is tried once more on another PC** (stages/prtest.ts). The PR test waits for that run:
+  - **A pass there** means the failure was this PC's. The PR passes, and its note says so.
+  - **A failure there too** is the change's. The PR fails at once, without a third run here.
+  - **With no other PC**, or none taking it in time, it's tried again here as before.
+- **A failure confirmed on two PCs** while a run waited for its turn isn't run here again: it's the change's.
+- **The whole suite before a kit's release is shared out** (stages/wholesuite.ts). Where the Seneschal says another of your PCs runs the Steward's whole suite too, it's cut into shards by test file: one for this PC and one for each of the others, four at most, and at least 10 test files each.
+  - **Each shard is a task of its own.** Whichever PC has room first runs it, and a shard another PC ran comes back as its pass or failure. The test files are dealt out by name, so every PC deals the same shards from the same commit.
+  - **The typecheck runs in the first shard, the posttest in the last.** Each shard here runs in a worktree of its own, removed after.
+  - **A failure runs once more, only the shards that failed.** A shard that failed on two PCs already isn't run a third time.
+  - **With no other PC**, it runs whole here, as before.
+- **A kit's trial of an agent can run on another PC too** (with the Seneschal 0.2.3). The trial names the kit it tries by its version and the Steward commit it comes from, and the agent it tries.
+  - **The kit:** the other PC fetches that commit from the Steward's own repository, and makes the kit from it only when it's on one of the Steward's own branches. It checks that the commit makes the very kit named. A kit from a fork, or from a commit on no branch, isn't tried.
+  - **The trial:** the agent's main, at the commit the trial names, bumped to the kit as a trial here bumps it (its kit.json, the kit's tools/kit.ts, its version and changelog entry), and only the tests the kit's files reach when the trial here ran only those. An agent's PR that pins the kit runs at its head as it is. Either way its checks run once, filled from that kit, and the result comes back to the trial that asked.
+  - **Where:** the kit in a worktree of the Steward's clone (`_steward-kit-others` in the work folder), the agent in its trial's worktree, both removed after.
+  - **When:** only on a PC whose Steward's own clone is there and free right then, and that looks after that agent.
+
+### What changed
+
+- **A check running on another PC doesn't time out here.** While its task runs elsewhere, the Steward's 20-minute wait for a turn isn't counted, for up to two hours. Before, a long check on another PC would have been run here again after 20 minutes.
+- It hands out kit 2.78.22.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Work moves between PCs only where each PC has the Seneschal 0.2.0 with sharing on, and Manor's Other PCs on; elsewhere nothing changes. Kit trials move only between PCs with the Seneschal 0.2.3 or later.
+
 ## 0.36.96
 
 **The Steward hands out kit 2.78.18: the keeper's NPU refresh starts the server it tests again, so a PC set up on an older kit gets its route's new command. In kit 2.78.12 every refresh was refused, on the Snapdragon X2, AMD's XDNA 2 and Intel's NPU alike.**

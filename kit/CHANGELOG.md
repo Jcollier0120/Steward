@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.78.21
+## 2.78.24
 
 **The local models take less of a PC's memory. llama-server keeps no RAM cache of earlier prompts: by default each server keeps up to 8 GB of them in the PC's memory, beside what its card holds, for prompts that start the same way, and the manor's rarely do. On a Core Ultra 5 225U's Intel Graphics, the chat server held 3.59 GB instead of 4.54 GB after 34 of the manor's kind of requests, and gave the same answers a little faster. And Intel's integrated graphics on a PC with under 32 GB chat on their vision server: one Qwen3-VL-4B for both, 5.0 GB of the PC's memory where Qwen3-4B beside it made 8.5 GB. On text it is as fast and passes the Smith's checks, but it got one of 18 of the manor's kind of tasks wrong that Qwen3-4B got right. A PC set up before gets both at the keeper's next look; nothing to download, nothing to set up again.**
 
@@ -26,6 +26,33 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing. An agent that finds a server with `endpointFor` finds vision on chat's, as it always could. One that reads a card's `vision.baseUrl` itself finds none on such a card now.
+
+## 2.78.22
+
+**seneschal.ts knows the Seneschal's other PCs (Seneschal 0.2.0): a task running on another PC isn't timed out, results name the PC they ran on and say flaky or confirmed, a failure's try on another PC can be waited for, `seneschalWork` is the worker's side, and a whole suite can be cut into shards.**
+
+### What's new
+
+- **`SeneschalResult` gains `pc`, `flaky` and `confirmed`.**
+  - `pc`: the PC a run was on, when that was another PC on the licence. `by` is then "steward on LAPTOP".
+  - `flaky: { on, note? }`: a pass after a failure on another PC.
+  - `confirmed: { on }`: a failure after a failure on another PC.
+- **`seneschalTurn` can answer `{ failed, id }`**: a failure of exactly these commands confirmed on two PCs while it waited for its turn. That's the change's failure, so don't run it again. A failure the Seneschal held already when it was asked is still asked for again, as before.
+- **`turn.elsewhere()`**: after a failure `hold` reported, the Seneschal may try the task once more on another PC. This waits for that run and gives back its result (`flaky` or `confirmed`), or null when it isn't tried elsewhere or the first failure stands.
+- **`turn.giveBack(note)`** hands a task back unstarted: it spends no try.
+- **`seneschalWork({ worker, kinds, repos, slot? })`** is a worker's ask: any task of those kinds and repositories, this PC's or another PC's (`from`), at its turn. It answers `{ job }` (run it under `job.turn.hold`), `{ idle, retryMs }`, or null with no Seneschal. A task it can't read is given back. `jobOf` checks a task again: an owner/name repository, full commit ids, and a branch git takes as one.
+- **Shards of a whole suite.** `SeneschalTask.shard` and `SeneschalJob.shard` (`{ index, of }`, from 1, `SENESCHAL_MOST_SHARDS` at most): one part of a full-suite task, part of its key. `jobOf` refuses a shard that's out of range or on any other kind, and `shardOf` checks one.
+- **`seneschalSiblings({ kind, repo })`**: the other PCs whose workers run that kind for that repository now, as this PC's Seneschal last read them. Empty while it shares no work; null with no Seneschal.
+- **Kit trials for a worker** (Seneschal 0.2.3): `SeneschalJob.kit` and `SeneschalJob.agent`. `jobOf` takes a `kit-trial` job only with both: the kit as a version (`2.78.22`) or a version and 12 hex digits of the Steward's commit it's made from (`2.78.22-1a2b3c4d5e6f`), and the agent as an agent's id. A job of any other kind that names a kit or an agent is refused.
+- `SENESCHAL_RUN_MS` (2 hours) and `SENESCHAL_IDLE_MS` (30 s).
+
+### What changed
+
+- **The 20-minute wait for a turn (`SENESCHAL_WAIT_MS`) doesn't count the time its task runs elsewhere** (`state: 'leased'`: another worker's run, another PC's). That time is limited by `SENESCHAL_RUN_MS` instead.
+
+### Before you update
+
+- Nothing for an agent to do: `seneschalTurn` answers as before where no other PC runs its tasks. An agent that switches on its answer should handle `{ failed }`.
 
 ## 2.78.18
 

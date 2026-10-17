@@ -42,6 +42,7 @@ import { holdForBuilds } from './build-hold.ts';
 import { wakesPc } from './kit/wake.ts';
 import { keepHeads } from './heads.ts';
 import { withLane } from './stages/seneschal.ts';
+import { workForOthers } from './stages/others.ts';
 
 /** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
 const githubReadyHere = (): boolean | undefined => {
@@ -84,6 +85,10 @@ export const SOON_IN_A_ROW = 3;
  * conflictsNow); not within this long of a round beginning, whose own look just did the same.
  */
 export const CONFLICTS_EVERY_MS = 5 * 60_000;
+
+/** How often the Steward may ask the Seneschal for work beside the rounds (stages/others.ts), and the wait after an error. */
+export const OTHERS_TICK_MS = 2_000;
+export const OTHERS_AFTER_ERROR_MS = 60_000;
 
 /**
  * The wait before the next round, after one that did (`soon`) or didn't ask for it sooner, with `run` rounds in a row
@@ -339,6 +344,26 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   };
   // Not under node --test: a test asks for a look itself.
   if (!process.env.NODE_TEST_CONTEXT) setInterval(() => void conflictsJob(), CONFLICTS_EVERY_MS).unref();
+  // Beside the rounds (stages/others.ts): one of the Seneschal's workers, where it's on this PC (Seneschal 0.2.0). A PR
+  // check or whole suite of a repository the Steward looks after, waiting for room here or on another PC on the licence,
+  // runs here, one at a time; asked for again as soon as the Seneschal says to.
+  let othersGoing = false;
+  let othersNext = 0;
+  const othersJob = async () => {
+    if (othersGoing || Date.now() < othersNext || !loadSettings().byItself || !duty().onDuty || !stewardActs() || updateHold()) return;
+    othersGoing = true;
+    const log = (line: string) => console.log(`seneschal: ${line}`);
+    try {
+      const r = await workForOthers({ settings: loadSettings(), ctxOf: () => context({ run: o.run, owner: o.owner, glance: false, log }), say: log });
+      othersNext = Date.now() + r.retryMs;
+    } catch (e) {
+      othersNext = Date.now() + OTHERS_AFTER_ERROR_MS;
+      console.error(`${new Date().toISOString()} seneschal: ${(e as Error).message}`);
+    } finally {
+      othersGoing = false;
+    }
+  };
+  if (!process.env.NODE_TEST_CONTEXT) setInterval(() => void othersJob(), OTHERS_TICK_MS).unref();
   // A kit trial runs beside the rounds here (stages/trial.ts): once it ends, a round settles its PR at once, rather than
   // at the next tick. One the network cut short waits for the next tick, as before.
   trialsOnTheirOwn(({ cut }) => {

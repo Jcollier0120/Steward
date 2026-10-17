@@ -6,7 +6,7 @@ import { compareVersions, KIT_VERSION } from '../kitfiles.ts';
 import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
-import { runChecks, type AffectedScope } from './bump.ts';
+import { runChecks, type AffectedScope, type FailedChecks } from './bump.ts';
 import { checkoutOf, freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { authorOf, type Author } from './kickback.ts';
 import { deadKitIn, KIT_VERSION_FILE, kitTitleVersions, NEVER_RELEASED } from './kitpart.ts';
@@ -323,12 +323,19 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
     const scope: AffectedScope | undefined = ctx.settings.affectedTests === false || wholeAhead(ctx, e, pr) ? undefined : { base: `origin/${e.branch}` };
     const affected = scope ? { affected: scope } : {};
     const stoodIn: StoodIn = {};
+    const seen: FailedChecks = {};
     const task = { pr: pr.number, branch: pr.head };
-    const failed = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}`, stoodIn, task });
+    // A failure here is tried once more on another PC on the licence, where the Seneschal has one (bump.ts' elsewhere).
+    const failed = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}`, stoodIn, task, failed: seen, elsewhere: true });
     // A pass of exactly this code stood in (standin.ts): said as whose, and vouched for as such.
-    if (!failed && stoodIn.by) return await vouchedHere(ctx, e, pr, scope, { ok: true, note: `checks passed ${stoodIn.where} at ${sha}, not run again`, at: now(), branch }, stoodInDescription(e, stoodIn, pr.headOid));
+    if (!failed && stoodIn.by) {
+      const note = stoodIn.flaky ? `checks failed here at ${sha} and passed ${stoodIn.where}: this PC's failure, not the change's (${stoodIn.flaky})` : `checks passed ${stoodIn.where} at ${sha}, not run again`;
+      return await vouchedHere(ctx, e, pr, scope, { ok: true, note, at: now(), branch }, stoodInDescription(e, stoodIn, pr.headOid));
+    }
     const which = scope?.chose && scope.chose !== 'the whole suite' ? ` (${scope.chose})` : '';
     if (!failed) return await vouchedHere(ctx, e, pr, scope, { ok: true, note: `checks passed here at ${sha}${which}`, at: now(), branch });
+    // Failed on two PCs: the change's failure, not tried a third time.
+    if (seen.confirmed) return { ok: false, note: `its checks failed at ${sha}: ${failed}`, at: now(), branch };
     say(`#${pr.number}: its checks once more (${failed})`);
     const again = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}`, task });
     return again
