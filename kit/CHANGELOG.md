@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.82.4
+
+**Each agent's PowerShell worker stays 4 minutes with nothing to run, not 2, so agents start PowerShell less often.**
+
+On a Snapdragon X2 Elite running the manor as usual (about 20 staff), the workers were the PC's biggest source of process starts and exits: 21 started in 32 minutes, about 40 an hour. Typically 2 were alive at once (198 MB committed in all), 6 at most (815 MB). Each is 80 to 215 MB committed and about 13 MB in memory. On that PC each process's exit leaves kernel records behind until a restart, so fewer starts are worth more than the memory an idle worker holds 2 minutes longer.
+
+### What changed
+
+- **ps.ts:** `IDLE_MS` is 4 minutes (was 2). The worker still goes after `MAX_SCRIPTS` (500) and when a script times out, and an idle worker still never keeps a command from exiting.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.82.3
 
 **The NPU's refresh and patch looks wait for the NPU to be quiet, not the whole manor. They counted every agent's work turn as use of the NPU, so on a PC with a dozen staff they hardly ever ran: kit 2.82.1's GenieX build, which frees the vision encoder after a minute, waited on this X2 for over an hour.**

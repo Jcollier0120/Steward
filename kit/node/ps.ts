@@ -58,8 +58,13 @@ export const WRITES_CONSOLE = /\[(System\.)?Console\]::(Out\b|Error\b|Write(Line
 /** PowerShell from Node without the worker: KIT_PS_WORKER=0, or after the worker couldn't start. */
 let oneShotOnly = process.env.KIT_PS_WORKER === '0';
 
-/** How long the worker stays with nothing to run, and how many scripts it runs before a fresh one takes over. */
-export const IDLE_MS = 2 * 60_000;
+/**
+ * How long the worker stays with nothing to run, and how many scripts it runs before a fresh one takes over. 4 minutes,
+ * not 2 (kit 2.82.4): with 2, a Snapdragon X2 Elite running the manor as usual started 21 workers in 32 minutes, its
+ * biggest source of process exits, and each exit's kernel records stay until a restart there. An idle worker costs
+ * about 13 MB of memory in use (80 to 215 MB committed).
+ */
+export const IDLE_MS = 4 * 60_000;
 export const MAX_SCRIPTS = 500;
 
 /** The worker went before answering (stopped on another script's timeout, or it failed): the script runs on its own. */
