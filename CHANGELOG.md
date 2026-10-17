@@ -24,6 +24,9 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - **Kit 2.78.13** (kit/CHANGELOG.md): a FastFlowLM server the kit starts has its working set emptied once its model has loaded (`working-set.ts`). Windows keeps those pages compressed, or in the pagefile, and reads back the few the server touches again. `KIT_SERVER_TRIM=0` turns it off.
+- **Tests that passed only on some PCs, so a vouch from the maker's other PCs failed:**
+  - `claims.test.ts`: the two tests of claims kept here now run as the maker's laptop (`makersPcForTests`), whatever PC runs them. On the maker's other PCs they were refused as one of Castellan's own repositories.
+  - `signing.test.ts`: its releases find a Windows SDK signtool of the test's own. On a PC without the SDK, the hung-signtool test was told "signtool isn't installed" instead.
 
 ### Before you update
 
