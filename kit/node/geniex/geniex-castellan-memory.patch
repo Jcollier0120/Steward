@@ -18,10 +18,22 @@ index 887002e..cecd600 100644
 +
  }  // namespace geniex
 diff --git a/sdk/plugins/llama_cpp/include/vlm.h b/sdk/plugins/llama_cpp/include/vlm.h
-index f31ca38..9f2c8ae 100644
+index f31ca38..6963d27 100644
 --- a/sdk/plugins/llama_cpp/include/vlm.h
 +++ b/sdk/plugins/llama_cpp/include/vlm.h
-@@ -39,6 +39,11 @@ class LlamaVlm : public IVlm {
+@@ -3,7 +3,11 @@
+ 
+ #pragma once
+ 
++#include <chrono>
++#include <condition_variable>
++#include <mutex>
+ #include <string>
++#include <thread>
+ 
+ #include "chat.h"
+ #include "htp_session.h"
+@@ -39,6 +43,21 @@ class LlamaVlm : public IVlm {
      // Tracks whether this instance pinned an HTP session; releases on last handoff.
      htp::SessionGuard htp_guard_;
  
@@ -30,14 +42,25 @@ index f31ca38..9f2c8ae 100644
 +    mtmd_context_params vision_params_{};
 +    bool                vision_pending_ = false;
 +
++    // Castellan patch: and is freed again once no media has come for vision_idle_s_ seconds (vision_idler_ waits for
++    // that), the next request with media loading it as the first did. generate() holds vision_mu_ throughout, so the
++    // encoder is only freed between requests.
++    std::mutex                            vision_mu_;
++    std::condition_variable               vision_cv_;
++    std::thread                           vision_idler_;
++    std::chrono::steady_clock::time_point vision_used_{};
++    int32_t                               vision_idle_s_ = 0;
++    bool                                  stopping_      = false;
++
     public:
      ~LlamaVlm() override;
  
-@@ -55,6 +60,7 @@ class LlamaVlm : public IVlm {
+@@ -55,6 +74,8 @@ class LlamaVlm : public IVlm {
  
     private:
      void set_sampler(const geniex_SamplerConfig* cfg);
 +    void init_vision();
++    void idle_vision();
      bool vlm_message_to_common_chat_msg(const geniex_VlmChatMessage* input, common_chat_msg* output);
  };
  
@@ -152,7 +175,7 @@ index fa6d2c1..d651772 100644
      llama_model_params mpar = llama_model_default_params();
      mpar.load_mode          = use_mmap ? LLAMA_LOAD_MODE_MMAP : LLAMA_LOAD_MODE_NONE;
 diff --git a/sdk/plugins/llama_cpp/src/vlm.cpp b/sdk/plugins/llama_cpp/src/vlm.cpp
-index aa54195..0ef8a1a 100644
+index aa54195..fdfb83d 100644
 --- a/sdk/plugins/llama_cpp/src/vlm.cpp
 +++ b/sdk/plugins/llama_cpp/src/vlm.cpp
 @@ -9,6 +9,7 @@
@@ -163,7 +186,23 @@ index aa54195..0ef8a1a 100644
  #include "htp_session.h"
  #include "llama.h"
  #include "logging.h"
-@@ -90,6 +91,14 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
+@@ -20,6 +21,15 @@
+ namespace geniex {
+ 
+ LlamaVlm::~LlamaVlm() {
++    // Castellan patch: the idle thread goes first, so nothing else frees the encoder.
++    if (this->vision_idler_.joinable()) {
++        {
++            std::lock_guard<std::mutex> lock(this->vision_mu_);
++            this->stopping_ = true;
++        }
++        this->vision_cv_.notify_all();
++        this->vision_idler_.join();
++    }
+     // ctx_vision and ctx hold pointers into model; free them first.
+     if (this->ctx_vision) {
+         mtmd_free(this->ctx_vision);
+@@ -90,6 +100,14 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
      }
  
      llama_context_params cpar = build_context_params(config, /*n_ctx_default=*/16384, device);
@@ -178,7 +217,7 @@ index aa54195..0ef8a1a 100644
  
      this->ctx = llama_init_from_model(this->model, cpar);
      if (!this->ctx) {
-@@ -105,6 +114,12 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
+@@ -105,6 +123,12 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
          return tp_ret;
      }
  
@@ -191,7 +230,7 @@ index aa54195..0ef8a1a 100644
      // Initialize vision context if mmproj_path provided
      if (input->mmproj_path) {
          mtmd_context_params mparams = mtmd_context_params_default();
-@@ -119,18 +134,43 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
+@@ -119,18 +143,51 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
          // Zack TODO: elegant fix this error:  no member named 'verbosity' in 'mtmd_context_params'
          // mparams.verbosity           = GGML_LOG_LEVEL_ERROR;
  
@@ -207,12 +246,7 @@ index aa54195..0ef8a1a 100644
 +        if (image_max_tokens > 0) {
 +            mparams.image_max_tokens = image_max_tokens;
 +            GENIEX_LOG_INFO("[Castellan] pictures capped at {} tokens", image_max_tokens);
-         }
--        // Continue even if vision context fails
--        if (this->ctx_vision) {
--            this->supports_vision = mtmd_support_vision(this->ctx_vision);
--            this->supports_audio  = mtmd_support_audio(this->ctx_vision);
--            GENIEX_LOG_INFO("mmproj loaded: vision={}, audio={}", this->supports_vision, this->supports_audio);
++        }
 +
 +        this->mmproj_path_   = input->mmproj_path;
 +        this->vision_params_ = mparams;
@@ -233,7 +267,12 @@ index aa54195..0ef8a1a 100644
 +                metadata_read = has_vision || has_audio;
 +                gguf_free(meta);
 +            }
-+        }
+         }
+-        // Continue even if vision context fails
+-        if (this->ctx_vision) {
+-            this->supports_vision = mtmd_support_vision(this->ctx_vision);
+-            this->supports_audio  = mtmd_support_audio(this->ctx_vision);
+-            GENIEX_LOG_INFO("mmproj loaded: vision={}, audio={}", this->supports_vision, this->supports_audio);
 +        if (metadata_read) {
 +            this->supports_vision = has_vision;
 +            this->supports_audio  = has_audio;
@@ -241,12 +280,20 @@ index aa54195..0ef8a1a 100644
 +            GENIEX_LOG_INFO("[Castellan] mmproj loads with the first picture: vision={}, audio={}",
 +                this->supports_vision,
 +                this->supports_audio);
++            // Castellan patch: and goes again once no picture has come for GENIEX_VISION_IDLE_SECONDS (60 by
++            // default): ~1.6 GB on the X2 for Qwen3-VL-2B, held until GenieX exits otherwise. The next picture loads
++            // it again (~0.8 s). GENIEX_PATCH_VISION_IDLE=0 keeps it loaded, as upstream.
++            if (patch_enabled("GENIEX_PATCH_VISION_IDLE")) {
++                this->vision_idle_s_ = env_int("GENIEX_VISION_IDLE_SECONDS", 60);
++                this->vision_idler_  = std::thread([this] { this->idle_vision(); });
++                GENIEX_LOG_INFO("[Castellan] mmproj freed after {} s without a picture", this->vision_idle_s_);
++            }
 +        } else {
 +            this->init_vision();
          }
      }
  
-@@ -139,6 +179,28 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
+@@ -139,6 +196,47 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
      return GENIEX_SUCCESS;
  }
  
@@ -272,16 +319,49 @@ index aa54195..0ef8a1a 100644
 +    }
 +}
 +
++void LlamaVlm::idle_vision() {
++    std::unique_lock<std::mutex> lock(this->vision_mu_);
++    while (!this->stopping_) {
++        if (!this->ctx_vision) {
++            this->vision_cv_.wait(lock);
++            continue;
++        }
++        const auto due = this->vision_used_ + std::chrono::seconds(this->vision_idle_s_);
++        if (std::chrono::steady_clock::now() < due) {
++            this->vision_cv_.wait_until(lock, due);
++            continue;
++        }
++        mtmd_free(this->ctx_vision);
++        this->ctx_vision      = nullptr;
++        this->vision_pending_ = true;
++        GENIEX_LOG_INFO("[Castellan] mmproj freed: no picture for {} s", this->vision_idle_s_);
++    }
++}
++
  int32_t LlamaVlm::get_capabilities(geniex_VlmCapabilities* output) {
      if (!output) return GENIEX_ERROR_COMMON_INVALID_INPUT;
      output->supports_vision = this->supports_vision;
-@@ -240,6 +302,13 @@ int32_t LlamaVlm::generate(const geniex_VlmGenerateInput* input, geniex_VlmGener
+@@ -240,6 +338,27 @@ int32_t LlamaVlm::generate(const geniex_VlmGenerateInput* input, geniex_VlmGener
      std::vector<mtmd_bitmap*> bitmaps;
      int                       n_media = 0;
  
 +    const bool has_media =
 +        input->config && ((input->config->image_paths && input->config->image_count > 0) ||
 +                             (input->config->audio_paths && input->config->audio_count > 0));
++
++    // Castellan patch: the encoder isn't freed during a request, and one with media starts its idle wait again when
++    // it ends (media_seen goes before vision_lock).
++    std::unique_lock<std::mutex> vision_lock(this->vision_mu_);
++    struct MediaSeen {
++        LlamaVlm* self;
++        bool      media;
++        ~MediaSeen() {
++            if (!media) return;
++            self->vision_used_ = std::chrono::steady_clock::now();
++            self->vision_cv_.notify_all();
++        }
++    } media_seen{this, has_media};
++
 +    if (has_media && this->vision_pending_) {
 +        this->init_vision();
 +    }
@@ -289,7 +369,7 @@ index aa54195..0ef8a1a 100644
      if (input->config && input->config->image_paths && input->config->image_count > 0 && this->ctx_vision) {
          if (!this->supports_vision) {
              GENIEX_LOG_WARN("model does not support image input; skipping {} image(s)", input->config->image_count);
-@@ -420,41 +489,39 @@ int32_t LlamaVlm::generate(const geniex_VlmGenerateInput* input, geniex_VlmGener
+@@ -420,41 +539,39 @@ int32_t LlamaVlm::generate(const geniex_VlmGenerateInput* input, geniex_VlmGener
  
          // Only process if there's new text content
          if (!new_text_portion.empty()) {

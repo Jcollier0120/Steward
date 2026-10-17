@@ -12,6 +12,7 @@ The patch applies to qualcomm/GenieX at tag v0.8.0 and touches only `sdk/plugins
 - **GENIEX_PATCH_TRIM:** after load, the mapped file's pages leave the working set.
 - **GENIEX_PATCH_OUTPUTS:** the vision model reserves one logits row, so its compute buffer on the NPU is 128 MiB, not 601.
 - **GENIEX_PATCH_LAZY_VISION:** the vision encoder loads with the first picture, not at start.
+- **GENIEX_PATCH_VISION_IDLE:** the vision encoder is freed again once no picture has come for GENIEX_VISION_IDLE_SECONDS (60 by default), and the next picture loads it again (about 1 s). A request is never cut short: the encoder is freed only between requests.
 - **GENIEX_IMAGE_MAX_TOKENS=n:** a picture over n tokens is scaled down to fit. The kit sets it to the vision model's `pictureTokens`.
 - A text-only prompt to the vision model is fed with positions, as a chat model's is.
 
@@ -24,12 +25,14 @@ Measured on the X2 Elite with Qwen3-VL-2B Q4_0, GenieX's own plugin against this
 | After a picture: working set | 4.08 GB | 3.36 GB |
 | Cold load to the first answer | 5.0 s | 2.4 s |
 
+With the encoder freed after a quiet spell (kit 2.82.1, `--nctx 2560`): after a picture, 3.19 GB working set and 1.97 GB private; once the encoder was freed, 2.08 GB and 0.67 GB. The 0.3 to 0.4 GB still held above a chat's is the OpenCL backend's own, in GenieX's ggml-opencl.dll, which isn't built here.
+
 ## How it was built
 
 - `build-geniex-plugin.bat`: run in a clone of qualcomm/GenieX at v0.8.0 with the patch applied. Set its SRC and OUT to that clone first.
 - The build uses Clang for arm64-pc-windows-msvc from Visual Studio 2022 Build Tools, with Ninja. Hexagon and OpenCL are off; only the `geniex_llama_cpp` target is built.
 - It is built against the same llama.cpp commit (94256114) and GenieX patches as the shipped DLLs. It links against GenieX 0.8.0's own llama.dll, llama-common.dll, mtmd.dll, ggml.dll, ggml-base.dll and geniex.dll. The keeper checks each of them is 0.8.0's before it puts this in.
-- It is signed with Castellan's code-signing certificate (Certum, timestamped). SHA-256 `a167bfbdd3a672caf2e629a5b56f4017e4f1bf4f442200b542ff2d602121f21b`, 301,136 bytes.
+- It is signed with Castellan's code-signing certificate (Certum, timestamped). SHA-256 `f58eb6239500f124a0e5bc88adc92b372861883b6fb2a3df7279ec2abc9c4e0f`, 304,208 bytes.
 
 ## Putting GenieX's own back
 

@@ -1,6 +1,6 @@
 {
   "name": "steward",
-  "version": "0.36.127",
+  "version": "0.36.131",
   "private": true,
   "license": "UNLICENSED",
   "description": "Looks after your repositories: claims versions, and builds and releases what you merge, where you say yes",

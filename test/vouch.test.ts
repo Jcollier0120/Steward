@@ -18,7 +18,8 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { coveredBy } = await import('../src/stages/mainbuild.ts');
 const { checksOf, VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
-const { MERGE_IT_YOURSELF, passingTrouble, setVouch, STATUS_WAITS_MS, vouch, vouchedBy, vouchOn } = await import('../src/stages/vouch.ts');
+const { makersClone, MERGE_IT_YOURSELF, passingTrouble, setVouch, STATUS_WAITS_MS, vouch, vouchedBy, vouchOn } = await import('../src/stages/vouch.ts');
+const { makersPcForTests } = await import('../src/maker.ts');
 const { assayerChecksFile, ASSAYED_MS, choseOf, covers, whyShort } = await import('../src/stages/assayed.ts');
 const { noteVouchTime, vouchLimit, vouchTimes, vouchTimesFile } = await import('../src/stages/vouchtime.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
@@ -150,6 +151,60 @@ test('steward vouch: the checks run at the PR\'s head, and only once they pass i
   assert.equal(dirty.v.ok, false);
   assert.match(dirty.v.message, /uncommitted changes/);
   assert.ok(!dirty.r.gh.some((a) => a[0] === 'pr' || a[0] === 'api'));
+});
+
+test("on a maker's other PC, a clone of one of Castellan's own repositories gives its own checks, only where GitHub says this PC's account can push there", async () => {
+  // The site: no manor-agent.json, no src/app.ts, no tools/kit.ts; named by its repository.
+  const site = path.join(tmp, 'CastellanSite');
+  mkdirSync(site, { recursive: true });
+  writeFileSync(path.join(site, 'package.json'), JSON.stringify({ name: 'castellan-site', version: '0.1.59', scripts: { test: 'node scripts/check-site.mts' } }));
+  writeFileSync(path.join(site, 'tsconfig.json'), '{}');
+  const ctx = { run: runner().run, neutralDir: tmp };
+  const yes = async () => true;
+  const e = (await makersClone(ctx, 'Jcollier0120/CastellanSite', site, { makers: false, canPush: yes }))!;
+  assert.deepEqual([e.id, e.name, e.repo, e.checkout, e.fill, e.test], ['castellansite', 'CastellanSite', 'Jcollier0120/CastellanSite', site, '', ['npx tsc -p . --noEmit', 'npm test']]);
+  // An agent's clone names itself (its src/app.ts).
+  const agent = fakeEmployee(path.join(tmp, 'agent'));
+  assert.equal((await makersClone(ctx, 'Jcollier0120/Fake', agent.checkout, { makers: false, canPush: yes }))?.id, 'fake');
+
+  for (const [why, repo, o] of [
+    ["on the maker's laptop, Settings look after them", 'Jcollier0120/CastellanSite', { makers: true, canPush: yes }],
+    ["a repository that isn't Castellan's", 'someone/Thing', { makers: false, canPush: yes }],
+    ["an account that can't push there: the vouch would record a pass for it", 'Jcollier0120/CastellanSite', { makers: false, canPush: async () => false }],
+    ["GitHub couldn't be asked", 'Jcollier0120/CastellanSite', { makers: false, canPush: () => Promise.reject(new Error('offline')) }],
+  ] as const)
+    assert.equal(await makersClone(ctx, repo, site, o), null, why);
+});
+
+test("steward vouch on a maker's other PC: a clone of Castellan's own, which Settings here don't have, is tested and vouched for when this account can push there; else it says why not", async (t) => {
+  makersPcForTests(() => false);
+  t.after(() => makersPcForTests(null));
+  const f = fakeEmployee(path.join(tmp, 'other-pc'), { files: { 'package.json': JSON.stringify({ name: 'fake', version: '0.4.0', private: true, scripts: { test: 'node -e process.exit(0)' } }) } });
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/elsewhere');
+  writeFileSync(path.join(f.checkout, 'e.txt'), 'e\n');
+  sh(f.checkout, 'add', '-A');
+  sh(f.checkout, 'commit', '--quiet', '-m', 'e');
+  const head = sh(f.checkout, 'rev-parse', 'HEAD');
+  sh(f.checkout, 'remote', 'set-url', 'origin', 'https://github.com/Jcollier0120/Fake.git');
+  const go = (permission: string) => {
+    const r = runner((a) => {
+      if (a[0] === 'api' && a[1] === 'graphql') return ok({ data: { r0: { viewerPermission: permission } } });
+      if (a[0] === 'pr' && a[1] === 'view') return ok({ number: 12, state: 'OPEN', headRefOid: head, isCrossRepository: false });
+      if (a[0] === 'api') return ok('{}');
+    });
+    // Settings here look after nothing of Castellan's.
+    const ctx = ctxFor({ employees: [], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
+    return vouch(ctx, { dir: f.checkout, say: () => {} }).then((v) => ({ v, r }));
+  };
+
+  const pushes = await go('WRITE');
+  assert.equal(pushes.v.ok, true, pushes.v.message);
+  assert.deepEqual(pushes.r.gh.find((a) => a[0] === 'api' && a[1] === '-X'), ['api', '-X', 'POST', `repos/Jcollier0120/Fake/statuses/${head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`, '-f', `description=npm test (the whole suite) passed at ${head.slice(0, 7)}`]);
+
+  const reads = await go('READ');
+  assert.equal(reads.v.ok, false);
+  assert.equal(reads.v.message, "Jcollier0120/Fake is one of Castellan's own, and GitHub doesn't say this PC's account can push to it: only those who can vouch for it");
+  assert.ok(!reads.r.gh.some((a) => a[0] === 'pr' || (a[0] === 'api' && a[1] === '-X')), 'nothing asked of the PR, nothing set');
 });
 
 test("the vouch's status is set again after GitHub's passing trouble (an answer cut short, a 5xx, the network), and waits between; a refusal of it, or trouble that lasts, gives up", async () => {

@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.127
+## 0.36.131
 
 **The Steward hands out kit 2.82.0: agents keep the decode speed of each chat answer, by boot, so Manor can say when the NPU has started slow and that a restart usually fixes it.**
 
@@ -13,6 +13,27 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.130
+
+**`steward vouch` works on the maker's other PCs for Castellan's own repositories, where GitHub says the PC's account can push to them.**
+
+### Fixed
+
+- Off the maker's laptop, the Steward's Settings look after none of Castellan's own repositories, so `steward vouch` refused every one ("isn't a repository the Steward looks after") and their PRs couldn't be vouched for from any other PC. Now, when GitHub says this PC's account can push to the repository, the vouch runs the checks the clone itself gives: its kit filled when it has `tools/kit.ts`, then its typecheck and `npm test`, the same employee a clone gives when it is taken on. Nothing is kept in Settings.
+- Where the account can't push there, or GitHub can't be asked, the vouch still refuses, and says so: it records a pass on GitHub, so it never takes checks from a clone of a repository the account can't push to.
+
+## 0.36.129
+
+**The Steward hands out kit 2.82.1: on a Snapdragon X2, GenieX lets go of the part that reads pictures a minute after the last one, about 1.1 GB.**
+
+### What changed
+
+- On a Snapdragon X2, GenieX used to keep the part that reads pictures loaded after the first picture, until it stopped after 10 idle minutes. Now it lets it go once no picture has come for a minute, and loads it again for the next picture in about a second. Measured on the X2 Elite with Qwen3-VL-2B: 3.2 GB after a picture, 2.1 GB once it's let go.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The keeper puts the new build in when the NPU is idle, after a picture and a chat answer through it.
 
 ## 0.36.125
 

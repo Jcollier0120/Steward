@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.82.0
+## 2.82.2
 
 **A slow start is noticed. Some PCs come up from a restart with the NPU decoding well below its usual speed until the next restart, and nothing but the speed shows it. The kit now keeps the decode speed each chat answer was written at, by boot, so Manor can say when this boot is slow and that a restart usually fixes it.**
 
@@ -19,6 +19,21 @@ On WEASELDEV03 (an AMD Ryzen AI 7 350, qwen3.5:2b on FastFlowLM 1.0.7), a boot t
 ### Before you update
 
 - Nothing: agents keep speeds as they answer, through `npu.ts`. Manor shows the notice once it pins this kit. A driver that builds its own rules object (not from rules.json through `checkRules`) needs the `speed` section.
+
+## 2.82.1
+
+**The Snapdragon X2's GenieX plugin frees its vision encoder after 60 s without a picture: 1.1 GB less working set (1.3 GB less private) from a minute after the last picture until the server stops.**
+
+### What changed
+
+- **node/geniex/geniex_plugin.dll:** a new build, signed, 304,208 bytes. A thread frees the vision encoder once no request with media has come for GENIEX_VISION_IDLE_SECONDS (60 by default), and the next picture loads it again, as the first does (about 1 s). The encoder is freed only between requests. GENIEX_PATCH_VISION_IDLE=0 keeps it loaded. `geniex-castellan-memory.patch` and `README.md` say so.
+- **spec/npu-vendors.json:** snapdragon-x2's `pluginPatch.patched` pins the new build; its `what` and `basis` say what it does and what was measured.
+- On a PC with 2.81.0's build in, the keeper's next look replaces it with this one, in the NPU's turn and after its test, as for a first put-in. It knows 2.81.0's build by the SHA-256 in `npu-patch.json`.
+- spec/NPU-VENDORS.md: the measurement. The 0.3 to 0.4 GB still held above a chat's is GenieX's OpenCL backend's own (ggml-opencl.dll).
+
+### Before you update
+
+- Nothing for an agent: only the keeper changes the file.
 
 ## 2.81.0
 
