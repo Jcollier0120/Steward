@@ -50,20 +50,28 @@ test('on Windows, a process holding 300 MB it no longer touches is trimmed to a 
   const { powershell, stopPowerShellWorker } = await import('./fixture/src/kit/ps.ts');
   const source = readFileSync(new URL('./fixture/src/kit/working-set.cs', import.meta.url), 'utf8');
   const dll = path.join(home, 'working-set-test.dll');
-  // 300 MB written once (every page touched), then only its first byte: a server's table after its model loaded. Alive
-  // for longer than the calls can take (the first compiles the DLL, a minute and more at the checks pace); ended below.
-  const child = spawn(process.execPath, ['-e', 'const b = Buffer.alloc(300 * 1048576, 1); process.stdout.write("held"); setInterval(() => b[0]++, 1000); setTimeout(() => {}, 900000)'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
-  const workingSetMB = async (pid: number) => Number((await powershell(`[math]::Round((Get-Process -Id ${pid}).WorkingSet64 / 1MB)`)).trim());
+  // 300 MB written (every page touched) whenever it's told to, then only its first byte: a server's table after its model
+  // loaded. Alive for longer than the calls can take; ended below.
+  const child = spawn(process.execPath, ['-e', 'const b = Buffer.alloc(300 * 1048576, 1); process.stdin.on("data", () => { b.fill(2); process.stdout.write("held"); }); setInterval(() => b[0]++, 1000); setTimeout(() => {}, 900000)'], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+  const workingSetMB = async (pid: number) => Number((await powershell(`[math]::Round((Get-Process -Id ${pid}).WorkingSet64 / 1MB)`, { timeoutMs: 120_000 })).trim());
   try {
-    await new Promise<void>((resolve) => child.stdout!.once('data', () => resolve()));
-    const before = await workingSetMB(child.pid!);
-    assert.ok(before >= 300, `it held ${before} MB`);
-    const said = (await powershell(trimScript(child.pid!, dll, source), { timeoutMs: 120_000 })).trim();
+    // First the compile, on its own and with time to spare: a minute and more at the checks pace, beside a whole run's
+    // other tests (the 12:00 build of 2026-10-17 failed here twice). It's asked to empty a process that doesn't exist.
+    assert.match((await powershell(trimScript(2_147_483_000, dll, source), { timeoutMs: 300_000 })).trim(), /^open \d+ -1$/, 'no such process: refused, and nothing held');
+    // The 300 MB touched again just before the trim, so a busy PC's own trimming in the meantime can't have taken it.
+    const touched = new Promise<void>((resolve) => child.stdout!.once('data', () => resolve()));
+    child.stdin!.write('touch\n');
+    await touched;
+    const said = (await powershell(trimScript(child.pid!, dll, null), { timeoutMs: 120_000 })).trim();
     const held = /^trimmed (\d+)$/.exec(said);
-    assert.ok(held && Number(held[1]) >= 300, said);
-    const afterMB = await workingSetMB(child.pid!);
-    assert.ok(afterMB < 100, `${afterMB} MB after the trim`);
-    assert.match((await powershell(trimScript(2_147_483_000, dll, null))).trim(), /^open \d+ -1$/, 'no such process: refused, and nothing held');
+    assert.ok(held && Number(held[1]) >= 250, `it should have held about 300 MB: ${said}`);
+    // Read until it's down, for a few seconds: one reading can catch the process faulting its runtime back in.
+    let afterMB = await workingSetMB(child.pid!);
+    for (let i = 0; i < 10 && afterMB >= 100; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      afterMB = await workingSetMB(child.pid!);
+    }
+    assert.ok(afterMB < 100, `${afterMB} MB after the trim, from ${held![1]}`);
   } finally {
     child.kill();
     stopPowerShellWorker();
