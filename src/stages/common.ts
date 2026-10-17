@@ -41,11 +41,12 @@ export interface EmployeeResult {
   errors?: string[];
   /** Its release waits until this PC can sign (signing.ts): why it can't, in a line. Nothing failed. */
   signing?: string;
-  /** The Steward's kit merged, whose release waits (its whole suite, stages/self.ts): its version. A build's rollout waits for it (stages/buildkit.ts). */
+  /** Main's kit, still being tried on the agents or waiting for its whole suite (stages/self.ts): its version. A build's rollout waits for it. */
   kitWaits?: string;
 }
 
-export type StageName = 'bump' | 'push' | 'merge' | 'release' | 'round' | 'staff';
+/** The stages. A stage kept from before Steward 0.36.119 may say 'merge', which is gone. */
+export type StageName = 'bump' | 'push' | 'release' | 'round' | 'staff';
 
 export interface StageResult {
   stage: StageName;
@@ -64,8 +65,8 @@ export interface StageResult {
   /** A round that asked GitHub nothing and only kept the staff's pages up (tend.ts): no repositories here, or Settings said so. */
   tendOnly?: boolean;
   /**
-   * A round that left a PR waiting only on something that settles itself within minutes (merge.ts's waitsBriefly): its
-   * checks running, at a head just caught up, or GitHub working out whether it merges. The next round comes sooner (agent.ts).
+   * A round that left work that settles itself within minutes: main's kit being tried on the agents (stages/trial.ts),
+   * a slice at a time. The next round comes sooner (agent.ts).
    */
   soon?: boolean;
   /**
@@ -104,36 +105,17 @@ export interface Ctx {
    * PC still has its turn in that repository. None when there are no turns to take: every repository is this PC's.
    */
   lease?: LeaseGuard | null;
-  /** Waits this long before asking GitHub something again (merge.ts); tests stand in for it. Not given: the clock's. */
+  /** Waits this long before asking GitHub something again (mainbuild.ts's mergeOwn); tests stand in for it. Not given: the clock's. */
   pause?: (ms: number) => Promise<void>;
   /** The Exchequer to let an urgent release out at (release.ts urgentNote); tests stand in for it. Not given: Castellan's. */
   exchequer?: ExchequerOptions;
   /**
-   * One of a build's rounds (pipeline.ts): its build time, and its name in words ("the 13:00 build"). A repository's
-   * ready PRs are then stacked as one batch, and a batch that fails is halved to find the PR that broke it
-   * (stages/build.ts). Absent between builds, and without the pipeline.
-   *
-   * `ahead`: between builds, the merge pass ahead of the next build (stages/prepare.ts), whose build time `due` is. Its
-   * ready PRs merge as in a build (stacked, tested once, halved to find the one that broke it, a kit's trial first), and
-   * nothing is released: the build releases them. A PR it leaves out is tried again by the build itself, and a kit's
-   * trial in it is not the build's one kit (trial.ts).
+   * One of a build's rounds (pipeline.ts): its build time, and its name in words ("the 13:00 build"). Each repository's
+   * main is then tested once, unless a vouch covers it, and released (stages/mainbuild.ts). Absent between builds, and
+   * without the pipeline.
    */
-  build?: { due: string; name: string; ahead?: boolean } | null;
-  /**
-   * Between builds, the next build prepared for (stages/prepare.ts): its build time, and its name in words. A repository's
-   * ready PRs are then tested as that build would test them (each at its head, stacked as its train or batch, a kit's
-   * trial), and nothing is merged, pushed, caught up or released: the build finds those passes and only merges.
-   * `inBuild`: the build under way, its Steward's own PRs tested the same way beside its rounds (stages/selftests.ts).
-   */
-  prepare?: { due: string; name: string; inBuild?: boolean } | null;
+  build?: { due: string; name: string } | null;
 }
-
-/**
- * The build this work is part of, by its build time: the build under way (not a merge pass ahead of it), or the one whose
- * rounds the Steward's own PRs are tested beside (ctx.prepare `inBuild`). Null between builds. A build tries one kit (trial.ts).
- */
-export const buildUnderWay = (ctx: Pick<Ctx, 'build' | 'prepare'>): string | null =>
-  ctx.build ? (ctx.build.ahead ? null : ctx.build.due) : ctx.prepare?.inBuild ? ctx.prepare.due : null;
 
 /** How a repository is worked with in this stage (scm.ts). */
 export const hostIs = (ctx: Pick<Ctx, 'host'>, e: Employee): Host => ctx.host?.(e) ?? 'github';

@@ -5,8 +5,9 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // The rollout in a round (stages/rollout.ts): which employees a new kit release reaches, as pure decisions; then whole
-// rounds on a data folder of their own, a fake employee's git, and gh standing in. Nothing reaches GitHub, the live
-// ~/.steward or the real checkouts.
+// rounds on a data folder of their own, a fake employee's git, and gh standing in. The rollout merges the kit PRs it
+// opens itself (Steward 0.36.119: no one else merges the Steward's PRs), and the round releases them. Nothing reaches
+// GitHub, the live ~/.steward or the real checkouts.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-rollout-'));
 process.env.STEWARD_HOME = home;
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
@@ -16,8 +17,6 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const { runStage } = await import('../src/steward.ts');
 const { planRollout, rollout, rolloutFacts, rolloutGate, loadRolloutFailures, settleKit, settlingLine, urgentIn } = await import('../src/stages/rollout.ts');
 const { bumpOne } = await import('../src/stages/bump.ts');
-const { planRound } = await import('../src/stages/changes.ts');
-const { roundSig } = await import('../src/glance.ts');
 const { roundConditions } = await import('../src/alarms.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
@@ -44,13 +43,20 @@ test('a new kit release: each employee behind it is bumped; not one already on i
   assert.deepEqual(plan.bump.map((b) => [b.employee.id, b.head]), [['porter', H1]]);
   assert.deepEqual(plan.skip.map((s) => [s.employee.id, s.why]), [
     ['clerk', 'on kit 2.9.1 already'],
-    ['miller', 'its kit PR #12 (steward/kit-2.9.0) is open: the rounds merge it once it is ready'],
+    ['miller', 'its kit PR #12 (steward/kit-2.9.0) is open: merge it yourself, or close it, and the next build rolls the kit out'],
     ['manor', 'not using the kit yet'],
   ]);
   // A pin ahead of the newest release (a trial) is left alone, and so is one with no checkout, no kit.json or no branch.
   const odd = planRollout({ on: true, kit: '2.9.1', ownKit: null, employees: [porter, clerk, miller], facts: { porter: facts('3.0.0'), clerk: { checkout: false, head: null, pin: null, kitPrs: [] }, miller: facts(null) }, failed: {} });
   assert.deepEqual(odd.bump, []);
   assert.deepEqual(odd.skip.map((s) => s.why), ['on kit 3.0.0 already', 'no checkout at C:\\nowhere\\Clerk', 'no kit.json on origin/main']);
+});
+
+test("a kit PR of the Steward's left open at the kit rolled out is merged by the rollout, not bumped again", () => {
+  const plan = planRollout({ on: true, kit: '2.9.1', ownKit: null, employees: [porter, clerk], facts: { porter: facts('2.9.0', { kitPrs: ['#12 (steward/kit-2.9.1)'], own: { number: 12, head: H2 } }), clerk: facts('2.9.0') }, failed: {} });
+  assert.deepEqual(plan.merge?.map((m) => [m.employee.id, m.number, m.head]), [['porter', 12, H2]]);
+  assert.deepEqual(plan.bump.map((b) => b.employee.id), ['clerk']);
+  assert.deepEqual(plan.skip, []);
 });
 
 test('a bump that failed is held for that kit until a new commit lands on its branch; a newer kit is tried at once', () => {
@@ -97,7 +103,7 @@ test('a kit PR open for an older kit takes the new kit (the fold), instead of wa
   const fold = { number: 12, head: 'steward/kit-2.9.0', kit: '2.9.0' };
   const plan = planRollout({ on: true, kit: '2.9.1', ownKit: null, employees: [porter, miller], facts: { porter: facts('2.8.3', { kitPrs: ['#12 (steward/kit-2.9.0)'], fold }), miller: facts('2.8.3', { kitPrs: ['#13 (steward/kit-2.9.1)'] }) }, failed: {} });
   assert.deepEqual(plan.bump.map((b) => [b.employee.id, b.fold]), [['porter', fold]]);
-  assert.deepEqual(plan.skip.map((s) => s.why), ['its kit PR #13 (steward/kit-2.9.1) is open: the rounds merge it once it is ready']);
+  assert.deepEqual(plan.skip.map((s) => s.why), ['its kit PR #13 (steward/kit-2.9.1) is open: merge it yourself, or close it, and the next build rolls the kit out']);
   // A fold that failed at that head is held like any bump.
   const failed = { porter: { kit: '2.9.1', head: H1, stage: 'bump' as const, message: 'npm test failed (exit 1)', at: '' } };
   assert.deepEqual(planRollout({ on: true, kit: '2.9.1', ownKit: null, employees: [porter], facts: { porter: facts('2.8.3', { kitPrs: ['#12 (steward/kit-2.9.0)'], fold }) }, failed }).bump, []);
@@ -127,7 +133,7 @@ test('a kit PR open for an older kit takes the new kit (the fold), instead of wa
   assert.equal((await rolloutFacts(ctx, e, '1.0.3')).fold, undefined);
 });
 
-test("a round's rollout folds the new kit onto the open kit PR: pushed onto its branch and the PR retitled, none opened", async () => {
+test("a round's rollout folds the new kit onto the open kit PR: pushed onto its branch, the PR retitled and merged, none opened", async () => {
   const dir = mkdtempSync(path.join(home, 'fold-round-'));
   const fk = fakeEmployee(dir, { kit: '1.0.0' });
   const e = employee(fk.checkout, { fill: '' });
@@ -137,6 +143,7 @@ test("a round's rollout folds the new kit onto the open kit PR: pushed onto its 
     if (a[0] === 'pr' && a[1] === 'list') return ok(open);
     if (a[0] === 'pr' && a[1] === 'view') return ok({ state: 'OPEN', headRefName: 'steward/kit-1.0.1' });
     if (a[0] === 'pr' && a[1] === 'edit') return ok('');
+    if (a[0] === 'pr' && a[1] === 'merge') return ok('');
   });
   const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
   // Kit 1.0.1's PR, open and waiting.
@@ -145,10 +152,42 @@ test("a round's rollout folds the new kit onto the open kit PR: pushed onto its 
   open = [{ number: 30, title: "Fake 0.4.1: the Steward's kit 1.0.1", url: 'u30', body: '', headRefName: 'steward/kit-1.0.1', headRefOid: '', baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, files: [{ path: 'kit.json' }] }];
 
   const out = await rollout(ctx, [e], { kit: '1.0.2', ownKit: null, changelog: async () => null });
-  assert.deepEqual(out.results.map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [['done', `rollout: kit 1.0.2: 0.4.1 on steward/kit-1.0.1 (…): kit 1.0.1 → 1.0.2, onto its open PR #30, checks passed; put kit 1.0.2 onto its open PR #30, now "Fake 0.4.1: the Steward's kit 1.0.2"`]]);
+  assert.deepEqual(out.results.map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [['done', `rollout: kit 1.0.2: 0.4.1 on steward/kit-1.0.1 (…): kit 1.0.1 → 1.0.2, onto its open PR #30, checks passed; put kit 1.0.2 onto its open PR #30, now "Fake 0.4.1: the Steward's kit 1.0.2"; merged it`]]);
   assert.match(sh(fk.origin, 'show', 'steward/kit-1.0.1:kit.json'), /"kit": "1\.0\.2"/);
   assert.ok(!r.gh.some((a) => a[1] === 'create'), 'no second kit PR');
   assert.ok(r.gh.some((a) => a[1] === 'edit' && a[2] === '30'));
+  // Merged at the commit pushed onto it.
+  const merge = r.gh.filter((a) => a[1] === 'merge');
+  assert.deepEqual(merge.map((a) => [a[2], a[a.indexOf('--match-head-commit') + 1]]), [['30', sh(fk.origin, 'rev-parse', 'steward/kit-1.0.1')]]);
+});
+
+test("a rollout merges the Steward's kit PR left open at the kit it rolls out, at its head; one GitHub won't merge says so", async () => {
+  const dir = mkdtempSync(path.join(home, 'own-'));
+  const fk = fakeEmployee(dir, { kit: '1.0.0' });
+  sh(fk.checkout, 'checkout', '--quiet', '-b', 'steward/kit-1.0.1', 'origin/main');
+  writeFileSync(path.join(fk.checkout, 'kit.json'), '{\n  "kit": "1.0.1",\n  "parts": ["node"]\n}\n');
+  sh(fk.checkout, 'commit', '--quiet', '-am', 'kit 1.0.1');
+  sh(fk.checkout, 'push', '--quiet', 'origin', 'steward/kit-1.0.1');
+  const sha = sh(fk.checkout, 'rev-parse', 'HEAD');
+  sh(fk.checkout, 'checkout', '--quiet', 'main');
+  const open = [{ number: 30, title: "Fake 0.4.1: the Steward's kit 1.0.1", url: 'u30', body: '', headRefName: 'steward/kit-1.0.1', headRefOid: sha, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, files: [{ path: 'kit.json' }] }];
+  const e = employee(fk.checkout, { fill: '' });
+  let merges = true;
+  const r = runner((a) => (a[0] === 'pr' && a[1] === 'list' ? ok(open) : a[0] === 'pr' && a[1] === 'merge' ? (merges ? ok('') : { code: 1, out: '', err: 'GraphQL: Pull Request is not mergeable (mergePullRequest)' }) : undefined));
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
+  assert.deepEqual((await rolloutFacts(ctx, e, '1.0.1')).own, { number: 30, head: sha });
+
+  const out = await rollout(ctx, [e], { kit: '1.0.1', ownKit: null, changelog: async () => null });
+  assert.deepEqual(out.results.map((x) => [x.outcome, x.message]), [['done', 'rollout: merged its kit PR #30 (kit 1.0.1)']]);
+  const merge = r.gh.filter((a) => a[1] === 'merge');
+  assert.deepEqual(merge, [['pr', 'merge', '30', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', sha, '--delete-branch']]);
+  assert.ok(!r.gh.some((a) => a[1] === 'create'), 'no second kit PR');
+
+  merges = false;
+  const refused = await rollout(ctx, [e], { kit: '1.0.1', ownKit: null, changelog: async () => null });
+  assert.deepEqual(refused.results.map((x) => x.outcome), ['failed']);
+  assert.match(refused.results[0].message, /^rollout: its kit PR #30 at kit 1\.0\.1 is open still \(.* wouldn't merge #30: GraphQL: Pull Request is not mergeable \(mergePullRequest\)\): merge it yourself, or close it$/);
+  assert.equal(r.gh.filter((a) => a[1] === 'merge').length, 1 + 4, 'asked again after each wait');
 });
 
 test('nothing is rolled out with the setting off, with no kit release, or while this Steward carries an older kit', () => {
@@ -164,30 +203,15 @@ test('nothing is rolled out with the setting off, with no kit release, or while 
   assert.equal(normalizeSettings({ rollout: false }).settings.rollout, false);
 });
 
-test('a new kit release, or this Steward carrying a new kit, is something new for every employee: the round looks at all', () => {
-  const settings = structuredClone(DEFAULT_SETTINGS);
-  const repo = { head: H1, prs: [], releases: [] };
-  const glance = { at: '', stewardReleases: [], repos: { porter: repo }, errors: {} };
-  const now = new Date('2026-10-04T12:00:00Z');
-  const before = { newest: '2.9.0', own: '2.9.0' };
-  const seen = { full: now.toISOString(), ok: true, repos: { porter: { sig: roundSig(porter, repo, settings, before), held: [] } } };
-  assert.deepEqual(planRound({ employees: [porter], glance, seen, settings, now, kit: before }).look, [], 'nothing new');
-  assert.deepEqual(planRound({ employees: [porter], glance, seen, settings, now, kit: { newest: '2.9.1', own: '2.9.0' } }).look.map((e) => e.id), ['porter'], 'a new kit release');
-  assert.deepEqual(planRound({ employees: [porter], glance, seen, settings, now, kit: { newest: '2.9.0', own: '2.9.1' } }).look.map((e) => e.id), ['porter'], 'the Steward updated');
-  const off = { ...settings, rollout: false };
-  const seenOff = { ...seen, repos: { porter: { sig: roundSig(porter, repo, off, before), held: [] } } };
-  assert.deepEqual(planRound({ employees: [porter], glance, seen: seenOff, settings: off, now, kit: { newest: '2.9.1', own: '2.9.1' } }).look, [], 'rolling out off: a kit release is nothing new');
-});
-
 test('a bump or push the rounds gave up on is an alarm at once; a kit waiting on the Steward itself, after a day', () => {
   const settings = structuredClone(DEFAULT_SETTINGS);
   const round = { stage: 'round' as const, started: '', finished: '', kit: null, asked: {}, results: [], log: [] };
   const failedRollouts = { porter: { kit: '2.9.1', head: H1, stage: 'bump' as const, message: 'npm test failed (exit 1)' }, gone: { kit: '2.9.1', head: H1, stage: 'bump' as const, message: 'x' } };
-  const c = roundConditions({ round, held: [], failedReleases: {}, failedRollouts, rolloutWaits: { kit: '2.9.1', own: '2.9.0' }, employees: [porter], settings });
+  const c = roundConditions({ round, failedReleases: {}, failedRollouts, rolloutWaits: { kit: '2.9.1', own: '2.9.0' }, employees: [porter], settings });
   assert.deepEqual(c.map((x) => [x.id, x.afterMs]), [['rollout:porter:2.9.1', 0], ['rollout:waits:2.9.1', 24 * 3_600_000]]);
   assert.match(c[0].title, /^Porter's bump to kit 2\.9\.1 failed, and the rounds won't try it again until its branch moves$/);
   assert.equal(c[0].detail[0], 'npm test failed (exit 1)');
-  assert.deepEqual(roundConditions({ round, held: [], failedReleases: {}, failedRollouts, rolloutWaits: { kit: '2.9.1', own: '2.9.0' }, employees: [porter], settings: { ...settings, rollout: false } }), [], 'off: no alarm');
+  assert.deepEqual(roundConditions({ round, failedReleases: {}, failedRollouts, rolloutWaits: { kit: '2.9.1', own: '2.9.0' }, employees: [porter], settings: { ...settings, rollout: false } }), [], 'off: no alarm');
 });
 
 // Whole rounds: a fake employee on kit 1.0.0, and the kit releases GitHub lists.
@@ -270,7 +294,7 @@ function commit(file: string) {
   sh(f.checkout, 'push', '--quiet', 'origin', 'main');
 }
 
-test('a round rolls a new kit out by itself: bumped and its PR pushed; the next round merges and releases it', async () => {
+test('a round rolls a new kit out by itself: bumped, its PR opened and merged by the Steward, and released in the same round', async () => {
   const first = await round();
   assert.equal(first.error, undefined);
   assert.deepEqual(created(), [], 'on the newest kit already');
@@ -280,14 +304,20 @@ test('a round rolls a new kit out by itself: bumped and its PR pushed; the next 
   assert.equal(out.error, undefined, out.log.join('\n'));
   const r = out.results.find((x) => x.message.startsWith('rollout: '))!;
   assert.equal(r.outcome, 'done', `${r.message}\n${out.log.join('\n')}`);
-  assert.match(r.message, /^rollout: kit 1\.0\.1: 0\.4\.1 on steward\/kit-1\.0\.1 \(.{7}\): kit 1\.0\.0 → 1\.0\.1, checks passed; opened "Fake 0\.4\.1: the Steward's kit 1\.0\.1"$/);
+  assert.match(r.message, /^rollout: kit 1\.0\.1: 0\.4\.1 on steward\/kit-1\.0\.1 \(.{7}\): kit 1\.0\.0 → 1\.0\.1, checks passed; opened "Fake 0\.4\.1: the Steward's kit 1\.0\.1"; merged it$/);
   assert.equal(created().length, 1);
-  assert.equal(sh(f.origin, 'show', 'steward/kit-1.0.1:kit.json'), '{\n  "kit": "1.0.1",\n  "parts": ["node"]\n}');
+  // Merged by the Steward at the commit it pushed, its branch deleted: no one else merges the Steward's PRs.
+  const merge = gh.filter((a) => a[0] === 'pr' && a[1] === 'merge');
+  assert.deepEqual(merge.map((a) => [a[2], a.includes('--delete-branch'), a[a.indexOf('--match-head-commit') + 1]]), [['7', true, sh(f.origin, 'rev-parse', 'main')]]);
+  assert.equal(sh(f.origin, 'show', 'main:kit.json'), '{\n  "kit": "1.0.1",\n  "parts": ["node"]\n}');
+  // And released in the same round, main's head tested first (no vouch covers it).
+  assert.deepEqual(out.results.filter((x) => x.message.startsWith('release: ')).map((x) => x.message.replace(/\(.{7}\)/, '(…)')), ['release: released v0.4.1 from origin/main (…), with kit 1.0.1']);
+  assert.deepEqual(released(), ['0.4.0', '0.4.1']);
 
-  // Its PR is open: the next round merges it (a PR of the Steward's, tested by its bump), and releases the version.
+  // The next round: nothing left to do.
   const next = await round();
-  assert.deepEqual(next.results.filter((x) => x.outcome !== 'skipped').map((x) => x.message.replace(/\(.{7}\)/, '(…)')), ['merged #7', 'release: released v0.4.1 from origin/main (…), with kit 1.0.1']);
-  assert.deepEqual(created(), [], 'not bumped again: its branch pins 1.0.1 now');
+  assert.deepEqual(next.results.filter((x) => x.outcome !== 'skipped').map((x) => x.message), []);
+  assert.deepEqual(created(), [], 'not bumped again: main pins 1.0.1 now');
 });
 
 test("a bump whose checks fail is an alarm, and isn't tried again for that kit until a new commit; Bump lets it go", async () => {
@@ -320,9 +350,9 @@ test("a bump whose checks fail is an alarm, and isn't tried again for that kit u
   assert.equal(bumped.results[0].outcome, 'done', bumped.results[0].message);
   assert.deepEqual(loadRolloutFailures(), {});
   const pushed = await round();
-  assert.match(pushed.results.find((x) => x.message.startsWith('rollout: '))!.message, /opened "Fake 0\.4\.2: the Steward's kit 1\.0\.2"$/);
+  assert.match(pushed.results.find((x) => x.message.startsWith('rollout: '))!.message, /opened "Fake 0\.4\.2: the Steward's kit 1\.0\.2"; merged it$/);
   assert.deepEqual(openAlarms(), [], 'the alarm cleared');
-  await round(); // merged and released
+  assert.deepEqual(released().at(-1), '0.4.2', 'released in the same round');
 });
 
 test("a glance that misses doesn't stall a rollout: the round asks on its own and rolls the kit out", async () => {
@@ -331,11 +361,11 @@ test("a glance that misses doesn't stall a rollout: the round asks on its own an
   const out = await round();
   glanceFails = false;
   assert.match(out.log.join('\n'), /couldn't ask GitHub about everyone at once/);
-  assert.match(out.results.find((x) => x.message.startsWith('rollout: '))?.message ?? '', /opened "Fake 0\.4\.3: the Steward's kit 1\.0\.3"$/);
-  // With the PR open, the rounds after leave it to merge: no second bump.
-  const next = await round();
+  assert.match(out.results.find((x) => x.message.startsWith('rollout: '))?.message ?? '', /opened "Fake 0\.4\.3: the Steward's kit 1\.0\.3"; merged it$/);
+  assert.deepEqual(released().at(-1), '0.4.3');
+  // Merged and released: the rounds after have nothing more to roll out.
+  await round();
   assert.deepEqual(created(), []);
-  assert.ok(next.results.some((x) => x.message === 'merged #9'), JSON.stringify(next.results));
 });
 
 test('the Steward carrying an older kit than the newest: the rollout waits, and says so', async () => {
@@ -348,7 +378,7 @@ test('the Steward carrying an older kit than the newest: the rollout waits, and 
   assert.ok('rollout:waits:1.0.4' in watching, 'watched: an alarm after a day');
 });
 
-test("the Steward carrying an older kit, with the new kit's tag in its clone: the rollout hands out that kit's tools/kit.ts at once, and the next round comes sooner", async () => {
+test("the Steward carrying an older kit, with the new kit's tag in its clone: the rollout hands out that kit's tools/kit.ts at once", async () => {
   // The Steward's clone: the kit's release tag carries its kit\ and its tools/kit.ts.
   const steward = fakeEmployee(path.join(home, 'steward-clone'), { kit: null, files: { 'kit/VERSION': '1.0.5\n', 'tools/kit.ts': '// tools/kit.ts as released with kit 1.0.5\n' } });
   sh(steward.checkout, 'tag', 'kit-v1.0.5');
@@ -365,8 +395,8 @@ test("the Steward carrying an older kit, with the new kit's tag in its clone: th
     assert.match(log, /rollout: this Steward carries kit 1\.0\.4, so each bump hands out the tools\/kit\.ts released with kit 1\.0\.5/);
     assert.equal(readFileSync(path.join(home, 'work', '_kit-tool-1.0.5.ts'), 'utf8'), '// tools/kit.ts as released with kit 1.0.5\n');
     assert.equal(created().length, 1, log);
-    assert.equal(out.soon, true, 'its PR merges in a round that comes sooner');
-    assert.match(log, /the next round comes sooner: kit 1\.0\.5's PRs for Fake merge and release then/);
+    assert.match(out.results.find((x) => x.message.startsWith('rollout: '))?.message ?? '', /opened "Fake 0\.4\.4: the Steward's kit 1\.0\.5"; merged it$/, log);
+    assert.deepEqual(released().at(-1), '0.4.4', 'merged and released in the same round');
   } finally {
     writeFileSync(file, before);
   }

@@ -10,7 +10,7 @@ export type Owner = () => string | null;
 export const realOwner: Owner = () => (process.env.NODE_TEST_CONTEXT ? null : githubOwner());
 
 /** Said wherever the team is used and there is none. */
-export const NO_TEAM = "Team is empty in Settings and gh isn't signed in (gh auth login), so there is no team: only the Steward's own PRs are merged";
+export const NO_TEAM = "Team is empty in Settings and gh isn't signed in (gh auth login), so there is no team: no one's vouch is trusted, and no work is filed for the Wright";
 
 export interface Team {
   team: string[];

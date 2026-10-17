@@ -28,7 +28,6 @@ const at = (h: number) => new Date(T0 + h * HOUR);
 const empty = () => ({ at: null, watching: {}, open: [], cleared: [] });
 const cond = (id: string, afterMs: number, more = {}) => ({ id, who: 'porter', title: `Title of ${id}`, detail: ['a fact'], afterMs, ...more });
 const settings = structuredClone(DEFAULT_SETTINGS);
-const porter = DEFAULT_EMPLOYEES.find((e) => e.id === 'porter')!;
 const roundResult = (more = {}) => ({ stage: 'round' as const, started: at(0).toISOString(), finished: at(0).toISOString(), kit: null, asked: {}, results: [], log: [], ...more });
 
 test('a condition is an alarm once it has lasted its while, raised once, and cleared when it goes', () => {
@@ -64,17 +63,50 @@ test('dismissed, an alarm stays open but quiet until it clears; back again, it i
   assert.deepEqual([r.raised.length, r.state.open[0].dismissedAt], [1, undefined]);
 });
 
-test('from the round: a PR held a while, a release the rounds gave up on, a round that cannot run', () => {
-  const held = [{ employee: porter, prs: [{ number: 12, url: 'https://github.com/Jcollier0120/Porter/pull/12', title: 'Porter 0.4.11: a thing', why: 'a draft', draft: true }] }];
+test('from the round: a release the rounds gave up on, a round that cannot run', () => {
   const round = roundResult({ error: 'gh: not signed in', results: [{ id: 'porter', name: 'Porter', outcome: 'failed', message: 'release: npm run release failed: no network' }] });
-  const c = roundConditions({ round, held, failedReleases: { porter: 'abc1234' }, employees: DEFAULT_EMPLOYEES, settings });
+  const c = roundConditions({ round, failedReleases: { porter: 'abc1234' }, employees: DEFAULT_EMPLOYEES, settings });
   const by = (id: string) => c.find((x) => x.id === id)!;
-  const w = by('waiting:Jcollier0120/Porter#12');
-  assert.deepEqual([w.afterMs, w.url, w.title], [24 * HOUR, 'https://github.com/Jcollier0120/Porter/pull/12', 'Porter #12 has waited 24 hours or more: a draft']);
-  assert.match(w.detail.join('\n'), /mark it ready/);
   const rel = by('release:porter:abc1234');
   assert.deepEqual([rel.afterMs, rel.detail[0]], [0, 'npm run release failed: no network']);
   assert.equal(by('round').afterMs, HOUR);
+  assert.ok(!c.some((x) => /^(waiting|blocking|deadkit|queue|build):/.test(x.id)), 'the Steward merges no PRs: none is an alarm');
+});
+
+test("from the round: main's kit held by its trial, at once, naming each failing agent and what failed", () => {
+  const round = roundResult();
+  const heldKit = {
+    kit: '2.79.0',
+    commit: 'f00dfacecafe',
+    failed: [
+      { id: 'porter', name: 'Porter', message: 'npm test failed: 2 tests', main: '0123456789abcdef', errors: ['not ok 1 - feeds', 'not ok 2 - pages'] },
+      { id: 'reeve', name: 'Reeve', message: 'tsc failed: TS2307' },
+    ],
+    passed: 5,
+    at: at(-1).toISOString(),
+  };
+  const c = roundConditions({ round, heldKit, failedReleases: {}, employees: DEFAULT_EMPLOYEES, settings });
+  const k = c.find((x) => x.id === 'kittrial:2.79.0')!;
+  assert.ok(k, 'one alarm for the held kit');
+  assert.deepEqual([k.who, k.afterMs, k.since], ['steward', 0, at(-1).toISOString()]);
+  assert.match(k.title, /Porter, Reeve/);
+  const detail = k.detail.join('\n');
+  assert.match(detail, /Porter at 0123456: npm test failed: 2 tests/);
+  assert.match(detail, /not ok 1 - feeds/);
+  assert.match(detail, /Reeve: tsc failed: TS2307/);
+  assert.deepEqual(c.filter((x) => x.id.startsWith('kittrial:')).length, 1);
+  assert.deepEqual(roundConditions({ round, heldKit: null, failedReleases: {}, employees: DEFAULT_EMPLOYEES, settings }).filter((x) => x.id.startsWith('kittrial:')), [], 'none held: no alarm');
+});
+
+test('a kit PR a build left out (stage "build", kept from before Steward 0.36.119) is no alarm; a failed bump still is', () => {
+  const s = structuredClone(settings);
+  s.rollout = true;
+  const failedRollouts = {
+    porter: { kit: '2.78.0', head: 'abc1234', stage: 'build' as const, message: 'its build failed' },
+    reeve: { kit: '2.78.0', head: 'def5678', stage: 'bump' as const, message: 'npm test failed' },
+  };
+  const c = roundConditions({ round: roundResult(), failedRollouts, failedReleases: {}, employees: DEFAULT_EMPLOYEES, settings: s });
+  assert.deepEqual(c.filter((x) => x.id.startsWith('rollout:')).map((x) => x.id), ['rollout:reeve:2.78.0']);
 });
 
 test("from Manor: an update it couldn't install, its checks failing, its page down", () => {
@@ -108,7 +140,7 @@ test('after a round, a port clash in Manor\'s summary is an alarm once it has la
     'http://m/api/state': { updates: { items: [] } },
     'http://m/api/summary': { ports: [{ port: 19898, agent: 'developer-herald', answeredBy: 'chamberlain', problem: "chamberlain answers there, so Developer Herald's page can't start." }] },
   };
-  const run = (min: number) => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async () => {}, now: new Date(at(0).getTime() + min * 60_000), manorUrl: 'http://m' });
+  const run = (min: number) => watchAlarms({ settings: s, round: roundResult(), failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async () => {}, now: new Date(at(0).getTime() + min * 60_000), manorUrl: 'http://m' });
   assert.deepEqual((await run(0)).open, [], 'not at once: a page may be restarting');
   assert.deepEqual((await run(16)).open.map((a) => a.id), ['port:19898']);
   delete pages['http://m/api/summary'];
@@ -135,7 +167,7 @@ test('after a round: everything reconciled into alarms.json, and one toast for w
   const pages = { 'http://m/api/state': { updates: { items: [{ id: 'miller', name: 'Miller', error: 'EBUSY' }] } }, 'http://127.0.0.1:19595/api/survey': { findings: [] }, 'http://127.0.0.1:19797/api/work': { needsYou: [] } } as Record<string, unknown>;
   const s = structuredClone(settings);
   const deps = (h: number) => ({ getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async (t: string, b: string) => void toasts.push([t, b]), now: at(h), manorUrl: 'http://m' });
-  const run = (h: number) => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: { porter: 'abc1234' }, employees: DEFAULT_EMPLOYEES, log: () => {} }, deps(h));
+  const run = (h: number) => watchAlarms({ settings: s, round: roundResult(), failedReleases: { porter: 'abc1234' }, employees: DEFAULT_EMPLOYEES, log: () => {} }, deps(h));
   await run(0);
   assert.deepEqual(toasts, [['Steward: this needs you', "Porter's release failed at abc1234, and the rounds won't try it again"]], 'the release at once; the install waits two hours');
   await run(1);
@@ -220,7 +252,7 @@ test("from the Bailiff: Claude Code unusable, or a review failing twice, at once
   const asked: string[] = [];
   const s = structuredClone(settings);
   const pages: Partial<AgentPages> = {};
-  const watch = () => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { pages, getJson: async (u: string) => (asked.push(u), u.endsWith('/api/reviews') ? { needsYou: [{ id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: 'not signed in', url: 'u' }] } : { error: 'none' }), toast: async () => {}, now: at(0), manorUrl: null });
+  const watch = () => watchAlarms({ settings: s, round: roundResult(), failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { pages, getJson: async (u: string) => (asked.push(u), u.endsWith('/api/reviews') ? { needsYou: [{ id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: 'not signed in', url: 'u' }] } : { error: 'none' }), toast: async () => {}, now: at(0), manorUrl: null });
   assert.equal(agentPages().bailiff, '', 'not installed here: not read');
   await watch();
   assert.ok(!asked.some((u) => u.includes('19999')));
@@ -290,7 +322,7 @@ test("watching: Reeve's alerts are read only where he is installed, raised at on
   const asked: string[] = [];
   const s = structuredClone(settings);
   const deps = (installed: boolean, answer: unknown = REEVE_ALERTS) => ({ pages: { manor: '', surveyor: '', wright: '', reeve: 'http://127.0.0.1:18383' }, getJson: async (u: string) => (asked.push(u), u === 'http://127.0.0.1:18383/api/alerts' ? answer : { error: 'none' }), toast: async (t: string, b: string) => void toasts.push([t, b]), now: at(12), reeveInstalled: () => installed });
-  const watch = (d: ReturnType<typeof deps>) => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, d);
+  const watch = (d: ReturnType<typeof deps>) => watchAlarms({ settings: s, round: roundResult(), failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, d);
   let st = await watch(deps(false));
   assert.deepEqual([asked, st.open, toasts], [[], [], []], 'not installed: not read');
   st = await watch(deps(true, { error: 'HTTP 404' }));
@@ -318,7 +350,7 @@ test("the Seneschal's jams: one alarm each, at once, read only where it is insta
   const asked: string[] = [];
   const s = structuredClone(settings);
   const deps = (installed: boolean) => ({ pages: { manor: '', surveyor: '', wright: '', reeve: '', seneschal: 'http://127.0.0.1:18393' }, getJson: async (u: string) => (asked.push(u), u === 'http://127.0.0.1:18393/api/alerts' ? SENESCHAL_JAMS : { error: 'none' }), toast: async () => {}, now: at(12), seneschalInstalled: () => installed });
-  const watch = (d: ReturnType<typeof deps>) => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, d);
+  const watch = (d: ReturnType<typeof deps>) => watchAlarms({ settings: s, round: roundResult(), failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, d);
   let st = await watch(deps(false));
   assert.deepEqual([asked, st.open], [[], []], 'not installed (or no Developer Pro): not read');
   st = await watch(deps(true));
@@ -345,7 +377,7 @@ test("while this PC is offline, what is only the network's is no alarm; everythi
     { id: 'herald.round', subject: 'herald', severity: 'problem', title: "Herald's round failed 4 times", evidence: ['getaddrinfo ENOTFOUND www.nvidia.com'], since: at(-24).toISOString() },
     { id: 'pc.disk.C', subject: 'pc', severity: 'problem', title: 'Drive C: has 4.0 GB free (1%)', evidence: ['C: 4.0 GB free'], since: at(-24).toISOString() },
   ] } } as Record<string, unknown>;
-  const watch = (online: boolean, h: number) => watchAlarms({ settings: structuredClone(settings), round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async (t: string) => void toasts.push(t), now: at(h), manorUrl: 'http://m', pages: { surveyor: 'http://127.0.0.1:19595' }, surveyorInstalled: () => true, online: async () => online });
+  const watch = (online: boolean, h: number) => watchAlarms({ settings: structuredClone(settings), round: roundResult(), failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async (t: string) => void toasts.push(t), now: at(h), manorUrl: 'http://m', pages: { surveyor: 'http://127.0.0.1:19595' }, surveyorInstalled: () => true, online: async () => online });
   let state = await watch(false, 0);
   assert.deepEqual(state.open.map((a) => a.id), ['survey:pc.disk.C'], 'offline: only the disk');
   assert.equal(toasts.length, 1);

@@ -36,15 +36,9 @@ test("nobody's employees, repository or clone are built in: they start empty, an
   assert.deepEqual(normalizeSettings({}).settings.employees, []);
   const text = JSON.stringify([DEFAULT_SETTINGS, SETTINGS_SPEC.schema]);
   assert.doesNotMatch(text, /jcollier|C:\\\\Projects/i, "no one's account or folders in the defaults or the page's hints");
-  assert.equal(DEFAULT_SETTINGS.releaseAfterMerge, false, 'release is a stage of its own, unless Settings say otherwise');
-  assert.deepEqual([DEFAULT_SETTINGS.byItself, DEFAULT_SETTINGS.roundMinutes], [false, 10], 'it merges and releases by itself only once the person says yes; then a round every 10 minutes on duty');
+  assert.deepEqual([DEFAULT_SETTINGS.byItself, DEFAULT_SETTINGS.roundMinutes], [false, 10], 'it builds and releases by itself only once the person says yes; then a round every 10 minutes on duty');
   assert.equal(DEFAULT_SETTINGS.releasesCastellan, false, "a new install releases nothing of Castellan's");
   assert.deepEqual([normalizeSettings({ roundMinutes: 1 }).settings.roundMinutes, normalizeSettings({ byItself: false }).settings.byItself], [2, false]);
-  assert.deepEqual(
-    [{}, { mergeMinAgeMinutes: 0 }, { mergeMinAgeMinutes: 25 }, { mergeMinAgeMinutes: -3 }, { mergeMinAgeMinutes: 'soon' }].map((r) => normalizeSettings(r).settings.mergeMinAgeMinutes),
-    [10, 0, 25, 0, 10],
-    'a ready PR merges once it is 10 minutes old, unless Settings say otherwise',
-  );
   assert.deepEqual(DEFAULT_SETTINGS.team, [], 'none named: the account gh is signed in as (team.ts)');
   assert.equal(DEFAULT_SETTINGS.workRoot, path.join(home, 'work'));
 });
@@ -59,6 +53,40 @@ test('an employee named with nothing more is a Node agent on the kit, with no re
   assert.deepEqual(saved, STAFF, 'a full list in settings.json is kept as it is');
   const off = normalizeSettings({ employees: [{ id: 'porter', usesKit: false, branch: 'master' }] }).settings.employees[0];
   assert.deepEqual([off.usesKit, off.branch], [false, 'master']);
+});
+
+test("Settings from before the Steward stopped merging PRs (0.36.119) still load and save: their fields hidden, each saying it's no longer used; the build pipeline's bisectRuns gone", async () => {
+  const field = (key: string, fields = SETTINGS_SPEC.schema) => fields.find((x) => x.key === key);
+  const fieldsOf = (key: string) => {
+    const g = field(key);
+    assert.ok(g && (g.kind === 'group' || g.kind === 'records'), key);
+    return g.fields;
+  };
+  const gone = [
+    ...['mergeMinAgeMinutes', 'releaseAfterMerge', 'catchUp', 'mergeTrain', 'mergeSelf'].map((k) => [k, field(k)] as const),
+    ...['merges', 'whenReady'].map((k) => [`employees.${k}`, field(k, fieldsOf('employees'))] as const),
+    ['alarms.blockingHours', field('blockingHours', fieldsOf('alarms'))] as const,
+    ['buildPipeline.bisectRuns', field('bisectRuns', fieldsOf('buildPipeline'))] as const,
+  ];
+  for (const [key, f] of gone) {
+    assert.equal(f?.hidden, true, `${key}: never drawn`);
+    assert.match(f?.help ?? '', /^No longer (used|run)/, key);
+  }
+  assert.equal(field('byItself')?.label, 'Builds and releases by itself');
+  assert.match(field('byItself')?.help ?? '', /at each build time it releases what is new on each repository's branch. Whoever writes a PR merges it once vouched/);
+  assert.doesNotMatch(field('team')?.help ?? '', /ready PRs are merged/);
+  assert.equal('bisectRuns' in DEFAULT_SETTINGS.buildPipeline, false);
+  // Still read from an older settings.json, as they were, so nothing it kept is lost; the pipeline's bisectRuns left out.
+  const old = normalizeSettings({ releaseAfterMerge: true, catchUp: false, mergeTrain: false, mergeSelf: false, mergeMinAgeMinutes: 25, buildPipeline: { times: ['08:00'], bisectRuns: 3 } }).settings;
+  assert.deepEqual([old.releaseAfterMerge, old.catchUp, old.mergeTrain, old.mergeSelf, old.mergeMinAgeMinutes], [true, false, false, false, 25]);
+  assert.deepEqual([{}, { mergeMinAgeMinutes: -3 }, { mergeMinAgeMinutes: 'soon' }].map((r) => normalizeSettings(r).settings.mergeMinAgeMinutes), [10, 0, 10]);
+  assert.equal('bisectRuns' in old.buildPipeline, false);
+  // An older Manor sends the whole form, its hidden fields too: saved all the same.
+  const r = await save({ releaseAfterMerge: true, mergeMinAgeMinutes: 5, buildPipeline: { ...DEFAULT_SETTINGS.buildPipeline, bisectRuns: 2 } });
+  assert.equal(r.json.ok, true, JSON.stringify(r.json));
+  assert.equal(loadSettings().mergeMinAgeMinutes, 5);
+  assert.equal('bisectRuns' in loadSettings().buildPipeline, false);
+  rmSync(settingsFile());
 });
 
 test("an older settings.json keeps its repository and clone; only missing ones take the new empty defaults", () => {
@@ -87,12 +115,11 @@ test("a team account that isn't one, or one listed twice in any case, is refused
   assert.match(r.json.errors['team.2'], /Listed twice/);
 });
 
-test('a good change is saved and read back; release after merge can be switched on, and the team grown', async () => {
-  const r = await save({ releaseAfterMerge: true, parallel: 4, team: ['octocat', 'app/claude'] });
+test('a good change is saved and read back, and the team grown', async () => {
+  const r = await save({ parallel: 4, team: ['octocat', 'app/claude'] });
   assert.equal(r.status, undefined);
   assert.equal(r.json.ok, true);
   const s = loadSettings();
-  assert.equal(s.releaseAfterMerge, true);
   assert.equal(s.parallel, 4);
   assert.deepEqual(s.team, ['octocat', 'app/claude']);
   assert.equal(s.employees.length, 0);
@@ -192,7 +219,7 @@ test("with no settings.json at all, the staff table and its clones are written t
     assert.equal(m.notes.length, 2);
     assert.match(m.notes.join(' '), /Gone was left out: its clone isn't on this PC/);
     assert.match(m.notes.join(' '), /Dotty: couldn't tell Test it/);
-    const c = roundConditions({ round: { stage: 'round', at: '', results: [] } as any, held: [], failedReleases: {}, migrated: m, employees: s.employees, settings: s });
+    const c = roundConditions({ round: { stage: 'round', at: '', results: [] } as any, failedReleases: {}, migrated: m, employees: s.employees, settings: s });
     assert.deepEqual(c.map((x) => x.id), [`settings:migrated:${m.at}`]);
     // Once only: settings.json now names its employees, and a later read keeps what's in it.
     writeFileSync(settingsFile(), JSON.stringify({ ...written, employees: [written.employees[0]] }));
@@ -206,7 +233,7 @@ test("with no settings.json at all, the staff table and its clones are written t
   }
 });
 
-test("Manor's internal staff are released here: built and installed from the clone, never published; a GitHub release is none of theirs", async () => {
+test("Manor's internal staff are released here: built and installed from the clone, never published", async () => {
   const manor = path.join(home, 'manor');
   mkdirSync(path.join(manor, 'app'), { recursive: true });
   // This PC's own (Manor 0.6.4 and later): staff.local.json, which Manor never ships; an older Manor's own staff.json too.
@@ -224,10 +251,6 @@ test("Manor's internal staff are released here: built and installed from the clo
     assert.equal(releasedHere(porter), true);
     assert.equal(releasedHere(dotty), false, 'published with -Publish');
     assert.equal(releasedHere({ release: 'npm run release -- --publish' }), false);
-    const { installOne } = await import('../src/stages/aftermerge.ts');
-    const r = await installOne({ run: async () => { throw new Error('no GitHub look for one released here'); } } as any, porter);
-    assert.equal(r.outcome, 'done');
-    assert.match(r.message, /installed by its release, built here from its clone/);
   } finally {
     if (before === undefined) delete process.env.MANOR_HOME;
     else process.env.MANOR_HOME = before;

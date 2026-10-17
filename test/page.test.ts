@@ -125,10 +125,10 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
     rows: [row({}), row({ id: 'porter', name: 'Porter', repo: 'octocat/porter', status: 'here', holder: 'this PC', pinned: true }), row({ id: 'away', name: 'Away', repo: 'octocat/away', status: 'unreachable', holder: '', note: 'releasing Away waits until this PC can reach its remote' })],
   };
   const withTurns = (await renderStewardBody())({ ...body, turns, claimClashes: ['octocat/clerk 0.4.13 was claimed on another PC too'] });
-  assert.match(withTurns, /Merging and releasing for Clerk: done by <strong>DESKTOP-ABC<\/strong>/);
+  assert.match(withTurns, /Releasing for Clerk: done by <strong>DESKTOP-ABC<\/strong>/);
   assert.match(withTurns, /data-post="\/api\/turns\/take"[^>]*>Do it here</);
   assert.match(withTurns, /data-post="\/api\/turns\/take"[^>]*>Keep it on this PC</);
-  assert.match(withTurns, /Merging and releasing for Porter: this PC \(kept there\)/);
+  assert.match(withTurns, /Releasing for Porter: this PC \(kept there\)/);
   assert.match(withTurns, />Unpin</);
   assert.match(withTurns, /Releasing Away waits until this PC can reach its remote\./);
   assert.match(withTurns, /octocat\/clerk 0\.4\.13 was claimed on another PC too\./);
@@ -137,15 +137,15 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const inTable = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [clerk] }, round: { ...body.round, repos: true }, turns });
   assert.match(inTable, /<th>Release PC<\/th>/);
   assert.match(inTable, /<td><strong>DESKTOP-ABC<\/strong><div class="turn-cell">.*>Do it here</);
-  assert.doesNotMatch(inTable, /Merging and releasing for Clerk/, 'a row in the table says it there');
-  assert.match(inTable, /Merging and releasing for Porter: this PC \(kept there\)/, 'a turn with no row, under the table');
+  assert.doesNotMatch(inTable, /Releasing for Clerk/, 'a row in the table says it there');
+  assert.match(inTable, /Releasing for Porter: this PC \(kept there\)/, 'a turn with no row, under the table');
   assert.doesNotMatch(html, /<h2[^>]*>Release PC/);
   // The Steward's own repository: a row of the table, with its release PC in it, and no stage ticks it.
   const self = { ...rows[0], id: 'steward', name: 'Steward', repo: 'octocat/steward', self: true };
   const selfTurn = row({ id: 'steward', name: 'Steward', repo: 'octocat/steward', status: 'here', holder: 'this PC' });
   const withSelf = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [rows[0], self] }, round: { ...body.round, repos: true }, turns: { at: null, rows: [selfTurn] } });
   assert.match(withSelf, /href="https:\/\/github\.com\/octocat\/steward"/);
-  assert.doesNotMatch(withSelf, /Merging and releasing for Steward/, 'said in its row, not under the table');
+  assert.doesNotMatch(withSelf, /Releasing for Steward/, 'said in its row, not under the table');
   assert.match(withSelf, /name="employees"[^>]*value="fake"/);
   assert.doesNotMatch(withSelf, /name="employees"[^>]*value="steward"/, 'its rounds merge and release it');
   // One box ticks every repository, or none: the Steward's own row isn't counted.

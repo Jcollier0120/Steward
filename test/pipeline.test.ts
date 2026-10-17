@@ -1,21 +1,23 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// The build pipeline: rounds that merge and release only at set build times, each repository released once a build, and
-// fragments (changes/<branch>.md) that pick no version, given the next release's as they merge.
+// The build pipeline: rounds that release only at set build times, each repository's main released once a build, and
+// fragments (changes/<branch>.md) that pick no version, stamped on main by the build into the next release's.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-pipeline-'));
 process.env.STEWARD_HOME = home;
+process.env.WRIGHT_HOME = path.join(home, 'no-wright');
+process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { boardedUrgent, DEFAULT_PIPELINE, endRound, kitRides, lastBuildTime, lateLine, nextBuildTime, normalizePipeline, pipelineMode, pipelineView, urgentKey } = await import('../src/pipeline.ts');
+const { boardedUrgent, DEFAULT_PIPELINE, endRound, kitRides, lastBuildTime, lateLine, loadPipeline, nextBuildTime, normalizePipeline, pipelineMode, pipelineView, savePipeline, urgentKey } = await import('../src/pipeline.ts');
 const { addToEntry, composeEntry, CHANGES_README, changesReadme, fragmentBody, fragmentFiles, fragmentFor } = await import('../src/entries.ts');
-const { stamp } = await import('../src/stages/stamp.ts');
-const { prVersions } = await import('../src/stages/merge.ts');
-const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
-type PrInfo = import('../src/stages/staff.ts').PrInfo;
+const { stampBranch, stampMain } = await import('../src/stages/stamp.ts');
+const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
+const { runStage } = await import('../src/steward.ts');
+const { ctxFor, employee, fakeEmployee, mergesOf, ok, runner, sh } = await import('./helpers.ts');
 type PipelineState = import('../src/pipeline.ts').PipelineState;
 
 /** Three builds a day, as before the defaults were four. */
@@ -33,31 +35,34 @@ test("the pipeline's settings: no switch, four builds a day to start with, each 
   assert.deepEqual(normalizePipeline({ on: false }), DEFAULT_PIPELINE);
   assert.deepEqual(normalizePipeline({ on: false, times: ['07:30'] }), { ...DEFAULT_PIPELINE, times: ['07:30'] });
   const p = normalizePipeline({ on: true, times: ['18:00', '8:00', 'noon', '08:00', '24:00'], days: ['mon', 'fri', 'xyz'], kit: 'first', windowMinutes: 9999 });
-  assert.deepEqual(p, { times: ['08:00', '18:00'], days: ['mon', 'fri'], kit: 'first', windowMinutes: 60, bisectRuns: 3 });
+  assert.deepEqual(p, { times: ['08:00', '18:00'], days: ['mon', 'fri'], kit: 'first', windowMinutes: 60 });
   assert.deepEqual(normalizePipeline({ times: ['nope'], kit: 'sometimes', windowMinutes: 'x' }).times, DEFAULT_PIPELINE.times);
   assert.equal(normalizePipeline({ windowMinutes: 1 }).windowMinutes, 15);
   // A build takes half an hour unless Settings say otherwise, and never more than an hour; the old default of two hours,
   // stored when the pipeline was turned on, was never chosen, and reads as today's.
   assert.equal(DEFAULT_PIPELINE.windowMinutes, 30);
   assert.deepEqual([45, 60, 90, 120, 360].map((windowMinutes) => normalizePipeline({ windowMinutes }).windowMinutes), [45, 60, 60, 30, 60]);
-  assert.equal(DEFAULT_PIPELINE.bisectRuns, 3);
-  assert.deepEqual([0, '5', 99, 1.5].map((bisectRuns) => normalizePipeline({ bisectRuns }).bisectRuns), [0, 5, 6, 3]);
+  // Finding the PR that broke a build went with the merges: a settings.json that keeps bisectRuns loads, and it is left out.
+  assert.equal('bisectRuns' in DEFAULT_PIPELINE, false);
+  assert.deepEqual(normalizePipeline({ bisectRuns: 5 }), DEFAULT_PIPELINE);
 });
 
-test("Settings: no switch shown; Manor's save of the group with its old switch, off, is taken, and the switch left out", async () => {
+test("Settings: no switch shown; Manor's save of the group with its old switch, off, and its old bisectRuns, is taken, both left out", async () => {
   const { SETTINGS_SPEC, loadSettings } = await import('../src/settings.ts');
   const { saveSettingsReply, schemaFor } = await import('../src/kit/settings-kit.ts');
   const group = SETTINGS_SPEC.schema.find((f) => f.key === 'buildPipeline');
   assert.ok(group && group.kind === 'group');
   const on = group.fields.find((f) => f.key === 'on');
   assert.equal(on?.hidden && on.optional, true, 'kept for older Manors, never drawn');
+  const bisect = group.fields.find((f) => f.key === 'bisectRuns');
+  assert.equal(bisect?.hidden && bisect.optional, true, 'kept for older Manors, never drawn');
   assert.doesNotMatch(group.help ?? '', /\bOff\b/);
   assert.ok(schemaFor(SETTINGS_SPEC.schema, true).some((f) => f.key === 'buildPipeline'));
   const r = await saveSettingsReply(SETTINGS_SPEC, { values: { buildPipeline: { on: false, times: ['07:00', '19:00'], days: ['mon', 'tue', 'wed', 'thu', 'fri'], kit: 'every', windowMinutes: 45, bisectRuns: 3 } } }, true);
   assert.equal((r.json as { ok?: boolean }).ok, true, JSON.stringify(r.json));
   const stored = JSON.parse(readFileSync(SETTINGS_SPEC.file(), 'utf8'));
   assert.equal('on' in stored.buildPipeline, false);
-  assert.deepEqual(loadSettings().buildPipeline, { times: ['07:00', '19:00'], days: ['mon', 'tue', 'wed', 'thu', 'fri'], kit: 'every', windowMinutes: 45, bisectRuns: 3 });
+  assert.deepEqual(loadSettings().buildPipeline, { times: ['07:00', '19:00'], days: ['mon', 'tue', 'wed', 'thu', 'fri'], kit: 'every', windowMinutes: 45 });
   rmSync(SETTINGS_SPEC.file(), { force: true });
 });
 
@@ -100,8 +105,11 @@ test('there is no off: a first round builds at once for the build time gone by; 
   assert.equal(m.kind, 'between');
   if (m.kind === 'between') {
     assert.deepEqual(m.next, at(13));
-    assert.match(m.line, /ready PRs merge ahead of the next build, at 13:00, and are released at it/);
+    assert.match(m.line, /between builds: PRs are merged by whoever wrote them once vouched, and the next build, at 13:00,? releases each repository's main/);
   }
+  const never = pipelineMode({ ...THREE, days: [] }, done, at(10));
+  assert.equal(never.kind === 'between' && never.next, null);
+  assert.match((never as { line: string }).line, /Settings name no build time to come/);
 });
 
 test('a build begins at its time, once, even when the PC slept through it; it goes on until it settles or its time runs out', () => {
@@ -111,7 +119,7 @@ test('a build begins at its time, once, even when the PC slept through it; it go
   assert.equal(first.fresh, true);
   assert.equal(first.run.due, at(8).toISOString());
   assert.equal(first.run.by, 'schedule');
-  // Its first round ends with something still settling: the build stays open.
+  // Its first round ends with something still settling (a kit's rollout, its own PR merged): the build stays open.
   let state = endRound(none, first.run, { merged: ['porter #12'], released: [], failed: [], closed: false, now: at(8, 10) });
   const again = pipelineMode(THREE, state, at(8, 12));
   assert.equal(again.kind === 'build' && !again.fresh && !again.closing && again.run.rounds === 1, true);
@@ -169,19 +177,19 @@ test("the kit goes into every build, or only the day's first", () => {
   assert.equal(kitRides(THREE, state, { ...run(10), by: 'urgent' }), false, "an urgent fix's doesn't: the next build takes it");
 });
 
-test("an urgent fix between builds begins a build of its own, for its repository; once at its head; a build time's takes it with the rest", () => {
+test("an urgent fix on main between builds begins a build of its own, for its repository; once at its head; a build time's takes it with the rest", () => {
   const done: PipelineState = { open: null, builds: [{ due: at(8).toISOString(), by: 'schedule', started: at(8).toISOString(), finished: at(8, 40).toISOString(), rounds: 3, merged: [], released: [], failed: [] }] };
-  const fix = { id: 'porter', number: 12, head: 'a1b2c3' };
-  const m = pipelineMode(THREE, done, at(10), { urgent: [fix, { id: 'porter', number: 14, head: 'd4e5f6' }] });
+  const fix = { id: 'porter', head: 'a1b2c3' };
+  const m = pipelineMode(THREE, done, at(10), { urgent: [fix, { id: 'reeve', head: 'd4e5f6' }] });
   assert.equal(m.kind, 'build');
   if (m.kind !== 'build') return;
-  assert.deepEqual([m.fresh, m.run.by, m.run.due, m.run.employees, m.run.urgent], [true, 'urgent', at(10).toISOString(), ['porter'], ['porter #12 a1b2c3', 'porter #14 d4e5f6']]);
-  assert.equal(urgentKey(fix), 'porter #12 a1b2c3');
+  assert.deepEqual([m.fresh, m.run.by, m.run.due, m.run.employees, m.run.urgent], [true, 'urgent', at(10).toISOString(), ['porter', 'reeve'], ['porter a1b2c3', 'reeve d4e5f6']]);
+  assert.equal(urgentKey(fix), 'porter a1b2c3');
   // A build time come: its build, for every repository, takes the urgent fix with the rest.
   const due = pipelineMode(THREE, done, at(13, 1), { urgent: [fix] });
   assert.equal(due.kind === 'build' && due.run.by === 'schedule' && !due.run.employees && !due.run.urgent, true);
-  // Kept once it ends: that PR at that head never boards again; at a new head it may.
-  const state = endRound(done, m.run, { merged: ['porter #12'], released: ['porter v0.4.28'], failed: [], closed: true, now: at(10, 20) });
+  // Kept once it ends: main at that head never builds as urgent again; at a new head it may.
+  const state = endRound(done, m.run, { merged: [], released: ['porter v0.4.28'], failed: [], closed: true, now: at(10, 20) });
   assert.equal(boardedUrgent(state).has(urgentKey(fix)), true);
   assert.equal(boardedUrgent(state).has(urgentKey({ ...fix, head: 'f00' })), false);
   assert.equal(boardedUrgent({ open: m.run, builds: [] }).has(urgentKey(fix)), true, 'while its build is open too');
@@ -230,54 +238,63 @@ test("a fragment joins the waiting version's entry, or starts the next one; a mi
   assert.equal(addToEntry(log.replace(/\n/g, '\r\n'), 'Fake', '0.4.1', 'x').includes('\r\n'), true, 'its line endings kept');
 });
 
-/** A fake repository on changes/, main at 0.4.1, with a PR that adds a fragment. */
-function pending(name: string, o: { entry?: string } = {}) {
+/**
+ * A fake repository on changes/: main at 0.4.1 (its entry "Something else."), then a PR its author merged that brings a
+ * fragment, unstamped. gh stands in: the stamp's PR is opened as #31, and merging it moves origin's main to its head.
+ */
+function merged(name: string, o: { entry?: string } = {}) {
   const dir = path.join(home, name);
   const { checkout, origin } = fakeEmployee(dir, { version: '0.4.0', files: { [CHANGES_README]: changesReadme('Fake'), 'CHANGELOG.md': "# Fake's changelog\n\n## 0.4.0\n\n**First.**\n" } });
   const write = (f: string, t: string) => (mkdirSync(path.dirname(path.join(checkout, f)), { recursive: true }), writeFileSync(path.join(checkout, f), t));
   const read = (f: string) => readFileSync(path.join(checkout, f), 'utf8');
-  sh(checkout, 'switch', '--quiet', '-c', 'claude/feature');
-  write('src/feature.ts', 'export const feature = 1;\n');
-  write(fragmentFor('claude/feature'), o.entry ?? ENTRY('A feature.'));
-  sh(checkout, 'add', '-A');
-  sh(checkout, 'commit', '--quiet', '-m', 'A feature');
-  sh(checkout, 'push', '--quiet', 'origin', 'claude/feature');
-  const headOid = sh(checkout, 'rev-parse', 'HEAD');
-  sh(checkout, 'switch', '--quiet', 'main');
   for (const f of ['package.json', 'package-lock.json', 'src/app.ts']) write(f, read(f).split('0.4.0').join('0.4.1'));
   write('CHANGELOG.md', read('CHANGELOG.md').replace('## 0.4.0', `## 0.4.1\n\n${ENTRY('Something else.')}\n## 0.4.0`));
   sh(checkout, 'add', '-A');
   sh(checkout, 'commit', '--quiet', '-m', 'Fake 0.4.1: something else');
+  write('src/feature.ts', 'export const feature = 1;\n');
+  write(fragmentFor('claude/feature'), o.entry ?? ENTRY('A feature.'));
+  sh(checkout, 'add', '-A');
+  sh(checkout, 'commit', '--quiet', '-m', 'A feature (#30)');
   sh(checkout, 'push', '--quiet', 'origin', 'main');
-  const pr: PrInfo = { number: 31, title: 'Fake: a feature', url: 'https://github.com/Jcollier0120/Fake/pull/31', head: 'claude/feature', base: 'main', author: 'Jcollier0120', whose: 'team', headOid, after: null, afterError: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'none', labels: [], changed: 10, files: [], fork: false };
+  const head = sh(checkout, 'rev-parse', 'HEAD');
+  const r = runner((args) => {
+    if (args[0] === 'api' && /\/statuses\?/.test(args[1])) return ok([]);
+    if (args[0] === 'pr' && args[1] === 'create') return ok('https://github.com/Jcollier0120/Fake/pull/31\n');
+    if (args[0] === 'pr' && args[1] === 'merge') {
+      sh(origin, 'update-ref', 'refs/heads/main', args[args.indexOf('--match-head-commit') + 1]);
+      return ok('');
+    }
+  });
   const e = employee(checkout);
-  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: runner(() => ok('')).run, neutralDir: dir });
-  const at = (f: string) => sh(origin, 'show', `refs/heads/claude/feature:${f}`);
-  return { pr, e, ctx, at, origin };
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
+  const at = (f: string) => sh(origin, 'show', `refs/heads/main:${f}`);
+  return { e, ctx, at, origin, head, gh: r.gh };
 }
 
-test("a fragment PR sets no version of its own: it isn't queued, and merges as one that leaves the version alone", async () => {
-  const p = pending('frag-versions');
-  const v = await prVersions(p.ctx, p.e, p.pr);
-  assert.deepEqual(v.fragments, ['changes/claude-feature.md']);
-  assert.equal(v.entries, undefined);
-  assert.equal(v.head, v.from);
-});
-
-test('stamped after a release: the next patch, its entry its own', async () => {
-  const p = pending('frag-released');
-  const s = await stamp(p.ctx, p.e, p.pr, { released: ['0.4.0', '0.4.1'], taken: [], carry: null });
+test("main's fragment stamped at a build after a release: the next patch, its entry its own, through a PR the Steward opens and merges itself", async () => {
+  const p = merged('frag-released');
+  const s = await stampMain(p.ctx, p.e, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.ok(s);
   assert.equal(s.done, true, s.note);
   assert.equal(s.version, '0.4.2');
+  assert.equal(s.url, 'https://github.com/Jcollier0120/Fake/pull/31');
+  assert.match(s.note, /^stamped v0\.4\.2, and merged it$/);
   assert.equal(JSON.parse(p.at('package.json')).version, '0.4.2');
   assert.deepEqual(p.at('CHANGELOG.md').split('\n').filter((l) => l.startsWith('## ')), ['## 0.4.2', '## 0.4.1', '## 0.4.0']);
   assert.match(p.at('CHANGELOG.md'), /## 0\.4\.2\n\n\*\*A feature\.\*\*/);
-  assert.equal(sh(p.origin, 'ls-tree', '-r', '--name-only', 'refs/heads/claude/feature', 'changes/'), CHANGES_README, 'the fragment gone');
+  assert.equal(sh(p.origin, 'ls-tree', '-r', '--name-only', 'refs/heads/main', 'changes/'), CHANGES_README, 'the fragment gone');
+  // On a branch of its own, never pushed to main: its PR opened, and merged at the stamp's head.
+  assert.equal(sh(p.origin, 'rev-parse', `refs/heads/${stampBranch(p.head)}`), sh(p.origin, 'rev-parse', 'refs/heads/main'));
+  const create = p.gh.find((a) => a[0] === 'pr' && a[1] === 'create')!;
+  assert.deepEqual(create.slice(0, 10), ['pr', 'create', '--repo', 'Jcollier0120/Fake', '--base', 'main', '--head', stampBranch(p.head), '--title', 'Fake 0.4.2: version and changelog, stamped by the Steward']);
+  assert.match(create.at(-1)!, /Only version lines, CHANGELOG\.md and the changes files they came from change\. Opened and merged by the Steward at a build/);
+  assert.deepEqual(mergesOf(p.gh), [['pr', 'merge', '31', '--repo', 'Jcollier0120/Fake', '--merge', '--delete-branch']]);
 });
 
 test('stamped while main waits to release: it joins that version and its one entry, so the build releases once', async () => {
-  const p = pending('frag-waiting');
-  const s = await stamp(p.ctx, p.e, p.pr, { released: ['0.4.0'], taken: [], carry: null });
+  const p = merged('frag-waiting');
+  const s = await stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] });
+  assert.ok(s);
   assert.equal(s.done, true, s.note);
   assert.equal(s.version, '0.4.1');
   assert.match(s.note, /v0\.4\.1, its entry joining the changes that release brings/);
@@ -287,10 +304,86 @@ test('stamped while main waits to release: it joins that version and its one ent
 });
 
 test('a minor step asked for while main waits on a patch: the waiting version becomes the minor one', async () => {
-  const p = pending('frag-minor', { entry: `minor: true\n\n${ENTRY('Big.')}` });
-  const s = await stamp(p.ctx, p.e, p.pr, { released: ['0.4.0'], taken: [], carry: null });
+  const p = merged('frag-minor', { entry: `minor: true\n\n${ENTRY('Big.')}` });
+  const s = await stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] });
+  assert.ok(s);
   assert.equal(s.done, true, s.note);
   assert.equal(s.version, '0.5.0');
   assert.equal(JSON.parse(p.at('package.json')).version, '0.5.0');
   assert.deepEqual(p.at('CHANGELOG.md').split('\n').filter((l) => l.startsWith('## ')), ['## 0.5.0', '## 0.4.0']);
+});
+
+test('main with nothing to stamp: no worktree, no PR', async () => {
+  const dir = path.join(home, 'frag-none');
+  const { checkout } = fakeEmployee(dir, { version: '0.4.0' });
+  const r = runner();
+  const e = employee(checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
+  assert.equal(await stampMain(ctx, e, { released: ['0.4.0'], taken: [] }), null);
+  assert.deepEqual(r.gh, []);
+  assert.equal(existsSync(path.join(dir, 'work', 'fake-stamp')), false);
+});
+
+test("a round between builds releases nothing; the build's round releases main's unreleased version, once, and tells Manor once", async () => {
+  const dir = path.join(home, 'build-round');
+  const f = fakeEmployee(dir, { version: '0.4.0' });
+  // Main at 0.4.1, merged by its author; 0.4.0 is the newest release.
+  for (const file of ['package.json', 'package-lock.json', 'src/app.ts']) writeFileSync(path.join(f.checkout, file), readFileSync(path.join(f.checkout, file), 'utf8').replaceAll('0.4.0', '0.4.1'));
+  sh(f.checkout, 'commit', '--quiet', '-am', 'Fake 0.4.1');
+  sh(f.checkout, 'push', '--quiet', 'origin', 'main');
+  const head = sh(f.checkout, 'rev-parse', 'HEAD');
+  // The release command notes each version it's asked to release.
+  const attempts = path.join(home, 'build-attempts.txt');
+  const releaseCmd = `node -e "const fs=require('fs');fs.appendFileSync(process.argv[1],JSON.parse(fs.readFileSync('package.json','utf8')).version+'\\n')" ${attempts}`;
+  const released = () => (existsSync(attempts) ? readFileSync(attempts, 'utf8').split('\n').filter(Boolean) : []);
+  writeFileSync(
+    path.join(home, 'settings.json'),
+    JSON.stringify({
+      employees: [{ id: 'fake', name: 'Fake', repo: 'Jcollier0120/Fake', checkout: f.checkout, branch: 'main', usesKit: true, parts: ['node'], fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: releaseCmd, install: '', approve: '' }],
+      team: ['Jcollier0120'],
+      workRoot: path.join(dir, 'work'),
+      // Manor's update check, told of a build's releases (the tell below stands in for it).
+      afterRelease: ['http://127.0.0.1:9/api/updates/check'],
+      buildPipeline: { times: ['08:00'], days: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'], kit: 'every', windowMinutes: 30 },
+    }),
+  );
+  // The 08:00 build has been and gone.
+  savePipeline({ open: null, builds: [{ due: at(8).toISOString(), by: 'schedule', started: at(8).toISOString(), finished: at(8, 30).toISOString(), rounds: 1, merged: [], released: [], failed: [] }] });
+  const r = runner((args) => {
+    if (args[0] === 'pr' && args[1] === 'list') return ok([]);
+    if (args[0] === 'release' && args[1] === 'list') return ok([...released().map((v) => ({ tagName: `v${v}`, isDraft: false })), { tagName: 'v0.4.0', isDraft: false }]);
+    if (args[0] === 'release' && args[1] === 'view') return ok({ targetCommitish: head });
+    // A team member vouched for main's head: the build doesn't test it again.
+    if (args[0] === 'api' && args[1] === `repos/Jcollier0120/Fake/commits/${head}/statuses?per_page=100`) return ok([{ context: VOUCH_CONTEXT, state: 'success', creator: { login: 'Jcollier0120' } }]);
+  });
+  let told = 0;
+  const round = (now: Date) => runStage('round', {}, { run: r.run, now: () => now, pipeline: true, alarms: { manorUrl: 'http://127.0.0.1:9' }, tell: async () => (told++, { ok: true, said: 'HTTP 200' }) });
+
+  const between = await round(at(10));
+  assert.equal(between.error, undefined);
+  assert.deepEqual(between.build, { between: true, next: at(8, 0, 14).toISOString() });
+  assert.match(between.log.join('\n'), /between builds: PRs are merged by whoever wrote them once vouched, and the next build, at Wed 08:00,? releases each repository's main/);
+  assert.deepEqual(released(), [], 'nothing released between builds');
+  assert.equal(told, 0);
+  assert.equal(loadPipeline().open, null);
+
+  const build = await round(at(8, 2, 14));
+  assert.equal(build.error, undefined);
+  const log = build.log.join('\n');
+  assert.match(log, /the 08:00 build begins: each repository's main tested once \(unless a vouch covers it\) and released once it has all settled/);
+  assert.match(log, new RegExp(`\\[fake\\] Jcollier0120 vouched for ${head.slice(0, 7)}: not tested again before its release`));
+  assert.deepEqual(build.results.filter((x) => x.outcome !== 'skipped').map((x) => [x.outcome, x.message]), [['done', `release: released v0.4.1 from origin/main (${head.slice(0, 7)}), with kit 1.0.0`]]);
+  assert.deepEqual(released(), ['0.4.1'], 'released once');
+  assert.equal(build.build?.closed, true);
+  assert.match(log, /the build ends: 1 release/);
+  assert.equal(told, 1, 'Manor told once, as the build ends');
+  const state = loadPipeline();
+  assert.equal(state.open, null);
+  assert.deepEqual([state.builds.at(-1)!.due, state.builds.at(-1)!.released], [at(8, 0, 14).toISOString(), ['fake v0.4.1']]);
+
+  // Between builds again: nothing more released, nothing told.
+  const later = await round(at(9, 0, 14));
+  assert.equal(later.build?.between, true);
+  assert.deepEqual(released(), ['0.4.1']);
+  assert.equal(told, 1);
 });

@@ -2,14 +2,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import { APP } from './app.ts';
-import type { Condition, FailedRollout, Held } from './alarms.ts';
-import { CONFLICTS, loadConflicts, type ConflictLook } from './conflicts.ts';
+import type { Condition, FailedRollout } from './alarms.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { redact, trimmed } from './redact.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
-import { checksLogOf, kitTrialLogOf, trialDirOf } from './stages/bump.ts';
-import { latestTrial, standingFailures, trialFails } from './stages/trial.ts';
+import { checksLogOf } from './stages/bump.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, installedRelease, releaseDirOf, type StageResult } from './stages/common.ts';
 import { roundFailuresFile } from './stages/round.ts';
 import { showFile } from './git.ts';
@@ -27,12 +25,9 @@ import { hostFor } from './hosts/index.ts';
  *   (round-failed.json), and one of Reeve's alerts that is code work in an employee's repository: a new high or
  *   critical security advisory (his dependency-health job), a Maestro flow that failed (maestro-runs). Reeve's other
  *   alerts (the NPU driver, the test phone, a job that crashed) are a person's, and stay alarms. So do the Steward's
- *   own releases: its repository isn't one the Wright works in. And a PR's conflict with its branch that its author was
- *   told about and left an hour (Settings: alarms.blockingHours) at the same head (conflictItem): the PR is told once
- *   that the Wright has it, and the issue closes by itself once the PR merges, closes, or no longer conflicts. And an
- *   agent one of the Steward's own kit PRs waits for, its trial done and failing it (kitTrialItem): the work is the
- *   agent's PR that pins the kit and passes with it, which lets the kit merge (stages/trial.ts's pairUp). Before Steward
- *   0.35.71 that waited for the kit PR's author, and Steward#214 held the whole Steward queue for it.
+ *   own releases: its repository isn't one the Wright works in. Before Steward 0.36.119 a PR's conflict its author left,
+ *   and an agent a kit PR's trial waited for, were filed too; the Steward merges no PRs now, so neither is, and the
+ *   issues filed for them close by themselves once their PR has merged or closed (closeResolved).
  * - **Where:** only an employee's repository (never one of the PC's other projects the Wright helps with), and only one
  *   the Wright's GET /api/work says it works in (`label`, `repos`), while it takes work,
  *   and only when gh here is signed in as one of its `team` (it takes no one else's issues), as the Surveyor and the
@@ -233,116 +228,8 @@ export function reeveItems(answer: unknown, employees: Employee[]): WorkItem[] {
   return out;
 }
 
-/**
- * A PR's conflict with its branch, which its author was told about (stages/kickback.ts) and left, as an issue for the
- * Wright. The Wright's jobs start from the branch on a wright/ branch of their own, never on someone else's: so the work
- * is the PR's branch merged into the job's branch, the conflict resolved there, as a merge commit. Once the Wright's draft
- * merges, the PR's own commits are on the branch, and GitHub marks the PR merged too. Should its author resolve it first,
- * the issue is closed (closeResolved), and a job that starts anyway finds nothing left to do.
- */
-export function conflictItem(e: Employee, look: ConflictLook): WorkItem {
-  const id = `conflict:${e.repo}#${look.number}:${look.headOid.slice(0, 7)}`;
-  const files = look.needs.map((f) => `\`${f}\``).join(', ');
-  return {
-    id,
-    condition: `waiting:${e.repo}#${look.number}`,
-    repo: e.repo,
-    title: `Resolve #${look.number}'s conflict with ${e.branch} (${look.needs.join(', ')})`.slice(0, 200),
-    body: [
-      `#${look.number} (${look.title}, on \`${look.head}\`) conflicts with \`${e.branch}\` in ${files}, beyond what the Steward resolves by itself (version lines, and a new entry at the top of CHANGELOG.md). Its author was told on the PR, and nothing has been pushed to it since, so it waits; meanwhile the PRs above it in the version queue merge without it.`,
-      '',
-      '**The work**',
-      '',
-      `Your branch starts from \`${e.branch}\`. Merge \`origin/${look.head}\` into it (\`git fetch origin ${look.head}\`, then \`git merge --no-ff origin/${look.head}\`), resolve the conflicts in ${files} so that both sides keep what they meant, and run the tests. Keep it a merge commit: never squash or rebase #${look.number}'s commits, so they land with yours. Its version lines and changelog entry give way to your own version.`,
-      '',
-      `**Done means:** your draft carries #${look.number}'s change on top of \`${e.branch}\` as it is now, with no conflicts and the tests passing. Once it merges, #${look.number}'s commits are on \`${e.branch}\`, and GitHub marks it merged too. If #${look.number} no longer conflicts when you start (its author resolved it), there is nothing left to do: say so.`,
-      ...footer(id),
-    ].join('\n'),
-    pr: { number: look.number, comment: (url) => `Still conflicting with \`${e.branch}\` in ${files}, so the Steward handed it to the Wright: ${url}. Its draft will carry this PR's commits with the conflict resolved; pushing a resolution here first is just as good (the issue then closes by itself).` },
-  };
-}
-
-/**
- * The conflicts to hand to the Wright this round: each PR the merge stage held for a conflict (`held`) whose last look
- * (conflicts.ts) sent it back to its author `hours` or more ago at the head it has now, and found files that need
- * judgement. Never one of the Wright's own (those are closed and queued again: kickback.ts), nor a draft.
- */
-export function conflictItems(o: { held: { employee: Employee; prs: Held[] }[]; hours: number; now: Date; looks?: ConflictLook[] }): WorkItem[] {
-  const looks = o.looks ?? loadConflicts(o.now.getTime());
-  const out: WorkItem[] = [];
-  for (const { employee: e, prs } of o.held) {
-    for (const pr of prs) {
-      if (pr.draft || !pr.why.startsWith(CONFLICTS)) continue;
-      const look = looks.find((l) => l.repo.toLowerCase() === e.repo.toLowerCase() && l.number === pr.number);
-      if (!look || look.outcome !== 'sent-back' || !look.needs.length || !look.headOid || look.head.startsWith('wright/')) continue;
-      if (o.now.getTime() - Date.parse(look.at) < o.hours * 3_600_000) continue;
-      out.push(conflictItem(e, look));
-    }
-  }
-  return out;
-}
-
-/**
- * An agent a new kit fails, as an issue in the agent's repository: the Steward's PR that raises the kit (`steward`'s
- * #number) waits for it in its trial (stages/trial.ts). The work is the agent's PR that pins the kit and passes with it:
- * once it is ready, the trial tries it at its head (pairUp), the kit merges and is released, and that PR merges after
- * it. The kit itself being at fault is the Wright's to say on the issue, not to fix: the kit is the Steward's repository.
- */
-export function kitTrialItem(e: Employee, f: { message: string; main?: string | null }, kit: string, steward: Employee, pr: { number: number; url: string; title: string }, settings: Settings): WorkItem {
-  const id = `kittrial:${e.id}:${kit}`;
-  // The trial's own copy (kitTrialLogOf), which the agent's next try doesn't clear; else the one beside its worktree.
-  const kept = kitTrialLogOf(settings, e, kit);
-  const output = outputBeside(trialDirOf(settings, e), existsSync(kept) ? kept : undefined);
-  const tests = e.test.join(' && ') || '(Settings give it no checks)';
-  return {
-    id,
-    condition: `waiting:${steward.repo}#${pr.number}`,
-    repo: e.repo,
-    title: `Make ${e.name} pass with kit ${kit} (the ${APP.name}'s #${pr.number} waits for it)`.slice(0, 200),
-    body: [
-      `The ${APP.name}'s ${pr.url} (${pr.title}) raises its kit to ${kit}. Before it merges, the ${APP.name} tries the new kit on every agent, and ${e.name}'s checks fail with it, so that PR waits, and every ${APP.name} PR above it in the version queue with it.`,
-      '',
-      '**What failed**',
-      '',
-      `${e.name}'s ${e.branch}${f.main ? ` at ${f.main.slice(0, 7)}` : ''}, with kit.json pinned to ${kit} and its kit filled from that PR's kit\\ (\`${e.fill}\`), then its checks (\`${tests}\`), twice:`,
-      '',
-      `> ${redact(f.message)}`,
-      '',
-      ...(output ? ['**What it printed** (the end of it, secrets taken out)', '', ...fence(output)] : ["Its whole output wasn't kept here."]),
-      '',
-      `**The work:** a pull request to ${e.name}'s ${e.branch} that pins kit ${kit} in kit.json and passes its checks with it. Kit ${kit} isn't released yet, so fill it from the PR: in a clone of ${steward.repo}, \`git fetch origin pull/${pr.number}/head\` and \`git worktree add <folder> FETCH_HEAD\`; then here \`node tools/kit.ts --from <folder>\\kit\`. Change ${e.name} so its checks pass with the new kit, as the kit's changelog entry for ${kit} (kit\\CHANGELOG.md there) says the agents must.`,
-      '',
-      `**If the kit is at fault** (it breaks what it shouldn't, and no change here is right): make no change, and say so on this issue with what you found. The kit is fixed in its own PR, by its author.`,
-      '',
-      `**Done means:** your PR is ready (not a draft) and passes with kit ${kit}. The ${APP.name}'s next round tries it at its head with that PR's kit; passing, the kit merges and is released, and your PR is tested with the released kit and merged after it. Should ${e.branch} pass with kit ${kit} as it is by the time you start (another fix landed), there is nothing to do: say so.`,
-      ...footer(id),
-    ].join('\n'),
-  };
-}
-
-/**
- * The agents each of the Steward's own kit PRs waits for, as the merge stage held them (trialFails): the standing
- * failures of its latest trial, done (kit-trials.json), each one's work in its own repository. Not a draft's.
- */
-export function kitTrialItems(o: { held: { employee: Employee; prs: Held[] }[]; employees: Employee[]; settings: Settings; trials?: Parameters<typeof latestTrial>[2] }): WorkItem[] {
-  const out: WorkItem[] = [];
-  for (const { employee: steward, prs } of o.held) {
-    if (steward.id !== APP.id) continue;
-    for (const pr of prs) {
-      const kit = pr.draft ? null : trialFails(pr.why);
-      const t = kit ? latestTrial(pr.number, kit, o.trials) : null;
-      if (!kit || !t || t.pending?.length) continue;
-      for (const f of standingFailures(t)) {
-        const e = o.employees.find((x) => x.id === f.id);
-        if (e && e.id !== APP.id) out.push(kitTrialItem(e, f, kit, steward, pr, o.settings));
-      }
-    }
-  }
-  return out;
-}
-
-/** This round's work: its failed bumps (while rollout is on) and releases, Reeve's alerts that are code work, conflicts left a while (conflictItems), and the agents a kit PR's trial waits for (kitTrialItems). Not the Steward's own. */
-export function workItems(o: { failedReleases: Record<string, string>; failedRollouts?: Record<string, FailedRollout>; reeve?: unknown; round?: StageResult; employees: Employee[]; settings: Settings; held?: { employee: Employee; prs: Held[] }[]; now?: Date }): WorkItem[] {
+/** This round's work: its failed bumps (while rollout is on) and releases, and Reeve's alerts that are code work. Not the Steward's own. */
+export function workItems(o: { failedReleases: Record<string, string>; failedRollouts?: Record<string, FailedRollout>; reeve?: unknown; round?: StageResult; employees: Employee[]; settings: Settings }): WorkItem[] {
   const out: WorkItem[] = [];
   if (o.settings.rollout) {
     for (const [id, f] of Object.entries(o.failedRollouts ?? {})) {
@@ -357,8 +244,6 @@ export function workItems(o: { failedReleases: Record<string, string>; failedRol
     out.push(releaseItem(e, commit, o.settings, said));
   }
   if (o.reeve) out.push(...reeveItems(o.reeve, o.employees));
-  if (o.held?.length) out.push(...conflictItems({ held: o.held, hours: o.settings.alarms.blockingHours, now: o.now ?? new Date() }));
-  if (o.held?.length) out.push(...kitTrialItems({ held: o.held, employees: o.employees, settings: o.settings }));
   return out;
 }
 
@@ -678,9 +563,8 @@ async function closeRelease(o: { employees: Employee[]; run: Runner; cwd: string
 }
 
 /**
- * A kit trial's issue whose kit PR no longer waits for the agent, closed: the kit's latest trial, done, passes the agent
- * or lets it move with its own PR (pairUp), or the kit PR merged or was closed. A trial going on (the PR caught up or
- * pushed to) is no answer: the issue stays open until it ends. True once it is closed, or found closed already.
+ * A kit trial's issue (filed before Steward 0.36.119, for a kit PR's trial) whose kit PR no longer waits: it merged or
+ * was closed. True once it is closed, or found closed already.
  */
 async function closeKitTrial(o: { employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }, f: FiledWork, agent: string, kit: string): Promise<boolean> {
   const c = /^waiting:([^#]+)#(\d+)$/.exec(f.condition ?? '');
@@ -688,20 +572,16 @@ async function closeKitTrial(o: { employees: Employee[]; run: Runner; cwd: strin
   const n = Number(c[2]);
   const name = o.employees.find((e) => e.id === agent)?.name ?? agent;
   const host = hostFor({ run: o.run, neutralDir: o.cwd });
-  const t = latestTrial(n, kit);
-  let why: string | null = t && !t.pending?.length && !standingFailures(t).some((x) => x.id === agent) ? `kit ${kit}'s trial on ${c[1]}#${n} no longer waits for ${name}` : null;
-  if (!why) {
-    const v = await host.viewPr(c[1], n, 'state');
-    if (v.code !== 0) return false;
-    let state = '';
-    try {
-      state = String(JSON.parse(v.out).state ?? '').toUpperCase();
-    } catch {
-      return false;
-    }
-    if (state === 'OPEN') return false;
-    why = `${c[1]}#${n} ${state === 'MERGED' ? 'has merged (a failing bump to the released kit is work of its own)' : 'was closed'}`;
+  const v = await host.viewPr(c[1], n, 'state');
+  if (v.code !== 0) return false;
+  let state = '';
+  try {
+    state = String(JSON.parse(v.out).state ?? '').toUpperCase();
+  } catch {
+    return false;
   }
+  if (state === 'OPEN') return false;
+  const why = `${c[1]}#${n} ${state === 'MERGED' ? `has merged (a failing bump to kit ${kit} is work of its own, for ${name})` : 'was closed'}`;
   const r = await host.closeIssue(f.repo, f.number, { reason: 'completed', comment: `Nothing left to do: ${why}. Closed by the ${APP.name}.` });
   const gone = r.code === 0 || /already closed/i.test(`${r.out}\n${r.err}`);
   if (!gone) {

@@ -4,16 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// The Steward's look at the Wright's drafts: what passes is marked ready and goes on as any team PR; what doesn't
-// stays a draft for the person, and says why.
+// The Steward's look at the Wright's drafts (review.ts): which files a person reviews, dependency changes, and the
+// Bailiff's verdict on a draft's head. (The Steward marked the drafts that passed ready, and merged them, until 0.36.119:
+// whoever reviews one merges it now.)
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-review-'));
 process.env.STEWARD_HOME = home;
 // Whether the Bailiff is installed on this PC decides nothing here: each test says.
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { dependenciesOf, dependencyHold, isWrightDraft, reviewHold, sensitiveFiles } = await import('../src/review.ts');
-const { holdReason, lookAtWrightDrafts, NO_BAILIFF } = await import('../src/stages/merge.ts');
+const { bailiffHold, dependenciesOf, dependencyHold, isWrightDraft, reviewHold, sensitiveFiles } = await import('../src/review.ts');
 const { DEFAULT_SETTINGS } = await import('../src/settings.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
@@ -46,7 +46,7 @@ test("what a person always reviews, whatever Settings say: Claude Code's permiss
   assert.equal(reviewHold(pr({ files: ['src/claude-notes.ts', 'src/environment.ts'] }), none), null, 'names that only look alike pass');
   // The guard in its own repository: the Steward's look, the Wright's worker, the Bailiff's review. Elsewhere, the same path is ordinary code.
   assert.match(reviewHold(pr({ files: ['src/review.ts'] }), s, 'steward')!, /src\/review\.ts/);
-  assert.match(reviewHold(pr({ files: ['src/stages/merge.ts'] }), s, 'steward')!, /merge\.ts/);
+  assert.match(reviewHold(pr({ files: ['src/stages/trial.ts'] }), s, 'steward')!, /trial\.ts/);
   assert.match(reviewHold(pr({ files: ['src/worker.ts'] }), s, 'wright')!, /worker\.ts/);
   assert.match(reviewHold(pr({ files: ['src/review.ts'] }), s, 'bailiff')!, /review\.ts/);
   assert.equal(reviewHold(pr({ files: ['src/review.ts', 'src/worker.ts'] }), s, 'porter'), null);
@@ -65,21 +65,6 @@ test('dependencies: the fields compared, in any order; a new one, or a version m
   assert.notEqual(dependenciesOf('{}'), dependenciesOf('{ "scripts": { "prepare": "x" } }'));
   assert.equal(dependenciesOf(s1), dependenciesOf('{ "scripts": { "test": "node --test --watch", "postinstall": "node setup.js" } }'));
   assert.notEqual(dependenciesOf('{}'), dependenciesOf('{ "overrides": { "semver": "7.6.0" } }'));
-});
-
-test("without the Bailiff, no draft of the Wright's is marked ready: one that passes the look waits for you, one that doesn't says why", async () => {
-  const r = runner((args) => (args[0] === 'pr' && (args[1] === 'ready' || args[1] === 'comment') ? ok('') : undefined));
-  const e = employee(path.join(home, 'nowhere'), { repo: 'Jcollier0120/Fake' });
-  const ctx = ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: r.run, neutralDir: home });
-  const good = pr();
-  const risky = pr({ number: 15, files: ['jobs/fast-forward.ps1'] });
-  const mine = pr({ number: 16, labels: [] });
-  await lookAtWrightDrafts(ctx, e, [good, risky, mine]);
-  assert.deepEqual(r.gh.filter((a) => a[1] === 'ready' || a[1] === 'comment'), [], 'the manor takes on no new work without the Bailiff');
-  assert.deepEqual([good.draft, risky.draft, mine.draft], [true, true, true]);
-  assert.equal(holdReason(good, 'main'), `a draft from the Wright, waiting for you: ${NO_BAILIFF}`);
-  assert.match(holdReason(risky, 'main')!, /^a draft from the Wright, waiting for you: it changes what a person reviews/);
-  assert.equal(holdReason(mine, 'main'), 'a draft', "a draft of your own isn't the Steward's to look at");
 });
 
 test("a draft that changes package.json's dependencies stays for you; one that only raises the version passes (real git)", async () => {
@@ -117,7 +102,7 @@ test("the Bailiff's verdict: its last marked comment by the team; a stranger's m
   assert.equal(bailiffVerdict('nonsense', ['Jcollier0120']), null);
 });
 
-test("with the Bailiff installed, a Wright draft that passes the look is marked ready only once the Bailiff approved its head commit", async () => {
+test("the Bailiff's hold on one of the Wright's drafts: none once it approved the head commit, else why it waits", async () => {
   const H = 'c'.repeat(40);
   const OLD = 'd'.repeat(40);
   const marked = (head: string, verdict: string) => ({ author: { login: 'Jcollier0120' }, body: `review\n\n<!-- bailiff-review {"head":"${head}","verdict":"${verdict}"} -->` });
@@ -127,38 +112,19 @@ test("with the Bailiff installed, a Wright draft that passes the look is marked 
     '32': { headRefOid: 'e'.repeat(40), comments: [marked(H, 'approved')] },
     '33': { headRefOid: H, comments: [marked(H, 'changes')] },
   };
-  const r = runner((args) => (args[0] === 'pr' && args[1] === 'view' ? ok(views[args[2]]) : args[0] === 'pr' && (args[1] === 'ready' || args[1] === 'comment') ? ok('') : undefined));
+  const r = runner((args) => (args[0] === 'pr' && args[1] === 'view' ? (views[args[2]] ? ok(views[args[2]]) : { code: 1, out: '', err: 'HTTP 502: Bad Gateway' }) : undefined));
   const e = employee(path.join(home, 'nowhere'), { repo: 'Jcollier0120/Fake' });
   const ctx = ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: r.run, neutralDir: home });
-  const approved = pr({ number: 30, headOid: H, labels: ['wright', 'bailiff:approved'] });
-  const stale = pr({ number: 31, headOid: H, labels: ['wright', 'bailiff:approved'] });
-  const moved = pr({ number: 32, headOid: H, labels: ['wright', 'bailiff:approved'] });
-  const contradicted = pr({ number: 33, headOid: H, labels: ['wright', 'bailiff:approved'] });
-  const unreviewed = pr({ number: 34, headOid: H });
-  const changes = pr({ number: 35, headOid: H, labels: ['wright', 'bailiff:changes'] });
-  const waiting = pr({ number: 36, headOid: H, labels: ['wright', 'bailiff:waiting'] });
-  const risky = pr({ number: 37, headOid: H, labels: ['wright', 'bailiff:approved'], files: ['jobs/fast-forward.ps1'] });
-  const all = [approved, stale, moved, contradicted, unreviewed, changes, waiting, risky];
-  await lookAtWrightDrafts(ctx, e, all, true);
-  assert.deepEqual(r.gh.filter((a) => a[1] === 'ready'), [['pr', 'ready', '30', '--repo', 'Jcollier0120/Fake']], 'only the one approved at its head');
-  assert.ok(r.gh.find((a) => a[1] === 'comment')!.at(-1)!.includes(`the Bailiff approved its head commit, ${H.slice(0, 7)}`));
-  assert.match(r.gh.find((a) => a[1] === 'comment')!.at(-1)!, /The Steward looked at this draft from the Wright and marked it ready[\s\S]*3 files[\s\S]*24 lines changed/);
-  assert.match(ctx.lines.join('\n'), /the Wright's #30: looked at, and marked ready/);
-  assert.deepEqual(all.map((p) => p.draft), [false, true, true, true, true, true, true, true]);
-  assert.equal(holdReason(approved, 'main'), null);
-  assert.equal(stale.bailiffHold, `the Bailiff approved ${OLD.slice(0, 7)}, not its head ${H.slice(0, 7)}: waiting for its review of the new commit`);
-  assert.equal(moved.bailiffHold, 'its head moved since the round listed it: the next round looks again');
-  assert.equal(contradicted.bailiffHold, "labelled bailiff:approved, but the Bailiff's last review doesn't approve it");
-  assert.equal(holdReason(unreviewed, 'main'), "a draft from the Wright, with the Bailiff: waiting for the Bailiff's review");
-  assert.equal(changes.bailiffHold, 'the Bailiff asked for changes (its comment says which)');
-  assert.equal(waiting.bailiffHold, "the Bailiff couldn't review it yet (its comment says why)");
-  assert.ok(risky.reviewHold && !risky.bailiffHold, "the Steward's own look comes first: an approval never overrides it");
-  assert.deepEqual(r.gh.filter((a) => a[1] === 'view').map((a) => a[2]), ['30', '31', '32', '33'], 'GitHub is asked only for the ones labelled approved that passed the look');
-
-  // Without the Bailiff, not even one labelled approved is marked ready: the Steward's look alone is never enough.
-  const r2 = runner((args) => (args[0] === 'pr' && (args[1] === 'ready' || args[1] === 'comment') ? ok('') : undefined));
-  const plain = pr({ number: 40, headOid: H, labels: ['wright', 'bailiff:approved'] });
-  await lookAtWrightDrafts(ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: r2.run, neutralDir: home }), e, [plain], false);
-  assert.deepEqual(r2.gh, [], 'nothing asked of GitHub');
-  assert.equal(plain.reviewHold, NO_BAILIFF);
+  const approvedLabels = ['wright', 'bailiff:approved'];
+  const hold = (o: Partial<PrInfo>) => bailiffHold(ctx, e, pr({ headOid: H, ...o }));
+  assert.equal(await hold({ number: 30, labels: approvedLabels }), null, 'approved at its head');
+  assert.equal(await hold({ number: 31, labels: approvedLabels }), `the Bailiff approved ${OLD.slice(0, 7)}, not its head ${H.slice(0, 7)}: waiting for its review of the new commit`);
+  assert.equal(await hold({ number: 32, labels: approvedLabels }), 'its head moved since the round listed it: the next round looks again');
+  assert.equal(await hold({ number: 33, labels: approvedLabels }), "labelled bailiff:approved, but the Bailiff's last review doesn't approve it");
+  assert.equal(await hold({ number: 38, labels: approvedLabels }), "the Steward couldn't read the Bailiff's review: HTTP 502: Bad Gateway");
+  assert.equal(await hold({ number: 39, labels: approvedLabels, headOid: '' }), "gh didn't say its head commit, so the Steward can't match the Bailiff's approval to it");
+  assert.equal(await hold({ number: 34 }), "waiting for the Bailiff's review");
+  assert.equal(await hold({ number: 35, labels: ['wright', 'bailiff:changes'] }), 'the Bailiff asked for changes (its comment says which)');
+  assert.equal(await hold({ number: 36, labels: ['wright', 'bailiff:waiting'] }), "the Bailiff couldn't review it yet (its comment says why)");
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'view').map((a) => a[2]), ['30', '31', '32', '33', '38'], 'GitHub is asked only about the ones labelled approved, with a head to match');
 });

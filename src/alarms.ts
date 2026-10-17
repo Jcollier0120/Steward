@@ -8,13 +8,10 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { failureDetail, keptFailure } from './failure.ts';
 import { allowedInstallScripts, installHoldConditions, type InstallHold } from './installscripts.ts';
 import { BAILIFF_WAIT } from './review.ts';
-import { CONFLICTS } from './conflicts.ts';
-import { deadKitIn, NEVER_RELEASED } from './stages/kitpart.ts';
 import { agentPages, reeveInstalled, seneschalInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { SigningWait } from './signing.ts';
 import type { Migration } from './migrate.ts';
-import type { BuildLeft } from './stages/build.ts';
 import { bumpDirOf, releaseDirOf, type StageResult } from './stages/common.ts';
 import { refreshDirOf } from './stages/refresh.ts';
 import type { Runner } from './run.ts';
@@ -22,7 +19,7 @@ import { portClashConditions, type PortUse } from './ports.ts';
 import { manorKeeps, tendConditions, type TendState } from './tend.ts';
 import { unstickConditions, type UnstickState } from './unstick.ts';
 import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
-import type { HeldQueue } from './version-queue.ts';
+import type { KitTrial } from './stages/trial.ts';
 
 /**
  * What needs the person: the few things no one in the manor can see to by themselves. Each round, code (never a
@@ -31,15 +28,10 @@ import type { HeldQueue } from './version-queue.ts';
  * one hides it until it clears and comes back.
  *
  * The conditions:
- * - a PR to an employee that has waited a day: a draft no one marked ready, conflicts, failing checks, a version
- *   that clashes (Settings: waitingHours);
- * - a PR whose kit.json pins a kit that will never be released (stages/prtest.ts kitReleaseHold), a draft too: at once;
- * - a PR that conflicts with its branch and holds up others waiting their turn behind it (the lowest version merges
- *   first), for an hour (Settings: blockingHours): the whole queue stands still. One whose conflict was handed on to
- *   its author gives up its turn instead (stages/merge.ts), so this is the one nobody could be told about;
- * - the lowest version in a queue that isn't ready for another reason (a draft, untested, its checks failing or
- *   running) while ready PRs wait behind it (version-queue.ts's queueHold), for an hour from when it began to hold them
- *   (Settings: blockingHours);
+ * - main's new kit failing an agent's checks in its trial (stages/trial.ts's heldKit), so the kit isn't released: at
+ *   once, naming each agent and what failed. Only the kit waits: every other repository releases as usual. (Before
+ *   Steward 0.36.119 the Steward merged PRs, and a PR that waited, conflicted or held its version queue was an alarm
+ *   too; the Steward merges none now, so no PR is.)
  * - a release that failed, which the rounds won't try again at that commit (round-failed.json): at once;
  * - a kit's bump or push that failed, which the rounds won't try again until the branch moves (rollout-failed.json),
  *   and one of the Steward's own releases that failed (self-failed.json): at once; a new kit that waits for the
@@ -67,8 +59,7 @@ import type { HeldQueue } from './version-queue.ts';
  *   reports as crashed takes that problem's place (withoutReeveDuplicates).
  *
  * Work the team can do is handed to the Wright first (work.ts; Settings: fileWork): an employee's failed bump or
- * release, Reeve's alerts that are code work in an employee's repository, and a PR's conflict its author left an hour
- * (blockingHours) after being told, are filed as manor:work issues, and their
+ * release, and Reeve's alerts that are code work in an employee's repository, are filed as manor:work issues, and their
  * alarms wait a day (waitingHours) from when they were filed, or are raised at once when the Wright gets stuck or its
  * PR waits for a person, or when they couldn't be filed (holdForWork).
  *
@@ -94,8 +85,8 @@ export interface Condition {
 }
 
 /**
- * What an alarm's button does, in its words, and the question asked before it (Steward 0.36.52): moving a PR that holds a
- * version queue past the others (move-past.ts). Its page and Manor's Needs you show it beside Dismiss.
+ * What an alarm's button does, in its words, and the question asked before it (Steward 0.36.52). Its page and Manor's
+ * Needs you show it beside Dismiss. None has one since the version queues went (Steward 0.36.119).
  */
 export interface AlarmAction {
   label: string;
@@ -179,31 +170,6 @@ export function clearAlarm(id: string, now = new Date()): boolean {
 
 const hours = (h: number) => `${h} hour${h === 1 ? '' : 's'}`;
 
-/** The id of the alarm a PR holding its version queue raises: "queue:Jcollier0120/Steward#233". */
-export const queueAlarmId = (repo: string, number: number) => `queue:${repo}#${number}`;
-
-/** The repository and PR a queue alarm's id names, or null for any other alarm's. Pure. */
-export function queueAlarmOf(id: string): { repo: string; number: number } | null {
-  const m = /^queue:([^/#\s]+\/[^/#\s]+)#(\d+)$/.exec(id);
-  return m ? { repo: m[1], number: Number(m[2]) } : null;
-}
-
-/** A PR the merge stage held, as it said why. */
-export interface Held {
-  number: number;
-  url: string;
-  title: string;
-  why: string;
-  draft: boolean;
-  /** The PRs that wait their turn after it (the lowest version merges first), when it holds any up. */
-  blocks?: number[];
-  /** The files it conflicts with its branch in that need judgement, when a catch-up found them. */
-  files?: string[];
-  /** A PR to the Steward that raises its kit (trial.ts's raisesKit): a build's rollout waits for it (stages/buildkit.ts). */
-  kit?: boolean;
-}
-
-
 /** A bump or push of a kit that failed in a round (stages/rollout.ts's rollout-failed.json), as the alarms read it. */
 export interface FailedRollout {
   kit: string;
@@ -219,20 +185,19 @@ export interface FailedSelf {
 }
 
 /**
- * From the round: PRs held a while, releases the rounds gave up on, releases that wait until this PC can sign, a round
+ * From the round: main's kit held by its trial, releases the rounds gave up on, releases that wait until this PC can sign, a round
  * that couldn't run; and, while the rounds
  * roll kits out, a bump or push they gave up on, and a new kit waiting a while for the Steward itself to carry it; and,
  * while they release the Steward's own versions, one of those that failed.
  */
 export function roundConditions(o: {
   round: StageResult;
-  held: { employee: Employee; prs: Held[] }[];
+  /** Main's kit, tried and failing agents, so it isn't released (stages/trial.ts's heldKit); null when none is held. */
+  heldKit?: KitTrial | null;
   failedReleases: Record<string, string>;
   failedRollouts?: Record<string, FailedRollout>;
   failedSelf?: Record<string, FailedSelf>;
   rolloutWaits?: { kit: string; own: string } | null;
-  /** What builds left of each repository's batch (stages/build.ts's build-left.json), by employee: PRs kept for the next build are an alarm. */
-  buildLeft?: Record<string, BuildLeft>;
   /** Releases the Aletaster's tasting holds (tasting.ts's tasting-held.json), by employee. */
   tastingHolds?: Record<string, TastingHold>;
   /** Releases that wait until this PC can sign (signing.ts's signing-waits.json), by employee. */
@@ -253,8 +218,6 @@ export function roundConditions(o: {
   ports?: PortUse[];
   /** Packages whose install scripts held an install (installscripts.ts's install-held.json), by id. */
   installHolds?: Record<string, InstallHold>;
-  /** What holds each version queue, and since when (version-queue.ts's queueHold, kept in version-queues.json). */
-  queueHolds?: HeldQueue[];
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
@@ -264,80 +227,21 @@ export function roundConditions(o: {
   if (o.tending) out.push(...tendConditions(o.tending));
   if (o.unstick) out.push(...unstickConditions(o.unstick));
   out.push(...(o.strangers ?? []));
-  const wait = o.settings.alarms.waitingHours;
-  for (const { employee: e, prs } of o.held) {
-    for (const pr of prs) {
-      out.push({
-        id: `waiting:${e.repo}#${pr.number}`,
-        who: e.id,
-        title: `${e.name} #${pr.number} has waited ${hours(wait)} or more: ${pr.why}`,
-        detail: [pr.title, pr.draft ? 'Review it, then mark it ready: the next round merges it.' : 'The Steward merges it once nothing holds it.'],
-        url: pr.url,
-        afterMs: wait * HOUR,
-      });
-      // Its kit.json pins a kit that will never be released (stages/prtest.ts kitReleaseHold): no round clears it, so it
-      // is raised at once, a draft's too, rather than after a day.
-      const dead = deadKitIn(pr.why);
-      if (dead) {
-        const rest = pr.why.slice(pr.why.indexOf(NEVER_RELEASED) + NEVER_RELEASED.length);
-        out.push({
-          id: `deadkit:${e.repo}#${pr.number}`,
-          who: e.id,
-          title: `${e.name} #${pr.number} pins kit ${dead}, which will never be released`,
-          detail: [pr.title, `${rest.charAt(0).toUpperCase()}${rest.slice(1)}.`, 'The Steward tells its author on the PR, once for each commit.'],
-          url: pr.url,
-          afterMs: 0,
-        });
-      }
-      // The lowest version, held by a conflict, with others waiting their turn behind it: the whole queue stands still,
-      // so it is raised within the hour, not the day (Manor#226 held six ready PRs for five hours, 2026-10-12).
-      if (pr.blocks?.length && !pr.draft && pr.why.startsWith(CONFLICTS)) {
-        const behind = pr.blocks.map((n) => `#${n}`).join(', ');
-        const block = o.settings.alarms.blockingHours;
-        out.push({
-          id: `blocking:${e.repo}#${pr.number}`,
-          who: e.id,
-          title: `${e.name} #${pr.number} conflicts with ${e.branch}${pr.files?.length ? ` in ${pr.files.join(', ')}` : ''}, and holds up ${behind}`,
-          detail: [
-            pr.title,
-            pr.why,
-            `${behind} ${pr.blocks.length === 1 ? 'waits its' : 'wait their'} turn after it: the lowest version merges first.`,
-            `Merge ${e.branch} into its branch, resolve the conflict and push, or close it: the PRs behind it merge at the next round.`,
-          ],
-          url: pr.url,
-          afterMs: block * HOUR,
-        });
-      }
-    }
-  }
-  // The lowest version not ready (a draft, untested, its checks), with ready PRs waiting their turn behind it: the queue
-  // stands still, so it is raised within the hour (three drafts held the Steward's own for hours, 2026-10-14 and 15). A
-  // conflict holding it is the blocking alarm's, above, which names its files.
-  for (const q of o.queueHolds ?? []) {
-    const h = q.hold;
-    if (h.why.startsWith(CONFLICTS)) continue;
-    const block = o.settings.alarms.blockingHours;
-    const behind = h.behind.map((n) => `#${n}`).join(', ');
-    const moving = [h.number, ...(h.drafts ?? [])].map((n) => `#${n}`);
-    const them = moving.length === 1 ? moving[0] : `${moving.slice(0, -1).join(', ')} and ${moving.at(-1)}`;
+  // Main's new kit, failing agents in its trial: it isn't released, and the Steward's own version that carries it waits
+  // with it (stages/self.ts). Raised at once, naming each agent and what failed; no other repository waits for it.
+  if (o.heldKit) {
+    const t = o.heldKit;
+    const names = t.failed.map((x) => x.name).join(', ');
     out.push({
-      id: queueAlarmId(q.repo, h.number),
-      who: q.id,
-      title: `${q.name} #${h.number} (v${h.version}) has held its version queue for ${hours(block)} or more: ${behind} ${h.behind.length === 1 ? 'waits' : 'wait'} behind it`,
+      id: `kittrial:${t.kit}`,
+      who: 'steward',
+      title: `Kit ${t.kit} isn't released: it fails ${names}'s checks in its trial`,
       detail: [
-        h.title,
-        `Why it isn't ready: ${h.why}.`,
-        `${behind} ${h.behind.length === 1 ? 'is' : 'are'} ready, and ${h.behind.length === 1 ? 'waits its' : 'wait their'} turn after it: the lowest version merges first. Held since ${h.since}.`,
-        ...(h.drafts?.length ? [`${h.drafts.map((n) => `#${n}`).join(', ')}, a draft${h.drafts.length === 1 ? '' : ' each'}, would hold it next: they are moved with it.`] : []),
-        `${h.draft ? 'Mark it ready once it is done' : 'Get it ready to merge'}, or close it; or move it past the others: the Steward gives ${them} a version above the rest, tells ${moving.length === 1 ? 'its author' : 'their authors'} on GitHub, and the PRs behind merge at the next round.`,
+        ...t.failed.flatMap((x) => [`${x.name}${x.main ? ` at ${x.main.slice(0, 7)}` : ''}: ${x.message}`, ...(x.errors ?? []).slice(0, 3).map((line) => `  ${line}`)]),
+        "Fix the kit on main, or the agents on theirs: each build tries main's kit again, and releases it once it passes. Every other repository releases as usual meanwhile.",
       ],
-      url: h.url,
-      since: h.since,
-      afterMs: block * HOUR,
-      action: {
-        label: 'Move it past the others',
-        confirm: `Give ${them} ${moving.length === 1 ? 'a version' : 'versions'} above the rest of ${q.name}'s queue, so ${behind} can merge? ${moving.length === 1 ? 'Its author is' : 'Their authors are'} told on GitHub; nothing is pushed to ${moving.length === 1 ? 'its branch' : 'their branches'}.`,
-      },
+      since: t.at,
+      afterMs: 0,
     });
   }
   for (const [id, commit] of Object.entries(o.failedReleases)) {
@@ -373,17 +277,8 @@ export function roundConditions(o: {
     for (const [id, f] of Object.entries(o.failedRollouts ?? {})) {
       const e = o.employees.find((x) => x.id === id);
       if (!e) continue;
-      // A kit PR a build left out (stages/build.ts): the agent stays on its old kit.
-      if (f.stage === 'build') {
-        out.push({
-          id: `rollout:${id}:${f.kit}`,
-          who: id,
-          title: `${e.name}'s kit PR to kit ${f.kit} broke its build, so ${e.name} left without it and stays on its old kit`,
-          detail: [f.message, `Its kit PR doesn't go into a build again until it moves: a newer kit folds into it, or press Bump on the Steward's page once the kit or ${e.name} is fixed.`],
-          afterMs: 0,
-        });
-        continue;
-      }
+      // A kit PR a build left out, before Steward 0.36.119: builds no longer merge PRs, so it is no alarm.
+      if (f.stage === 'build') continue;
       out.push({
         id: `rollout:${id}:${f.kit}`,
         who: id,
@@ -408,20 +303,6 @@ export function roundConditions(o: {
         afterMs: o.settings.alarms.waitingHours * HOUR,
       });
     }
-  }
-  // A build that couldn't find the one PR that broke a repository's batch: the PRs it kept wait for the next build.
-  for (const [id, l] of Object.entries(o.buildLeft ?? {})) {
-    if (!l.kept.length) continue;
-    const e = o.employees.find((x) => x.id === id);
-    const prs = l.kept.map((k) => `#${k.number}`).join(', ');
-    out.push({
-      id: `build:${id}:${l.due}`,
-      who: id,
-      title: `${e?.name ?? id} ${prs} didn't leave in ${l.name}, and wait${l.kept.length === 1 ? 's' : ''} for ${l.ahead ? 'the build' : 'the next build'}`,
-      detail: [l.why, ...l.kept.map((k) => `#${k.number}: ${k.title}`), `They go into ${l.ahead ? 'the build' : 'the next build'} as they are. Look at what failed (the Steward's log has each test run), and fix or close the PR that broke them.`],
-      url: l.kept[0].url,
-      afterMs: 0,
-    });
   }
   if (o.settings.releaseSelf) {
     for (const [tag, f] of Object.entries(o.failedSelf ?? {})) {
@@ -819,9 +700,9 @@ export async function watchAlarms(
   let states = new Map<string, WorkState>();
   if (filing) {
     try {
-      items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings, held: o.held, now });
+      items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings });
       if (items.length) states = await fileWork({ items, work: wright, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), now, log: o.log });
-      // And the issues whose failure is gone (a bump, a release, a conflict, a kit trial), closed, so the Wright isn't sent to find nothing to do.
+      // And the issues whose failure is gone (a bump, a release, and a conflict or kit trial filed before 0.36.119), closed, so the Wright isn't sent to find nothing to do.
       await closeResolved({ items, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), log: o.log });
     } catch (e) {
       o.log(`work: ${(e as Error).message}`);

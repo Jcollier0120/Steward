@@ -6,8 +6,9 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // The Steward on someone else's PC: no owner settings, Reeve's repositories, no Wright, Bailiff or Surveyor. It offers
-// the person's own repositories, looks after the ones they pick, merges and releases only where they said yes, to
-// their own repositories, and nothing of Castellan's runs.
+// the person's own repositories, looks after the ones they pick, releases only where they said yes, to their own
+// repositories, merges none of their PRs (whoever writes one merges it, since Steward 0.36.119), and nothing of
+// Castellan's runs.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-customer-'));
 process.env.STEWARD_HOME = home;
 // None of the owner's own agents here.
@@ -21,8 +22,6 @@ const { candidates, findRepos, githubOf, loadFound, lookAfter, lookAfterAll, any
 const { runStage } = await import('../src/steward.ts');
 const { watchAlarms } = await import('../src/alarms.ts');
 const { tend } = await import('../src/tend.ts');
-const { authorOf } = await import('../src/stages/kickback.ts');
-const { NOT_MERGING } = await import('../src/stages/merge.ts');
 const { releasesRepo } = await import('../src/kit/release.ts');
 const { ONBOARDING } = await import('../src/onboarding.ts');
 const { fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
@@ -49,7 +48,6 @@ test('a new install: nothing of Castellan, and nothing merged or released by its
   assert.deepEqual(releasesRepoEnv(s), { MANOR_RELEASES_REPO: '' }, 'a release goes to its own repository only');
   // No Wright here: nothing handed to it, its drafts never looked at, and a "wright" label is anyone's.
   assert.deepEqual([s.wrightHere, s.fileWork, s.wrightReview.on], [false, false, false]);
-  assert.equal(authorOf({ labels: ['wright'], head: 'wright/12-fix' } as any), 'person');
 });
 
 test("Reeve's repositories: those on GitHub the person can push to are offered, and one picked is looked after as they said", async () => {
@@ -134,7 +132,7 @@ test("with Manor here and its Repositories brought in, they are the Steward's li
   assert.equal(JSON.parse(readFileSync(settingsFile(), 'utf8')).employees.length, 1, "the Steward's own list untouched");
 });
 
-test("a round on the person's PC: their PRs merged only where they said yes, a new version released to their own repository, and no kit asked for", async () => {
+test("a round on the person's PC: none of their PRs merged, even where Settings once said yes, a new version released to their own repository, and no kit asked for", async () => {
   // Releasing: switched on in Settings as "tag" (it has no release script), as Look after's tick would have.
   const raw = JSON.parse(readFileSync(settingsFile(), 'utf8'));
   raw.employees[0].release = 'tag';
@@ -143,16 +141,14 @@ test("a round on the person's PC: their PRs merged only where they said yes, a n
   const pr = (repo: string, n: number) => ({ number: n, title: 'A fix', url: `https://github.com/${repo}/pull/${n}`, headRefName: 'fix', headRefOid: sh(app.checkout, 'rev-parse', 'HEAD'), baseRefName: 'main', isCrossRepository: false, author: { login: 'me' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }], body: '' });
   const r = runner((args) => {
     if (args[0] === 'api' && args[1] === 'graphql') return { code: 1, out: '', err: 'no glance here' };
-    if (args[0] === 'pr' && args[1] === 'list') return ok(args.includes('me/app') ? [] : [pr('me/two', 3)]);
+    if (args[0] === 'pr' && args[1] === 'list') return ok(args.includes('me/app') ? [pr('me/app', 4)] : [pr('me/two', 3)]);
     if (args[0] === 'pr' && args[1] === 'merge') return ok('');
     if (args[0] === 'release' && args[1] === 'list') return ok([]);
     if (args[0] === 'release' && args[1] === 'create') return ok('');
   });
   const out = await runStage('round', { full: true }, { run: r.run, owner: () => 'me' });
   assert.equal(out.error, undefined, out.log.join('\n'));
-  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [], "nothing merged where the person didn't say yes");
-  const two = out.results.find((x) => x.id === 'app-two' && !x.message.startsWith('release: '))!;
-  assert.match(two.message, new RegExp(`1 open PR \\(#3\\) ${NOT_MERGING.replace(/[()]/g, '\\$&')}`));
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [], "nothing merged: whoever wrote a PR merges it");
   const create = r.gh.find((a) => a[0] === 'release' && a[1] === 'create')!;
   assert.deepEqual(create.slice(0, 5), ['release', 'create', 'v1.2.0', '--repo', 'me/app'], 'released to their own repository');
   assert.ok(create.includes('--notes-file'), 'its notes the CHANGELOG.md entry');
@@ -166,10 +162,10 @@ test("a round on the person's PC: their PRs merged only where they said yes, a n
 test('no Surveyor installed: no alarm that its page is down, however long', async () => {
   const s = loadSettings();
   const now = new Date(Date.now() + 48 * 3600_000);
-  const state = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null, pages: { surveyor: 'http://127.0.0.1:19595' } });
+  const state = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null, pages: { surveyor: 'http://127.0.0.1:19595' } });
   assert.ok(!Object.keys(state.watching).some((id) => id.startsWith('surveyor:')), JSON.stringify(state.watching));
   // Where it is installed, its page down is watched as before.
-  const watched = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null, pages: { surveyor: 'http://127.0.0.1:19595' }, surveyorInstalled: () => true });
+  const watched = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null, pages: { surveyor: 'http://127.0.0.1:19595' }, surveyorInstalled: () => true });
   assert.ok('surveyor:down' in watched.watching);
 });
 
@@ -179,7 +175,7 @@ test("once Manor keeps the staff's pages and the manor-wide alarms, the Steward 
   assert.deepEqual(await tend({ manorUrl: 'http://m', getJson: async () => keeps, open: async (id) => (opened.push(id), { ok: true, said: '' }), log: () => {} }), []);
   assert.deepEqual(opened, [], 'nothing opened: Manor does it');
   const s = loadSettings();
-  const state = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async (u: string) => (u.endsWith('/api/state') ? keeps : { error: 'down' }), toast: async () => {}, now: new Date(), manorUrl: 'http://m', surveyorInstalled: () => true });
+  const state = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async (u: string) => (u.endsWith('/api/state') ? keeps : { error: 'down' }), toast: async () => {}, now: new Date(), manorUrl: 'http://m', surveyorInstalled: () => true });
   assert.deepEqual(Object.keys(state.watching), [], 'no manor-wide condition watched here');
 });
 
@@ -191,8 +187,9 @@ test("the held-back wording: on the person's PC the page and Settings speak of t
   const employees = fields.find((f) => f.key === 'employees') as any;
   assert.equal(employees.fields.find((f: any) => f.key === 'usesKit').hidden, true, 'whether it takes the kit: the Steward decides, never shown');
   for (const key of ['fill', 'install', 'approve', 'installed']) assert.deepEqual(employees.fields.find((f: any) => f.key === key).shownWhen, { key: 'releasesCastellan', is: ['true'] }, key);
-  assert.equal(employees.blank.merges, false, 'a repository added by hand merges nothing until the person says yes');
-  assert.match(employees.fields.find((f: any) => f.key === 'merges').help, /^Off until you say yes/);
+  assert.equal(employees.blank.merges, false, 'a repository added by hand merges nothing');
+  const merges = employees.fields.find((f: any) => f.key === 'merges');
+  assert.deepEqual([merges.hidden, /^No longer used/.test(merges.help)], [true, true], 'whoever writes a PR merges it (Steward 0.36.119): no switch for it');
   assert.doesNotMatch(JSON.stringify(ONBOARDING), /kit|Wright|Bailiff|Castellan|employee/i, 'the onboarding is about their repositories');
   // The page, as /api/page's body on this PC.
   const m = await bundleForNode<{ render: (body: unknown) => string }>(
@@ -220,12 +217,14 @@ test("the held-back wording: on the person's PC the page and Settings speak of t
   assert.doesNotMatch(html, /Roll out the kit/, 'no kit rollout to show');
   assert.match(html, /Found on this PC/);
   assert.match(html, /only if you tick that/);
-  assert.match(html, /PRs left to you/);
-  assert.match(html, /merges and releases only when asked, until you say yes/);
+  assert.match(html, /releases only when asked, until you say yes/);
   assert.match(html, /data-post="\/api\/repos\/look-after"/);
   assert.match(html, /aria-label="Pick me\/new"/, 'each one found can be picked');
   assert.match(html, /<button[^>]*disabled=""[^>]*data-post="\/api\/repos\/look-after"[^>]*>Look after the picked</, 'none picked yet: nothing to look after in one go');
-  assert.match(html, /data-post="\/api\/stage\/merge-team"[^>]*>Merge your ready PRs</);
+  // The Steward merges none of their PRs (0.36.119): no merge button, and the page says who merges them.
+  assert.doesNotMatch(html, /\/api\/stage\/merge|PRs left to you|Merge your ready PRs/);
+  assert.match(html, /The Steward merges no PRs: merge your own once vouched/);
+  assert.match(html, /data-post="\/api\/stage\/release"/);
 });
 
 test("allow-update takes a version x.y.z (its check had lost its backslashes)", () => {

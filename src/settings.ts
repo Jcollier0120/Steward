@@ -86,9 +86,10 @@ export interface Employee {
 
 export interface Settings {
   employees: Employee[];
-  /** The GitHub accounts whose PRs to the employees `merge --team` merges, as well as the Steward's own. Empty: gh's signed-in account (team.ts). */
+  /** The GitHub accounts whose vouches are trusted (stages/vouch.ts) and whose work is filed for the Wright (work.ts). Empty: gh's signed-in account (team.ts). */
   team: string[];
   workRoot: string;
+  /** No longer used (Steward 0.36.119); kept so older settings load. */
   releaseAfterMerge: boolean;
   stewardRepo: string;
   parallel: number;
@@ -96,10 +97,10 @@ export interface Settings {
   stagesAtOnce: number;
   /** A vouch and a PR tested here run only the tests its change reaches (affected.ts); false: the whole suite. Absent: on. */
   affectedTests?: boolean;
-  /** On duty, a round every `roundMinutes`: merge what's ready (the Steward's and the team's), then release what isn't. */
+  /** On duty, a round every `roundMinutes`: between builds it looks; at a build it releases each repository's main (pipeline.ts). */
   byItself: boolean;
   roundMinutes: number;
-  /** A ready PR merges only once it was opened at least this many minutes ago, so a small fix can still be pushed to it (merge.ts' ageHold). 0: at once. Absent: none. */
+  /** No longer used (Steward 0.36.119: the Steward merges no PRs); kept so older settings load. */
   mergeMinAgeMinutes?: number;
   /** What needs the person, after each round (alarms.ts). */
   alarms: AlarmSettings;
@@ -111,11 +112,11 @@ export interface Settings {
    * and a PR whose lockfile brings one is held for you. Absent: installscripts.ts's DEFAULT_INSTALL_SCRIPTS.
    */
   installScripts?: string[];
-  /** In its rounds, a ready team PR that waits only on its branch moving is caught up with it (stages/catchup.ts). */
+  /** No longer used (Steward 0.36.119: the Steward catches no PRs up); kept so older settings load. */
   catchUp: boolean;
-  /** In its rounds, a repository's ready PRs in the version queue are stacked, tested once and merged together (stages/train.ts). */
+  /** No longer used (Steward 0.36.119: there are no version queues); kept so older settings load. */
   mergeTrain: boolean;
-  /** The build pipeline (pipeline.ts): merged, tested and released together at set build times, not as each PR is ready. */
+  /** The build pipeline (pipeline.ts): each repository's main tested and released at set build times. */
   buildPipeline: BuildPipeline;
   /** Local pages POSTed after a stage releases something (upkeep.ts): Manor's update check, the Aletaster's Run now. */
   afterRelease: string[];
@@ -127,7 +128,7 @@ export interface Settings {
   rolloutMaxWaitHours: number;
   /** In its rounds, a kit version or a Steward version on the Steward's own main with no release is released (stages/self.ts). */
   releaseSelf: boolean;
-  /** In its rounds, the team's PRs to the Steward's own repository are merged as an employee's are: tested here first. */
+  /** No longer used (Steward 0.36.119): the Steward merges only the kit and stamp PRs it opens itself, always. Kept so older settings load. */
   mergeSelf: boolean;
   /** The Steward's own checkout, which those releases are made from (a worktree of it at origin/main). */
   stewardCheckout: string;
@@ -313,7 +314,7 @@ export const DEFAULT_SETTINGS: Settings = {
   parallel: 2,
   stagesAtOnce: 2,
   affectedTests: true,
-  // It merges and releases by itself only once the person says yes: here, and for each repository (Employee.merges).
+  // It builds and releases by itself only once the person says yes.
   byItself: false,
   roundMinutes: 10,
   mergeMinAgeMinutes: 10,
@@ -370,7 +371,7 @@ const SOURCE_CONTROL: Field = {
 /**
  * Each setting as the page's Settings panel shows it, and as the kit's settings-kit.ts checks it. In tabs, in this order:
  * Repositories (each one a line saying what it is and does, its Merges switch on that line, and what the Steward finds
- * by itself folded under Found by the Steward), Merging and releasing, General, Alarms, the Wright's drafts, and on the
+ * by itself folded under Found by the Steward), Releasing, General, Alarms, the Wright's drafts, and on the
  * PC that releases it, Castellan. Each one's help is a line: README.md says the rest.
  */
 export const SETTINGS_SCHEMA: Field[] = [
@@ -382,7 +383,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     unique: 'id',
     label: 'Repositories',
     tab: 'Repositories',
-    help: "The repositories the Steward looks after. They arrive by Hire, or by Look after on the Steward's page, with all of it found from their clones: here you choose whether each merges your PRs and how it is released.",
+    help: "The repositories the Steward looks after. They arrive by Hire, or by Look after on the Steward's page, with all of it found from their clones: here you choose how each is released. Whoever writes a PR merges it once vouched; each build releases what is on the branch.",
     maxItems: 50,
     noAdd: true,
     line: ['repo', 'branch', 'note'],
@@ -394,7 +395,8 @@ export const SETTINGS_SCHEMA: Field[] = [
         kind: 'switch',
         label: 'Merges PRs',
         inline: true,
-        help: "Off until you say yes. On: your (and the team's) ready PRs to it are merged: not a draft, merging cleanly, no failing or running checks.",
+        help: 'No longer used: the Steward merges no PRs (0.36.119). Whoever writes one merges it once vouched.',
+        hidden: true,
       },
       {
         key: 'release',
@@ -406,14 +408,15 @@ export const SETTINGS_SCHEMA: Field[] = [
         chipOff: 'not released',
         ...command,
       },
-      { key: 'test', kind: 'list', label: 'Test it', help: 'Each must pass before a PR with no checks on GitHub merges. None: such a PR waits for you.', item: { label: 'Command', ...command }, maxItems: 10, matchCase: true, chipOff: 'no tests', hidden: true },
+      { key: 'test', kind: 'list', label: 'Test it', help: "Each must pass on the branch's newest commit before a build releases it, unless a vouch covers that commit. None: only a vouched commit is released.", item: { label: 'Command', ...command }, maxItems: 10, matchCase: true, chipOff: 'no tests', hidden: true },
       {
         key: 'whenReady',
         kind: 'text',
         label: 'When a branch is ready',
-        help: 'Plain git has no PRs: run in your clone for a pushed branch that claimed a version and passes its tests, with {branch}, {base}, {commit}, {version}, {title}, {notesFile}, {repo} and {checkout} filled in. Say: git push origin {commit}:refs/heads/{base}.',
+        help: 'No longer run: the Steward lands no branches (0.36.119). Whoever writes one lands it in the branch; each build releases what is there.',
         empty: 'Claimed branches are left to you',
         optional: true,
+        hidden: true,
         shownWhen: { key: 'sourceControl', is: ['git'] },
         ...command,
       },
@@ -447,7 +450,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       // Whether it takes the kit is the Steward's to decide, from the kit.json on its branch: kept, never shown.
       { key: 'usesKit', kind: 'switch', label: "Takes the Steward's kit", hidden: true },
       { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'Fills its kit at the version kit.json pins.', empty: 'None: it has no kit', chip: 'kit', ...command, ...CASTELLAN, hidden: true },
-      { key: 'install', kind: 'text', label: 'Install it', help: 'Run in its newest release, downloaded and checked, when a merged PR asks for install.', empty: 'Not installed by the Steward', ...command, ...CASTELLAN, hidden: true },
+      { key: 'install', kind: 'text', label: 'Install it', help: 'No longer run: steps a merged PR asks for are not run since 0.36.119.', empty: 'Not installed by the Steward', ...command, ...CASTELLAN, hidden: true },
       { key: 'approve', kind: 'text', label: 'Approve a job', help: "Approves one of its jobs, with {job} its name and {sha256} the hash of the script merged on its branch.", empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command, ...CASTELLAN, hidden: true },
       { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true }, ...CASTELLAN, hidden: true },
       {
@@ -467,27 +470,28 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'list',
     label: 'Team',
     tab: 'How it works',
-    help: "GitHub accounts whose ready PRs are merged with yours. Empty: the account gh is signed in as, which covers Claude Code's PRs. Named here, they are the whole team, so name yours too.",
+    help: "GitHub accounts whose vouches the Steward trusts, and whose work it files for the Wright. Empty: the account gh is signed in as, which covers Claude Code's PRs. Named here, they are the whole team, so name yours too.",
     item: { label: 'GitHub account', maxLength: 60, pattern: '(app/)?[A-Za-z0-9][A-Za-z0-9-]*', patternHint: 'a GitHub account, like octocat, or app/<name> for a GitHub App' },
     maxItems: 20,
   },
   {
     key: 'byItself',
     kind: 'switch',
-    label: 'Merges and releases by itself',
+    label: 'Builds and releases by itself',
     tab: 'How it works',
-    help: "On duty, a round every few minutes merges each repository's ready PRs (where Merges PRs is on), then releases each new version. Off: only when you press a button.",
+    help: "On duty, at each build time it releases what is new on each repository's branch. Whoever writes a PR merges it once vouched. Off: only when you press a button.",
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', tab: 'How it works', help: 'How often it looks, while on duty.' },
-  { key: 'mergeMinAgeMinutes', kind: 'whole', min: 0, max: 1440, unit: 'minutes', label: 'A PR merges once it is', tab: 'How it works', help: "Time to push a small fix to a PR before it merges; the Steward's own kit PRs don't wait. 0: as soon as it's ready." },
-  { key: 'releaseAfterMerge', kind: 'switch', advanced: true, label: 'Release right after merging', tab: 'How it works', help: 'Off: Release is a stage of its own.' },
+  { key: 'mergeMinAgeMinutes', kind: 'whole', min: 0, max: 1440, unit: 'minutes', label: 'A PR merges once it is', tab: 'How it works', help: 'No longer used: the Steward merges no PRs (0.36.119).', hidden: true },
+  { key: 'releaseAfterMerge', kind: 'switch', advanced: true, label: 'Release right after merging', tab: 'How it works', help: 'No longer used: each build releases what is on the branch (0.36.119).', hidden: true },
   {
     key: 'catchUp',
     kind: 'switch',
     advanced: true,
     label: 'Catches PRs up with their branch',
     tab: 'How it works',
-    help: "A ready PR held back only because its branch moved on is caught up (version lines and changelog settled), tested and merged. Any other conflict goes back to whoever wrote it.",
+    help: 'No longer used: the Steward catches no PRs up (0.36.119). Whoever writes one brings it up to date and merges it.',
+    hidden: true,
   },
   {
     key: 'mergeTrain',
@@ -495,18 +499,22 @@ export const SETTINGS_SCHEMA: Field[] = [
     advanced: true,
     label: 'Merges ready PRs together',
     tab: 'How it works',
-    help: "Two or more of a repository's ready PRs are stacked lowest version first, tested once and merged together. Off: one at a time.",
+    help: 'No longer used: the Steward merges no PRs (0.36.119).',
+    hidden: true,
   },
   {
     key: 'buildPipeline',
     kind: 'group',
     tab: 'Build pipeline',
     label: 'Build pipeline',
-    help: "At set times a day, a build: every repository's ready PRs merged together, tested once and released once, and Manor told once. Between builds, ready PRs merge ahead of the next build, and wait on their branch to be released at it, except an urgent fix (its changelog entry starting \"**Urgent fix:\"), which builds at once for its repository.",
+    help: "At set times a day, a build: each repository's main tested once at its newest commit (unless a vouch covers it) and released once, main's new kit tried on the agents and rolled out, and Manor told once. Whoever writes a PR merges it once vouched, and it waits on main for the next build, except an urgent fix (its changelog entry starting \"**Urgent fix:\"), which builds at once for its repository.",
     fields: [
       // The switch it had (0.36.40 to 0.36.62), never drawn: a Manor that still sends it saves this group as before, and
       // whatever it says is left out (pipeline.ts' normalizePipeline).
       { key: 'on', kind: 'switch', label: 'Build at set times', help: 'No longer used: the Steward always builds at its build times.', optional: true, hidden: true },
+      // So had finding the PR that broke a build (until 0.36.118), gone with the merges: kept so a Manor that sends it
+      // still saves, and left out the same way.
+      { key: 'bisectRuns', kind: 'whole', min: 0, max: 6, unit: 'test runs', label: 'To find the PR that breaks a build, at most', help: 'No longer used: builds merge no PRs (0.36.119).', optional: true, hidden: true },
       {
         key: 'times',
         kind: 'list',
@@ -540,17 +548,7 @@ export const SETTINGS_SCHEMA: Field[] = [
           { value: 'first', label: "The day's first build" },
         ],
       },
-      { key: 'windowMinutes', kind: 'whole', min: 15, max: 60, unit: 'minutes', label: 'A build takes at most', advanced: true, help: 'Then it releases what it merged, and the rest waits for the next build. Its tests run between builds, ahead of it.' },
-      {
-        key: 'bisectRuns',
-        kind: 'whole',
-        min: 0,
-        max: 6,
-        unit: 'test runs',
-        label: 'To find the PR that breaks a build, at most',
-        advanced: true,
-        help: "A repository's PRs that fail their checks together are halved this many times to find the one that broke them: it goes back to a draft and the rest leave. 3 finds it among up to 8 PRs. 0: the whole batch waits for the next build.",
-      },
+      { key: 'windowMinutes', kind: 'whole', min: 15, max: 60, unit: 'minutes', label: 'A build takes at most', advanced: true, help: "Then it releases each main as it is, and a kit still being tried or rolled out waits for the next build. Main's new kit is tried between builds, ahead of it." },
     ],
   },
   {
@@ -637,8 +635,8 @@ export const SETTINGS_SCHEMA: Field[] = [
     fields: [
       { key: 'on', kind: 'switch', label: 'Raise alarms' },
       { key: 'toast', kind: 'switch', label: 'A Windows notification for each', help: 'Clicking it opens this page.' },
-      { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR waiting for', help: 'A draft no one marked ready, conflicts, failing checks, a version that clashes.' },
-      { key: 'blockingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR holding others up for', help: 'The lowest version merges first, so the ready PRs behind one not ready yet (a draft, a conflict) wait. Its alarm comes after this long, with a button that moves it past the others. A conflict its author was told about and left this long goes to the Wright.' },
+      { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'Something waiting for', help: "A new kit waiting for the Steward to carry it; work filed for the Wright that hasn't landed." },
+      { key: 'blockingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR holding others up for', help: 'No longer used: there are no version queues (0.36.119).', hidden: true },
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
       { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Aletaster's tasting holds for" },
     ],
@@ -649,9 +647,10 @@ export const SETTINGS_SCHEMA: Field[] = [
     tab: 'How it works',
     label: "The Wright's drafts",
     ...WRIGHT,
-    help: "Each of the Wright's drafts the Steward looks at: one that passes (small enough, nothing a person reviews, the Bailiff's approval where it is installed) is marked ready and merged; one that doesn't says why.",
+    help: "No longer used: the Steward merges no PRs (0.36.119), so it no longer looks at the Wright's drafts. Whoever reviews one merges it.",
+    hidden: true,
     fields: [
-      { key: 'on', kind: 'switch', label: "Look at the Wright's drafts, and merge the ones that pass" },
+      { key: 'on', kind: 'switch', label: "Look at the Wright's drafts" },
       { key: 'maxLines', kind: 'whole', min: 10, max: 5000, unit: 'lines', label: 'At most', help: 'Lines added and removed; a larger draft waits for you.' },
       { key: 'sensitive', kind: 'list', label: 'For a person to review', help: "A draft changing a file matching one of these waits for you (* any part of a name, ** any folders). Claude Code's settings, secrets and the guards always wait too.", item: { label: 'Path pattern', maxLength: 120 }, maxItems: 40 },
     ],
@@ -661,7 +660,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'list',
     tab: 'How it works',
     label: 'Install scripts allowed',
-    help: "Packages whose install scripts may run where the Steward installs packages: every install runs with --ignore-scripts, then these alone run theirs. Any other package with one holds the work, with an alarm naming it and its script, and a PR whose package-lock.json brings one waits for you. Add a package only once you trust it.",
+    help: "Packages whose install scripts may run where the Steward installs packages: every install runs with --ignore-scripts, then these alone run theirs. Any other package with one holds the work, with an alarm naming it and its script. Add a package only once you trust it.",
     item: { label: 'npm package', maxLength: 214 },
     maxItems: 40,
   },
@@ -690,7 +689,8 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Merges its own PRs',
     tab: 'Castellan',
     ...CASTELLAN,
-    help: "The team's ready PRs to the Steward itself are tested here and merged, then it releases itself. An update that doesn't stay up is rolled back.",
+    help: "No longer used: the Steward merges no PRs to itself (0.36.119); it merges only the kit and stamp PRs it opens, and releases itself from main.",
+    hidden: true,
   },
   { key: 'stewardRepo', kind: 'text', label: "The Steward's repository", tab: 'Castellan', help: 'Where its kit releases (kit-v<version>) are, and where it releases itself.', empty: "None: it doesn't release itself, and a kit rollout needs a kit you name", maxLength: 140, ...REPO, ...CASTELLAN, hidden: true },
   {

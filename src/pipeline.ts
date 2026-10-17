@@ -2,22 +2,24 @@ import type { BuildPhase } from './buildtimes.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 
 /**
- * The build pipeline (Settings: Build pipeline): how the Steward always works, with no switch to turn it off. It merges,
- * tests and releases at set build times a day (four to start with: 00:00, 06:00, 12:00 and 18:00), instead of whenever
- * a PR goes ready. Between builds its rounds only look: no merges, catch-ups, kit rollouts, releases or site refreshes.
- * At a build time, a build begins: its rounds merge every ready PR (a repository's stacked as one train and tested once,
- * stages/train.ts), roll the newest kit out, and once nothing is left that settles in minutes, release each repository
- * once and tell Manor once, so each agent is installed at most once a build.
+ * The build pipeline (Settings: Build pipeline): how the Steward always works, with no switch to turn it off. It tests
+ * and releases at set build times a day (four to start with: 00:00, 06:00, 12:00 and 18:00). It merges no one's PRs
+ * (Steward 0.36.119): their authors merge them once vouched, and a build releases each repository's main as it finds it.
+ * Between builds its rounds only look (and try a new kit ahead of the build: stages/self.ts's trialAhead). At a build
+ * time, a build begins: its rounds stamp main's unstamped entries (stages/stamp.ts), release the Steward's new kit once it
+ * passed its trial on every agent, roll it out (its PRs merged by the Steward itself), and once nothing is left that
+ * settles in minutes, test main's head of each repository with an unreleased version (unless a vouch covers it:
+ * stages/mainbuild.ts), release each once and tell Manor once, so each agent is installed at most once a build.
  *
  * A build that the PC slept through begins at the first round after it wakes, once (a later build time it also missed
  * is the same build), and the page says it was late, and why (lateLine). The Steward wakes the PC for its builds, and
  * holds it until they close (build-hold.ts), so on AC power that happens only when the PC can't be woken. The owner's
  * override, Build now (POST /api/pipeline/build, or `steward build` at a console), begins one at once: for some
- * repositories, or all, and, ticked, lets its releases out to customers at once too. An urgent fix (a ready PR whose
+ * repositories, or all, and, ticked, lets its releases out to customers at once too. An urgent fix (a commit on main whose
  * changelog entry has a line starting "**Urgent fix:", stages/urgent.ts) begins one at once too, for its repository
  * alone, without the kit.
  *
- * pipeline.json keeps the build that is open, and the last builds, each with what it merged and released.
+ * pipeline.json keeps the build that is open, and the last builds, each with what it merged itself and released.
  */
 
 export const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
@@ -35,19 +37,15 @@ export interface BuildPipeline {
   /** The newest kit goes into every build, or only the day's first. */
   kit: 'every' | 'first';
   /**
-   * A build's rounds go on at most this long (15 to 60 minutes; 30 unless Settings say otherwise); then the build releases
-   * what it merged, and ends. Its ready PRs merge ahead of it, between builds (stages/prepare.ts), so a build mostly merges
-   * what went ready since, and releases.
+   * A build's rounds go on at most this long (15 to 60 minutes; 30 unless Settings say otherwise), waiting for a new kit's
+   * trial and rollout; then the build releases each repository's main as it is, and ends, and the kit waits for the next.
+   * (Before Steward 0.36.119 it also had bisectRuns, for the merges it no longer makes: a settings.json that keeps it
+   * loads all the same, and normalizePipeline leaves it out.)
    */
   windowMinutes: number;
-  /**
-   * A repository's stack that fails its checks (twice: once more for a flaky test) is halved at most this many times to
-   * find the PR that broke it (stages/build.ts). 0: none is looked for, and the stack waits for the next build.
-   */
-  bisectRuns: number;
 }
 
-export const DEFAULT_PIPELINE: BuildPipeline = { times: ['00:00', '06:00', '12:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 30, bisectRuns: 3 };
+export const DEFAULT_PIPELINE: BuildPipeline = { times: ['00:00', '06:00', '12:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 30 };
 
 /** The longest a build may take (Steward 0.36.67): an hour, which the owner already finds too long. */
 export const MAX_WINDOW_MINUTES = 60;
@@ -77,14 +75,12 @@ export function normalizePipeline(raw: unknown): BuildPipeline {
   const days = Array.isArray(r.days) ? DAYS.filter((x) => (r.days as unknown[]).includes(x)) : d.days;
   const whole = (x: unknown) => (typeof x === 'number' ? x : typeof x === 'string' && x.trim() ? Number(x) : Number.NaN);
   const w = whole(r.windowMinutes);
-  const b = whole(r.bisectRuns);
   const oldDefault = times.length === OLD_DEFAULT_TIMES.length && times.every((t, i) => t === OLD_DEFAULT_TIMES[i]);
   return {
     times: times.length && !oldDefault ? times : d.times,
     days,
     kit: r.kit === 'first' || r.kit === 'every' ? r.kit : d.kit,
     windowMinutes: Number.isInteger(w) && w !== OLD_DEFAULT_WINDOW ? Math.min(MAX_WINDOW_MINUTES, Math.max(15, w)) : d.windowMinutes,
-    bisectRuns: Number.isInteger(b) ? Math.min(6, Math.max(0, b)) : d.bisectRuns,
   };
 }
 
@@ -97,13 +93,16 @@ export interface BuildRun {
   finished?: string | null;
   /** The owner's Build now, or an urgent fix's build, for some repositories only (ids); none: all. */
   employees?: string[] | null;
-  /** An urgent fix's build: "<id> #<n> <head>" for each urgent PR that began it, which boards once at that head (stages/urgent.ts). */
+  /**
+   * An urgent fix's build: "<id> <head>" for each main head that began it, which builds once (stages/urgent.ts); "<id>
+   * #<n> <head>", an urgent PR's, in a build from before Steward 0.36.119.
+   */
   urgent?: string[];
   /** The owner's Build now: its releases let out to customers at once, not on their release day. */
   toCustomers?: boolean;
   /** The rounds it took. */
   rounds: number;
-  /** "<id> #<n>" for each PR it merged. */
+  /** "<id> #<n>" for each PR it merged: the Steward's own (a kit's rollout, a stamp) since 0.36.119, anyone's before. */
   merged: string[];
   /** "<id> v<version>" for each release it made. */
   released: string[];
@@ -188,17 +187,16 @@ export type PipelineMode =
   /** A build's round: `closing` once its window has run out, when it releases whatever it merged and ends. */
   | { kind: 'build'; run: BuildRun; fresh: boolean; closing: boolean };
 
-/** An urgent PR that boards at once (stages/urgent.ts): its repository's id, its number and its head commit. */
+/** An urgent fix on main that builds at once (stages/urgent.ts): its repository's id and main's head commit. */
 export interface UrgentPr {
   id: string;
-  number: number;
   head: string;
 }
 
-/** How an urgent PR is kept in its build's record, so it boards once at that head. */
-export const urgentKey = (u: UrgentPr) => `${u.id} #${u.number} ${u.head}`;
+/** How an urgent fix is kept in its build's record, so that head builds once. */
+export const urgentKey = (u: UrgentPr) => `${u.id} ${u.head}`;
 
-/** The urgent PRs that boarded a build already, open or kept, by urgentKey: each boards once at its head. */
+/** The urgent heads that built already, open or kept, by urgentKey: each builds once. */
 export const boardedUrgent = (state: PipelineState): Set<string> => new Set([...state.builds, ...(state.open ? [state.open] : [])].flatMap((b) => b.urgent ?? []));
 
 /**
@@ -225,7 +223,7 @@ export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, 
   // An urgent fix between builds: a build of its own, for its repository, at once.
   if (o.urgent?.length) return fresh(now.toISOString(), 'urgent', { employees: [...new Set(o.urgent.map((u) => u.id))], urgent: o.urgent.map(urgentKey) });
   const next = nextBuildTime(p, now);
-  return { kind: 'between', next, line: `between builds: ready PRs merge ahead of the next build${next ? `, at ${buildWhen(next, now)}` : " (Settings name no build time to come: Build pipeline)"}, and are released at it` };
+  return { kind: 'between', next, line: `between builds: PRs are merged by whoever wrote them once vouched, and the next build${next ? `, at ${buildWhen(next, now)},` : " (Settings name no build time to come: Build pipeline)"} releases each repository's main` };
 }
 
 /** "the 08:00 build was late: the PC was in standby until 08:39", for a build the PC slept through; else null. */

@@ -4,17 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// Entries written as changes/<version>.md, and the stamp that moves them into CHANGELOG.md and the version files on the
-// pull request's own branch just before it merges: two pieces of work side by side never meet in the same lines.
+// Entries written as changes/<version>.md, and the stamp that moves them into CHANGELOG.md and the version files on main
+// at a build, through a PR of the Steward's own it merges itself: two pieces of work side by side never meet in the same lines.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-entries-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { changeFiles, changeVersion, CHANGES_README, changesReadme, entryBody, foldEntries, stampVersions } = await import('../src/entries.ts');
-const { stamp, usesChanges } = await import('../src/stages/stamp.ts');
-const { testedBefore } = await import('../src/stages/prtest.ts');
-const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
-type PrInfo = import('../src/stages/staff.ts').PrInfo;
+const { stampAll, stampBranch, stampDirOf, stampMain, stampTree, usesChanges } = await import('../src/stages/stamp.ts');
+const { ctxFor, employee, fakeEmployee, mergesOf, ok, runner, sh } = await import('./helpers.ts');
 
 const ENTRY = (line: string) => `**${line}**\n\n### What changed\n\n- ${line}\n\n### Before you update\n\n- Nothing: it updates itself as usual.\n`;
 
@@ -54,34 +52,53 @@ test('the entries fold into the changelog, the highest on top, a changelog start
   assert.match(foldEntries(null, 'Fake', [{ version: '0.1.0', body: '**First.**' }]), /^# Fake's changelog[\s\S]*## 0\.1\.0\n\n\*\*First\.\*\*/);
 });
 
+
 /**
- * An employee that writes its entries in changes/: main at 0.4.1 (stamped already, its entry in CHANGELOG.md) under a
- * PR that branched at 0.4.0 and wrote changes/<version>.md beside a feature, touching no version file.
+ * An employee that writes its entries in changes/: main at 0.4.1 (stamped already, its entry in CHANGELOG.md), and on
+ * it a piece of work merged as its author wrote it: changes/<version>.md beside a feature, no version file touched.
  */
-function pending(name: string, o: { entry?: string; file?: string; leftover?: boolean } = {}) {
+function onMain(name: string, o: { entry?: string; file?: string; leftover?: boolean } = {}) {
   const dir = path.join(home, name);
   const { checkout, origin } = fakeEmployee(dir, { version: '0.4.0', files: { [CHANGES_README]: changesReadme('Fake'), 'CHANGELOG.md': "# Fake's changelog\n\n## 0.4.0\n\n**First.**\n" } });
   const write = (f: string, t: string) => (mkdirSync(path.dirname(path.join(checkout, f)), { recursive: true }), writeFileSync(path.join(checkout, f), t));
   const read = (f: string) => readFileSync(path.join(checkout, f), 'utf8');
-  sh(checkout, 'switch', '--quiet', '-c', 'claude/feature');
-  write('src/feature.ts', 'export const feature = 1;\n');
-  write(o.file ?? 'changes/0.4.2.md', o.entry ?? ENTRY('A feature.'));
-  sh(checkout, 'add', '-A');
-  sh(checkout, 'commit', '--quiet', '-m', 'A feature');
-  sh(checkout, 'push', '--quiet', 'origin', 'claude/feature');
-  const headOid = sh(checkout, 'rev-parse', 'HEAD');
-  // main: another piece of work, stamped as 0.4.1.
-  sh(checkout, 'switch', '--quiet', 'main');
+  // Another piece of work, stamped as 0.4.1.
   for (const f of ['package.json', 'package-lock.json', 'src/app.ts']) write(f, read(f).split('0.4.0').join('0.4.1'));
   write('CHANGELOG.md', read('CHANGELOG.md').replace('## 0.4.0', `## 0.4.1\n\n${ENTRY('Something else.')}\n## 0.4.0`));
   write('src/other.ts', 'export const other = 1;\n');
   if (o.leftover) write('changes/0.4.1.md', ENTRY('Merged by an older Steward.'));
   sh(checkout, 'add', '-A');
   sh(checkout, 'commit', '--quiet', '-m', 'Fake 0.4.1: something else');
+  // The feature, merged with its entry unstamped.
+  write('src/feature.ts', 'export const feature = 1;\n');
+  write(o.file ?? 'changes/0.4.2.md', o.entry ?? ENTRY('A feature.'));
+  sh(checkout, 'add', '-A');
+  sh(checkout, 'commit', '--quiet', '-m', 'A feature');
   sh(checkout, 'push', '--quiet', 'origin', 'main');
-  const main = sh(checkout, 'rev-parse', 'HEAD');
-  const pr: PrInfo = { number: 30, title: 'Fake 0.4.2: a feature', url: 'https://github.com/Jcollier0120/Fake/pull/30', head: 'claude/feature', base: 'main', author: 'Jcollier0120', whose: 'team', headOid, after: null, afterError: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'none', labels: [], changed: 10, files: [], fork: false };
-  return { dir, checkout, origin, pr, main };
+  return { dir, checkout, origin, main: sh(checkout, 'rev-parse', 'HEAD') };
+}
+
+const RELEASES = [{ tagName: 'v0.4.1', isDraft: false, publishedAt: '2026-10-04T00:00:00Z' }, { tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-03T00:00:00Z' }];
+
+/**
+ * GitHub, standing in: main's head vouched for by the team when `vouched`, a stamp's PR opened as #31, and merged by
+ * moving origin's main to the head it names (`mainBefore`: where main was when it was asked to).
+ */
+function github(p: { origin: string; main: string }, o: { vouched?: boolean } = {}) {
+  const seen: { mainBefore?: string } = {};
+  const r = runner((a) => {
+    if (a[0] === 'release' && a[1] === 'list') return ok(RELEASES);
+    if (a[0] === 'api' && a[1] === `repos/Jcollier0120/Fake/commits/${p.main}/statuses?per_page=100`) return ok(o.vouched ? [{ context: 'steward/tested', state: 'success', creator: { login: 'Jcollier0120' } }] : []);
+    if (a[0] === 'api' && a[1].endsWith('/statuses?per_page=100')) return ok([]);
+    if (a[0] === 'pr' && a[1] === 'create') return ok('https://github.com/Jcollier0120/Fake/pull/31\n');
+    if (a[0] === 'pr' && a[1] === 'merge') {
+      seen.mainBefore = sh(p.origin, 'rev-parse', 'refs/heads/main');
+      sh(p.origin, 'update-ref', 'refs/heads/main', a[a.indexOf('--match-head-commit') + 1]);
+      return ok('');
+    }
+    return ok('');
+  });
+  return { ...r, seen };
 }
 
 const ctxOf = (p: { dir: string; checkout: string }, run = runner(() => ok('')).run) => {
@@ -89,69 +106,94 @@ const ctxOf = (p: { dir: string; checkout: string }, run = runner(() => ok('')).
   return { e, ctx: ctxFor({ employees: [e], workRoot: path.join(p.dir, 'work'), run, neutralDir: p.dir }) };
 };
 
-test('a pull request is stamped on its own branch: main merged in, its version set, its entry moved into the changelog', async () => {
-  const p = pending('stamp');
-  const r = runner(() => ok(''));
-  const { e, ctx } = ctxOf(p, r.run);
+test("a build stamps main's entries through a PR of its own, merged by it: the version set, the entry moved into the changelog", async () => {
+  const p = onMain('stamp');
+  const g = github(p, { vouched: true });
+  const { e, ctx } = ctxOf(p, g.run);
   assert.equal(await usesChanges(ctx, e), true);
-  const s = await stamp(ctx, e, p.pr, { released: ['0.4.0', '0.4.1'], taken: [], carry: `checks passed at ${p.pr.headOid.slice(0, 7)} in Jcollier0120's clone, vouched for` });
-  assert.equal(s.done, true, s.note);
-  assert.equal(s.version, '0.4.2');
-  assert.equal(s.note, 'stamped v0.4.2');
-  const at = (f: string) => sh(p.origin, 'show', `refs/heads/claude/feature:${f}`);
+  const { results, merged } = await stampAll(ctx, [e]);
+  assert.deepEqual(results.map((r) => [r.outcome, r.message, r.version, r.url]), [['done', 'stamp: stamped v0.4.2, and merged it', '0.4.2', 'https://github.com/Jcollier0120/Fake/pull/31']], ctx.lines.join('\n'));
+  assert.deepEqual(merged, ['fake #31']);
+  const branch = stampBranch(p.main);
+  const stamped = sh(p.origin, 'rev-parse', `refs/heads/${branch}`);
+  assert.equal(sh(p.origin, 'rev-parse', `${stamped}^`), p.main, "on main's head");
+  assert.equal(g.seen.mainBefore, p.main, 'never a push to main: it moves by the PR alone');
+  assert.equal(sh(p.origin, 'rev-parse', 'refs/heads/main'), stamped, 'merged');
+  const at = (f: string) => sh(p.origin, 'show', `${stamped}:${f}`);
   assert.equal(JSON.parse(at('package.json')).version, '0.4.2');
   const lock = JSON.parse(at('package-lock.json'));
   assert.deepEqual([lock.version, lock.packages[''].version], ['0.4.2', '0.4.2']);
   assert.match(at('src/app.ts'), /version: '0\.4\.2'/);
   assert.deepEqual(at('CHANGELOG.md').split('\n').filter((l) => l.startsWith('## ')), ['## 0.4.2', '## 0.4.1', '## 0.4.0']);
   assert.match(at('CHANGELOG.md'), /## 0\.4\.2\n\n\*\*A feature\.\*\*/);
-  assert.equal(sh(p.origin, 'ls-tree', '-r', '--name-only', 'refs/heads/claude/feature', 'changes/'), CHANGES_README, 'its file gone, the folder kept');
-  assert.equal(at('src/other.ts'), 'export const other = 1;', "main's work in it");
-  assert.equal(sh(p.origin, 'rev-parse', 'refs/heads/main'), p.main, 'never a push to main');
-  assert.equal(s.head, sh(p.origin, 'rev-parse', 'refs/heads/claude/feature'));
-  // What passed at its head holds at the stamped one: it merges untested.
-  const t = testedBefore(e, { ...p.pr, headOid: s.head! });
-  assert.equal(t?.ok, true);
-  assert.equal(t?.carried, p.pr.headOid);
-  assert.equal(r.gh.filter((a) => a[1] === 'edit').length, 0, 'its title already says its version');
-  assert.equal(existsSync(path.join(p.dir, 'work', 'fake-stamp')), false, 'its worktree removed');
+  assert.equal(sh(p.origin, 'ls-tree', '-r', '--name-only', stamped, 'changes/'), CHANGES_README, 'its file gone, the folder kept');
+  assert.deepEqual(sh(p.origin, 'diff', '--name-only', p.main, stamped).split('\n').sort(), ['CHANGELOG.md', 'changes/0.4.2.md', 'package-lock.json', 'package.json', 'src/app.ts'], 'only versions and entries');
+  const title = 'Fake 0.4.2: version and changelog, stamped by the Steward';
+  assert.equal(sh(p.origin, 'log', '-1', '--format=%s', stamped), title);
+  const create = g.gh.find((a) => a[0] === 'pr' && a[1] === 'create')!;
+  assert.deepEqual(['--base', '--head', '--title'].map((k) => create[create.indexOf(k) + 1]), ['main', branch, title]);
+  assert.match(create[create.indexOf('--body-file') + 1], new RegExp(`The entries main carried at ${p.main.slice(0, 7)}, stamped: v0\\.4\\.2\\.`));
+  assert.deepEqual(mergesOf(g.gh), [['pr', 'merge', '31', '--repo', 'Jcollier0120/Fake', '--merge', '--delete-branch']]);
+  const merge = g.gh.find((a) => a[1] === 'merge')!;
+  assert.equal(merge[merge.indexOf('--match-head-commit') + 1], stamped, 'at the head it pushed');
+  // Only versions and entries changed: the vouch that covered main's head covers the stamp, so the build doesn't test it.
+  const vouch = g.gh.find((a) => a[0] === 'api' && a.includes('-X'))!;
+  assert.ok(vouch.includes(`repos/Jcollier0120/Fake/statuses/${stamped}`), vouch.join(' '));
+  assert.ok(vouch.includes(`description=Only versions and changelog changed since ${p.main.slice(0, 7)}: Jcollier0120 vouched for ${p.main.slice(0, 7)}`), vouch.join(' '));
+  assert.equal(existsSync(stampDirOf(ctx.settings, e)), false, 'its worktree removed');
 });
 
-test('a version taken meanwhile: the next free one, its title following', async () => {
-  const p = pending('stamp-taken');
-  const r = runner(() => ok(''));
-  const { e, ctx } = ctxOf(p, r.run);
-  const s = await stamp(ctx, e, p.pr, { released: ['0.4.0', '0.4.1'], taken: ['0.4.2'], carry: null });
-  assert.equal(s.done, true, s.note);
-  assert.equal(s.note, 'stamped v0.4.3; v0.4.3 for changes/0.4.2.md, since other work holds v0.4.2');
-  assert.equal(JSON.parse(sh(p.origin, 'show', 'refs/heads/claude/feature:package.json')).version, '0.4.3');
-  assert.deepEqual(r.gh.find((a) => a[1] === 'edit')?.slice(-2), ['--title', 'Fake 0.4.3: a feature']);
-  assert.equal(testedBefore(e, { ...p.pr, headOid: s.head! }), null, 'nothing to carry: it is tested at its new head');
+test('a stamp of main no vouch covers carries none', async () => {
+  const p = onMain('stamp-unvouched');
+  const g = github(p);
+  const { e, ctx } = ctxOf(p, g.run);
+  const s = await stampMain(ctx, e, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.equal(s?.done, true, s?.note);
+  assert.deepEqual(g.gh.filter((a) => a[0] === 'api' && a.includes('-X')), [], 'no status set: the build tests it');
 });
 
-test("an entry an older Steward left on main unstamped is stamped with the pull request's, below it", async () => {
-  const p = pending('stamp-leftover', { leftover: true });
-  const { e, ctx } = ctxOf(p);
-  // main says 0.4.1 already, so the one left there gets the next free version, and the PR's its own above it.
-  const s = await stamp(ctx, e, p.pr, { released: ['0.4.0', '0.4.1'], taken: [], carry: null });
-  assert.equal(s.done, true, s.note);
-  assert.deepEqual(s.stamped!.map((x) => [x.file, x.version]), [['changes/0.4.1.md', '0.4.2'], ['changes/0.4.2.md', '0.4.3']]);
-  assert.deepEqual(sh(p.origin, 'show', 'refs/heads/claude/feature:CHANGELOG.md').split('\n').filter((l) => l.startsWith('## ')), ['## 0.4.3', '## 0.4.2', '## 0.4.1', '## 0.4.0']);
+test('a version taken meanwhile: the next free one, and why', () => {
+  const p = onMain('stamp-taken');
+  const s = stampTree(p.checkout, employee(p.checkout), { released: ['0.4.0', '0.4.1'], taken: ['0.4.2'] });
+  if (!s || 'error' in s) return assert.fail(JSON.stringify(s));
+  assert.equal(s.version, '0.4.3');
+  assert.deepEqual(s.did, ['v0.4.3', 'v0.4.3 for changes/0.4.2.md, since other work holds v0.4.2']);
+  assert.equal(JSON.parse(readFileSync(path.join(p.checkout, 'package.json'), 'utf8')).version, '0.4.3');
+  assert.equal(existsSync(path.join(p.checkout, 'changes', '0.4.2.md')), false);
+  assert.deepEqual([...new Set(s.changed)].sort(), ['CHANGELOG.md', 'changes/0.4.2.md', 'package-lock.json', 'package.json', 'src/app.ts']);
 });
 
-test('a pull request with no entry merges as it is; an empty entry, or one naming another version, waits for its author', async () => {
-  const none = pending('stamp-none', { file: 'docs/notes.md' });
-  const a = ctxOf(none);
-  const s = await stamp(a.ctx, a.e, none.pr, { released: [], taken: [], carry: null });
-  assert.deepEqual([s.done, s.nothing], [false, true]);
-  assert.equal(sh(none.origin, 'rev-parse', 'refs/heads/claude/feature'), none.pr.headOid, 'nothing pushed');
+test('an entry an older Steward left on main unstamped is stamped with the newer one, below it', () => {
+  const p = onMain('stamp-leftover', { leftover: true });
+  // main says 0.4.1, released already, so the one left there gets the next free version, and the newer its own above it.
+  const s = stampTree(p.checkout, employee(p.checkout), { released: ['0.4.0', '0.4.1'], taken: [] });
+  if (!s || 'error' in s) return assert.fail(JSON.stringify(s));
+  assert.equal(s.version, '0.4.3');
+  assert.equal(s.did[0], 'v0.4.3 (with v0.4.2)');
+  const log = readFileSync(path.join(p.checkout, 'CHANGELOG.md'), 'utf8');
+  assert.deepEqual(log.split('\n').filter((l) => l.startsWith('## ')), ['## 0.4.3', '## 0.4.2', '## 0.4.1', '## 0.4.0']);
+  assert.match(log, /## 0\.4\.3\n\n\*\*A feature\.\*\*[\s\S]*## 0\.4\.2\n\n\*\*Merged by an older Steward\.\*\*/);
+});
 
-  const bad = pending('stamp-bad', { entry: '## 0.4.9\n\n**Wrong heading.**\n' });
-  const b = ctxOf(bad);
-  const s2 = await stamp(b.ctx, b.e, bad.pr, { released: [], taken: [], carry: null });
-  assert.equal(s2.done, false);
-  assert.match(s2.note, /changes\/0\.4\.2\.md says nothing, or its heading names another version/);
-  assert.equal(sh(bad.origin, 'rev-parse', 'refs/heads/claude/feature'), bad.pr.headOid, 'nothing pushed');
+test('main with no entry has nothing to stamp; an empty entry, or one naming another version, waits for its author', async () => {
+  const none = onMain('stamp-none', { file: 'docs/notes.md' });
+  const a = github(none);
+  const n = ctxOf(none, a.run);
+  assert.equal(await stampMain(n.ctx, n.e, { released: ['0.4.0', '0.4.1'], taken: [] }), null);
+  assert.deepEqual(a.gh, [], 'nothing asked of GitHub');
+  assert.equal(sh(none.origin, 'for-each-ref', 'refs/heads/steward/'), '', 'nothing pushed');
+  assert.equal(existsSync(stampDirOf(n.ctx.settings, n.e)), false, 'no worktree made');
+
+  const bad = onMain('stamp-bad', { entry: '## 0.4.9\n\n**Wrong heading.**\n' });
+  const b = github(bad);
+  const x = ctxOf(bad, b.run);
+  const s = await stampMain(x.ctx, x.e, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.equal(s?.done, false);
+  assert.equal(s?.note, `its entries on main at ${bad.main.slice(0, 7)} weren't stamped: changes/0.4.2.md says nothing, or its heading names another version: that needs its author`);
+  assert.equal(sh(bad.origin, 'for-each-ref', 'refs/heads/steward/'), '', 'nothing pushed');
+  assert.equal(sh(bad.origin, 'rev-parse', 'refs/heads/main'), bad.main);
+  assert.deepEqual(b.gh.filter((g) => g[0] === 'pr'), [], 'no PR');
+  assert.equal(existsSync(stampDirOf(x.ctx.settings, x.e)), false, 'its worktree removed');
 });
 
 test("a repository without changes/README.md isn't on the new format", async () => {
@@ -160,45 +202,4 @@ test("a repository without changes/README.md isn't on the new format", async () 
   const { e, ctx } = ctxOf({ dir, checkout });
   sh(checkout, 'fetch', '--quiet', 'origin');
   assert.equal(await usesChanges(ctx, e), false);
-});
-
-test("a PR's version is read from the changes file it adds, where it leaves its version files alone", async () => {
-  const { prVersions, teamHold } = await import('../src/stages/merge.ts');
-  const p = pending('read-version');
-  sh(p.origin, 'update-ref', 'refs/pull/30/head', p.pr.headOid);
-  const { e, ctx } = ctxOf(p);
-  sh(p.checkout, 'fetch', '--quiet', 'origin');
-  assert.deepEqual(await prVersions(ctx, e, p.pr), { head: '0.4.2', from: '0.4.0', entries: ['changes/0.4.2.md'] });
-  // Even a version released, claimed or below its branch's: the stamp gives it a free one, so it never waits.
-  const lookup = async () => ({ released: ['0.4.0', '0.4.1', '0.4.2'], base: '0.4.1' });
-  assert.deepEqual(await teamHold(ctx, e, p.pr, lookup), { why: null, sets: '0.4.2', stamps: true });
-});
-
-test('the round: a vouched PR written as changes/<version>.md is stamped on its branch and merged at the stamped head, untested', async () => {
-  const { merge } = await import('../src/stages/merge.ts');
-  const p = pending('round');
-  const listed = () => {
-    const at = sh(p.origin, 'rev-parse', 'refs/heads/claude/feature');
-    sh(p.origin, 'update-ref', 'refs/pull/30/head', at);
-    return [{ number: 30, title: p.pr.title, url: p.pr.url, body: '', headRefName: p.pr.head, headRefOid: at, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [], labels: [], additions: 5, deletions: 0, files: [] }];
-  };
-  const releases = [{ tagName: 'v0.4.1', isDraft: false, publishedAt: '2026-10-04T00:00:00Z' }, { tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-03T00:00:00Z' }];
-  const vouch = [{ context: 'steward/tested', state: 'success', creator: { login: 'Jcollier0120' } }];
-  const r = runner((a) => {
-    if (a[0] === 'pr' && a[1] === 'list') return ok(listed());
-    if (a[0] === 'release' && a[1] === 'list') return ok(releases);
-    if (a[0] === 'api' && a[1].includes('/statuses')) return ok(a[1].includes(p.pr.headOid) ? vouch : []);
-    return ok('');
-  });
-  // Checks that would fail, were they run.
-  const e = employee(p.checkout, { fill: '', test: ['node -e process.exit(1)'] });
-  const ctx = ctxFor({ employees: [e], workRoot: path.join(p.dir, 'work'), run: r.run, neutralDir: p.dir });
-  const [m] = await merge(ctx, [e], { yes: true, team: true });
-  const now = sh(p.origin, 'rev-parse', 'refs/heads/claude/feature');
-  assert.notEqual(now, p.pr.headOid, `stamped: ${m.message}\n${ctx.lines.join('\n')}`);
-  assert.equal(m.outcome, 'done', m.message);
-  assert.ok(m.message.includes(`merged #30 (checks passed at ${p.pr.headOid.slice(0, 7)} in Jcollier0120's clone, vouched for; stamped v0.4.2)`), m.message);
-  assert.doesNotMatch(ctx.lines.join('\n'), /testing it here/, 'no checks run');
-  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '30', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', now]]);
-  assert.equal(sh(p.origin, 'rev-parse', 'refs/heads/main'), p.main, 'never a push to main');
 });

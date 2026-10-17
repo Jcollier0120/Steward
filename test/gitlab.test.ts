@@ -14,9 +14,8 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 const { hostFor, must } = await import('../src/hosts/index.ts');
 const { mergeStatesOf, prOf, undraft, whereIs } = await import('../src/hosts/gitlab.ts');
 const { autoWords, hostOf, isGitlabRepo } = await import('../src/scm.ts');
-const { merge } = await import('../src/stages/merge.ts');
 const { parsePrs } = await import('../src/stages/staff.ts');
-const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+const { ok } = await import('./helpers.ts');
 type Ran = import('../src/run.ts').Ran;
 type ScmLook = import('../src/scm.ts').ScmLook;
 
@@ -183,43 +182,4 @@ test('releases and issues in GitHub\'s words', async () => {
     ['PUT', `${P}/issues/3`, { state_event: 'close' }],
     ['POST', `${P}/labels`, { name: 'manor:work', color: '#1d76db', description: 'Queued for the Wright' }],
   ]);
-});
-
-test("a merge round on GitLab: the team's merge request, its pipeline passed, merged at the head it read", async () => {
-  const f = fakeEmployee(path.join(tmp, 'round'), { version: '0.4.0' });
-  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/feature');
-  for (const file of ['package.json', 'package-lock.json', 'src/app.ts']) writeFileSync(path.join(f.checkout, file), readFileSync(path.join(f.checkout, file), 'utf8').split('0.4.0').join('0.4.1'));
-  writeFileSync(path.join(f.checkout, 'feature.txt'), 'a feature\n');
-  sh(f.checkout, 'add', '-A');
-  sh(f.checkout, 'commit', '--quiet', '-m', 'A feature');
-  const head = sh(f.checkout, 'rev-parse', 'HEAD');
-  sh(f.checkout, 'push', '--quiet', 'origin', 'claude/feature');
-  sh(f.origin, 'update-ref', 'refs/merge-requests/7/head', head);
-  sh(f.checkout, 'switch', '--quiet', 'main');
-
-  const glab: string[][] = [];
-  const gh = runner();
-  const run = async (cmd: string, args: string[], opts?: any): Promise<Ran> => {
-    if (cmd !== 'glab') return gh.run(cmd, args, opts);
-    glab.push(args);
-    const [m, at] = call({ args });
-    if (at === `${P}/merge_requests?state=opened&per_page=100`) return ok([mr({ sha: head })]);
-    if (at === `${P}/merge_requests/7/diffs?per_page=100`) return ok([{ new_path: 'feature.txt', diff: '+a feature\n' }, { new_path: 'package.json', diff: '-  "version": "0.4.0",\n+  "version": "0.4.1",\n' }]);
-    if (at === `${P}/repository/commits/${head}/statuses?per_page=100`) return ok([{ id: 1, name: 'test', status: 'success', author: { username: 'ci' } }]);
-    if (at === `${P}/releases?per_page=100`) return ok([{ tag_name: 'v0.4.0', released_at: '2026-10-03T00:00:00Z', commit: { id: 'c0' } }]);
-    if (m === 'PUT' && at === `${P}/merge_requests/7/merge`) return ok(mr({ state: 'merged', sha: head }));
-    if (m === 'POST') return ok({});
-    return { code: 1, out: '', err: `404 Not Found: ${m} ${at}` };
-  };
-  // Checks that would fail, were they run here: GitLab's pipeline passed, so they aren't.
-  const e = employee(f.checkout, { repo: R, fill: '', test: ['node -e process.exit(1)'] });
-  const ctx = { ...ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run, neutralDir: tmp }), host: () => 'gitlab' as const };
-  const [m] = await merge(ctx, [e], { yes: true, team: true });
-  assert.equal(m.outcome, 'done', `${m.message}\n${ctx.lines.join('\n')}`);
-  assert.match(m.message, /merged #7/);
-  assert.deepEqual(gh.gh, [], 'GitHub is never asked');
-  const merged = glab.find((a) => call({ args: a })[1] === `${P}/merge_requests/7/merge`)!;
-  assert.ok(merged, 'merged through GitLab');
-  const i = merged.indexOf('--input');
-  assert.ok(i > 0);
 });

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { getJson, loadAlarms, watchAlarms, type GetJson, type Held } from './alarms.ts';
+import { getJson, loadAlarms, watchAlarms, type GetJson } from './alarms.ts';
 import { portUses } from './ports.ts';
 import { APP, dataDir } from './app.ts';
 import { clock, gate, GithubLimited, loadBudget, noteGlance, noteLimited, restReset, roundCost, saveBudget, waitLine } from './budget.ts';
@@ -15,16 +15,10 @@ import { agentPages, loadSettings, selfRepoOf, settingsFile, type Employee, type
 import { pendingMigration } from './migrate.ts';
 import { DEVELOPER_ONLY, makersPc, stewardActs } from './maker.ts';
 import { bump } from './stages/bump.ts';
-import { headsUp } from './heads-up.ts';
-import { heldQueues, keepVersionQueues, loadVersionQueues } from './version-queue.ts';
-import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
-import { checkoutOf, pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
-import { afterMerge } from './stages/aftermerge.ts';
-import { conflictsWaiting, joinLooks, merge, mergeOne, NO_CONFLICTS, TESTED_BESIDE, waitsBriefly, type MergeLook } from './stages/merge.ts';
-import { waitsForKit } from './stages/prtest.ts';
+import { checkoutOf, pick, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
-import { loadClaims, pruneClaims, shareClaims } from './claims.ts';
+import { pruneClaims, shareClaims } from './claims.ts';
 import { push } from './stages/push.ts';
 import { loadRefreshFailures, loadRefreshPending, refreshAfterReleases, refreshPendingFile, refreshStep, releasedWords } from './stages/refresh.ts';
 import { loadInstallHolds } from './installscripts.ts';
@@ -32,7 +26,10 @@ import { release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
 import { clearRolloutHolds, loadRolloutFailures, rollout, takeRolloutResults } from './stages/rollout.ts';
-import { loadSelfFailures, releaseSelf, selfFactsAlone } from './stages/self.ts';
+import { loadSelfFailures, releaseSelf, selfFactsAlone, trialAhead } from './stages/self.ts';
+import { heldKit, kitTrialsFile, TRIAL_GOING, type KitTrial } from './stages/trial.ts';
+import { stampAll } from './stages/stamp.ts';
+import { compareVersions } from './kitfiles.ts';
 import { settleWholeSuite } from './stages/wholesuite.ts';
 import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
@@ -47,16 +44,12 @@ import { hostFor, must } from './hosts/index.ts';
 import { whereIs } from './hosts/gitlab.ts';
 import { whereAzure } from './hosts/azure.ts';
 import { whereGitea } from './hosts/gitea.ts';
-import { apart, heldBy, repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
+import { heldBy, withRepo, withStageSlot } from './stages/slots.ts';
 import { lastWoke } from './fresh-start.ts';
 import { boardedUrgent, buildWhen, endRound, kitRides, lateLine, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode, type PipelineState, type UrgentPr } from './pipeline.ts';
 import { urgentReady } from './stages/urgent.ts';
 import { letOut } from './kit/exchequer.ts';
-import { loadBuildLeft, noteReady } from './stages/build.ts';
 import { keepPhases, phaseOf, timed } from './buildtimes.ts';
-import { kitComing } from './stages/buildkit.ts';
-import { buildBegins, prepareBeside } from './stages/prepare.ts';
-import { selfTestBeside } from './stages/selftests.ts';
 
 /**
  * The stages, as the command line and the page both run them: Settings' stagesAtOnce at a time on this PC, each
@@ -82,7 +75,7 @@ export interface StageAsk {
   hire?: boolean;
   /** round: every employee looked at, whatever has changed (Run now, and `steward round`). */
   full?: boolean;
-  /** round: these employees (ids) looked at too, whatever GitHub's glance says: a branch just vouched for with no PR (branchesin.ts). */
+  /** round: these employees (ids) looked at too, whatever GitHub's glance says: those whose rollout bump or push failed. */
   look?: string[];
   /**
    * round: only the staff's pages kept up (tend.ts) and the alarms, nothing asked of GitHub: a scheduled round while
@@ -384,9 +377,9 @@ async function unstickRound(settings: Settings, o: StageOptions, run: Runner, lo
   return unstick({ manorUrl, getJson: o.unstick?.getJson ?? getJson, readUpdates: o.unstick?.readUpdates, rolledBack: o.unstick?.rolledBack, allow: o.unstick?.allow, manorLog: o.unstick?.manorLog, slots: o.unstick?.slots, dryRun: o.unstick?.dryRun ?? manorDryRun(run), press: o.unstick?.press, now: o.now, log });
 }
 
-/** The Steward's own repository for the merge stage, when Settings say it merges its own PRs and it has a checkout. */
+/** The Steward's own repository, as a build sees an employee's: while Settings say it releases itself, with a checkout. */
 function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
-  if (!ctx.settings.mergeSelf) return null;
+  if (!ctx.settings.releaseSelf) return null;
   if (process.env.NODE_TEST_CONTEXT && !o.self) return null;
   const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
   if (!ctx.settings.stewardRepo || !checkout) return null;
@@ -394,7 +387,7 @@ function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
 }
 
 /**
- * The urgent fixes ready between builds (stages/urgent.ts) in the repositories the round asks about: all of them and the
+ * The urgent fixes on main between builds (stages/urgent.ts) in the repositories the round asks about: all of them and the
  * Steward's own when it names none. Said in the log; none without a glance at GitHub. Never throws: the round goes on
  * between builds.
  */
@@ -403,8 +396,10 @@ async function urgentBetween(ctx: Ctx, o: StageOptions, ask: StageAsk, pipeline:
   try {
     const asked = ask.employees?.length ? ask.employees.map((x) => x.trim().toLowerCase()) : null;
     const self = !asked || asked.includes(APP.id) ? selfEmployee(ctx, o) : null;
-    const urgent = await urgentReady(ctx, [...ctx.settings.employees.filter((e) => !asked || asked.includes(e.id)), ...(self ? [self] : [])], boardedUrgent(pipeline));
-    if (urgent.length) log(`an urgent fix is ready (${urgent.map((u) => `${u.id} #${u.number}`).join(', ')}): it builds at once, for its repository alone, rather than at the next build time`);
+    // The Steward's own main and releases, which the glance keeps apart from the employees'.
+    const heads = self ? { [APP.id]: { head: ctx.glance.stewardMain?.head ?? null, tags: (ctx.glance.stewardReleases ?? []).map((r) => r.tagName).filter((t) => /^v\d+\.\d+\.\d+$/.test(t)).sort((a, b) => compareVersions(b.slice(1), a.slice(1))) } } : {};
+    const urgent = await urgentReady(ctx, [...ctx.settings.employees.filter((e) => !asked || asked.includes(e.id)), ...(self ? [self] : [])], boardedUrgent(pipeline), heads);
+    if (urgent.length) log(`an urgent fix is on main (${urgent.map((u) => `${u.id} at ${u.head.slice(0, 7)}`).join(', ')}): it builds at once, for its repository alone, rather than at the next build time`);
     return urgent;
   } catch (e) {
     log(`couldn't look for an urgent fix: ${(e as Error).message}`);
@@ -455,13 +450,9 @@ async function claimRemotes(ctx: Ctx, o: StageOptions): Promise<{ repo: string; 
   return out;
 }
 
-/** The Steward's own repository as an employee, for its turn: while Settings say it merges or releases itself, with a checkout. */
-function selfForTurns(ctx: Ctx, o: StageOptions, merging: boolean, releasing: boolean): Employee | null {
-  if (!(merging && ctx.settings.mergeSelf) && !(releasing && ctx.settings.releaseSelf)) return null;
-  if (process.env.NODE_TEST_CONTEXT && !o.self) return null;
-  const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
-  if (!ctx.settings.stewardRepo || !checkout || !existsSync(checkout)) return null;
-  return stewardEmployee(ctx.settings, checkout);
+/** The Steward's own repository as an employee, for its turn: while Settings say it releases itself, with a checkout. */
+function selfForTurns(ctx: Ctx, o: StageOptions): Employee | null {
+  return selfEmployee(ctx, o);
 }
 
 /** Whether this PC is online: the kit's look, or online under node --test (StageOptions.online). */
@@ -515,65 +506,21 @@ export async function approveJobsNow(ids: string[], o: { run?: Runner; owner?: O
 }
 
 /**
- * The ready PRs that conflict with their branch, caught up now, beside the rounds (merge.ts's mergeOne, conflictsOnly):
- * a round reaches each repository in turn, one round at a time, and a long one (a vouch's tests, a kit trial) left a PR
- * that conflicted waiting for hours. A glance at GitHub first, in no stage slot: a repository with no ready PR in
- * conflict (conflictsWaiting), or one another stage is working on now (repoBusy), is left alone, and with none left
- * nothing more is done. The rest in a stage slot of its own, "conflicts" (stages/slots.ts; none free: LockTimeout at
- * once, and the next look tries again), each where this PC has its turn (lease.ts), under its lock. Nothing is merged,
- * released or tested: the next round does that. Only while Settings say it merges by itself and catches up, online, and
- * within GitHub's API budget at its pace (budget.ts). `begin`: told when it takes a slot, and the end it returns called
- * once it gives the slot back. One line for each repository whose PRs it caught up, or handed a conflict on in.
+ * Main's new kit tried on the agents ahead of the next build (stages/self.ts's trialAhead), a slice a round between
+ * builds: while Settings say the Steward releases itself, with a checkout, and only where this PC has the Steward's own
+ * turn (lease.ts), under its repository's lock. A line for the log, or null. Never throws.
  */
-export async function conflictsNow(o: StageOptions & { begin?: () => () => void } = {}): Promise<EmployeeResult[]> {
-  const log = o.log ?? (() => {});
-  if (!stewardActs()) return [];
-  const given = loadSettings();
-  if (!given.byItself || !given.catchUp || !reposHere(given, o)) return [];
-  if (!(await (o.online ?? onlineNow)())) return [];
-  const b = loadBudget();
-  if (!gate(b, b.glanceCost ?? given.employees.length + 1, o.now?.() ?? new Date(), { paced: true }).go) return [];
-  const ctx = await context({ settings: given, run: o.run, log, owner: o.owner, scm: o.scm, now: o.now });
-  if (!ctx.glance) return [];
+async function kitAhead(ctx: Ctx, o: StageOptions): Promise<string | null> {
   const self = selfEmployee(ctx, o);
-  const waiting = [...ctx.settings.employees, ...(self ? [self] : [])].filter((e) => !repoBusy(e.id) && conflictsWaiting(ctx, e).length);
-  if (!waiting.length) return [];
-  return withStageSlot(
-    'conflicts',
-    ctx.settings.stagesAtOnce,
-    async () => {
-      const end = o.begin?.();
-      try {
-        const t = await takeTurns(waiting, { run: ctx.run, settings: ctx.settings, log: ctx.log, deps: turnsDeps(o, ctx.run) });
-        ctx.lease = t.guard;
-        const out: EmployeeResult[] = [];
-        // takeTurns keeps one entry per id: matched by id, as the Steward may be its own employee.
-        for (const e of waiting.filter((x) => t.acting.some((a) => a.id === x.id))) {
-          // Taken by another stage since the glance: left to it.
-          if (repoBusy(e.id)) continue;
-          try {
-            const { merged: _m, held: _h, did: _d, waits: _w, lookAgain: _l, ...r } = await withRepo(log, e.id, () => mergeOne(ctx, e, { yes: true, team: true, conflictsOnly: true }));
-            if (r.message !== NO_CONFLICTS) out.push(r);
-          } catch (err) {
-            log(`[${e.id}] ${(err as Error).message}`);
-          }
-        }
-        // Caught up: Manor's version queues and the staff's table say so now, not at the next round.
-        if (out.some((r) => r.outcome === 'done') && !process.env.NODE_TEST_CONTEXT) {
-          try {
-            await keepVersionQueues(ctx);
-            await refreshStaff(ctx, { fetch: true });
-          } catch (err) {
-            log(`couldn't keep the version queues and the staff's table: ${(err as Error).message}`);
-          }
-        }
-        return out;
-      } finally {
-        end?.();
-      }
-    },
-    { waitMs: 0 },
-  );
+  if (!self || !ctx.glance) return null;
+  try {
+    const t = await takeTurnsFor(ctx, o, [], self);
+    if (!t.selfActs) return null;
+    const glance = ctx.glance;
+    return await withRepo(ctx.log, APP.id, () => trialAhead(ctx, { checkout: self.checkout, main: glance.stewardMain ?? null, tags: glance.stewardReleases?.map((r) => r.tagName) ?? null }));
+  } catch (e) {
+    return `its kit's trial ahead of the next build: ${(e as Error).message}`;
+  }
 }
 
 /** Runs a stage in one of the stages' slots (stages/slots.ts), records it, and refreshes the staff's table; a round only when it did something. */
@@ -617,43 +564,29 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (o.kitInfo) ctx.kit = o.kitInfo;
       if (o.tasting) ctx.tasting = o.tasting;
       if (o.online) ctx.online = o.online;
-      // When each PR went ready, as the rounds see it: a build stacks its PRs in that order (stages/build.ts).
-      if (name === 'round' && ctx.glance) {
-        try {
-          noteReady(ctx.glance, at());
-        } catch (e) {
-          log(`couldn't keep when PRs went ready: ${(e as Error).message}`);
-        }
-      }
       const started = new Date().toISOString();
       const out: StageResult = { stage: name, started, finished: started, kit: null, asked: { ...ask }, results: [], log: lines };
-      let held: { employee: Employee; prs: Held[] }[] = [];
-      // A round looks only at the employees with something new on GitHub since the last (stages/changes.ts).
-      const seen = name === 'round' ? loadSeen() : null;
-      let plan: RoundPlan | null = null;
-      /** Those a rollout beside the rounds is bumping now, which this round leaves to it (stages/rollout.ts). */
-      let bumping: Employee[] = [];
       const own = o.ownKit !== undefined ? o.ownKit : ownKit();
       /** A new kit that waits for this Steward to carry it (stages/rollout.ts), for the alarms. */
       let rolloutWaits: { kit: string; own: string } | null = null;
       /** Whether this round took turns (lease.ts): then each repository's shared claims are looked at too. */
       let turnsOn = false;
-      // The build pipeline (pipeline.ts): between builds a round only looks; a build's rounds merge, and its last releases.
+      // The build pipeline (pipeline.ts): between builds a round only looks; a build's rounds release each main.
       const pipeline = name === 'round' && !quiet && pipelineRounds(o) ? loadPipeline() : null;
       const planned: PipelineMode = pipeline ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { buildNow: ask.buildNow, employees: ask.employees, wokeAt: lastWoke() }) : { kind: 'outside' };
-      // An urgent fix between builds (stages/urgent.ts): a build of its own for its repository, at once.
+      // An urgent fix on main between builds (stages/urgent.ts): a build of its own for its repository, at once.
       const urgent = pipeline && planned.kind === 'between' ? await urgentBetween(ctx, o, ask, pipeline, log) : [];
       const mode: PipelineMode = pipeline && urgent.length ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { urgent }) : planned;
-      /** This round ends its build: it released what the build merged. */
+      /** This round ends its build: it released each repository's main. */
       let buildCloses = false;
-      /** "<id> #<n>" for each PR this round merged, for the build's record. */
+      /** "<id> #<n>" for each PR of its own this round merged (a rollout's, a stamp's), for the build's record. */
       const mergedHere: string[] = [];
       try {
         // The owner's Build now, or an urgent fix's build, for some repositories: each of its rounds looks at those alone.
         const only = ask.employees?.length ? ask.employees : mode.kind === 'build' ? (mode.run.employees ?? null) : null;
-        // A merge or round with the Steward's own repository among them (an urgent fix of its own), or with no repository
-        // named: it merges and releases its own too.
-        const isSelf = (id: string) => (name === 'merge' || name === 'round') && id.trim().toLowerCase() === APP.id;
+        // A round with the Steward's own repository among them (an urgent fix of its own), or with no repository named:
+        // it releases its own too.
+        const isSelf = (id: string) => name === 'round' && id.trim().toLowerCase() === APP.id;
         const withSelf = !only?.length || only.some(isSelf);
         const agents = only?.filter((id) => !isSelf(id)) ?? null;
         const picked = only?.length && !agents?.length ? { employees: [] as Employee[] } : pick(ctx.settings.employees, agents);
@@ -662,7 +595,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           out.tendOnly = true;
           log(
             ask.tendOnly
-              ? "Settings say it doesn't merge and release by itself: the round keeps the staff's pages up, and asks GitHub nothing"
+              ? "Settings say it doesn't release by itself: the round keeps the staff's pages up, and asks GitHub nothing"
               : "no repositories to look after on this PC (no employee's clone here, and no checkout of its own): the round keeps the staff's pages up, and asks GitHub nothing",
           );
         } else if (offline) {
@@ -672,43 +605,31 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           out.budget = budget;
           log(waitLine(budget));
         } else if (mode.kind === 'between') {
-          // Between builds: nothing released or rolled out. The PRs that waited at the last look still wait, so the alarms
-          // go on counting their hours.
+          // Between builds: nothing released or rolled out. Main's new kit is tried on the agents ahead of the next build.
           out.build = { between: true, next: mode.next?.toISOString() ?? null };
           log(mode.line);
-          held.push(...heldBefore(seen!, picked.employees));
-          // The merge pass ahead of the next build, beside the rounds (stages/prepare.ts): ready PRs merged as the build
-          // would merge them, and released by the build. Only where this PC has the turn (lease.ts).
-          if (name === 'round' && mode.next && !only?.length) {
-            const turns = async (c: Ctx, list: Employee[]) => {
-              const own = list.find((e) => e.id === APP.id) ?? null;
-              const t = await takeTurnsFor(c, o, list.filter((e) => e !== own), own ? selfForTurns(c, o, true, false) : null, true);
-              return list.filter((e) => (e === own ? t.selfActs : t.acting.includes(e)));
-            };
-            const prepLine = prepareBeside(ctx, { next: mode.next, employees: picked.employees, self: selfEmployee(ctx, o), kit: latestKit(ctx.kit), turns });
-            if (prepLine) log(prepLine);
+          if (!only?.length) {
+            const ahead = await kitAhead(ctx, o);
+            if (ahead) {
+              log(`[${APP.id}] ${ahead}`);
+              if (ahead.includes(TRIAL_GOING)) out.soon = true;
+            }
           }
-        } else if (name === 'merge' || name === 'round') {
+        } else if (name === 'round') {
           if (mode.kind === 'build') {
-            // The merge pass ahead of this build, if one goes on, merges nothing more (stages/prepare.ts).
-            buildBegins();
             const when =
               mode.run.by === 'owner'
                 ? "the owner's Build now"
                 : mode.run.by === 'urgent'
-                  ? `the urgent fix's build (${(mode.run.urgent ?? []).map((k) => k.split(' ').slice(0, 2).join(' ')).join(', ')})`
+                  ? `the urgent fix's build (${(mode.run.urgent ?? []).map((k) => k.split(' ').map((w, i) => (i === 1 && !w.startsWith('#') ? w.slice(0, 7) : w)).slice(0, 2).join(' ')).join(', ')})`
                   : `the ${buildWhen(new Date(mode.run.due), at())} build`;
             log(
               mode.fresh
-                ? `${when} begins${mode.run.employees?.length ? ` for ${mode.run.employees.join(', ')}` : ''}: every ready PR merged, tested once with the others, and released once it has all settled${mode.run.late ? ` (${lateLine(mode.run, at())})` : ''}`
+                ? `${when} begins${mode.run.employees?.length ? ` for ${mode.run.employees.join(', ')}` : ''}: each repository's main tested once (unless a vouch covers it) and released once it has all settled${mode.run.late ? ` (${lateLine(mode.run, at())})` : ''}`
                 : mode.closing
-                  ? `${when} has run out of time (${ctx.settings.buildPipeline.windowMinutes} minutes): it releases what it merged, and the rest waits for the next build`
+                  ? `${when} has run out of time (${ctx.settings.buildPipeline.windowMinutes} minutes): it releases each main as it is, and a kit still being tried or rolled out waits for the next build`
                   : `${when} goes on (its round ${mode.run.rounds + 1})`,
             );
-            // In a build, a ready PR merges at once: the build time was the time to push to it (merge.ts' ageHold). And
-            // nothing is released merge by merge: the build releases each repository once, when it closes.
-            ctx.settings = { ...ctx.settings, mergeMinAgeMinutes: 0, releaseAfterMerge: false };
-            // Each repository's ready PRs stacked as one batch, in the order they went ready (stages/build.ts).
             ctx.build = { due: mode.run.due, name: when };
             out.build = { due: mode.run.due, by: mode.run.by, round: mode.run.rounds + 1 };
             // Under way from its first round's start, not its end: GET /api/pipeline says building (Manor holds its installs)
@@ -721,227 +642,90 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               }
             }
           }
-          // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
-          const round = name === 'round';
-          const yes = round || !!ask.yes;
-          // Turns with this PC's others first (lease.ts): a repository another PC has its turn in is left to it. A round
-          // takes the Steward's own and the refreshed repositories' now, and the employees' once its plan says which it
-          // looks at (below): it publishes nothing to the rest.
-          const turns = await takeTurnsFor(ctx, o, round ? [] : picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && withSelf, round && withSelf));
+          // Turns with this PC's others first (lease.ts): a repository another PC has its turn in is left to it.
+          const turns = await takeTurnsFor(ctx, o, picked.employees, withSelf ? selfForTurns(ctx, o) : null);
           turnsOn = turns.on;
-          let elsewhere = turns.elsewhere;
-          // The team's PRs to the Steward's own repository, as an employee's (stages/selfmerge.ts), first: its kit's PRs at
-          // the head of its line (merge.ts), and the new kit released at once (selfRound), so the agents' PRs that take
-          // that kit are tested after it is there, in this round. Not in a stage asked about others alone.
-          const self = (round || ask.team) && withSelf && turns.selfActs ? selfEmployee(ctx, o) : null;
-          /** The Steward's own: its team's PRs merged, its new versions released, and a new kit's releases read again. */
-          const selfPart = async (): Promise<{ line: EmployeeResult | null; releases: EmployeeResult[] }> => {
-            let line: EmployeeResult | null = null;
-            let moved = false;
-            if (self) {
-              const [r] = await merge(ctx, [self], { yes, team: true });
-              const { merged: selfMerged, held: prs, ...rest } = r;
-              line = rest;
-              if (prs.length) held.push({ employee: self, prs });
-              moved = selfMerged.length > 0;
-              mergedHere.push(...selfMerged.map((p) => `${APP.id} #${p.number}`));
+          const employees = turns.acting;
+          out.results = [...turns.elsewhere];
+          const self = withSelf && turns.selfActs ? selfEmployee(ctx, o) : null;
+          // Main's unstamped entries first (stages/stamp.ts), each repository's and the Steward's own, so what is released
+          // carries its version and changelog: a PR of the Steward's, opened and merged by it.
+          const stamped = await timed(phaseOf(ctx), 'merges', null, () => stampAll(ctx, [...(self ? [self] : []), ...employees]), (r) => r.results.length > 0);
+          out.results.push(...stamped.results);
+          mergedHere.push(...stamped.merged);
+          // The Steward's own new versions (stages/self.ts): its kit, once tried on every agent, then its own.
+          const selfReleases = self ? await timed(phaseOf(ctx), 'releases', APP.id, () => selfRound(ctx, o, stamped.merged.some((m) => m.startsWith(`${APP.id} `))), (r) => r.some((x) => x.outcome === 'done' || x.outcome === 'failed')) : [];
+          // Its turn another PC's now (lease.ts): a whole suite beside the rounds here is that PC's to run, and is stopped.
+          if (withSelf && !turns.selfActs) await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
+          if (selfReleases.some((r) => r.outcome === 'done' && /\bkit-v\d/.test(r.message))) {
+            // A new kit: the kit's releases read again, for the rollout below.
+            try {
+              ctx.kit = await kitInfo(ctx.run, ctx.neutralDir, ctx.settings.stewardRepo);
+              log(`kit ${latestKit(ctx.kit)} released: it is rolled out now`);
+            } catch (err) {
+              log(`couldn't read the kit's releases again: ${(err as Error).message}`);
             }
-            // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about others alone.
-            const releases = round && withSelf && turns.selfActs ? await timed(phaseOf(ctx), 'releases', APP.id, () => selfRound(ctx, o, moved), (r) => r.some((x) => x.outcome === 'done' || x.outcome === 'failed')) : [];
-            // Its turn another PC's now (lease.ts): a whole suite beside the rounds here is that PC's to run, and is stopped.
-            if (round && withSelf && !turns.selfActs) await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
-            if (releases.some((r) => r.outcome === 'done' && /\bkit-v\d/.test(r.message))) {
-              // A new kit: the kit's releases read again, and every employee looked at, since a new kit is new for each (changes.ts):
-              // a PR whose checks failed at its kit's fill, or that waited for its kit's release, is tried again now.
-              try {
-                ctx.kit = await kitInfo(ctx.run, ctx.neutralDir, ctx.settings.stewardRepo);
-                log(`kit ${latestKit(ctx.kit)} released: every employee's PRs looked at again with it`);
-              } catch (err) {
-                log(`couldn't read the kit's releases again: ${(err as Error).message}`);
-              }
-            }
-            return { line, releases };
+          }
+          out.results.push(...selfReleases);
+          /** The kit main carries, still being tried on the agents or waiting for its whole suite: the build waits for it. */
+          const kitWaits = selfReleases.find((r) => r.kitWaits)?.kitWaits ?? null;
+          // What a rollout beside the rounds did since the last round reported it (stages/rollout.ts): this round's to tell.
+          out.results.push(...takeRolloutResults());
+          const releaseNow = async (who: Employee[]) => {
+            const released = await releaseUnreleased(ctx, who);
+            out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
           };
-          // In a build, the employees' merges go beside the Steward's own (Steward 0.36.69), which may test its PRs pushed
-          // since the build was prepared, ten minutes a run, a failing one twice: on 2026-10-16 the 08:00 build's 34 kit
-          // PRs, open at 13:44, merged at 14:44, once a round had tested #291 twice. The Steward's own goes apart
-          // (slots.ts), holding its own repository only, and the round waits for both before what hangs on it: the
-          // rollout, which waits for a kit coming in this build (buildkit.ts) or takes the one just released, and the
-          // build's release. Out of a build, the Steward's own first, as before.
-          const selfBeside = mode.kind === 'build' && !!self;
-          // On the Steward's page, its PRs moved since they were tested for this build are tested beside the rounds
-          // instead (stages/selftests.ts, Steward 0.36.77), and the round doesn't wait for them: it, and those after it
-          // until they end, leave the Steward's own repository alone, its merges and releases, and its ready PRs wait.
-          // Once they end, a round merges what passed (agent.ts).
-          const testing = selfBeside && round && self ? await selfTestBeside(ctx, self, { kit: latestKit(ctx.kit) }) : null;
-          if (testing) {
-            log(`[${APP.id}] ${testing.line.message}`);
-            if (testing.held.length) held.push({ employee: self!, prs: testing.held });
-          }
-          const kitBefore = latestKit(ctx.kit);
-          let selfLine: EmployeeResult | null = null;
-          let selfReleases: EmployeeResult[] = [];
-          if (!selfBeside) ({ line: selfLine, releases: selfReleases } = await selfPart());
-          let employees = turns.acting;
-          if (round) {
-            // A build's first round looks at every repository: the PRs that waited since the last build board now,
-            // whether or not GitHub says anything new of them.
-            plan = planRound({ employees: picked.employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full || (mode.kind === 'build' && mode.fresh), look: ask.look ?? [], now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
-            // Those another PC has its turn in are left to it, and not kept as seen (afterRound): looked at again next round.
-            const looked = await takeTurnsFor(ctx, o, plan.look, null, true);
-            plan = { ...plan, look: looked.acting };
-            elsewhere = looked.elsewhere;
-            if (plan.quiet.length) log(`nothing new on GitHub since the last round for ${plan.quiet.map((e) => e.name).join(', ')}: not looked at again`);
-            // Those a rollout beside the rounds is bumping or pushing now (stages/rollout.ts): left to it, rather than this
-            // round waiting for that bump's checks, and looked at again next round (kept as they were seen before).
-            bumping = plan.look.filter((e) => heldBy(e.id) === 'rollout');
-            if (bumping.length) {
-              log(`${bumping.map((e) => e.name).join(', ')}: the kit's rollout beside the rounds is bumping ${bumping.length === 1 ? 'it' : 'them'} now, so ${bumping.length === 1 ? 'it is' : 'they are'} looked at next round`);
-              plan = { ...plan, look: plan.look.filter((e) => !bumping.includes(e)), quiet: [...plan.quiet, ...bumping] };
+          // The newest kit, rolled out to each employee behind it (stages/rollout.ts): bumped, pushed and merged by the
+          // Steward itself. On the Steward's page the bumps run beside the rounds (`beside`): this round goes on at once,
+          // and a round comes as soon as they end (agent.ts).
+          const rollOut = async (): Promise<{ beside: boolean }> => {
+            const newest = latestKit(ctx.kit);
+            try {
+              const rolled = await rollout(ctx, employees, { kit: newest, ownKit: own, changelog: (k) => changelogFor(ctx, k) });
+              out.results.push(...rolled.results);
+              mergedHere.push(...rolled.results.filter((r) => r.outcome === 'done' && /\bmerged\b/.test(r.message) && r.url).map((r) => `${r.id} #${r.url!.split('/').pop()}`));
+              if (rolled.plan.waitsForSteward && newest && own) rolloutWaits = { kit: newest, own };
+              return { beside: !!rolled.beside };
+            } catch (err) {
+              log(`rollout: ${(err as Error).message}`);
+              return { beside: false };
             }
-            employees = plan.look;
-          }
-          const theirs = (who: Employee[]) => merge(ctx, who, { yes, team: round || !!ask.team });
-          let merged: MergeLook[];
-          if (selfBeside) {
-            // Both at once, and neither one's failure thrown before the other has ended.
-            const [mine, others] = await Promise.allSettled([testing ? Promise.resolve({ line: testing.line, releases: [] }) : apart('self merge', selfPart), theirs(employees)]);
-            if (mine.status === 'rejected') throw mine.reason;
-            if (others.status === 'rejected') throw others.reason;
-            ({ line: selfLine, releases: selfReleases } = mine.value);
-            merged = others.value;
-            // A kit released beside them: what a round that released it first would have looked at with it, looked at now
-            // (changes.ts): those it makes new that this round's plan left out, so the rollout below takes it to them all
-            // at once; and those whose PRs waited for its release (prtest.ts), so they merge in this round.
-            const kitNow = latestKit(ctx.kit);
-            const first = plan;
-            if (round && first && kitNow !== kitBefore) {
-              const withKit = planRound({ employees: picked.employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, look: ask.look ?? [], now: o.now?.(), kit: { newest: kitNow, own } });
-              const more = await takeTurnsFor(ctx, o, withKit.look.filter((e) => !first.look.includes(e) && heldBy(e.id) !== 'rollout'), null, true);
-              elsewhere = [...elsewhere, ...more.elsewhere];
-              const waited = employees.filter((e) => merged.some((r) => r.id === e.id && r.held.some((h) => waitsForKit(h.why))));
-              if (waited.length || more.acting.length) {
-                log(`kit ${kitNow} released beside the employees' merges: ${[...waited, ...more.acting].map((e) => e.name).join(', ')} looked at with it now`);
-                const again = await theirs([...waited, ...more.acting]);
-                merged = [...merged.map((r) => joinLooks([r, ...again.filter((a) => a.id === r.id)])), ...again.filter((a) => !merged.some((r) => r.id === a.id))];
-              }
-              // Those looked at first keep the kit before as what they were looked at with: the next round looks again.
-              plan = { ...first, look: [...first.look, ...more.acting], quiet: first.quiet.filter((e) => !more.acting.includes(e)), sigs: { ...first.sigs, ...Object.fromEntries(more.acting.flatMap((e) => (withKit.sigs[e.id] ? [[e.id, withKit.sigs[e.id]]] : []))) } };
-              employees = plan.look;
-            }
-          } else merged = await theirs(employees);
-          mergedHere.push(...merged.flatMap((r) => r.merged.map((p) => `${r.id} #${p.number}`)));
-          // And what a rollout beside the rounds did since the last round reported it (stages/rollout.ts): this round's to tell.
-          out.results = [...elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r), ...(selfLine ? [selfLine] : []), ...(round ? takeRolloutResults() : [])];
-          held.push(
-            ...merged.flatMap((r) => {
-              const employee = employees.find((e) => e.id === r.id);
-              return employee && r.held.length ? [{ employee, prs: r.held }] : [];
-            }),
-          );
-          // Those not looked at still have the PRs that waited when they last were: the alarms go on counting their hours.
-          if (plan) held.push(...heldBefore(seen!, plan.quiet));
-          // A PR that waits only on something settling within minutes: the next round comes sooner (agent.ts).
-          const brief = held.flatMap((h) => h.prs.filter((p) => !p.draft && waitsBriefly(p.why)).map((p) => `${h.employee.name} #${p.number}`));
-          // Not for a Steward PR tested beside the rounds alone: a round comes once its tests end (agent.ts).
-          const sooner = held.flatMap((h) => h.prs.filter((p) => !p.draft && waitsBriefly(p.why) && !p.why.startsWith(TESTED_BESIDE)).map((p) => `${h.employee.name} #${p.number}`));
-          if (round && sooner.length) {
-            out.soon = true;
-            log(`the next round comes sooner: ${sooner.join(', ')} ${sooner.length === 1 ? 'waits' : 'wait'} only on checks running, a head just caught up, GitHub working out whether it merges, or being just opened`);
-          }
-          const done = merged.filter((r) => r.merged.length).map((r) => r.id);
-          if (yes && done.length) {
-            // A release when Settings say so, at the kit the Steward hands out; and whatever each merged PR asks for.
-            let releaseKit: string | null = null;
-            const releaseAny = ctx.settings.releaseAfterMerge && !ctx.settings.releasesCastellan;
-            if (releaseAny) log(`release after merge (Settings): ${done.join(', ')}`);
-            else if (ctx.settings.releaseAfterMerge) {
-              const chosen = chooseKit(ctx.kit, ask.kit);
-              if ('error' in chosen) log(`release after merge: ${chosen.error}`);
-              else {
-                log(`release after merge (Settings): ${done.join(', ')}`);
-                out.kit = chosen.version;
-                releaseKit = chosen.version;
-              }
-            }
-            out.results.push(...(await afterMerge(ctx, picked.employees, merged, { releaseKit, releaseAny })));
-          }
-          if (round) {
-            const releaseNow = async (who: Employee[]) => {
-              const releasedNow = new Set(out.results.filter((r) => r.message.startsWith('release: ')).map((r) => r.id));
-              const released = await releaseUnreleased(ctx, who.filter((e) => !releasedNow.has(e.id)));
-              out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
-            };
-            // A new kit, rolled out to each employee looked at that is behind it (stages/rollout.ts): bumped and pushed now,
-            // merged and released by the next round, which comes sooner for them (their checks passed here, and a kit PR
-            // of the Steward's doesn't wait to be old enough: merge.ts's ageHold). The kit PRs opened, if any. On the
-            // Steward's page the bumps run beside the rounds instead (`beside`): this round goes on at once, and those
-            // after it merge meanwhile; a round comes as soon as they end, to merge their PRs (agent.ts).
-            const rollOut = async (): Promise<{ opened: EmployeeResult[]; beside: boolean }> => {
-              const newest = latestKit(ctx.kit);
-              try {
-                const rolled = await rollout(ctx, employees, { kit: newest, ownKit: own, changelog: (k) => changelogFor(ctx, k) });
-                out.results.push(...rolled.results);
-                if (rolled.plan.waitsForSteward && newest && own) rolloutWaits = { kit: newest, own };
-                const opened = rolled.results.filter((r) => r.outcome === 'done');
-                if (opened.length && !out.soon) {
-                  out.soon = true;
-                  log(`the next round comes sooner: kit ${rolled.plan.kit ?? newest}'s PRs for ${opened.map((r) => r.name).join(', ')} merge${mode.kind === 'build' ? ' in this build' : ' and release'} then`);
-                }
-                return { opened, beside: !!rolled.beside };
-              } catch (err) {
-                log(`rollout: ${(err as Error).message}`);
-                return { opened: [], beside: false };
-              }
-            };
-            if (mode.kind === 'build') {
-              // A build: the kit's PRs opened first, so they merge in this build too; then, once nothing is left that
-              // settles within minutes (checks running, a kit's trial, kit PRs just opened, a rollout beside the rounds),
-              // every repository's new version released at once, the one release of this build. Or when the build's time
-              // has run out.
-              // A newer kit coming in this build (stages/buildkit.ts): the rollout waits for it, and the build stays open
-              // meanwhile, rather than sending every agent the kit before it to be bumped again at the next build.
-              const coming = kitComing({ selfHeld: self ? (held.find((h) => h.employee.id === self.id)?.prs ?? []) : [], selfReleases });
-              const rolled: { opened: EmployeeResult[]; beside: boolean; waits?: string } = !kitRides(ctx.settings.buildPipeline, pipeline!, mode.run)
-                ? (log(mode.run.by === 'urgent' ? 'the newest kit waits for the next build: this one is for an urgent fix' : "the newest kit waits for the day's first build (Settings: Build pipeline)"), { opened: [], beside: false })
-                : coming
-                  ? (log(`rollout: waits for ${coming}${mode.closing ? ', which the next build rolls out' : ''}`), { opened: [], beside: false, waits: coming })
-                  : await rollOut();
-              const opened = rolled.opened;
-              buildCloses = mode.closing || (!brief.length && !opened.length && !rolled.beside && !rolled.waits);
-              if (buildCloses) {
-                // The build's one release is every repository of the build's, looked at this round or not: their turns
-                // taken first, as this round took only those it looked at (above).
-                const all = await takeTurnsFor(ctx, o, picked.employees, null, true);
-                await timed(phaseOf(ctx), 'releases', null, () => releaseNow(all.acting));
-              }
-              else {
-                // A rollout beside the rounds alone: no round sooner, as the one after it comes once it ends (agent.ts).
-                // Nor a kit whose whole suite runs beside them: a round comes once it ends (wholesuite.ts). Nor the Steward's
-                // PRs tested beside them (selftests.ts), likewise.
-                if (sooner.length || opened.length) out.soon = true;
-                log(`the build releases once it has settled${brief.length ? `: ${brief.join(', ')} ${brief.length === 1 ? 'waits' : 'wait'} on something brief` : !opened.length && rolled.beside ? ": the kit's rollout goes on beside the rounds" : rolled.waits ? `: ${rolled.waits}` : ''}`);
-              }
-              out.results.push(...selfReleases);
+          };
+          if (mode.kind === 'build') {
+            // A build: the newest kit rolled out first, so it goes into this build; then, once no kit is being tried or
+            // rolled out, every repository's main released at once, the one release of this build. Or when the build's
+            // time has run out. A kit main carries that is still being tried (stages/trial.ts) keeps the build open,
+            // rather than sending every agent the kit before it to be bumped again at the next build.
+            const rolled: { beside: boolean; waits?: string } = !kitRides(ctx.settings.buildPipeline, pipeline!, mode.run)
+              ? (log(mode.run.by === 'urgent' ? 'the newest kit waits for the next build: this one is for an urgent fix' : "the newest kit waits for the day's first build (Settings: Build pipeline)"), { beside: false })
+              : kitWaits && !mode.closing
+                ? (log(`rollout: waits for kit ${kitWaits}, which is being tried`), { beside: false, waits: `kit ${kitWaits} is being tried` })
+                : await rollOut();
+            buildCloses = mode.closing || (!rolled.beside && !rolled.waits);
+            if (buildCloses) {
+              // The build's one release is every repository of the build's: their turns taken.
+              const all = await takeTurnsFor(ctx, o, picked.employees, null, true);
+              await timed(phaseOf(ctx), 'releases', null, () => releaseNow(all.acting));
             } else {
-              await releaseNow(employees);
-              // The Steward's own, released before the agents' merges (above).
-              out.results.push(...selfReleases);
-              await rollOut();
+              // A kit still being tried: the next round comes sooner. A rollout beside the rounds: a round comes once it ends.
+              if (rolled.waits) out.soon = true;
+              log(`the build releases once it has settled: ${rolled.waits ?? "the kit's rollout goes on beside the rounds"}`);
             }
-            // Then each employee's jobs whose installed script is the merged one, approved, so an update never leaves them waiting.
-            // Not one a rollout beside the rounds is bumping now: the next round approves its jobs, rather than this one waiting.
-            for (const e of picked.employees.filter((x) => heldBy(x.id) !== 'rollout')) {
-              let r: EmployeeResult | null;
-              try {
-                r = await withRepo(log, e.id, () => approveMerged(ctx, e));
-              } catch (err) {
-                log(`[${e.id}] jobs: ${(err as Error).message}`);
-                r = null;
-              }
-              if (r) out.results.push({ ...r, message: `jobs: ${r.message}` });
+          } else {
+            await rollOut();
+            await releaseNow(employees);
+          }
+          // Then each employee's jobs whose installed script is the merged one, approved, so an update never leaves them waiting.
+          // Not one a rollout beside the rounds is bumping now: the next round approves its jobs, rather than this one waiting.
+          for (const e of picked.employees.filter((x) => heldBy(x.id) !== 'rollout')) {
+            let r: EmployeeResult | null;
+            try {
+              r = await withRepo(log, e.id, () => approveMerged(ctx, e));
+            } catch (err) {
+              log(`[${e.id}] jobs: ${(err as Error).message}`);
+              r = null;
             }
-            if (plan) out.results.push(...plan.quiet.map((e) => result(e, 'skipped', bumping.includes(e) ? "the kit's rollout beside the rounds is bumping it now: looked at next round" : 'nothing new on GitHub since the last round')));
+            if (r) out.results.push({ ...r, message: `jobs: ${r.message}` });
           }
         } else if (name === 'release' && ask.hire) {
           // A hire: the agents named, installed here from their clones, whatever kit is being rolled out, on this PC's own
@@ -1010,7 +794,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         if (closed) {
           const all = mode.run.merged.length + mergedHere.length;
           const rel = mode.run.released.length + buildReleased.length;
-          log(`the build ends: ${all} PR${all === 1 ? '' : 's'} merged, ${rel} release${rel === 1 ? '' : 's'}`);
+          log(`the build ends: ${rel} release${rel === 1 ? '' : 's'}${all ? `, ${all} PR${all === 1 ? '' : 's'} of its own merged` : ''}`);
         }
         out.build = { ...out.build, closed };
       }
@@ -1059,20 +843,6 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           log(`claims: ${(e as Error).message}`);
         }
       }
-      // Each repository's version queue, for Manor (version-queue.ts): after the merges, so it says where each one is now,
-      // and what holds each (the PRs the merge stage held, and why), before the alarms, which raise one held an hour.
-      // Not in a test, which has no Manor and no projects of its own.
-      // Not in a round that asked GitHub nothing: without a glance, each repository's PRs would be asked of on its own.
-      if ((name === 'round' || name === 'merge') && !out.error && !quiet && !process.env.NODE_TEST_CONTEXT) {
-        try {
-          // Those the stage did something for (or failed partway) moved since its glance: their clones are fetched.
-          const queues = await keepVersionQueues(ctx, { moved: out.results.filter((r) => r.outcome === 'done' || r.outcome === 'failed').map((r) => r.id), held, self: selfEmployee(ctx, o) });
-          // The drafts coming up in them, told early so they're ready before their turn (heads-up.ts).
-          for (const line of await headsUp(ctx, queues.upcoming ?? [], { bailiffUrl: agentPages().bailiff })) log(line);
-        } catch (e) {
-          log(`couldn't keep the version queues: ${(e as Error).message}`);
-        }
-      }
       // After every round, done or not: what needs the person (alarms.ts).
       if (name === 'round') {
         try {
@@ -1082,17 +852,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Every agent's port (ports.ts): two agents on one is an alarm before either is installed. Not in a test,
           // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
           const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, buildLeft: loadBuildLeft(), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), queueHolds: heldQueues(loadVersionQueues(), loadTurns(), loadClaims()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, heldKit: heldKit(readJson<Record<string, KitTrial>>(kitTrialsFile(), {}), ctx.kit.released), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
-        }
-      }
-      // What the next round needs to tell what's new.
-      if (plan && seen) {
-        try {
-          saveSeen(afterRound(seen, { plan, results: out.results, held, error: out.error, now: o.now?.() }));
-        } catch (e) {
-          log(`couldn't keep what this round saw: ${(e as Error).message}`);
         }
       }
       // Something released: the pages that want to know are told (Manor installs it within minutes; the Aletaster tastes it).

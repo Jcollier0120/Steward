@@ -11,8 +11,8 @@ import { bumpPatch } from './versions.ts';
  * the file deleted, in a commit on the pull request's own branch. Nothing is ever pushed to the branch itself.
  *
  * In the Steward's own repository the kit has the same: `kit/changes/<kit version>.md` for kit/VERSION and
- * kit/CHANGELOG.md. A repository without `changes/README.md` keeps today's way, and the catch-up (stages/catchup.ts)
- * as before.
+ * kit/CHANGELOG.md. A repository without `changes/README.md` keeps today's way. A build puts main's
+ * entries together into one version and entry (stages/stamp.ts).
  */
 
 /** The folder, and the file whose presence on a repository's branch says it writes its entries there. */

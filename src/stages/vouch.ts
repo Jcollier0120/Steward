@@ -2,7 +2,6 @@ import { claimsOn, employeeFor } from '../claims.ts';
 import { gitMaybe } from '../git.ts';
 import { originRepo } from '../kit/manor.ts';
 import { originUrl, repoFromUrl } from '../scm.ts';
-import { dataFile, readJson } from '../kit/store.ts';
 import { WRIGHT_LABEL } from '../review.ts';
 import type { Employee } from '../settings.ts';
 import { checkKind, runChecks, type AffectedScope } from './bump.ts';
@@ -13,7 +12,8 @@ import { noteVouchTime, vouchLimit } from './vouchtime.ts';
 import { hostFor } from '../hosts/index.ts';
 
 /**
- * A team PR whose checks its author ran and saw pass, at its head commit, isn't tested here again before it merges.
+ * A PR whose checks its author ran and saw pass, at its head commit: its author merges it (Steward 0.36.119: the Steward
+ * merges no one's PRs), and the build that releases it doesn't test that code again.
  *
  * `steward vouch`, run in the clone a PR was pushed from (a Claude Code session's, a person's), runs the repository's
  * checks as Settings give them (the Steward's own: its kit filled, then npm run typecheck and npm test) at the clone's
@@ -24,13 +24,10 @@ import { hostFor } from '../hosts/index.ts';
  * of the whole checks on exactly that tree, on this PC or another on the licence (standin.ts). Checks that run
  * five minutes past the vouch's average time are stopped, and nothing is set (vouchtime.ts).
  *
- * The merge stage (merge.ts) trusts it only when a team member's account set it (Settings' team, read from GitHub's
- * record of who created the status), on the PR's current head, for a team PR from the repository itself that isn't the
- * Wright's. A new push, or a vouch by anyone else: tested here as before. A catch-up's merge commit keeps the vouch only
- * where it resolved nothing but version lines and changelogs (catchup.ts keepsStanding, prtest.ts carryTested). The
- * status isn't a check GitHub runs (checksOf leaves it out), so it never makes a PR's checks "passing" on its own. Nor
- * does it stand for the kit its kit.json pins: one not released holds a vouched PR as it holds any (prtest.ts's
- * kitReleaseHold), since its author's clone may have filled a kit from a Steward tree.
+ * A build (stages/mainbuild.ts) trusts it only when a team member's account set it (Settings' team, read from GitHub's
+ * record of who created the status), on main's head itself, or on the PR head a merge commit brought in unchanged (a PR
+ * merged while up to date with main). Anything else on main is tested there before it is released. The status isn't a
+ * check GitHub runs (checksOf leaves it out), so it never makes a PR's checks "passing" on its own.
  */
 
 /** The Wright's PRs (labelled wright, or a wright/… branch): reviewed by the Bailiff, and always tested here. */
@@ -48,7 +45,7 @@ export async function vouchedBy(ctx: Ctx, e: Employee, pr: PrInfo, team: string[
 
 /**
  * The team member who vouched for a commit of `repo` (the latest VOUCH_CONTEXT status on it says success, and one of
- * `team`'s accounts set it), or null. A PR's head (vouchedBy), or a claimed branch's with no PR yet (branchesin.ts).
+ * `team`'s accounts set it), or null. A PR's head (vouchedBy), or main's head at a build (mainbuild.ts).
  * Never throws.
  */
 export async function vouchOn(ctx: Ctx, repo: string, commit: string, team: string[]): Promise<string | null> {
@@ -67,33 +64,14 @@ export async function vouchOn(ctx: Ctx, repo: string, commit: string, team: stri
   return by && team.some((t) => t.toLowerCase() === by.toLowerCase()) ? by : null;
 }
 
-/**
- * After a vouch: the Steward running on this PC asked for a round now (its POST /api/round/soon), so the PR merges in
- * minutes when its turn has come, rather than at the next round. Its port and token from its server.json, as its own
- * stop reads them. What it answered, in a sentence; never throws, and never fails the vouch.
- */
-export async function askRoundSoon(o: { fetch?: typeof fetch; look?: string } = {}): Promise<string> {
-  const later = 'it merges at its next round instead';
-  const info = readJson<{ port?: number; token?: string } | null>(dataFile('server.json'), null);
-  if (!info?.port || !info.token) return `The Steward's page isn't running on this PC: ${later}.`;
-  try {
-    // A branch with no PR yet changes nothing GitHub's glance shows: the round is asked to look at its employee anyway.
-    const body = JSON.stringify(o.look ? { look: [o.look] } : {});
-    const r = await (o.fetch ?? fetch)(`http://127.0.0.1:${info.port}/api/round/soon`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': info.token }, body, signal: AbortSignal.timeout(5000) });
-    const j = (await r.json().catch(() => null)) as { message?: unknown } | null;
-    if (r.ok && typeof j?.message === 'string') return j.message;
-    return `The Steward's page answered HTTP ${r.status}: ${later}.`;
-  } catch (e) {
-    return `The Steward's page didn't answer (${(e as Error).message}): ${later}.`;
-  }
-}
+/** What to do once vouched: merge it yourself, and the next build releases it. Pure. */
+export const MERGE_IT_YOURSELF = (pr: number | null, repo: string) =>
+  `merge it yourself now, once GitHub says it merges cleanly (gh pr merge ${pr ?? '<number>'} --repo ${repo} --merge): the Steward merges no one's PRs, and the next build releases main`;
 
 /** What `steward vouch` did: whether it set the status, and in a sentence what happened. */
 export interface Vouched {
   ok: boolean;
   message: string;
-  /** A branch vouched for with no PR yet: the employee whose round opens it (branchesin.ts), for the round asked for now. */
-  look?: string;
 }
 
 /**
@@ -101,9 +79,8 @@ export interface Vouched {
  * the clone (open, from the repository itself, its head the clone's HEAD, nothing uncommitted), the repository's checks
  * run there, and once they pass, the commit status set. Never vouches for what it didn't test.
  *
- * A branch with no PR at all is vouched for as it is pushed, once a version is claimed for it (claims.ts): the Steward's
- * round then opens its PR (branchesin.ts), and merges it as any vouched one. `overMs` stands in for the time limit's
- * five minutes over the average (a test's).
+ * A branch with no PR at all is vouched for as it is pushed, once a version is claimed for it (claims.ts): its author
+ * then opens its PR and merges it. `overMs` stands in for the time limit's five minutes over the average (a test's).
  */
 export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line: string) => void; overMs?: number }): Promise<Vouched> {
   const { run } = ctx;
@@ -120,7 +97,7 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   const which = o.pr ? String(o.pr) : branch;
   if (!which) return { ok: false, message: 'name the PR (steward vouch <number>): this clone is on no branch' };
   const v = await hostFor({ ...ctx, run }, e).viewPr(repo, which, 'number,state,headRefOid,isCrossRepository');
-  // No PR from its branch: vouched for as pushed, and its PR opened by the Steward (branchesin.ts).
+  // No PR from its branch: vouched for as pushed, for the PR its author opens.
   if (v.code !== 0 && !o.pr && /no pull requests found/i.test(`${v.err}\n${v.out}`)) return vouchBranch(ctx, e, { ...o, repo, branch, head });
   if (v.code !== 0) return { ok: false, message: `no open PR ${o.pr ? `#${o.pr}` : `for ${branch}`} in ${repo}: ${(v.err || v.out).trim().split('\n').pop()}` };
   const pr = JSON.parse(v.out) as { number: number; state: string; headRefOid: string; isCrossRepository: boolean };
@@ -130,7 +107,7 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   o.say(`${e.name} #${pr.number} at ${head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, { ...o, repo, head });
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `#${pr.number}'s checks failed at ${head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): the Steward merges it without testing it again, unless it is pushed to first` };
+  return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): ${MERGE_IT_YOURSELF(pr.number, repo)}. Push to it again, and vouch again.` };
 }
 
 /**
@@ -168,8 +145,8 @@ export function vouchDescription(e: Employee, scope: AffectedScope | undefined, 
 }
 
 /**
- * The vouch set on `head` (VOUCH_CONTEXT, success): by `steward vouch` once a clone's checks pass, and by the Steward's
- * own PR test once they pass here (prtest.ts), so the Assayer, which vouches for any team PR head without one, doesn't
+ * The vouch set on `head` (VOUCH_CONTEXT, success): by `steward vouch` once a clone's checks pass, and by a build once
+ * main's checks pass here (mainbuild.ts), so the Assayer, which vouches for any team PR head without one, doesn't
  * install and test it a second time. A refusal that reads as the host's passing trouble (passingTrouble) is tried again
  * after each of STATUS_WAITS_MS: setting the same status twice leaves one. Null once it is set, else why not. Never throws.
  */
@@ -209,7 +186,7 @@ export function passingTrouble(text: string): boolean {
  */
 async function vouchBranch(ctx: Ctx, e: Employee, o: { dir: string; repo: string; branch: string; head: string; say: (line: string) => void; overMs?: number }): Promise<Vouched> {
   const claim = claimsOn(e.repo).find((c) => c.branch === o.branch);
-  if (!claim) return { ok: false, message: `${o.branch} has no PR, and no version is claimed for it: claim one (claim-version ${e.id} --branch ${o.branch} --for "<what the work is>"), push, and vouch again; the Steward then opens its PR` };
+  if (!claim) return { ok: false, message: `${o.branch} has no PR, and no version is claimed for it: claim one (claim-version ${e.id} --branch ${o.branch} --for "<what the work is>"), push, open its PR, and vouch again` };
   if (o.branch.startsWith('wright/') || o.branch.startsWith('steward/')) return { ok: false, message: `${o.branch} is ${o.branch.startsWith('wright/') ? "the Wright's" : "the Steward's"}: it opens its own PRs` };
   const out = await gitMaybe(ctx.run, o.dir, 'ls-remote', '--heads', 'origin', `refs/heads/${o.branch}`);
   if (out === null) return { ok: false, message: `git couldn't ask origin for ${o.branch}` };
@@ -219,5 +196,5 @@ async function vouchBranch(ctx: Ctx, e: Employee, o: { dir: string; repo: string
   o.say(`${e.name} ${o.branch} (v${claim.version}, no PR yet) at ${o.head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, o);
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `${o.branch}'s checks failed at ${o.head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  return { ok: true, look: e.id, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): the Steward opens its PR (v${claim.version}) at its round, and merges it without testing it again, unless it is pushed to first` };
+  return { ok: true, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): open its PR (v${claim.version}) from that commit, and ${MERGE_IT_YOURSELF(null, o.repo)}` };
 }

@@ -29,9 +29,10 @@ import { pushable } from './found.ts';
  * time, so two workers asking at once get two versions. Asking again for the same branch returns the same claim.
  *
  * A claim lives until its version is on the branch or released (the work landed), until it is given back
- * (`release-version`), or for CLAIM_DAYS with no open PR that names it. While it lives, the merge stage holds another
- * PR that sets that version and catches it up to a free one (stages/merge.ts, stages/catchup.ts). When a catch-up gives a
- * PR a new version after all (another PR with a higher claim merged first), its branch's claim moves to it (reclaim).
+ * (`release-version`), or for CLAIM_DAYS with no open PR that names it. The Steward merges no PRs (Steward 0.36.119):
+ * whoever claimed a version merges their own PR, and a build releases main at the version main carries. A version
+ * merged below one released already isn't released (release.ts's releaseDecision): claims come above main's version,
+ * so the next build's stamp or claim carries it.
  *
  * The kit is claimed the same way, as a part of the Steward's repository (`claim-version kit`): kit/VERSION, its
  * kit-v<version> releases, the kit versions open PRs' titles name, and claims under `<repo>#kit` (stages/kitpart.ts).
@@ -62,8 +63,8 @@ export interface Claim {
   /** A copy's: when it was copied here from the claims ref (keepCopies), in ms. Never shared. */
   copied?: number;
   /**
-   * The PR this claim moved past the others in its version queue (move-past.ts): its branch's version until that PR is
-   * caught up to it, whatever its files say meanwhile. Shared with the rest, so every PC's merges see it.
+   * The PR this claim moved past the others in its version queue, before Steward 0.36.119 (whose version queues are
+   * gone): kept so the claims ref other PCs share still reads.
    */
   moved?: number;
 }
@@ -108,11 +109,8 @@ export function stillHeld(c: Claim, o: { branchVersion: string | null; released:
   return (!!c.branch && o.openBranches.some((b) => b === c.branch)) || o.openVersions.includes(c.version);
 }
 
-/** The live claims on a repository, for the merge stage: versions taken by work that hasn't landed. */
+/** The live claims on a repository, for a build's stamp: versions taken by work that hasn't landed. */
 export const claimsOn = (repo: string, all = loadClaims()): Claim[] => all.filter((c) => same(c.repo, repo));
-
-/** The version a PR was moved to, past the others in its version queue (move-past.ts), or null: its branch's claim that says so. */
-export const movedTo = (claims: Claim[], pr: { number: number; head: string }): string | null => claims.find((c) => c.moved === pr.number && c.branch === pr.head)?.version ?? null;
 
 /**
  * A version for new work on an employee, claimed: as the module's comment says. Where the repository's remote can be
@@ -120,7 +118,7 @@ export const movedTo = (claims: Claim[], pr: { number: number; head: string }): 
  * as always, and shared on the next round that reaches the remote (shareClaims). `now`, the facts it reads and `remote`
  * stand in for tests (under node --test there's no remote unless given).
  */
-export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number; part?: 'kit'; remote?: RemoteRepo | null; canPush?: (repo: string) => Promise<boolean>; above?: string[]; moved?: number }): Promise<{ claim: Claim; again: boolean }> {
+export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number; part?: 'kit'; remote?: RemoteRepo | null; canPush?: (repo: string) => Promise<boolean> }): Promise<{ claim: Claim; again: boolean }> {
   const now = o.now ?? Date.now();
   const kit = o.part === 'kit';
   // Off the maker's laptop, no version of Castellan's own repositories or kit is claimed, unless GitHub says this PC's
@@ -140,7 +138,7 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
   const openVersions = kit ? kitTitleVersions(prs.map((p) => p.title)) : titleVersions(e.name, prs.map((p) => p.title));
   const openBranches = prs.map((p) => p.headRefName);
   const facts = { branchVersion, released, openBranches, openVersions, now };
-  const ask: Ask = { key, branch: o.branch ?? null, by: o.by, for: o.for, minor: !!o.minor, now, facts, what: kit ? 'The kit' : e.name, files, from: `origin/${e.branch}`, above: o.above ?? [], moved: o.moved ?? null };
+  const ask: Ask = { key, branch: o.branch ?? null, by: o.by, for: o.for, minor: !!o.minor, now, facts, what: kit ? 'The kit' : e.name, files, from: `origin/${e.branch}` };
   const remote = o.remote !== undefined ? o.remote : process.env.NODE_TEST_CONTEXT ? null : await remoteFor(ctx.run, ctx.settings, e).catch(() => null);
   if (remote) {
     const shared = await claimShared(ctx.run, remote, ask);
@@ -151,8 +149,7 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
     const all = loadClaims();
     const live = all.filter((c) => !same(c.repo, key) || stillHeld(c, facts));
     const r = choose(live.filter((c) => same(c.repo, key)), ask);
-    const kept = live.filter((c) => !replaced(c, r.claim, ask));
-    writeJson(claimsFile(), r.again ? kept : [...kept, r.claim]);
+    writeJson(claimsFile(), r.again ? live : [...live, r.claim]);
     return { claim: r.claim, again: r.again };
   });
 }
@@ -187,27 +184,20 @@ type Ask = {
   what: string;
   files: string[];
   from: string;
-  /** Versions open PRs set that their titles may not say (the version queue's): the claim comes above them too. */
-  above: string[];
-  /** A PR moved past the others (move-past.ts): its branch's claim is made again above the rest, unless it was moved already. */
-  moved: number | null;
 };
 
 /**
- * The claim for this work, from the live claims on its repository: the branch's own again, or the next free version. A
- * PR moved past the others gets a new one above the rest in place of its branch's, once. Pure.
+ * The claim for this work, from the live claims on its repository: the branch's own again, or the next free version. Pure.
  */
 function choose(mine: Claim[], a: Ask): { claim: Claim; again: boolean } {
-  const had = a.branch ? mine.find((c) => c.branch === a.branch && (a.moved === null || c.moved === a.moved)) : undefined;
+  const had = a.branch ? mine.find((c) => c.branch === a.branch) : undefined;
   if (had) return { claim: had, again: true };
   const f = a.facts;
-  const top = highest([f.branchVersion, ...f.released, ...f.openVersions, ...a.above, ...mine.map((c) => c.version)]);
+  const top = highest([f.branchVersion, ...f.released, ...f.openVersions, ...mine.map((c) => c.version)]);
   if (!top) throw new Error(`${a.what} has no version to count from (${a.files.join(', ')} on ${a.from})`);
-  return { claim: { repo: a.key, version: after(top, a.minor), branch: a.branch, by: a.by, for: a.for, at: new Date(a.now).toISOString(), ...(a.moved !== null ? { moved: a.moved } : {}) }, again: false };
+  return { claim: { repo: a.key, version: after(top, a.minor), branch: a.branch, by: a.by, for: a.for, at: new Date(a.now).toISOString() }, again: false };
 }
 
-/** A claim a moved PR's new one takes the place of: its branch's others on the repository. Pure. */
-const replaced = (c: Claim, claim: Claim, a: Ask) => a.moved !== null && same(c.repo, a.key) && c.branch === a.branch && c.version !== claim.version;
 
 /** The claims ref's claims, read from its file; nothing when it can't be read. */
 export function parseClaims(text: string | null | undefined): Claim[] {
@@ -243,9 +233,8 @@ async function claimShared(run: Runner, remote: RemoteRepo, a: Ask): Promise<{ c
     // One of this PC's own whose version another PC has meanwhile stays here; its work gets a new one at merge.
     const going = mineOnly.filter((c) => !sharedLive.some((s) => s.version === c.version));
     const r = choose([...sharedLive, ...going], a);
-    const stays = (c: Claim) => !replaced(c, r.claim, a);
-    const list = [...there.filter((c) => !same(c.repo, a.key)), ...sharedLive.filter(stays), ...going.filter(stays), ...(r.again ? [] : [r.claim])];
-    const unchanged = r.again && !going.length && sharedLive.filter(stays).length === there.filter((c) => same(c.repo, a.key)).length;
+    const list = [...there.filter((c) => !same(c.repo, a.key)), ...sharedLive, ...going, ...(r.again ? [] : [r.claim])];
+    const unchanged = r.again && !going.length && sharedLive.length === there.filter((c) => same(c.repo, a.key)).length;
     if (!unchanged) {
       const w = await writeRef(run, remote, CLAIMS_REF, CLAIMS_FILE, sharedText(list), read.kind === 'found' ? read.sha : null, `${a.key} ${r.claim.version}: claimed${a.branch ? ` for ${a.branch}` : ''}`);
       if (w.kind === 'stale') {
@@ -255,7 +244,7 @@ async function claimShared(run: Runner, remote: RemoteRepo, a: Ask): Promise<{ c
       }
       if (w.kind !== 'ok') return null;
     }
-    await keepCopies(repoOfKey(a.key), list, readAt, [], stays);
+    await keepCopies(repoOfKey(a.key), list, readAt);
     const { source: _s, ...claim } = r.claim;
     return { claim: { ...claim, source: 'shared' }, again: r.again };
   }
@@ -268,13 +257,13 @@ async function claimShared(run: Runner, remote: RemoteRepo, a: Ask): Promise<{ c
  * wrote the ref after this read) isn't in it yet, and stays. `stays`: false for a claim of this PC's own that a new one
  * took the place of (a PR moved past the others), which goes.
  */
-async function keepCopies(repo: string, shared: Claim[], readAt: number, clashes: Claim[] = [], stays: (c: Claim) => boolean = () => true): Promise<void> {
+async function keepCopies(repo: string, shared: Claim[], readAt: number, clashes: Claim[] = []): Promise<void> {
   await withLock(claimsLock(), async () => {
     const copied = Date.now();
     const mine = shared.filter((c) => belongs(c, repo));
     const went = (c: Claim) => mine.some((s) => same(s.repo, c.repo) && s.version === c.version && s.branch === c.branch);
     // This PC's own stay, unless they went up (the same version, for the same branch); so do copies newer than the read.
-    const rest = loadClaims().filter((c) => !belongs(c, repo) || (!went(c) && stays(c) && (c.source !== 'shared' || (c.copied ?? 0) >= readAt)));
+    const rest = loadClaims().filter((c) => !belongs(c, repo) || (!went(c) && (c.source !== 'shared' || (c.copied ?? 0) >= readAt)));
     const marked = rest.map((c) => {
       const clash = clashes.find((x) => same(x.repo, c.repo) && x.version === c.version && x.branch === c.branch);
       if (!clash) return c;
@@ -389,21 +378,6 @@ export async function shareClaims(run: Runner, rows: Row[], repos: { repo: strin
 /** This PC's claims that clash with another PC's (made while it couldn't reach the remote): the page says so. */
 export const claimClashes = (): string[] => loadClaims().flatMap((c) => (c.clash ? [c.clash] : []));
 
-/**
- * A branch's claim moved to the version a catch-up gave its PR (stages/catchup.ts): the old one is free again and the
- * new one held, so the next worker counts from it and the branch's worker, asking again, gets it. A branch with no
- * claim gets one now, as the Steward's. `key` is the repository, or its kit's (kitClaimKey).
- */
-export async function reclaim(key: string, branch: string, version: string, now = Date.now()): Promise<void> {
-  await withLock(claimsLock(), async () => {
-    const all = loadClaims();
-    const had = all.find((c) => same(c.repo, key) && c.branch === branch);
-    if (had?.version === version) return;
-    const rest = all.filter((c) => !(same(c.repo, key) && (c.branch === branch || c.version === version)));
-    const claim: Claim = { repo: key, version, branch, by: had?.by ?? 'steward', for: had?.for ?? 'caught up by the Steward', at: new Date(now).toISOString() };
-    writeJson(claimsFile(), [...rest, claim]);
-  });
-}
 
 /**
  * The Steward's own, for a claim: its repository and clone from Settings; else the Steward clone this runs in (a

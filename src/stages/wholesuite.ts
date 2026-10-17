@@ -24,7 +24,7 @@ import type { Employee } from '../settings.ts';
  * suite runs at that commit, unless that very code passed whole on this PC already (whole.ts: a vouch or a PR test whose
  * change reached everything, a train). A test the selection missed then holds the kit's release, as a failed release does
  * (self-failed.json, an alarm at once, tried again once a new commit lands on main), instead of reaching every agent. A
- * failure is run once more first, as a PR's checks are (prtest.ts); one Windows ended isn't held, the next round runs it
+ * failure is run once more first, as main's are at a build (mainbuild.ts); one Windows ended isn't held, the next round runs it
  * again; nor are two runs whose failing tests each passed in the other (onlyFlaky).
  *
  * On the Steward's page (agent.ts: wholeSuitesBeside) it runs beside the rounds, never inside one (Steward 0.36.45): run

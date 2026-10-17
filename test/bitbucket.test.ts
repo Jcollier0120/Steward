@@ -15,9 +15,7 @@ const { hostFor, must } = await import('../src/hosts/index.ts');
 const { answered, credentialOf, curlQuoted, mergeStatesOf, prOf, statusOf, whereBitbucket } = await import('../src/hosts/bitbucket.ts');
 const { autoWords, findScm, hostOf, repoFromUrl } = await import('../src/scm.ts');
 const { run: realRun } = await import('../src/run.ts');
-const { merge } = await import('../src/stages/merge.ts');
 const { parsePrs } = await import('../src/stages/staff.ts');
-const { ctxFor, employee, fakeEmployee, runner, sh } = await import('./helpers.ts');
 type Ran = import('../src/run.ts').Ran;
 type Runner = import('../src/run.ts').Runner;
 type ScmLook = import('../src/scm.ts').ScmLook;
@@ -222,38 +220,4 @@ test('releases are v<version> tags; a merge Bitbucket finishes later is waited f
   const later = fake(({ at }) => (at === '/pullrequests/7/merge' ? http(202, {}) : http(200, pull({ state: states.shift() }))));
   assert.equal((await new Bitbucket(later.run, tmp).mergePr(R, 7, {}, 0)).code, 0);
   assert.deepEqual(later.ran.map((c) => `${c.method} ${c.at}`), ['POST /pullrequests/7/merge', 'GET /pullrequests/7', 'GET /pullrequests/7', 'GET /pullrequests/7']);
-});
-
-test("a merge round on Bitbucket: the team's pull request, its checks passed, merged at the head it read", async () => {
-  const f = fakeEmployee(path.join(tmp, 'round'), { version: '0.4.0' });
-  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/feature');
-  for (const file of ['package.json', 'package-lock.json', 'src/app.ts']) writeFileSync(path.join(f.checkout, file), readFileSync(path.join(f.checkout, file), 'utf8').split('0.4.0').join('0.4.1'));
-  writeFileSync(path.join(f.checkout, 'feature.txt'), 'a feature\n');
-  sh(f.checkout, 'add', '-A');
-  sh(f.checkout, 'commit', '--quiet', '-m', 'A feature');
-  const head = sh(f.checkout, 'rev-parse', 'HEAD');
-  sh(f.checkout, 'push', '--quiet', 'origin', 'claude/feature');
-  sh(f.checkout, 'switch', '--quiet', 'main');
-
-  const gh = runner();
-  const short = head.slice(0, 12);
-  const open = () => pull({ source: { branch: { name: 'claude/feature' }, commit: { hash: short }, repository: { full_name: 'acme/fake' } } });
-  const bb = fake(({ method, at }) => {
-    if (at === '/pullrequests?state=OPEN&pagelen=50') return http(200, { values: [open()] });
-    if (at === '/pullrequests/7' && method === 'GET') return http(200, open());
-    if (at === `/commit/${short}`) return http(200, { hash: head });
-    if (at === '/pullrequests/7/diffstat?pagelen=500') return http(200, { values: [{ status: 'added', lines_added: 1, lines_removed: 0, new: { path: 'feature.txt' } }, { status: 'modified', lines_added: 1, lines_removed: 1, new: { path: 'package.json' } }] });
-    if (at === `/commit/${head}/statuses?pagelen=100`) return http(200, { values: [{ key: 'ci-test', state: 'SUCCESSFUL' }] });
-    if (at.startsWith('/refs/tags?')) return http(200, { values: [{ name: 'v0.4.0', target: { hash: 'c0', date: '2026-10-03T00:00:00+00:00' } }] });
-    if (at === '/pullrequests/7/merge') return http(200, { ...open(), state: 'MERGED' });
-    if (method === 'POST') return http(201, {});
-  }, gh.run);
-  // Checks that would fail, were they run here: Bitbucket's checks passed, so they aren't.
-  const e = employee(f.checkout, { repo: R, fill: '', test: ['node -e process.exit(1)'] });
-  const ctx = { ...ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: bb.run, neutralDir: tmp }), host: () => 'bitbucket' as const };
-  const [m] = await merge(ctx, [e], { yes: true, team: true });
-  assert.equal(m.outcome, 'done', `${m.message}\n${ctx.lines.join('\n')}`);
-  assert.match(m.message, /merged #7/);
-  assert.deepEqual(gh.gh, [], 'GitHub is never asked');
-  assert.ok(bb.ran.some((c) => c.at === '/pullrequests/7/merge'), 'merged through Bitbucket');
 });

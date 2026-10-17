@@ -100,11 +100,18 @@ function signer(name: string, kitJson: object): Employee {
   return { ...envoy, checkout, versionFiles: ['package.json'], release: 'npm run release -- --publish' };
 }
 
-/** gh lists v0.2.2 as released, and v0.2.3 once the release command has run and exited 0; npm (that command) is noted, and answers `npm`. */
+/**
+ * gh lists v0.2.2 as released, and v0.2.3 once the release command has run and exited 0; npm (that command) is noted, and
+ * answers `npm`. Every commit is vouched for by the team, so a build's test of main's head before its release
+ * (mainbuild.ts's mainGate) is done already.
+ */
 function releasing(o: { npm: Ran; store?: string; sign?: Ran }): { run: Runner; npm: string[][] } {
   const npm: string[][] = [];
   const out = () => (npm.length && o.npm.code === 0 ? ['v0.2.3', 'v0.2.2'] : ['v0.2.2']);
-  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok(out().map((tagName) => ({ tagName, isDraft: false }))) : undefined));
+  const r = runner((args) => {
+    if (args[0] === 'release' && args[1] === 'list') return ok(out().map((tagName) => ({ tagName, isDraft: false })));
+    if (args[0] === 'api' && /\/commits\/[0-9a-f]{40}\/statuses/.test(args[1])) return ok([{ context: 'steward/tested', state: 'success', creator: { login: 'Jcollier0120' } }]);
+  });
   const run: Runner = async (cmd, args, opts) => {
     if (cmd === 'npm') {
       npm.push(args);
@@ -168,6 +175,7 @@ test("a release that loses the key while it builds waits too, rather than failin
   const out = await releaseUnreleased(ctx, [e]);
   assert.equal(out[0].outcome, 'skipped', out[0].message);
   assert.equal(out[0].signing, said);
+  assert.match(ctx.lines.join('\n'), /\[porter\] Jcollier0120 vouched for [0-9a-f]{7}: not tested again before its release/, 'the build tests main before its release: its vouch covers it');
   assert.deepEqual(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')), {}, 'nothing held against its commit');
   const commit = sh(e.checkout!, 'rev-parse', 'HEAD').slice(0, 7);
   assert.deepEqual(Object.entries(loadSigningWaits()).map(([id, w]) => [id, w.version, w.commit, w.why]), [[e.id, '0.2.3', commit, said]]);
@@ -218,11 +226,11 @@ test('the alarm: one for every release that waits until this PC can sign, raised
     porter: { version: '0.5.51', commit: 'abc1234', why: 'the reason', since: '2026-10-14T17:00:00.000Z' },
     clerk: { version: '0.3.5', commit: 'def5678', why: 'the later reason', since: '2026-10-14T18:00:00.000Z' },
   };
-  const c = roundConditions({ round, held: [], failedReleases: {}, signingWaits, employees: STAFF, settings }).filter((x) => x.id.startsWith('signing'));
+  const c = roundConditions({ round, failedReleases: {}, signingWaits, employees: STAFF, settings }).filter((x) => x.id.startsWith('signing'));
   assert.deepEqual(c.map((x) => [x.id, x.who, x.afterMs, x.since]), [['signing:waits', 'steward', 0, '2026-10-14T17:00:00.000Z']]);
   assert.equal(c[0].title, `${porter.name} 0.5.51, ${clerk.name} 0.3.5 wait to be released until this PC can sign`);
   assert.equal(c[0].detail[0], 'Why: the reason');
-  assert.equal(roundConditions({ round, held: [], failedReleases: {}, signingWaits: {}, employees: STAFF, settings }).some((x) => x.id.startsWith('signing')), false);
+  assert.equal(roundConditions({ round, failedReleases: {}, signingWaits: {}, employees: STAFF, settings }).some((x) => x.id.startsWith('signing')), false);
 });
 
 test('noteSigningWaits: a wait keeps its first time while its version waits; one forgotten once it no longer does', () => {
