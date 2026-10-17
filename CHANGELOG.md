@@ -12,6 +12,10 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - A round no longer asks GitHub for the Steward's own open PRs unless the staff's table shows the Steward's row, which is the only place they appear. That is one GitHub point less a round on such a PC.
 - Settings for the Wright's drafts stay hidden, and your values are kept.
 
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.131
 
 **The Steward hands out kit 2.82.2: agents keep the decode speed of each chat answer, by boot, so Manor can say when the NPU has started slow and that a restart usually fixes it.**
