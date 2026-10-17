@@ -310,7 +310,8 @@ export const CHAT_ON_VISION_RAM_GB = 32;
  * against 11.1 to 12.4) and passed the Smith's golden, determinism and prefix-leak checks (13 of 13, as Qwen3-4B did),
  * but got 15 of 18 of the manor's kind of tasks right against Qwen3-4B's 16: it found the wrong line in a 2,700-token
  * log, and its sum was wrong where Qwen3-4B's was right (but for its working shown). A picture, text, then a picture
- * again all answered on the one server.
+ * again all answered on the one server. Qwen3-VL-2B (2026-10-17) would hold 3.3 GB, but it read the Smith's check
+ * picture, TALLY 4827, as "Tally 827".
  * `device` may be the build's backend before its device's number is known (planSetup).
  */
 export function chatsOnVision(card: { id: string; memoryGb?: number; device: string | null }, ramGb: number): boolean {
