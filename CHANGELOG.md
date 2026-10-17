@@ -2,7 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## Unreleased (its version needs claiming on the main laptop)
+## 0.36.93
+
+**The Steward hands out kit 2.78.17: FastFlowLM's working set is handed back to Windows once its model has loaded. That's about 3.6 GB of RAM for qwen3.5:2b and 6.4 GB for Gemma 4 E2B, decoding as fast as before.**
+
+### What changed
+
+- **Kit 2.78.17** (kit/CHANGELOG.md): a FastFlowLM server the kit starts has its working set emptied once its model has loaded (`working-set.ts`). Windows keeps those pages compressed, or in the pagefile, and reads back the few the server touches again. `KIT_SERVER_TRIM=0` turns it off.
+- **Tests that passed only on some PCs, so a vouch from the maker's other PCs failed:**
+  - `claims.test.ts`: the two tests of claims kept here now run as the maker's laptop (`makersPcForTests`), whatever PC runs them. On the maker's other PCs they were refused as one of Castellan's own repositories.
+  - `signing.test.ts`: its releases find a Windows SDK signtool of the test's own. On a PC without the SDK, the hung-signtool test was told "signtool isn't installed" instead.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.87
 
 **A PR whose kit.json pins a kit that will never be released is told so at once, and a draft is too. Before, it waited quietly ("no open Steward PR brings it: release that kit, or pin a released one"), its alarm came a day later, and a draft wasn't looked at at all.**
 
@@ -16,17 +31,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - **Drafts are looked at too** (stages/merge.ts `lookAtDraftKits`). A draft never reached `kitReleaseHold`, because it was held as a draft first: Manor#276, a draft pinned to kit 2.78.3 on 2026-10-16, would have been told nothing until it was marked ready.
   - Each of the team's drafts into the branch has its kit.json read as a ready PR's is: its head is fetched only when it isn't in the clone yet.
   - A draft whose kit will never be released is told, and its hold says so after "a draft".
-
-## 0.36.85
-
-**The Steward hands out kit 2.78.13: FastFlowLM's working set is handed back to Windows once its model has loaded. That's about 3.6 GB of RAM for qwen3.5:2b and 6.4 GB for Gemma 4 E2B, decoding as fast as before.**
-
-### What changed
-
-- **Kit 2.78.13** (kit/CHANGELOG.md): a FastFlowLM server the kit starts has its working set emptied once its model has loaded (`working-set.ts`). Windows keeps those pages compressed, or in the pagefile, and reads back the few the server touches again. `KIT_SERVER_TRIM=0` turns it off.
-- **Tests that passed only on some PCs, so a vouch from the maker's other PCs failed:**
-  - `claims.test.ts`: the two tests of claims kept here now run as the maker's laptop (`makersPcForTests`), whatever PC runs them. On the maker's other PCs they were refused as one of Castellan's own repositories.
-  - `signing.test.ts`: its releases find a Windows SDK signtool of the test's own. On a PC without the SDK, the hung-signtool test was told "signtool isn't installed" instead.
+- This release also brings 0.36.84 and kit 2.78.12, which weren't released on their own.
 
 ### Before you update
 
