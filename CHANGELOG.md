@@ -4,7 +4,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.98
 
-**The Steward runs your other PCs' checks: with the Seneschal 0.2.0 on each PC, a PR check or whole suite waiting for room on one runs on another of your PCs that has room, a PR's failure is tried once more on another PC before it counts, and the whole suite before a kit's release is shared out between them.**
+**The Steward runs your other PCs' checks: with the Seneschal on each PC, a PR check, whole suite or kit trial waiting for room on one runs on another of your PCs that has room, a PR's failure is tried once more on another PC before it counts, and the whole suite before a kit's release is shared out between them.**
 
 ### What's new
 
@@ -24,6 +24,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
   - **The typecheck runs in the first shard, the posttest in the last.** Each shard here runs in a worktree of its own, removed after.
   - **A failure runs once more, only the shards that failed.** A shard that failed on two PCs already isn't run a third time.
   - **With no other PC**, it runs whole here, as before.
+- **A kit's trial of an agent can run on another PC too** (with the Seneschal 0.2.3). The trial names the kit it tries by its version and the Steward commit it comes from, and the agent it tries.
+  - **The kit:** the other PC fetches that commit from the Steward's own repository, and makes the kit from it only when it's on one of the Steward's own branches. It checks that the commit makes the very kit named. A kit from a fork, or from a commit on no branch, isn't tried.
+  - **The trial:** the agent's main, at the commit the trial names, bumped to the kit as a trial here bumps it (its kit.json, the kit's tools/kit.ts, its version and changelog entry), and only the tests the kit's files reach when the trial here ran only those. An agent's PR that pins the kit runs at its head as it is. Either way its checks run once, filled from that kit, and the result comes back to the trial that asked.
+  - **Where:** the kit in a worktree of the Steward's clone (`_steward-kit-others` in the work folder), the agent in its trial's worktree, both removed after.
+  - **When:** only on a PC whose Steward's own clone is there and free right then, and that looks after that agent.
 
 ### What changed
 
@@ -32,7 +37,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### Before you update
 
-- Nothing: it updates itself as usual. Work moves between PCs only where each PC has the Seneschal 0.2.0 with sharing on, and Manor's Other PCs on; elsewhere nothing changes.
+- Nothing: it updates itself as usual. Work moves between PCs only where each PC has the Seneschal 0.2.0 with sharing on, and Manor's Other PCs on; elsewhere nothing changes. Kit trials move only between PCs with the Seneschal 0.2.3 or later.
 
 ## 0.36.96
 

@@ -70,6 +70,11 @@ export interface BumpOptions {
    * again, at its version, with its changelog entry written again. Never with `base` or a trial.
    */
   folds?: Record<string, KitFold>;
+  /**
+   * A trial run for another PC's Seneschal (others.ts): its checks run once, by this, under that task's lease, in place
+   * of runChecks' turn and second try. The PC that asked weighs a failure as it does its own trial's.
+   */
+  checks?: (dir: string, o: ChecksOptions) => Promise<string | null>;
 }
 
 /** Where a trial bumps an employee, and on which local branch. */
@@ -681,7 +686,8 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const tried = o.trial || fold || o.kitFrom ? null : await trialPassOf(ctx, e, { kit: o.kit, base: baseCommit, ...(tool !== undefined ? { tool } : {}) }).catch(() => null);
   if (tried) say(`its checks not run again: ${tried}`);
   const task: CheckTask | undefined = o.trial ? { kind: 'kit-trial' } : undefined;
-  const first = tried ? null : await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task });
+  const first = tried ? null : o.checks ? await o.checks(dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` }) : await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task });
+  if (first && o.checks) return result(e, 'failed', first, { base: baseCommit });
   if (first) {
     say(`its checks once more (${first})`);
     const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task });

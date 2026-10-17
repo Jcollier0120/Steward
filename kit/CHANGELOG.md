@@ -18,6 +18,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **`seneschalWork({ worker, kinds, repos, slot? })`** is a worker's ask: any task of those kinds and repositories, this PC's or another PC's (`from`), at its turn. It answers `{ job }` (run it under `job.turn.hold`), `{ idle, retryMs }`, or null with no Seneschal. A task it can't read is given back. `jobOf` checks a task again: an owner/name repository, full commit ids, and a branch git takes as one.
 - **Shards of a whole suite.** `SeneschalTask.shard` and `SeneschalJob.shard` (`{ index, of }`, from 1, `SENESCHAL_MOST_SHARDS` at most): one part of a full-suite task, part of its key. `jobOf` refuses a shard that's out of range or on any other kind, and `shardOf` checks one.
 - **`seneschalSiblings({ kind, repo })`**: the other PCs whose workers run that kind for that repository now, as this PC's Seneschal last read them. Empty while it shares no work; null with no Seneschal.
+- **Kit trials for a worker** (Seneschal 0.2.3): `SeneschalJob.kit` and `SeneschalJob.agent`. `jobOf` takes a `kit-trial` job only with both: the kit as a version (`2.78.22`) or a version and 12 hex digits of the Steward's commit it's made from (`2.78.22-1a2b3c4d5e6f`), and the agent as an agent's id. A job of any other kind that names a kit or an agent is refused.
 - `SENESCHAL_RUN_MS` (2 hours) and `SENESCHAL_IDLE_MS` (30 s).
 
 ### What changed

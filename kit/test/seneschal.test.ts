@@ -345,6 +345,19 @@ test('a shard of a whole suite: handed to a worker with its part, and only for a
   assert.deepEqual(shardOf({ index: 64, of: 64, extra: 1 }), { index: 64, of: 64 });
 });
 
+test('a kit trial: handed to a worker with its kit and its agent, which only a kit trial names', () => {
+  const trial = { id: 'b6', kind: 'kit-trial', repo: 'Jcollier0120/Reeve', commit: 'c'.repeat(40), lane: 'background', what: 'x', kit: '2.78.16-1a2b3c4d5e6f', agent: 'reeve' };
+  const job = jobOf(trial)!;
+  assert.deepEqual([job.kit, job.agent], ['2.78.16-1a2b3c4d5e6f', 'reeve']);
+  assert.equal(jobOf({ ...trial, kit: '2.78.16' })!.kit, '2.78.16', 'a released kit, by its version');
+  for (const bad of [{ kit: undefined }, { agent: undefined }, { kit: '2.78' }, { kit: '2.78.16-1A2B3C4D5E6F' }, { kit: '2.78.16-1a2b3c' }, { kit: '2.78.16-../x' }, { kit: 2 }, { agent: 'Reeve' }, { agent: '../reeve' }, { agent: '-x' }]) {
+    assert.equal(jobOf({ ...trial, ...bad }), null, JSON.stringify(bad));
+  }
+  assert.equal(jobOf({ ...trial, kind: 'pr-check' }), null, 'a PR check with a kit would run something else than it says');
+  assert.equal(jobOf({ ...trial, kind: 'pr-check', kit: undefined }), null, 'nor with an agent');
+  assert.equal(jobOf(trial, ['pr-check', 'full-suite']), null, "a kit trial, to a worker that doesn't run them");
+});
+
 test('the other PCs whose workers run a kind for a repository, as the Seneschal last read them; none while it shares no work', async () => {
   const sibling = (name: string, works: unknown) => ({ id: `pc-${name}`, name, offers: 0, works, room: null, problem: null });
   const siblings = [

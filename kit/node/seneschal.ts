@@ -449,6 +449,10 @@ export interface SeneschalJob {
   branch?: string;
   /** One part of a whole suite: run only its test files. */
   shard?: SeneschalShard;
+  /** A kit trial's kit: a version, or a version and the Steward's commit it's made from (2.78.1-1a2b3c4d5e6f). */
+  kit?: string;
+  /** A kit trial's agent, by its id: the agent whose checks are tried with the kit. */
+  agent?: string;
   lane: SeneschalLane;
   what: string;
   /** Another PC's task: that PC, and the task's id there. */
@@ -483,6 +487,9 @@ const REPO = /^(?!\.\.?\/)[A-Za-z0-9_.-]{1,100}\/(?!\.\.?$)[A-Za-z0-9_.-]{1,100}
 const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 /** A branch git takes as one: no leading dash or dot, no "..", no "//", not ending in "/" or ".lock". */
 const BRANCH = /^(?![-./])(?!.*\.\.)(?!.*\/\/)(?!.*\/$)(?!.*\.lock$)[A-Za-z0-9_./-]{1,200}$/;
+/** A kit trial's kit: a version, or a version and 12 hex digits of the Steward's commit it's made from. */
+const KIT = /^\d+\.\d+\.\d+(?:-[0-9a-f]{12})?$/;
+const AGENT = /^[a-z][a-z0-9-]{0,40}$/;
 
 /** A shard as the Seneschal names one, checked: whole numbers, 1 <= index <= of <= SENESCHAL_MOST_SHARDS. Pure. */
 export function shardOf(v: any): SeneschalShard | null {
@@ -501,7 +508,9 @@ export function jobOf(t: any, kinds: readonly SeneschalKind[] = KINDS): Omit<Sen
   if (t.pr != null && !(Number.isInteger(t.pr) && t.pr > 0)) return null;
   const shard = t.shard == null ? null : shardOf(t.shard);
   if (t.shard != null && (!shard || t.kind !== 'full-suite')) return null;
-  const from = t.from && typeof t.from === 'object' && t.from.pc && typeof t.from.pc.name === 'string' ? { pc: { id: String(t.from.pc.id ?? ''), name: String(t.from.pc.name).slice(0, 60) }, id: String(t.from.id ?? '') } : undefined;
+  // A kit trial names its kit and its agent; no other kind names either (a kit would change what runs).
+  if (t.kind === 'kit-trial' ? !KIT.test(String(t.kit ?? '')) || !AGENT.test(String(t.agent ?? '')) : t.kit != null || t.agent != null) return null;
+  const from =t.from && typeof t.from === 'object' && t.from.pc && typeof t.from.pc.name === 'string' ? { pc: { id: String(t.from.pc.id ?? ''), name: String(t.from.pc.name).slice(0, 60) }, id: String(t.from.id ?? '') } : undefined;
   return {
     id,
     kind: t.kind,
@@ -512,6 +521,7 @@ export function jobOf(t: any, kinds: readonly SeneschalKind[] = KINDS): Omit<Sen
     ...(t.pr ? { pr: t.pr } : {}),
     ...(t.branch ? { branch: t.branch } : {}),
     ...(shard ? { shard } : {}),
+    ...(t.kind === 'kit-trial' ? { kit: t.kit, agent: t.agent } : {}),
     lane: LANES.includes(t.lane) ? t.lane : 'normal',
     what: typeof t.what === 'string' && t.what ? t.what.slice(0, 200) : `${t.repo}'s ${t.kind}`,
     ...(from ? { from } : {}),
