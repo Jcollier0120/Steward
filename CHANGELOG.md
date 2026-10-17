@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.112
+
+**Brings kit 2.79.1: on every staff page, the status pill sits beside the name, with the role on the line under them.**
+
+### What changed
+
+- **The status pill** ("On duty · next round in 5 min", "At the forge", "Off duty") moved up from the role's line to beside the staff member's name. The role has the line under them to itself, so it's cut short less often. When it is, hover over it to read it all.
+- **In a narrow window,** the pill goes under the name, and the role under the pill.
+- **The kit it hands out is 2.79.1** (kit/CHANGELOG.md): page.ts and the React shell. Nothing in the Steward's own code changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.79.1.
+
 ## 0.36.110
 
 **The Steward hands out kit 2.78.26: the NPU benchmark sets up chat alone, so `--no-setup` downloads nothing. Before, it set up the route's embedding server too. On an Intel NPU 3720 that had its chat model but not its embedder, `--no-setup` pulled Qwen3-Embedding (428 MB) without asking.**
