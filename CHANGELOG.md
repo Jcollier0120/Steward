@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.92
+## 0.36.98
 
 **The Steward runs your other PCs' checks: with the Seneschal 0.2.0 on each PC, a PR check or whole suite waiting for room on one runs on another of your PCs that has room, a PR's failure is tried once more on another PC before it counts, and the whole suite before a kit's release is shared out between them.**
 
@@ -33,6 +33,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Work moves between PCs only where each PC has the Seneschal 0.2.0 with sharing on, and Manor's Other PCs on; elsewhere nothing changes.
+## 0.36.95
+
+**The Steward hands out kit 2.78.14: on every staff page, the status pill sits on the line under the name, after the role, so the title bar stays one row in a normal desktop window.**
+
+### What changed
+
+- **The status pill** ("On duty · next round in 5 min", "Working", "Off duty") moved from beside About and Settings to the line under the name, after the role. When there isn't room for the whole role, it's cut short: hover over it to read it all. The pill always shows whole, and the title bar stays one row unless the window is narrower than about 1,000 pixels.
+- **In a narrow window,** the pill goes under the role, and About, Settings, the theme and Run now sit on their own row, at its end.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.78.14.
+
 ## 0.36.91
 
 **A vouched PR whose kit.json pins a kit with no release waits for it, as any PR does. Before, a vouch let it skip that hold, so it could merge pinned to a kit that will never be released.**

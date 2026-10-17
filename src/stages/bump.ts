@@ -492,7 +492,7 @@ export function wholeTestFiles(dir: string): { files: string[]; flags: string[];
 export const dealt = (files: string[], shard: SeneschalShard): string[] => files.filter((_, i) => i % shard.of === shard.index - 1);
 
 /**
- * What runs in place of `npm test` for one shard of the whole suite (Steward 0.36.92): its pretest (each shard sets the
+ * What runs in place of `npm test` for one shard of the whole suite (Steward 0.36.98): its pretest (each shard sets the
  * code up), `node <its flags> --test <its part of the test files>` (dealt), and in the last shard its posttest, which npm
  * runs once after the tests. The whole suite (wholeTestSteps) when the script isn't a plain node --test to cut: more than
  * asked, never less. Pure but for the files in `dir`.

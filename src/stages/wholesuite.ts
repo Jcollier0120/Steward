@@ -38,7 +38,7 @@ import type { Employee } from '../settings.ts';
  * runs. In a terminal round, and under node --test unless a test says otherwise, it runs inside the round as before.
  *
  * Where other PCs on the licence run the Steward's whole suite too (the Seneschal's siblings, Seneschal 0.2.0), it is cut
- * into shards by test file (Steward 0.36.92): one for this PC and one for each of them, WHOLE_SHARDS_MOST at most, each
+ * into shards by test file (Steward 0.36.98): one for this PC and one for each of them, WHOLE_SHARDS_MOST at most, each
  * its own full-suite task in a worktree of its own here. The Seneschal hands each to whichever PC has room first, and a
  * shard another PC ran comes back as its pass or failure; one nobody else took runs here. A failure runs once more, only
  * the shards that failed.

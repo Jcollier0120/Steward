@@ -12,7 +12,7 @@ import { checkoutOf, freshWorktree, interrupted, workRootOf, type Ctx } from './
 import { apart, repoBusy, withRepo } from './slots.ts';
 
 /**
- * The Steward as one of the Seneschal's workers (Steward 0.36.92, Seneschal 0.2.0). Beside the rounds (agent.ts), it
+ * The Steward as one of the Seneschal's workers (Steward 0.36.98, Seneschal 0.2.0). Beside the rounds (agent.ts), it
  * asks the Seneschal for any PR check or whole suite of the repositories it looks after that waits for room, on this PC
  * or on another PC on the licence, and runs it as its own PR test would: the commit fetched from the repository's origin,
  * a worktree of its own, the employee's checks in Settings, and the result back to the Seneschal, which hands it to the
