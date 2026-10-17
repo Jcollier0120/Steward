@@ -374,6 +374,20 @@ A route's minutes are 20 times its cold start (stopped to its first answer), nev
 
 An idle stop never races a request: the keeper stops a server only holding the NPU's turn (the NPU 3720's embedding server, the graphics': its requests' turn, above), joining only an empty line, so a request in flight keeps it; a request that took the NPU after the keeper's look makes it give way (its turn wasn't had at once: `TURN_AT_ONCE_MS`), and a request arriving during the stop waits its turn, then starts the server again. That first request waits for the cold start: a server just started is given the cold-load allowance for its model's load, whatever shorter timeout the caller gave (`requestBaseMs` plus the larger of rules.json's and the route's `coldLoadMs`). A caller that passes `onWaking` (the kit's `AskOptions`) is told before it waits, with a line for the person: "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer."
 
+### A card that shares the PC's memory rests the same way (kit 2.78.19)
+
+Integrated graphics have under 2 GB of memory of their own (`OWN_MEMORY_GB`: an Intel Core Ultra's, an AMD Ryzen AI's Radeon, a Snapdragon's Adreno), so their llama.cpp servers hold the PC's own memory, as the NPU's do. On a PC under 20 GB, with no `gpuIdleStopMinutes` in config.json, the keeper stops such a card's servers (chat, vision, embeddings and a reranker) by the NPU's rule, from llama.cpp's cold start (`idleStop.cardColdStartMs`, 6 s): 20 times it is 2 minutes, so the floor's 5 (npu-vendors.ts' `cardIdleStopMinutes`). A card with memory of its own, one whose memory config.json doesn't give, the processor, and any card on a bigger PC keep rules.json's 10, as before.
+
+Measured on WEASELDEV02 (Core Ultra 5 225U, 15.4 GB, Intel Graphics with 0.1 GB of their own), llama.cpp b11669-vulkan, from the disk cache, below-normal priority, start to the first answer, two runs each:
+
+| Server | Cold start | Holds while idle |
+|---|---|---|
+| Qwen3-4B Q4_K_M chat, `-c 4096` | 5.2, 3.8 s | 3.5 GB |
+| Qwen3-VL-4B Q4_K_M vision with its Q8_0 projector, `-c 8192` | 5.4, 3.8 s | 5.0 GB |
+| Qwen3-Embedding-0.6B Q8_0, `-c 4096 -ub 512` | 2.9, 1.6 s | 1.3 GB |
+
+That PC's keeper stopped its vision server three times on 2026-10-16, each after 10 to 11 minutes unused. Each time it held some 5 GB of the PC's 15.4 for 5 minutes longer than this rule keeps it. The cost is a reload of 4 to 5 s for a request that comes 5 to 10 minutes after the last.
+
 ### The embedding server gives way to chat (kit 2.77.5)
 
 On a PC under 20 GB, with no `npuIdleStopMinutes` in config.json, a chat or vision request on the NPU first stops the NPU's own embedding server when the NPU hasn't answered an embedding for 30 s. That is Qualcomm's llama-server (18182) or Intel's second OpenVINO Model Server (18186). The chat gets its memory: on a Snapdragon, 1,408 MB of the NPU's and a 1.7 to 2.0 GB working set; on Intel, 1.7 GB. Only the embedding side gives way. It starts again for the next embedding in 2 to 3 s, where GenieX takes 9 to 17 s to load a model.

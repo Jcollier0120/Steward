@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.97
+
+**Brings kit 2.78.19: on a PC under 20 GB, the keeper stops an integrated graphics card's model servers after 5 minutes unused, not 10, so their models give the PC its memory back sooner.**
+
+### What changed
+
+- **The kit it hands out is 2.78.19** (kit/CHANGELOG.md): npu-vendors.ts' `cardIdleStopMinutes` and keeper.ts' `serversToReap`. A `gpuIdleStopMinutes` in config.json still wins. Nothing in the Steward's own code changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.91
 
 **A vouched PR whose kit.json pins a kit with no release waits for it, as any PR does. Before, a vouch let it skip that hold, so it could merge pinned to a kit that will never be released.**
