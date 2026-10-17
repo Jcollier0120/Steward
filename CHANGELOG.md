@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.111
+## 0.36.116
 
 **The Steward hands out kit 2.79.0, with which the Wright's jobs and Reeve's heavy background work can wait their turn from the Seneschal, as the Steward's checks do.**
 
@@ -21,6 +21,40 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The Wright and Reeve start asking once their own updates take this kit, and they need the Seneschal 0.3.0 for their turns. With an older Seneschal they run as before.
+
+## 0.36.112
+
+**Brings kit 2.79.1: on every staff page, the status pill sits beside the name, with the role on the line under them.**
+
+### What changed
+
+- **The status pill** ("On duty · next round in 5 min", "At the forge", "Off duty") moved up from the role's line to beside the staff member's name. The role has the line under them to itself, so it's cut short less often. When it is, hover over it to read it all.
+- **In a narrow window,** the pill goes under the name, and the role under the pill.
+- **The kit it hands out is 2.79.1** (kit/CHANGELOG.md): page.ts and the React shell. Nothing in the Steward's own code changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.79.1.
+
+## 0.36.110
+
+**The Steward hands out kit 2.78.26: the NPU benchmark sets up chat alone, so `--no-setup` downloads nothing. Before, it set up the route's embedding server too. On an Intel NPU 3720 that had its chat model but not its embedder, `--no-setup` pulled Qwen3-Embedding (428 MB) without asking.**
+
+### What changed
+
+- **The NPU benchmark** (kit/node/npu-bench.ts) leaves the route's embedding server and its model out of its plan, since its questions never ask for an embedding. `--no-setup` stops, exit 1, whenever the plan would fetch anything, and the download prompt names the plan's whole size: on a fresh PC about 2.4 GB on Intel, 4.4 GB on a Snapdragon X and 1.9 GB on an X2.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's benchmark changes once it takes kit 2.78.26.
+
+## 0.36.109
+
+**Brings kit 2.78.25: on a PC under 20 GB, the keeper stops an integrated graphics card's model servers after 5 minutes unused, not 10, so their models give the PC its memory back sooner.**
+
+### What changed
+
+- **The kit it hands out is 2.78.25** (kit/CHANGELOG.md): npu-vendors.ts' `cardIdleStopMinutes` and keeper.ts' `serversToReap`. A `gpuIdleStopMinutes` in config.json still wins. Nothing in the Steward's own code changed.
 
 ## 0.36.108
 

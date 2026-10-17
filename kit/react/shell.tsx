@@ -210,15 +210,15 @@ function TitleBar({ shell, route, about, action }: { shell: PageShell; route: Ro
       <a className="brand" href="#/">
         <img className="brand-mark" src="/favicon.svg" alt="" width="28" height="28" />
         <div className="brand-text">
-          <h1>{shell.app.name}</h1>
-          {/* The status pill on the role's line, so it never takes a row of its own: plain text in the link, nothing to press. */}
-          <p className="role-line">
-            <span className="role" title={shell.app.role}>
-              {shell.app.role}
-            </span>
+          {/* The status pill beside the name, so it never takes a row of its own: plain text in the link, nothing to press. */}
+          <div className="name-line">
+            <h1>{shell.app.name}</h1>
             <span className={`status-pill ${shell.pill.kind}`} title={shell.pill.title} data-tour="status">
               {shell.pill.text}
             </span>
+          </div>
+          <p className="role" title={shell.app.role}>
+            {shell.app.role}
           </p>
         </div>
       </a>
