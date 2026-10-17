@@ -670,3 +670,154 @@ export declare function requestTimeoutMs(rules: Rules, r: {
  * @returns {string[]}
  */
 export declare function pieces(rules: Rules, text: string, budgetTokens: number): string[];
+/**
+ * The answer sizes speeds are kept by, each its least tokens: a size runs up to the next one's, and the last has no end. A
+ * server's decode speed counts its first token's wait too, so a short answer reads slower than a long one on the same boot,
+ * and each size is compared only with itself. An answer under the first isn't kept: too few tokens to say.
+ */
+export declare const SPEED_SIZES: readonly number[];
+export type SpeedRow = {
+    /**
+     * The accelerator's id.
+     */
+    acc: string;
+    model: string;
+    /**
+     * The answers' size, its least tokens (SPEED_SIZES).
+     */
+    size: number;
+    /**
+     * Tokens a second as the server reported them, oldest first: the latest keptPerBoot.
+     */
+    tps: number[];
+};
+export type SpeedBoot = {
+    /**
+     * When the PC started (an ISO time).
+     */
+    boot: string;
+    rows: SpeedRow[];
+};
+export type Speeds = {
+    agent: string;
+    boots: SpeedBoot[];
+};
+export type Speed = {
+    /**
+     * The accelerator's id.
+     */
+    acc: string;
+    model: string;
+    answerTokens: number;
+    tokensPerSecond: number;
+};
+export type BootSpeed = {
+    acc: string;
+    model: string;
+    /**
+     * The answer size compared (SPEED_SIZES).
+     */
+    size: number;
+    /**
+     * When this boot started (an ISO time).
+     */
+    since: string;
+    /**
+     * This boot's median, in tokens a second, to a tenth.
+     */
+    now: number;
+    /**
+     * How many answers that's from.
+     */
+    samples: number;
+    /**
+     * The fastest earlier boot's median, to a tenth.
+     */
+    usual: number;
+    /**
+     * How many earlier boots had enough answers to count.
+     */
+    boots: number;
+    /**
+     * `now` as a percentage of `usual`, rounded.
+     */
+    percent: number;
+    /**
+     * `percent` is slowPercent or less.
+     */
+    slow: boolean;
+};
+/**
+ * @typedef {object} SpeedRow One accelerator's speeds on one model, for answers of one size, in one boot.
+ * @property {string} acc The accelerator's id.
+ * @property {string} model
+ * @property {number} size The answers' size, its least tokens (SPEED_SIZES).
+ * @property {number[]} tps Tokens a second as the server reported them, oldest first: the latest keptPerBoot.
+ */
+/**
+ * @typedef {object} SpeedBoot
+ * @property {string} boot When the PC started (an ISO time).
+ * @property {SpeedRow[]} rows
+ */
+/**
+ * @typedef {object} Speeds One program's speeds (`speed\<program>.json`): the latest keptBoots boots, oldest first.
+ * @property {string} agent
+ * @property {SpeedBoot[]} boots
+ */
+/**
+ * @typedef {object} Speed One answer's speed, as its server reported it.
+ * @property {string} acc The accelerator's id.
+ * @property {string} model
+ * @property {number} answerTokens
+ * @property {number} tokensPerSecond
+ */
+/**
+ * @typedef {object} BootSpeed How this boot's speed on an accelerator compares with earlier boots'.
+ * @property {string} acc
+ * @property {string} model
+ * @property {number} size The answer size compared (SPEED_SIZES).
+ * @property {string} since When this boot started (an ISO time).
+ * @property {number} now This boot's median, in tokens a second, to a tenth.
+ * @property {number} samples How many answers that's from.
+ * @property {number} usual The fastest earlier boot's median, to a tenth.
+ * @property {number} boots How many earlier boots had enough answers to count.
+ * @property {number} percent `now` as a percentage of `usual`, rounded.
+ * @property {boolean} slow `percent` is slowPercent or less.
+ */
+/**
+ * An answer's size (SPEED_SIZES), or null when it's too short to keep.
+ * @param {number} answerTokens
+ * @returns {number | null}
+ */
+export declare function speedSize(answerTokens: number): number | null;
+/**
+ * A speeds file's contents, or null when it's absent or unreadable (which count the same). A boot or row that can't be
+ * read is left out, and so is a speed that isn't one.
+ * @param {string | null} text
+ * @returns {Speeds | null}
+ */
+export declare function speedsOf(text: string | null): Speeds | null;
+/**
+ * A program's speeds with one more answer's: in this boot's row for its accelerator, model and size, which keeps the
+ * latest keptPerBoot, and the latest keptBoots boots. An answer too short to keep, or a speed that isn't one, leaves them
+ * as they were. A boot within bootSlackMs of one already there is that boot.
+ * @param {Rules} rules
+ * @param {Speeds | null} file
+ * @param {string} agent
+ * @param {number} bootMs When this PC started, in milliseconds since the epoch.
+ * @param {Speed} s
+ * @returns {Speeds}
+ */
+export declare function addSpeed(rules: Rules, file: Speeds | null, agent: string, bootMs: number, s: Speed): Speeds;
+/**
+ * How this boot's speed on an accelerator compares with earlier boots', from every program's speeds together: for the
+ * model and answer size with the most answers this boot, among those with samplesNeeded this boot and in at least one
+ * earlier boot. The usual is the fastest earlier boot's median, so an earlier slow boot doesn't lower it. Null until
+ * there's enough of both. A boot after this one (a clock set back) isn't an earlier one.
+ * @param {Rules} rules
+ * @param {(Speeds | null)[]} files
+ * @param {number} bootMs When this PC started, in milliseconds since the epoch.
+ * @param {string} acc The accelerator's id.
+ * @returns {BootSpeed | null}
+ */
+export declare function bootSpeed(rules: Rules, files: (Speeds | null)[], bootMs: number, acc: string): BootSpeed | null;

@@ -179,6 +179,14 @@ As measured on GenieX v0.7.0 on the Snapdragon X2 Elite (2026-10-03): GenieX kee
 
 A gaming desktop is for games first. While a game or another full-screen 3D program uses a graphics card, background work doesn't run on that card: it goes to another accelerator, or waits. A request someone is waiting on still may. A card counts as in use by a game while any other program's 3D engine on it is over 25% (Windows' `GPU Engine` counters, by the card's LUID), checked at most every 15 seconds. Heiward's ThreeDWatch does the same for its scans.
 
+## A slow start
+
+A PC can come up from a restart slower than usual and stay so until the next restart. An AMD Ryzen AI 7 350 that went into Modern Standby in its first two minutes (its lock screen turned the display off) decoded qwen3.5:2b on FastFlowLM at about 77% of its usual speed all day, while it read prompts as fast as ever, and a restart brought it back. Nothing but the speed shows it, so the kit keeps the speeds (kit 2.82.0, `boot-speed.ts`), and Manor's accelerator card says when this boot is slow.
+
+- **Kept:** each chat answered through `npu.ts` whose server reports its decode speed (FastFlowLM's `usage.decoding_speed_tps`; OpenVINO Model Server, GenieX and llama.cpp's usage don't), by boot, accelerator, model and answer size. A server's decode speed counts its first token's wait too, so a short answer reads slower than a long one on the same boot, and answers are kept by size: 16 to 31 tokens, 32 to 63, and 64 and up (the core's `SPEED_SIZES`), each compared only with itself. Shorter answers, and vision's, aren't kept. A boot is when the PC started: the clock less Windows' uptime, which goes on through sleep and standby, so a restart starts another and waking doesn't; two boot times within 2 minutes are one.
+- **Judged** (the core's `bootSpeed`), from every program's speeds together: for the model and size with the most answers this boot, among those with at least 8 this boot and 8 in an earlier boot, this boot's median against the usual, the fastest earlier boot's median, so an earlier slow boot doesn't lower it. This boot is slow at 85% of the usual or less (rules.json's `speed`). Until there's enough of both, nothing is said.
+- **Said** (the core's `say.slowBoot`): "about 17 tokens a second since this PC started, against 23 after earlier starts; restarting the PC usually brings it back".
+
 ## Shared files
 
 Every agent reads and writes these the same way, in `%USERPROFILE%\.npu-agent\accelerators\` (beside `locks\`, moved with it: with `NPU_AGENT_NPU_LOCK` set, the folder `accelerators` beside the lock folder's parent; a scratch `REEVE_HOME` gets its own). Each is written whole (a temporary file, then a rename), and anything unreadable counts as absent.
@@ -187,6 +195,7 @@ Every agent reads and writes these the same way, in `%USERPROFILE%\.npu-agent\ac
 - `hardware.json`: what this PC has (What this PC has, above). Written by setup and the keeper; read with every config.
 - `started.<pid>.json`: `{ "pid": 4242, "program": "<the server's full path>", "base": "http://127.0.0.1:18183", "atMs": <when> }`, written by whoever starts a model server from its `startCommand` (kit 2.31.0), so the keeper knows the process for the manor's own. Records older than 30 days are dropped.
 - `games.json`: `{ "checkedAt": "<ISO time>", "cards": { "<id>": { "busy": true, "percent": 87, "by": ["game.exe"] } } }`. Whoever finds it older than 15 seconds checks the counters again and rewrites it; everyone else reads it. A card missing from it isn't busy. `percent` is the busiest 3D engine's, rounded; `by` lists the programs (`name.exe`). Not counted: the checking process itself, `dwm.exe`, and the model servers (`llama-server.exe`, `geniex.exe`, and any configured `startCommand` program). A check that fails leaves the file as it was. A card's LUID in the counters is lowercase `0x<high>_0x<low>`.
+- `speed\<program>.json` (kit 2.82.0): `{ "agent": "<program>", "boots": [{ "boot": "<ISO time>", "rows": [{ "acc": "npu", "model": "qwen3.5:2b", "size": 16, "tps": [20.51, 20.62] }] }] }`, the decode speeds one program's chat answers were written at (A slow start, above): the latest 30 a row, the latest 10 boots, oldest first. Speeds only, never what was asked or answered. Each program writes only its own; anyone may read them all.
 
 ## What each part does
 

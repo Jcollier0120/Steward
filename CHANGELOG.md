@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.127
+
+**The Steward hands out kit 2.82.0: agents keep the decode speed of each chat answer, by boot, so Manor can say when the NPU has started slow and that a restart usually fixes it.**
+
+### What changed
+
+- Kit 2.82.0 keeps the speed FastFlowLM reports for each chat answer (`speed\<agent>.json` in the accelerators folder: speeds only, never what was asked or answered), and judges this boot against earlier ones. On an AMD Ryzen AI 7 350, a boot that went into Modern Standby in its first two minutes decoded at about 77% of its usual speed until the next restart. At 85% or less, this boot counts as slow.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.124
 
 **The Steward stops merging pull requests. Whoever writes a PR merges it once it is vouched, and each build releases what is on main.**

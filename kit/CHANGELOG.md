@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.82.0
+
+**A slow start is noticed. Some PCs come up from a restart with the NPU decoding well below its usual speed until the next restart, and nothing but the speed shows it. The kit now keeps the decode speed each chat answer was written at, by boot, so Manor can say when this boot is slow and that a restart usually fixes it.**
+
+On WEASELDEV03 (an AMD Ryzen AI 7 350, qwen3.5:2b on FastFlowLM 1.0.7), a boot that went into Modern Standby in its first two minutes decoded 16- to 31-token answers at 15.8 tokens a second against 20.5 to 20.8 after a normal start (17.4 against 22.9 for answers of 100 tokens and more), all day, until a restart. Prompts read as fast as ever.
+
+### What's new
+
+- **boot-speed.ts** (node): `noteSpeed(agent, speed)` keeps one answer's speed in `speed\<agent>.json` in the accelerators folder, never throwing. `readSpeeds()` reads every program's. `bootSpeedOf(acc)` says how this boot's speed on an accelerator compares with earlier boots', or null until there's enough to say. `bootMs()` is when this PC started: the clock less Windows' uptime, which goes on through sleep and standby.
+- **npu.ts:** an answer carries `tokensPerSecond` where its server reports its decode speed (FastFlowLM's `usage.decoding_speed_tps`). A chat's is kept with `noteSpeed` under the agent's id, for answers of 16 tokens or more. Vision's isn't.
+- **The core:** `SPEED_SIZES` (16, 32 and 64: answers are compared only with answers of their own size), `speedSize`, `speedsOf` (a speeds file read leniently), `addSpeed` (the latest 30 a row, the latest 10 boots) and `bootSpeed`. This boot is slow at 85% of the usual or less, the usual being the fastest earlier boot's median, once there are 8 answers of one size this boot and 8 in an earlier one. `say.slowBoot(now, usual)` words it. Types `Speeds`, `SpeedBoot`, `SpeedRow`, `Speed` and `BootSpeed`.
+- **rules.json:** a `speed` section: `keptPerBoot` 30, `keptBoots` 10, `samplesNeeded` 8, `slowPercent` 85, `bootSlackMs` 120000. `checkRules` requires it.
+- **spec/ACCELERATORS.md:** "A slow start", and `speed\<program>.json` among the shared files.
+
+### Before you update
+
+- Nothing: agents keep speeds as they answer, through `npu.ts`. Manor shows the notice once it pins this kit. A driver that builds its own rules object (not from rules.json through `checkRules`) needs the `speed` section.
+
 ## 2.80.3
 
 **spec/NPU-VENDORS.md says why the Smith's check picture read "Tally 827" on the Snapdragon X2's Qwen3-VL-2B, and why the kit doesn't change pictures for it.**
