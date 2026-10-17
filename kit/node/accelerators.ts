@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { alive, startApart } from './apart.ts';
@@ -9,6 +9,7 @@ import { lineState, queueDirFor, readLine, slotDirs, type Lane } from './npu-que
 import { powershell, psQuote } from './ps.ts';
 import { samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
+import { trimWorkingSet } from './working-set.ts';
 
 /**
  * The accelerators the manor's models run on: the NPU, one or more graphics cards, or the processor,
@@ -603,6 +604,32 @@ export function reportsLoaded(startCommand: string[] | undefined): boolean {
   return !!exe && /^flm(\.exe)?$/i.test(path.win32.basename(expandEnv(exe)));
 }
 
+/**
+ * Whether a server this kit starts has its working set handed back to Windows once its model has loaded (working-set.ts,
+ * kit 2.78.11): FastFlowLM's, which keeps its model's lookup tables in ordinary private memory and reads one row
+ * of them a token. qwen3.5:2b's working set went from 3,814 MB to 171 MB, decoding as fast as before.
+ */
+export function trimmedOnceLoaded(startCommand: string[] | undefined): boolean {
+  const exe = startCommand?.[0];
+  return !!exe && /^flm(\.exe)?$/i.test(path.win32.basename(expandEnv(exe)));
+}
+
+/**
+ * Trims a started server's working set (trimmedOnceLoaded) and says what it held, or why it couldn't: in the server's
+ * log when it keeps one (the keeper's restarts), else on stderr, never stdout, which an MCP server answers on. Never
+ * throws.
+ */
+async function trimLoaded(pid: number, program: string, base: string, logFile: string | undefined): Promise<void> {
+  const said = await trimWorkingSet(pid);
+  if (said === null) return;
+  const held = /^trimmed (\d+)$/.exec(said);
+  const line = `${new Date().toISOString()} kit: ${program} at ${base}: ${held ? `its working set handed back to Windows once loaded (it held ${Number(held[1]).toLocaleString('en-US')} MB)` : `its working set stays as it was (${said})`}`;
+  try {
+    if (logFile) return appendFileSync(logFile, `${line}\n`);
+  } catch {}
+  console.error(line);
+}
+
 /** Whether an endpoint answers now, without starting it. */
 export async function ping(baseUrl: string, ms = PROBE_MS): Promise<boolean> {
   return (await probe(baseUrl, ms)) === 'ready';
@@ -744,6 +771,8 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
   let log: number | undefined;
   /** Started apart (apart.ts): its process id, watched for an early exit rather than its exit event. */
   let apart: number | null = null;
+  /** The server's process id, whichever way it started: its working set is trimmed once it's ready (trimmedOnceLoaded). */
+  let pid: number | undefined;
   try {
     if (o.logFile) {
       mkdirSync(path.dirname(o.logFile), { recursive: true });
@@ -754,13 +783,14 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
     // the manor's ceiling (kit 2.78.3).
     const apartPid = await startApart(cmd, args, { cwd: os.homedir(), env, ...(log === undefined ? {} : { out: log }) });
     if (apartPid) {
-      apart = apartPid;
+      apart = pid = apartPid;
       noteStarted({ pid: apartPid, program: cmd, base: ep.baseUrl, atMs: Date.now() });
     } else {
       const child = spawn(cmd, args, { detached: true, stdio: log === undefined ? 'ignore' : ['ignore', log, log], windowsHide: true, cwd: os.homedir(), env });
       child.on('error', (e) => (spawnError = e));
       child.on('exit', (code) => (exited = code));
       child.unref();
+      pid = child.pid;
       if (child.pid) noteStarted({ pid: child.pid, program: cmd, base: ep.baseUrl, atMs: Date.now() });
     }
   } catch (e) {
@@ -770,13 +800,21 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
   }
   const deadline = Date.now() + waitMs;
   const lists = { listsWhenLoaded: listsWhenLoaded(ep.startCommand) };
+  // Once its model has loaded, in the background: the request that started it goes on at once (working-set.ts).
+  const loaded = () => {
+    if (pid && trimmedOnceLoaded(ep.startCommand)) void trimLoaded(pid, program, ep.baseUrl, o.logFile);
+  };
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 250));
     if (spawnError) throw new AcceleratorDown(core.say.couldNotStart(cmd, spawnError.message));
     const state = await probe(ep.baseUrl, 2000, lists);
-    if (state === 'ready') return { started: true, waited: false };
+    if (state === 'ready') {
+      loaded();
+      return { started: true, waited: false };
+    }
     if (state === 'busy') {
       await untilReady(ep.baseUrl, readyMs, lists);
+      loaded();
       return { started: true, waited: true };
     }
     // GenieX exits at once (code 0) when another server holds its port: it is down only if nothing answers.
