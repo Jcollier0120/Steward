@@ -16,6 +16,8 @@
  * Without --from, the pinned version comes from the first of: a sibling checkout ..\Steward\kit at that
  * version; %USERPROFILE%\.steward\kits\<version>; the Steward's kit release kit-v<version> over HTTPS
  * (no sign-in), or through gh if that fails, checked against its SHA256SUMS.txt and kept in that cache.
+ * Filled from a kit tree (--from, or that sibling) at the very version kit.json pins, it warns when that kit has no
+ * release, as far as this PC says without the network: such a pin is for development only.
  * The same file in every agent; the Steward's tools/kit.ts is the original. Node 22.18+, no dependencies.
  */
 import { execFileSync } from 'node:child_process';
@@ -48,8 +50,33 @@ const pinned = pin.parts ?? ['node', 'web', 'spec'];
 const parts = [...pinned];
 for (let i = 0; i < parts.length; i++) for (const need of NEEDS[parts[i]] ?? []) if (!parts.includes(need)) parts.push(need);
 const from = opt('--from') ?? process.env.STEWARD_KIT;
+/** Where a downloaded kit release is kept, by version. */
+const cacheOf = (version: string) => path.join(process.env.STEWARD_KITS ?? path.join(os.homedir(), '.steward', 'kits'), version);
+const inside = (dir: string, p: string) => {
+  const r = path.relative(dir, p);
+  return !r.startsWith('..') && !path.isAbsolute(r);
+};
 
-function fill(tree: string, how: string): void {
+/**
+ * Whether kit `version` has a release, as far as this PC says without the network: one downloaded is in the cache, and
+ * the Steward clone that holds `tree` has its tag kit-v<version> once it has fetched since the release. Null when
+ * nothing here can say: a tree outside a clone, a clone with no kit-v tags at all, no git.
+ */
+function releasedHere(tree: string, version: string): boolean | null {
+  if (text(path.join(cacheOf(version), 'VERSION')) === version) return true;
+  try {
+    const tags = execFileSync('git', ['-C', tree, 'tag', '--list', 'kit-v*'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+      .split(/\r?\n/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    return tags.length ? tags.includes(`kit-v${version}`) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `devTree`: a kit tree on this PC (--from, or the sibling checkout), not a release; STEWARD_KIT is the Steward's trial. */
+function fill(tree: string, how: string, devTree = false): void {
   const version = text(path.join(tree, 'VERSION'));
   if (!version) throw new Error(`${tree} isn't a kit tree: it has no VERSION`);
   rmSync(into, { recursive: true, force: true });
@@ -70,11 +97,19 @@ function fill(tree: string, how: string): void {
   if (existsSync(path.join(tree, 'LICENSE'))) cpSync(path.join(tree, 'LICENSE'), path.join(into, 'LICENSE'));
   console.log(`src\\kit: the Steward's kit ${version} (${filled.join(', ')}), from ${how}`);
   if (pin.kit && version !== pin.kit) console.warn(`  kit.json pins ${pin.kit}: this is for development, and a release refuses it`);
+  // Pinned to the tree's own version, which has no release: a build releases one kit, the top of the stack of every kit
+  // PR ready then, so most kits on the Steward's main never are (Manor#276 pinned 2.78.3, 2026-10-16). Not the
+  // Steward's own kit or its fixture (npm run kit), whose pin is their tree's.
+  else if (devTree && pin.kit && !inside(path.dirname(tree), root) && releasedHere(tree, version) === false)
+    console.warn(
+      `  kit.json pins ${pin.kit}, which has no release (no tag kit-v${pin.kit} in ${tree}'s clone, as of its last fetch): pin it for development only. ` +
+        `Commit your main's pin, unless an open Steward PR brings ${pin.kit}: a build releases one kit, the top of its stack, so most kits on the Steward's main never are`,
+    );
 }
 
 /** The kit release, downloaded and checked, in the cache; its folder. */
 async function download(version: string): Promise<string> {
-  const cache = path.join(process.env.STEWARD_KITS ?? path.join(os.homedir(), '.steward', 'kits'), version);
+  const cache = cacheOf(version);
   if (text(path.join(cache, 'VERSION')) === version) return cache;
   const zipName = `kit-${version}.zip`;
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-kit-'));
@@ -136,14 +171,14 @@ async function download(version: string): Promise<string> {
 }
 
 try {
-  if (from) fill(path.resolve(from), path.resolve(from));
+  if (from) fill(path.resolve(from), path.resolve(from), opt('--from') !== undefined);
   else {
     const version = pin.kit;
     if (!version) throw new Error(`${pinFile} pins no kit: it needs {"kit": "<version>"}`);
     const sibling = path.join(root, '..', 'Steward', 'kit');
     if (text(path.join(into, 'VERSION')) === version && text(path.join(into, 'PARTS')) === pinned.join(' ')) {
       // Already filled at the pinned version.
-    } else if (text(path.join(sibling, 'VERSION')) === version) fill(sibling, sibling);
+    } else if (text(path.join(sibling, 'VERSION')) === version) fill(sibling, sibling, true);
     else fill(await download(version), `the kit release kit-v${version}`);
   }
 } catch (e) {

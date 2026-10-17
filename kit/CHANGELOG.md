@@ -2,6 +2,17 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased (its version needs claiming on the main laptop)
+
+**`tools/kit.ts` says when a kit.json pin is for development only. It fills from a kit tree (`--from`, or the sibling `..\Steward\kit`) at the version kit.json pins, as before, and then warns if that kit has no release. A build releases one kit, the top of the stack of every kit PR ready then, so most versions on the Steward's main are never released. Commit main's pin instead, and the build's kit reaches the PR by catch-up. Nothing for an agent to do: the new tools/kit.ts comes with the kit.**
+
+### What changed
+
+- **tools/kit.ts:**
+  - **The warning** comes after the fill, which goes on as before. Manor#276 pinned kit 2.78.3, Steward main's kit on 2026-10-16, and filled it from the sibling without a word.
+  - **No network:** whether the kit has a release is asked of this PC only. It looks first in the cache (`%USERPROFILE%\.steward\kits\<version>`, kept from a download), then for the tag `kit-v<version>` in the Steward clone that holds the tree (as of that clone's last fetch). When neither can say (a tree in no clone, a clone with no kit tags, no git), it says nothing.
+  - **Not told:** the Steward filling its own kit or its fixture (`npm run kit`, a tree in the same checkout), and the Steward's trial, which fills through `STEWARD_KIT`.
+
 ## 2.78.12
 
 **npu-reports.ts counts a report against the model its generation runs (`routeFor`), so an X2's reports on its 2B count, and its reports on the route's 4B are stale. Also brings 2.78.10, which wasn't released on its own.**

@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## Unreleased (its version needs claiming on the main laptop)
+
+**A PR whose kit.json pins a kit that will never be released is told so at once, and a draft is too. Before, it waited quietly ("no open Steward PR brings it: release that kit, or pin a released one"), its alarm came a day later, and a draft wasn't looked at at all.**
+
+### What changed
+
+- **The hold says the kit will never be released** (stages/prtest.ts `kitReleaseHold`). That is when no open Steward PR brings the kit, and a newer kit is released already or the Steward's main has a newer one. A kit is released from main, and main's kit only goes up. Main's kit is read from the checkout's `origin/main`, once per stage, with nothing fetched for it.
+  - **It names the fix:** keep the repository main's pin. Once a build releases its kit, the rollout pins it on main, and the Steward's catch-up brings it to the PR.
+  - **A pin to main's own kit**, not released yet, is held as before: the next build may still release it.
+- **Its author is told on the PR**, in a comment, once for each commit (`tellDeadKit`, kept in dead-kits.json), as a conflict is: a Claude Code session's by its branch, anyone else's by name. A comment the Steward couldn't leave is tried again at the next round.
+- **An alarm at once** (`deadkit:<repo>#<number>`), rather than after the day a hold waits for its alarm.
+- **Drafts are looked at too** (stages/merge.ts `lookAtDraftKits`). A draft never reached `kitReleaseHold`, because it was held as a draft first: Manor#276, a draft pinned to kit 2.78.3 on 2026-10-16, would have been told nothing until it was marked ready.
+  - Each of the team's drafts into the branch has its kit.json read as a ready PR's is: its head is fetched only when it isn't in the clone yet.
+  - A draft whose kit will never be released is told, and its hold says so after "a draft".
+
 ## 0.36.84
 
 **The Steward hands out kit 2.78.12: an NPU's reports are counted against the model its generation runs, so a Snapdragon X2's reports on its 2B count. It also fixes the two tests that kept the 10-17 build from releasing anything.**
