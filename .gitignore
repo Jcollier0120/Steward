@@ -3,3 +3,5 @@ artifacts/
 src/kit/
 kit/test/fixture/src/kit/
 docs/UI-INVENTORY*
+# The kit's build of GenieX's plugin is tracked, whatever a global ignore says of DLLs (kit/node/geniex/README.md).
+!kit/node/geniex/*.dll

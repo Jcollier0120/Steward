@@ -75,6 +75,12 @@ export interface NpuRoute {
   serve: string[];
   /** What its server's environment needs (OpenVINO Model Server's PYTHONHOME and PATH): {tools} is filled in, `%NAME%` kept for when it starts. */
   env?: Record<string, string>;
+  /**
+   * The variable its server takes the most tokens a picture may be from, set to its vision model's `pictureTokens`
+   * (GenieX's GENIEX_IMAGE_MAX_TOKENS, which only Castellan's patched plugin reads: pluginPatch), so a picture that
+   * didn't come through the kit's fitPicture is scaled down too, rather than overflowing the window.
+   */
+  pictureTokensEnv?: string;
   models: NpuModel[];
   maxContextTokens: number;
   caps: Partial<Record<ServeKind, number>>;
@@ -155,6 +161,38 @@ export interface NpuGeneration {
   hexagonArch?: string;
   /** The chip Qualcomm AI Hub builds its models for (`qualcomm-snapdragon-x-elite`): GenieX's config.json chipset, when played. */
   aiHubChipset?: string;
+  /** A build of one of its server's own files the kit carries in its place (npu-patch.ts): the X2's GenieX llama.cpp plugin. */
+  pluginPatch?: NpuPluginPatch;
+}
+
+/** A file pinned by its size and SHA-256. */
+export interface PinnedFile {
+  size: number;
+  sha256: string;
+}
+
+/**
+ * A file of the route's server that the keeper replaces with the kit's own build of it (npu-patch.ts), only on its
+ * generation, only over the very file the server's pinned version installs, and only while the files it is built against
+ * are that version's: Castellan's build of GenieX 0.8.0's llama.cpp plugin on the Snapdragon X2, which holds about 2 GB
+ * less (qualcomm/GenieX#1557). The server's own file is kept beside it (`<file>.stock`) and put back whenever the patch
+ * fails its test, is switched off (config.json's npuPatch: false), or a later kit drops it. Anything else there (a
+ * GenieX update) is left alone.
+ */
+export interface NpuPluginPatch {
+  what: string;
+  /** The server version it is built for: the route's own (npu-vendors.json's `version`), or it isn't applied. */
+  serverVersion: string;
+  /** The server's folder that holds the file (%LOCALAPPDATA% expanded). */
+  folder: string;
+  file: string;
+  /** The server's own file. */
+  stock: PinnedFile;
+  /** The kit's build: `from` is its path in the kit's node part. */
+  patched: PinnedFile & { from: string };
+  /** The server's files the build links against, by their path in `folder`: all must be these, or it isn't applied. */
+  needs: Record<string, PinnedFile>;
+  basis: string;
 }
 
 /**
@@ -504,7 +542,10 @@ export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?
     return a.includes('{tools}') ? keep(x) : x;
   })];
   const cap = (k: ServeKind) => (route.caps[k] && route.caps[k] !== route.maxContextTokens ? { maxContextTokens: route.caps[k] } : {});
-  const env = routeEnv(route, o.tools, keep);
+  // The server's own picture cap, from its vision model's (pictureTokensEnv).
+  const pictures = firstModel(route, 'vision')?.pictureTokens;
+  const capEnv = route.pictureTokensEnv && pictures ? { [route.pictureTokensEnv]: String(pictures) } : undefined;
+  const env = capEnv ? { ...routeEnv(route, o.tools, keep), ...capEnv } : routeEnv(route, o.tools, keep);
   const server = { startCommand, ...(env ? { env } : {}) };
   const e: AcceleratorEntry = { id: 'npu', kind: 'npu', slots: 1, maxContextTokens: route.maxContextTokens, quirks: [...route.quirks] };
   e.chat = { baseUrl, model: chat.id, ...server, ...cap('chat') };
