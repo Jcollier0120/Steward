@@ -135,8 +135,8 @@ export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: num
  * themes), a compact title bar, and the body on one panel. With Manor installed, the page wears the manor's theme,
  * chosen in Manor (manor.ts), stamped on <html> as the page is drawn, so it's right at first paint; without Manor,
  * Match Windows unless the Theme menu chooses another (kept in this browser, per agent).
- * The title bar has the agent's icon, name and role, its scene (look.ts: still while idle, moving while a
- * round runs), a status pill, the Settings gear, the Theme menu, and the agent's Run now: the script
+ * The title bar has the agent's icon, name and role with its status pill on the role's line, its scene (look.ts: still
+ * while idle, moving while a round runs), the Settings gear, the Theme menu, and the agent's Run now: the script
  * lifts the body's first button that POSTs /api/run and says "Run now" (or a button marked
  * data-titlebar) into the title bar. Without JavaScript it stays where the agent put it. The title bar stays at the
  * top as the page scrolls (sticky, on the page's colour, with a line under it once scrolled), and a jump to a
@@ -190,10 +190,9 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
 <body>
 <header class="titlebar${o.busy ? ' busy' : ''}" data-agent="${esc(APP.id)}">
   ${backToManor(manor)}
-  <a class="brand" href="#/"><img class="brand-mark" src="/favicon.svg" alt="" width="28" height="28"><div class="brand-text"><h1>${esc(APP.name)}</h1><p class="role">${esc(APP.role)}</p></div></a>
+  <a class="brand" href="#/"><img class="brand-mark" src="/favicon.svg" alt="" width="28" height="28"><div class="brand-text"><h1>${esc(APP.name)}</h1><p class="role-line"><span class="role" title="${esc(APP.role)}">${esc(APP.role)}</span>${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, first: firstRoundNow(), ended: trialEnded() })}</p></div></a>
   ${sceneSvg(look)}
   <div class="tools">
-    ${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, first: firstRoundNow(), ended: trialEnded() })}
     <a class="tool-link" id="settings-link" href="#/settings" title="Settings" hidden>${GEAR}<span>Settings</span></a>
     ${themeMenu(manor)}
     <span class="titlebar-action" id="titlebar-action"></span>
@@ -558,15 +557,15 @@ h3 { font-size: 15px; font-weight: 600; }
 .card h2 { font-size: 15px; margin: 0 0 6px; }
 p { margin: 8px 0; }
 
-/* ---- The title bar: icon, name and role, the scene, the status pill, Settings, Theme, Run now ---- */
+/* ---- The title bar: icon, name, and role with the status pill, the scene, Settings, Theme, Run now ---- */
 /* Sticky, on the page's own colour, so what scrolls beneath doesn't show through; once the page has scrolled (the
    script marks it .stuck), a line and the theme's shadow under it. */
 .titlebar { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 8px 16px; min-height: 56px; background: var(--bg); border-bottom: 1px solid transparent; transition: border-color .15s, box-shadow .15s; }
 .titlebar.stuck { border-bottom-color: var(--line); box-shadow: var(--shadow); }
 /* The name and role take the room the bar has, up to their own width: the role is on one line, whole when it fits and
    cut with an ellipsis only when the window is too narrow for it. From 220px, so a long role doesn't push the tools
-   to a second row. */
-.brand { display: flex; align-items: center; gap: 10px; flex: 1 1 220px; min-width: 0; max-width: max-content; padding: 4px 8px; margin: -4px -8px; border-radius: 6px; color: inherit; text-decoration: none; }
+   to a second row; never narrower than the pill whole and a little of the role (min-content: the role line's grid). */
+.brand { display: flex; align-items: center; gap: 10px; flex: 1 1 220px; min-width: min-content; max-width: max-content; padding: 4px 8px; margin: -4px -8px; border-radius: 6px; color: inherit; text-decoration: none; }
 .brand:hover { background: var(--hover); }
 .brand-mark { width: 28px; height: 28px; flex: none; }
 /* Back to the manor, first in the title bar: Manor's icon and its name; the icon alone in a narrow window. */
@@ -577,10 +576,13 @@ p { margin: 8px 0; }
 .manor-sep { width: 1px; height: 24px; background: var(--line); flex: none; }
 .brand-text { min-width: 0; }
 .brand h1 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.3; }
-.brand .role { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The role, then the status pill on the same line: the role takes what the pill leaves (at least 96px) and is cut with
+   an ellipsis (its title says it all); the pill stays whole, no taller than the role's line, so the bar keeps one row. */
+.brand .role-line { display: grid; grid-template-columns: minmax(96px, max-content) max-content; align-items: center; column-gap: 8px; margin: 0; }
+.brand .role { min-width: 0; color: var(--muted); font-size: 12px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tools { margin-left: auto; display: flex; align-items: center; gap: 4px; }
-.status-pill { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: default; }
-.status-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.status-pill { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status-pill::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
 .status-pill.on { background: var(--ok-bg); color: var(--ok); }
 .status-pill.off { background: var(--warn-bg); color: var(--warn); }
 .status-pill.busy { background: var(--accent-soft); color: var(--accent-text); }
@@ -741,16 +743,17 @@ body.on-about main > :not(#about-view), body:not(.on-about) #about-view { displa
 .work-runs p { margin: 8px 0; }
 
 @media (max-width: 640px) {
-  :root { --titlebar-h: 97px; }
+  :root { --titlebar-h: 109px; }
   .titlebar { padding: 8px 12px; }
   .manor-back span { display: none; }
-  .brand { flex: 1 1 0; }
-  .brand .role { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .brand { flex: 1 1 0; min-width: 0; }
+  /* The pill goes under the role when they don't fit side by side: the role keeps its one line, and a long pill is cut
+     with an ellipsis too (each one's title says it all). */
+  .brand .role-line { display: flex; flex-wrap: wrap; row-gap: 2px; }
+  .status-pill { min-width: 0; max-width: 100%; }
   .scene { width: 52px; height: 33px; }
-  /* The tools wrap rather than run off the side: the title bar's action goes under the pill when they don't fit, and a
-     long pill is cut with an ellipsis (its title says it all). */
-  .tools { flex-basis: 100%; margin-left: 0; flex-wrap: wrap; row-gap: 6px; }
-  .status-pill { margin-right: auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  /* The tools wrap rather than run off the side, on a row of their own at its end. */
+  .tools { flex-basis: 100%; margin-left: 0; flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; }
   .tool-link { width: 32px; padding: 0; justify-content: center; }
   .tool-link span { display: none; }
   .theme-picker { position: static; }

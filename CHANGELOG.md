@@ -17,6 +17,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.36.95
+
+**The Steward hands out kit 2.78.14: on every staff page, the status pill sits on the line under the name, after the role, so the title bar stays one row in a normal desktop window.**
+
+### What changed
+
+- **The status pill** ("On duty · next round in 5 min", "Working", "Off duty") moved from beside About and Settings to the line under the name, after the role. When there isn't room for the whole role, it's cut short: hover over it to read it all. The pill always shows whole, and the title bar stays one row unless the window is narrower than about 1,000 pixels.
+- **In a narrow window,** the pill goes under the role, and About, Settings, the theme and Run now sit on their own row, at its end.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.78.14.
+
 ## 0.36.91
 
 **A vouched PR whose kit.json pins a kit with no release waits for it, as any PR does. Before, a vouch let it skip that hold, so it could merge pinned to a kit that will never be released.**
