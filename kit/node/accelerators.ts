@@ -606,7 +606,7 @@ export function reportsLoaded(startCommand: string[] | undefined): boolean {
 
 /**
  * Whether a server this kit starts has its working set handed back to Windows once its model has loaded (working-set.ts,
- * kit 2.78.11): FastFlowLM's, which keeps its model's lookup tables in ordinary private memory and reads one row
+ * kit 2.78.13): FastFlowLM's, which keeps its model's lookup tables in ordinary private memory and reads one row
  * of them a token. qwen3.5:2b's working set went from 3,814 MB to 171 MB, decoding as fast as before.
  */
 export function trimmedOnceLoaded(startCommand: string[] | undefined): boolean {

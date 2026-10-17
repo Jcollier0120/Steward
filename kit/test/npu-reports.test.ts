@@ -77,13 +77,28 @@ test('short of 3 PCs it says what is missing; a verified generation failing ofte
   assert.equal((edge.patch as any)?.routes.intel.generations['panther-lake']?.verified, undefined);
 });
 
-test("a small PC's own models (smallPc) are listed on their own: never counted toward the route's model, and not stale", () => {
+test("a generation's own models are the route as it runs there: an X2's reports on its 2B count, the route's 4B there is stale", () => {
   const qualcomm = V.NPU_CATALOG.routes.qualcomm;
-  const [gen] = Object.entries(qualcomm.generations).find(([, g]) => (g as any).smallPc) ?? [];
-  assert.ok(gen, 'a generation with smallPc models (the Snapdragon X2)');
+  const own = (r: any) => (r.models.find((m: any) => m.kinds.includes('chat')) ?? r.models[0]).id;
+  const twoB = own(V.routeFor(qualcomm, 'snapdragon-x2'));
+  assert.notEqual(twoB, own(qualcomm), "the X2 runs its own models (the 2B), not the route's");
+  const onX2 = (model: string) => group({ vendor: 'qualcomm', generation: 'snapdragon-x2', server: qualcomm.server, version: qualcomm.version, model, reports: 2, pcs: 2, passedPcs: 2 });
+  const r = P.reportsPatch({ ...summary, groups: [onX2(twoB), onX2(own(qualcomm))] } as any);
+  assert.equal(r.stale, 2, 'only the reports on the 4B, which the X2 no longer runs');
+  assert.ok(r.lines.some((l) => /2 of 2 PCs passed/.test(l)), r.lines.join('\n'));
+});
+
+test("a small PC's own models (smallPc) are listed on their own: never counted toward the route's model, and not stale", () => {
+  // No generation ships smallPc models now (the X2 runs the 2B on every PC): a catalog that gives the X2 some.
+  const catalog = structuredClone(V.NPU_CATALOG);
+  const qualcomm = catalog.routes.qualcomm;
+  const gen = 'snapdragon-x2';
+  const tiny = { ...qualcomm.models[0], id: 'test/tiny-chat' };
+  (qualcomm.generations[gen] as any).smallPc = { models: [tiny], basis: 'a test' };
   const run = V.routeFor(qualcomm, gen, true);
   const small = (run.models.find((m: any) => m.kinds.includes('chat')) ?? run.models[0]).id;
-  const r = P.reportsPatch({ ...summary, groups: [group({ vendor: 'qualcomm', generation: gen, server: qualcomm.server, version: qualcomm.version, model: small, reports: 4, pcs: 4, passedPcs: 3, failedPcs: 1, failures: { 'test-timeout': 1 } })] } as any);
+  assert.equal(small, tiny.id);
+  const r = P.reportsPatch({ ...summary, groups: [group({ vendor: 'qualcomm', generation: gen, server: qualcomm.server, version: qualcomm.version, model: small, reports: 4, pcs: 4, passedPcs: 3, failedPcs: 1, failures: { 'test-timeout': 1 } })] } as any, catalog);
   assert.deepEqual(r.smallPc, [{ vendor: 'qualcomm', generation: gen, model: small, pcs: 4, passedPcs: 3, failedPcs: 1 }]);
   assert.equal(r.stale, 0);
   assert.equal(r.patch, null, "nothing proposed for the route's model from a small PC's");

@@ -202,6 +202,57 @@ test("a release that doesn't match its SHA256SUMS.txt is refused, and nothing is
   }
 });
 
+/** A Steward clone whose kit\ is at `version`, with the tags kit-v<v> its fetch brought for each released `v`. */
+function stewardClone(dir: string, version: string, released: string[]): string {
+  kitTree(path.join(dir, 'kit'), version);
+  const git = (...a: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=Steward test', '-c', 'user.email=steward@example.com', ...a], { stdio: 'ignore', windowsHide: true });
+  git('init', '--quiet');
+  git('add', '-A');
+  git('commit', '--quiet', '-m', `kit ${version}`);
+  for (const v of released) git('tag', `kit-v${v}`);
+  return path.join(dir, 'kit');
+}
+
+test("a pin to a kit tree's own version with no release fills, but warns it is for development only; a released one, or a tree no clone holds, doesn't", async () => {
+  // Manor#276 pinned kit 2.78.3, Steward main's kit on 2026-10-16, and filled from the sibling: it would never be released.
+  const dev = /kit\.json pins 2\.78\.3, which has no release \(no tag kit-v2\.78\.3 in .+'s clone, as of its last fetch\): pin it for development only\. Commit your main's pin, unless an open Steward PR brings 2\.78\.3/;
+  const unreleased = stewardClone(path.join(tmp, 'clone-unreleased'), '2.78.3', ['2.77.6', '2.75.2']);
+  const pinned = hire('2.78.3');
+  const r = await tool(pinned.root, ['--from', unreleased]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(read(pinned.root, 'VERSION').trim(), '2.78.3', 'it fills all the same');
+  assert.match(r.out, dev);
+
+  // The sibling checkout, filled without --from: the same word.
+  const beside = hire('2.78.3');
+  stewardClone(path.join(beside.caseDir, 'Steward'), '2.78.3', ['2.77.6']);
+  const s = await tool(beside.root);
+  assert.equal(s.code, 0, s.out);
+  assert.match(s.out, /Steward[\\/]kit/);
+  assert.match(s.out, dev);
+
+  // Released: its tag is in the clone, or it was downloaded once (the cache).
+  const released = stewardClone(path.join(tmp, 'clone-released'), '2.77.6', ['2.77.6']);
+  assert.doesNotMatch((await tool(hire('2.77.6').root, ['--from', released])).out, /development only/);
+  const cache = path.join(tmp, 'cache-dev');
+  kitTree(path.join(cache, '2.78.3'), '2.78.3');
+  assert.doesNotMatch((await tool(hire('2.78.3').root, ['--from', unreleased], { STEWARD_KITS: cache })).out, /development only/, 'in the cache: a release');
+
+  // Nothing here says: a tree in no clone, or a clone with no kit tags. The Steward's trial (STEWARD_KIT) isn't told either.
+  assert.doesNotMatch((await tool(hire('2.78.3').root, ['--from', kitTree(path.join(tmp, 'tree-loose'), '2.78.3')])).out, /development only/);
+  assert.doesNotMatch((await tool(hire('2.78.3').root, ['--from', stewardClone(path.join(tmp, 'clone-untagged'), '2.78.3', [])])).out, /development only/);
+  assert.doesNotMatch((await tool(hire('2.78.3').root, [], { STEWARD_KIT: unreleased })).out, /development only/);
+});
+
+test("the Steward filling its own kit (npm run kit: --from kit) isn't told: its pin is its tree's by design", async () => {
+  const self = path.join(tmp, 'steward-self');
+  const tree = stewardClone(self, '2.78.3', ['2.77.6']);
+  writeFileSync(path.join(self, 'kit.json'), JSON.stringify({ kit: '2.78.3', parts: ['node', 'web'] }));
+  const r = await tool(self, ['--from', tree]);
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /development only/);
+});
+
 test('without a pin or a kit tree it says what it needs', async () => {
   const dir = path.join(tmp, 'no-pin');
   mkdirSync(dir, { recursive: true });

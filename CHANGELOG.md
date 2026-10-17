@@ -2,13 +2,44 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.83
+## Unreleased (its version needs claiming on the main laptop)
 
-**The Steward hands out kit 2.78.11: FastFlowLM's working set is handed back to Windows once its model has loaded. That's about 3.6 GB of RAM for qwen3.5:2b and 6.4 GB for Gemma 4 E2B, decoding as fast as before.**
+**A PR whose kit.json pins a kit that will never be released is told so at once, and a draft is too. Before, it waited quietly ("no open Steward PR brings it: release that kit, or pin a released one"), its alarm came a day later, and a draft wasn't looked at at all.**
 
 ### What changed
 
-- **Kit 2.78.11** (kit/CHANGELOG.md): a FastFlowLM server the kit starts has its working set emptied once its model has loaded (`working-set.ts`). Windows keeps those pages compressed, or in the pagefile, and reads back the few the server touches again. `KIT_SERVER_TRIM=0` turns it off.
+- **The hold says the kit will never be released** (stages/prtest.ts `kitReleaseHold`). That is when no open Steward PR brings the kit, and a newer kit is released already or the Steward's main has a newer one. A kit is released from main, and main's kit only goes up. Main's kit is read from the checkout's `origin/main`, once per stage, with nothing fetched for it.
+  - **It names the fix:** keep the repository main's pin. Once a build releases its kit, the rollout pins it on main, and the Steward's catch-up brings it to the PR.
+  - **A pin to main's own kit**, not released yet, is held as before: the next build may still release it.
+- **Its author is told on the PR**, in a comment, once for each commit (`tellDeadKit`, kept in dead-kits.json), as a conflict is: a Claude Code session's by its branch, anyone else's by name. A comment the Steward couldn't leave is tried again at the next round.
+- **An alarm at once** (`deadkit:<repo>#<number>`), rather than after the day a hold waits for its alarm.
+- **Drafts are looked at too** (stages/merge.ts `lookAtDraftKits`). A draft never reached `kitReleaseHold`, because it was held as a draft first: Manor#276, a draft pinned to kit 2.78.3 on 2026-10-16, would have been told nothing until it was marked ready.
+  - Each of the team's drafts into the branch has its kit.json read as a ready PR's is: its head is fetched only when it isn't in the clone yet.
+  - A draft whose kit will never be released is told, and its hold says so after "a draft".
+
+## 0.36.85
+
+**The Steward hands out kit 2.78.13: FastFlowLM's working set is handed back to Windows once its model has loaded. That's about 3.6 GB of RAM for qwen3.5:2b and 6.4 GB for Gemma 4 E2B, decoding as fast as before.**
+
+### What changed
+
+- **Kit 2.78.13** (kit/CHANGELOG.md): a FastFlowLM server the kit starts has its working set emptied once its model has loaded (`working-set.ts`). Windows keeps those pages compressed, or in the pagefile, and reads back the few the server touches again. `KIT_SERVER_TRIM=0` turns it off.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.84
+
+**The Steward hands out kit 2.78.12: an NPU's reports are counted against the model its generation runs, so a Snapdragon X2's reports on its 2B count. It also fixes the two tests that kept the 10-17 build from releasing anything.**
+
+### What changed
+
+- Reports from a Snapdragon X2 running its own model, the 2B, were counted as stale, measured against the route's 4B, which the X2 no longer runs. Now they count toward the X2, and an X2's reports on the 4B are the stale ones.
+- Two of the Steward's own tests failed in its whole suite during the build, so the Steward, its kit and the agents waiting on that kit weren't released:
+  - The small-PC models test looked for a Snapdragon generation that ships small-PC models, and none does since the X2 runs the 2B on every PC. It now makes one for the test.
+  - The page's pace test asked its page for an answer while the page ran below normal priority beside a kit's trial, and the page didn't get the processor in 3 minutes. It now asks at above normal priority, and still checks that a request changes neither the priority nor the job's cap.
+- This release also brings 0.36.61 to 0.36.83, none of which was released on its own.
 
 ### Before you update
 

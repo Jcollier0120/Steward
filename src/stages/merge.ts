@@ -13,7 +13,7 @@ import { openVouchedBranches } from './branchesin.ts';
 import { handInBranches } from './gitevents.ts';
 import { catchUp, isKitPr, type CaughtUp, type KitSetter } from './catchup.ts';
 import { bumpDirOf, buildUnderWay, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
-import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
+import { kitReleaseHold, tellDeadKit, testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
 import { runTrain, trainCars, type TrainRun } from './train.ts';
@@ -22,7 +22,7 @@ import { loadRolloutFailures } from './rollout.ts';
 import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, trialGoingAt, trialWaitsForNextBuild, TRIAL_GOING } from './trial.ts';
 import { claimsOn, movedTo, reclaim, type Claim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
-import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
+import { deadKitIn, kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
 import type { Held } from '../alarms.ts';
 import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, lockfileHold, ownerFirstHold, reviewedComment, reviewHold } from '../review.ts';
 import { openPrs, parsePrs, type PrInfo } from './staff.ts';
@@ -456,6 +456,25 @@ export async function lookAtLockfiles(ctx: Ctx, e: Employee, prs: PrInfo[]): Pro
 }
 
 /**
+ * Each of the team's drafts on the kit, looked at for its kit.json (prtest.ts's kitReleaseHold): a draft isn't tested,
+ * so the merge never looked at its pin, and Manor#276, a draft pinning kit 2.78.3 on 2026-10-16, would have been told
+ * nothing until it was marked ready. One that pins a kit that will never be released is told so, on it, to its author
+ * (tellDeadKit); its hold says so too, by number, which raises the alarm at once (alarms.ts). Its pin is read from its
+ * head as a ready PR's is: fetched only when that commit isn't in the clone yet.
+ */
+export async function lookAtDraftKits(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<Map<number, string>> {
+  const dead = new Map<number, string>();
+  if (!e.usesKit || !existsSync(checkoutOf(e))) return dead;
+  for (const pr of prs.filter((p) => p.draft && p.whose === 'team' && !p.fork && p.base === e.branch)) {
+    const why = await kitReleaseHold(ctx, e, pr).catch(() => null);
+    if (!why || !deadKitIn(why)) continue;
+    dead.set(pr.number, why);
+    await tellDeadKit(ctx, e, pr, why).catch((err: Error) => ctx.log(`[${e.id}] #${pr.number}: couldn't tell its author its kit will never be released: ${err.message}`));
+  }
+  return dead;
+}
+
+/**
  * One look at an employee's PRs (mergeOne): what it merged and what waits, and, apart, the lines of what it did (merged,
  * didn't merge, caught up) and of what waits, so that several looks in one round (merge) say each thing once.
  * `lookAgain`: another look this round can merge more (lookAgainAfter).
@@ -504,7 +523,10 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   if (o.yes && !only && !prep) await askAgainWhetherMerges(ctx, e, prs);
   // Whoever wrote it, one whose lockfile brings new packages or a new install script waits for the owner (review.ts).
   if (o.yes && !only) await lookAtLockfiles(ctx, e, prs);
+  // A team draft whose kit.json pins a kit that will never be released: told now, and its hold says so (prtest.ts).
+  const deadDrafts = o.yes && o.team && !only && !prep ? await lookAtDraftKits(ctx, e, prs) : new Map<number, string>();
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch, { minAgeMinutes: ctx.settings.mergeMinAgeMinutes });
+  for (const h of hold) if (deadDrafts.has(h.pr.number)) h.why = `${h.why}; it ${deadDrafts.get(h.pr.number)}`;
   let looked: ReturnType<Lookup> | null = null;
   const lookup: Lookup = () =>
     (looked ??= (async () => {
@@ -767,9 +789,10 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     if (vouched) notes.set(pr.number, here?.ok ? here.note : `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`);
     else if (untested(pr)) {
       // Its kit not released yet: not tested, nor held against its commit, until it is; its hold names the Steward PR
-      // that brings that kit, or says none does (prtest.ts).
+      // that brings that kit, or says none does (prtest.ts). One that will never be released is said to its author.
       const kitWaits = await kitReleaseHold(ctx, e, pr).catch(() => null);
       if (kitWaits) {
+        if (!prep && deadKitIn(kitWaits)) await tellDeadKit(ctx, e, pr, kitWaits).catch((err: Error) => ctx.log(`[${e.id}] #${pr.number}: couldn't tell its author its kit will never be released: ${err.message}`));
         waits.push(`${describe(pr)} waits: ${kitWaits}`);
         held.push(heldOf(pr, kitWaits));
         continue;
