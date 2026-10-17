@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.134
+
+**The kit 2.82.4: each member of the staff keeps its PowerShell helper 4 minutes after its last use, not 2, so it starts PowerShell less often.**
+
+### What changed
+
+- **The kit 2.82.4** ([kit/CHANGELOG.md](kit/CHANGELOG.md)):
+  - Each member of the staff keeps its PowerShell helper 4 minutes after its last use, not 2, so it starts PowerShell less often.
+  - Every process a PC starts and ends costs it a little, and on some PCs part of that stays until a restart. With 2 minutes, a PC running about 20 staff started about 40 PowerShell helpers an hour.
+  - A helper waiting for work holds about 13 MB of memory.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.133
 
 **The kit 2.82.3: the NPU's refresh and patch looks no longer wait for the whole manor to be quiet, only the NPU.**
