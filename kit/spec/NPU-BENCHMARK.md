@@ -26,12 +26,12 @@ Every model Castellan runs today is a Qwen model at 4-bit weights:
 
 | Maker | Server | Model | Weights |
 |---|---|---|---|
-| Qualcomm | GenieX 0.8.0 | Qwen3-VL-4B-Instruct (W4A16) | 4-bit, 16-bit activations; also does vision |
-| Qualcomm, an X2 under 20 GB | GenieX 0.8.0 (its llama.cpp plugin) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Adreno |
+| Qualcomm X | GenieX 0.8.0 | Qwen3-VL-4B-Instruct (W4A16) | 4-bit, 16-bit activations; also does vision |
+| Qualcomm X2 | GenieX 0.8.0 (its llama.cpp plugin) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Adreno |
 | Intel | OpenVINO Model Server 2026.4.1 | Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov | 4-bit symmetric, channel-wise |
 | AMD | FastFlowLM 1.0.7 | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
 
-They are not the same weights: each maker's NPU needs its own format, Qualcomm's is the vision model, and AMD's is a smaller model that does both. So the chips board doesn't claim identical models. It compares what each chip delivers with its shipped model, names the model on every row, and shows a quality score beside the speed, so a faster chip whose model answers worse can't hide it.
+They are not the same weights: each maker's NPU needs its own format, Qualcomm's are vision models, and AMD's is a smaller model that does both. So the chips board doesn't claim identical models. It compares what each chip delivers with its shipped model, names the model on every row, and shows a quality score beside the speed, so a faster chip whose model answers worse can't hide it.
 
 The Qwen3 models share one tokenizer (151,936 tokens), so their token counts mean the same thing. Qwen3.5's is larger (248,320), so the same text is usually fewer tokens to it, and its tokens a second aren't quite the Qwen3 rows' tokens a second. The jobs, timed in seconds, compare as they are.
 
@@ -185,7 +185,7 @@ Then resume the keeper and the agents in Manor, and put any timeouts back.
 
 ### On a Snapdragon
 
-The route is GenieX 0.8.0 with Qualcomm's Qwen3-VL-4B-Instruct (W4A16), one model for chat and vision, on port 18181. Run it as above, with an Arm64 Node, and look for these:
+The route is GenieX 0.8.0 on port 18181, one model for chat and vision: on an X2, Qwen3-VL-2B (unsloth's Q4_0 GGUF, through GenieX's llama.cpp plugin, its pictures' encoder on the Adreno; kit 2.78.8), and on a first-generation X, Qualcomm's Qwen3-VL-4B-Instruct (W4A16). Run it as above, with an Arm64 Node, and look for these:
 
 - **GenieX's quirks are applied.** Near the start the log says `GenieX's requests as the kit sends them: a nonce first in every request (prefix-leak); each picture as a file of its own, its path sent (image-path)`. If that line is missing, `src\kit` is older than this page: go back to step 1. Without the nonce GenieX reuses state across the tries of one prompt, and without the files it can't read the pictures.
 - **One model at a time.** GenieX holds one model and loads its vision part for a picture after text. The benchmark sends one picture as an untimed warm-up before the four graded ones, so their times aren't a load's, and its second start (the cached load) is a new process. GenieX's DSP fails after about a dozen vision loads in one process (ACCELERATORS.md); a run sends five. This is also why nothing else may ask GenieX during the run (step 4): another agent's request would make it swap.
@@ -193,9 +193,9 @@ The route is GenieX 0.8.0 with Qualcomm's Qwen3-VL-4B-Instruct (W4A16), one mode
 - **No graphics-card run yet.** GenieX runs on the NPU only, so `--device GPU` (or `CPU`) is refused, exit 2: "GenieX runs on the NPU only: it has no device to choose". The Adreno serves the manor's models through llama.cpp, which isn't an NPU route, so a Snapdragon graphics-card row needs a route for it first. When one exists, `--device GPU` runs it, plugged in, as on Intel.
 - **Streaming is unverified.** Whether GenieX streams one chunk a token and puts its token counts in the last chunk hasn't been checked. The first run's report says: `run.streamed` and `run.usageReported`. If either is false, the run is marked `not-streamed` or `no-usage` and isn't ranked; send it back anyway, as that is the finding. If the first load fails with a 4xx in GenieX's log, it refused the streamed request (`stream_options`, say): send the log.
 - **Energy on the X2 Elite is unseen.** On the Lunar Lake laptop the battery's rate didn't hold up (Energy, above). Whether the Snapdragon's does is what step 7 finds out.
-- **Setup checks the model's files.** On the X2 Elite each of Qwen3-VL-4B's pinned files is read and its SHA-256 checked before the server starts (4.3 GB), so the first lines take a little while. A `--candidate`'s files are read once too, after setup, for the report's SHA-256s.
+- **Setup checks the model's files.** On the X2 Elite each of Qwen3-VL-2B's pinned files is read and its SHA-256 checked before the server starts (1.9 GB; the 4B's, 4.3 GB, with `--model` the 4B), so the first lines take a little while. A `--candidate`'s files are read once too, after setup, for the report's SHA-256s.
 - **A start again waits for GenieX's port.** GenieX killed is gone at once, but its port stays bound about 2 s: requests time out for the first second, then are reset, then refused (measured on the X2 Elite, 2026-10-15). The benchmark, like the NPU check, waits until a connection is refused before it starts GenieX again (kit 2.74.7). Before, it started it while the port was held: GenieX couldn't bind it ("Only one usage of each socket address" in its log), and the cached load failed with "no correct answer".
-- **A small PC's model** (kit 2.78.0). On a PC under 20 GB the benchmark measures the models setup runs there, the generation's `smallPc`: a 16 GB X2's Qwen3-VL-2B. `--small-pc` measures them on a bigger X2, as does `--model unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`; `--model` the 4B measures the 4B on a small one. The report's `run.model` says which.
+- **The X2's model** (kit 2.78.8). The benchmark measures the models setup runs on the PC: on every X2, whatever its memory, its generation's own, Qwen3-VL-2B (from kit 2.78.0 on an X2 under 20 GB alone, its `smallPc`). `--model qualcomm/Qwen3-VL-4B-Instruct:W4A16` measures the route's own 4B on an X2, for comparing; a `--candidate` is pulled and served as that 4B is (AI Hub's QAIRT build). `--small-pc` measures a generation's `smallPc` models, of which there are none now. The report's `run.model` says which.
 - **An X played on the X2.** `--generation snapdragon-x` (kit 2.74.7) runs the first X's code on the X2's NPU: AI Hub's X Elite build of the model, served by GenieX from a folder of its own (`{tools}\played\snapdragon-x\geniex`, whose `config.json` names the X Elite to AI Hub), checked against the X Elite's pins there. The report says `run.played`, carries a `played` mark, and is never ranked: its numbers are the X's code on the X2, not an X's speed. A newer Snapdragon on an older one is refused (exit 2), as is `--generation` on any NPU but a Snapdragon, where it would be another generation's starting values alone (NPU-VENDORS.md, Playing an older Snapdragon on a newer one).
 
 The plugged-in full run's report is what the website's speed table takes for the Snapdragon row.

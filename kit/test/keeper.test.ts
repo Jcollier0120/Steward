@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -993,4 +993,18 @@ test('through the kit: a chat or vision request on the NPU lets the embedding se
   } finally {
     server.close();
   }
+});
+
+test("the keeper's look asks the PC itself (hardware, the cards', the NPU's commands) with the PC's own reaper, config.json handed or not; never with a test's", async () => {
+  const { asksPc, keeperLook, pcReaper } = await import('./fixture/src/kit/keeper.ts');
+  // The Smith hands keeperLook the config.json it read for its round, from its own pcReaper: until kit 2.78.8 a handed
+  // config.json kept the NPU's refresh, the cards' and hardware.json from ever running under it.
+  assert.equal(asksPc(pcReaper({ who: 'smith', logFile: path.join(home, 'smith-reaper.log') })), true);
+  const { deps } = fakePc({});
+  const fake = new Reaper(deps, { idleMs: 10 * MIN });
+  assert.equal(asksPc(fake), false);
+  // A test's reaper looks at the servers it's handed, and asks this PC nothing: no detection, nothing written beside config.json.
+  const looked = await keeperLook(fake, { config: () => ({ accelerators: [] }), withNpu: () => true });
+  assert.deepEqual(looked, { servers: [], orphans: [] });
+  assert.ok(!existsSync(path.join(home, 'accelerators', 'hardware.json')), 'hardware.json not asked for');
 });

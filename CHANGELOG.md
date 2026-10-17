@@ -2,6 +2,26 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.79
+
+**Every Snapdragon X2 now runs Qwen3-VL-2B on its NPU, whatever its memory, and on a PC with the Smith the keeper's own refreshes run at last.**
+
+### What's new
+
+- **Qwen3-VL-2B on every Snapdragon X2.** This Steward hands out kit 2.78.8. With it, a PC with a Snapdragon X2 runs Qwen3-VL-2B on its NPU for chat and pictures, with the pictures read on its Adreno graphics, however much memory it has. Until now only an X2 with less than 20 GB did, and a bigger one ran Qwen3-VL-4B. In the benchmark on a 48 GB X2 Elite the 2B was as accurate as the 4B and read pictures better (4 of 4 against 3), wrote about 75 tokens a second against 41, did the test jobs in about half the time and held 4.3 GB against 6.1. A first-generation Snapdragon X keeps Qwen3-VL-4B.
+
+### What changed
+
+- **The keeper's look now does its PC chores under the Smith.** Once a day the look should update the PC's record of its hardware, and once for each new kit it should bring the NPU's command and the graphics cards' picture settings up to what that kit's setup writes. On a PC where the Smith runs, none of the three ever ran, so a change a kit made to them reached only PCs where Set up local AI was pressed again. Now they run there too.
+- **The local AI's own folder is found where its servers really are.** On a PC set up in Manor's folder for the local AI, a Reeve folder that holds only logs made the kit look there for the AI's servers and models, so the NPU's refresh couldn't find them. The kit now looks in the folder the PC's own settings run the servers from. A PC whose servers are in Reeve's folder keeps it.
+
+### Before you update
+
+- A Snapdragon X2 that is set up and already has Qwen3-VL-2B switches to it at the keeper's next look, once nobody has used the NPU for two minutes.
+- Any other Snapdragon X2 switches when you press Set up local AI in Manor, which downloads 1.9 GB.
+- Qwen3-VL-4B (4.4 GB) stays on the PC until you remove it: `geniex remove qualcomm/Qwen3-VL-4B-Instruct`.
+- On a PC with the Smith, the first look after the update may also change the graphics cards' picture settings, as earlier kits meant to. Each change is written in the keeper's log, and a setting you changed yourself is kept.
+
 ## 0.36.78
 
 **The 85% limit now holds for everything the manor runs at once, not for each part on its own. And the NPU check and the NPU benchmark measure the local AI's server as the agents get it.**

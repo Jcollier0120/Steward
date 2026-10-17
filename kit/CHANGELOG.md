@@ -2,6 +2,32 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.8
+
+**Qwen3-VL-2B is every Snapdragon X2's NPU model, whatever its memory, and a first-generation X keeps Qwen3-VL-4B. And under the Smith, the keeper's look now runs the PC's refreshes (the NPU's command, the cards' vision, hardware.json), which until now never ran there. The tools home is now the folder config.json's commands are in, so a PC set up in the accelerators' folder no longer looks for its servers in a ~\.reeve that holds only logs.**
+
+### What's new
+
+- **A generation's own models** (npu-vendors.ts, npu-vendors.json): `NpuGeneration.models` are the models a generation runs in the route's place on every PC of it, whatever its memory. `routeFor` puts them there, and a small PC's `smallPc` still goes over them. The Snapdragon X2 has Qwen3-VL-2B (`unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`, 1.9 GB, its pictures' encoder on the Adreno with `--vit-compute GPUOpenCL`) as its `models`. Kit 2.78.0 gave it as `smallPc`, so only an X2 under 20 GB ran it. No generation has `smallPc` now; the mechanism stays. The route's own `models` stays Qwen3-VL-4B, which the first-generation X (Hexagon v73) runs, as does a Snapdragon setup doesn't know.
+
+### What changed
+
+- **Setup, the NPU check and the NPU's refresh** plan, check and refresh the 2B on an X2 of any memory, through `routeFor`. An X2 set up with the 4B is `needs-setup` until setup has pulled the 2B. Once the 2B is there, the refresh puts it in the 4B's place and adds `--compute npu` and `--vit-compute GPUOpenCL`.
+- **`routeFor` keeps a caller's own models.** The X2's 2B, and a small PC's models, go only in place of the route's own, as npu-vendors.json has them. A route handed in with other models, such as the Smith's try of a newer model, keeps them, so the try pulls and tests the model it names.
+- **npu-bench** measures what setup runs on the PC. `--model` takes the generation's models or the route's own, so `--model qualcomm/Qwen3-VL-4B-Instruct:W4A16` measures the 4B on an X2. A `--candidate` is pulled and served as the route's own model is (AI Hub's build on a Snapdragon), whatever the generation runs.
+- **`keeperLook`** (keeper.ts) brings hardware.json, the cards' vision commands and the NPU's command up to date whenever its reaper is the PC's own (`pcReaper`'s; `asksPc` says so), whether or not it's handed config.json. Until now a handed config.json meant a test. The Smith always hands the one it read for its round, and Reeve leaves its looks to the Smith, so on every PC with the Smith none of the three ever ran: no npu-refresh.json or card-refresh.json was written, and hardware.json changed only when setup ran. A test's reaper asks no PC.
+- **`toolsHome()`** (accelerator-config.ts) is the folder most of config.json's `startCommand`s are in, ~\.reeve or ~\.manor\accelerators, once %NAME% is expanded (`commandsHome`). A command in neither (GenieX's, FastFlowLM's flm, a program on the PATH) doesn't count. With none, or as many in each, ~\.reeve counts only when it holds a server build or a model, not just logs\ and downloads\. Before, any ~\.reeve\servers made ~\.reeve the tools home. So on a PC set up in the accelerators' folder, where something later made a ~\.reeve\servers with only logs in it (an Intel PC and an AMD PC were seen), the NPU's refresh and setup looked for the servers and models in the wrong folder: the refresh missed the embedding server and recorded `needs-setup`. On those PCs they now find the real servers and models. A PC whose commands are in ~\.reeve keeps it: the X2 Elite, whose config.json is in the accelerators' folder and whose card's embedding server runs from ~\.reeve\servers, still gets ~\.reeve.
+- **`redrawPicture`** (accelerators.ts) takes an optional `timeoutMs`. The picture-redraw test gives PowerShell three minutes on a busy PC, where 30 s timed out under a kit trial's load; agents still use 30 s.
+- **Measured** on the 47.6 GB X2 Elite (2026-10-16) with this kit, beside the card's own embedding llama-server on the Adreno under a steady load. The NPU check passed every step: 74.7 tokens a second, 1,812 tokens read in 0.7 s, both cap sizes answered, 3.95 GB held. A quick npu-bench gave 22 of 24 quality items, pictures 4 of 4, 75.4 tokens a second and jobs in 3.3 s, with 4.30 GB working set. The card's server answered all 52 of its requests with the same vectors throughout, at a median of 432 ms, its working set 3.54 GB before and 3.73 GB after.
+
+### Before you update
+
+- Nothing for an agent to change: it takes this kit as usual.
+- A Snapdragon X2 that is set up and already has Qwen3-VL-2B switches to it at the keeper's next look, once nobody has used the NPU for two minutes.
+- Any other Snapdragon X2 switches when Set up local AI is pressed, which pulls 1.9 GB.
+- Qwen3-VL-4B (4.4 GB) stays on the PC until it's removed: `geniex remove qualcomm/Qwen3-VL-4B-Instruct`.
+- Under the Smith, the first look with this kit may also change the cards' vision commands in config.json, as earlier kits' looks meant to (`refreshCardVision`: each flag only where it's missing). Each change goes in the keeper's log.
+
 ## 2.78.7
 
 **Everything the manor runs now stays within 85% of the PC together. The agents, their check runs and the model servers each had a cap of 85%, so all three busy at once could take the whole processor; now they share one. And the NPU check's and the NPU benchmark's server starts apart, as an agent's does, so they measure the server an agent gets. And if kit 2.78.0 to 2.78.3 weren't released on their own, this release brings them too: their entries follow.**

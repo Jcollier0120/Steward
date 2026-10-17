@@ -26,8 +26,9 @@ export { processMemory, type RunningServer, startServer } from './npu-server.ts'
  *
  *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--small-pc] [--harden] [--idle] [--out <file>]
  *
- * It runs the models setup would on this PC: on one with little memory (under idleStop.smallPcGb), its generation's
- * smallPc models, where it has any (a 16 GB Snapdragon X2's Qwen3-VL-2B). `--small-pc` runs those on a bigger PC too.
+ * It runs the models setup would on this PC: its generation's own, where it has any (a Snapdragon X2's Qwen3-VL-2B), and
+ * on one with little memory (under idleStop.smallPcGb) its generation's smallPc models, where it has any (none now).
+ * `--small-pc` runs those on a bigger PC too.
  *
  * `--generation <id>` on an NPU of another generation plays it, and verifies nothing: a Snapdragon X2 plays a Snapdragon X
  * whole (npu-vendors.ts' playGeneration: GenieX on a data folder of its own with AI Hub's X Elite build, the embeddings on
