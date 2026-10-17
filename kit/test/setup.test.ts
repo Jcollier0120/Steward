@@ -578,7 +578,8 @@ test("the keeper's look adds it once for each kit version: config.json written, 
   const file = path.join(dir, 'config.json');
   writeFileSync(file, JSON.stringify(intelConfig(), null, 2));
   const log: string[] = [];
-  const look = (kit: string) => refreshCardVision({ configFile: file, kit, now: () => Date.parse('2026-10-16T03:00:00Z'), log: (l) => log.push(l) });
+  // A PC with 64 GB: chat keeps its own server (chatsOnVision; the next test has one with less).
+  const look = (kit: string) => refreshCardVision({ configFile: file, kit, ramGb: 64, now: () => Date.parse('2026-10-16T03:00:00Z'), log: (l) => log.push(l) });
   const vision = () => JSON.parse(readFileSync(file, 'utf8')).accelerators[1].vision.startCommand as string[];
 
   assert.deepEqual(look('2.80.0'), [INTEL_ID]);
@@ -611,7 +612,7 @@ test("the keeper's look adds it once for each kit version: config.json written, 
   assert.equal(readCardRefresh(file)!.kit, '2.82.0');
   // Written only when it validates: the record says why.
   writeFileSync(file, JSON.stringify(intelConfig(), null, 2));
-  assert.deepEqual(refreshCardVision({ configFile: file, kit: '2.84.0', validate: () => ['nope'], log: (l) => log.push(l) }), []);
+  assert.deepEqual(refreshCardVision({ configFile: file, kit: '2.84.0', ramGb: 64, validate: () => ['nope'], log: (l) => log.push(l) }), []);
   assert.ok(!vision().includes('--no-mmproj-offload'));
   assert.deepEqual(readCardRefresh(file)!.problems, ['nope']);
   assert.match(log.at(-2)!, /^the vision of gpu-intel-r-graphics keeps its command and time: config\.json wasn't written: nope$/);
@@ -667,7 +668,7 @@ test("the keeper's card look brings the embedding server down too, once for each
   const file = path.join(dir, 'config.json');
   writeFileSync(file, JSON.stringify(amdConfig(), null, 2));
   const log: string[] = [];
-  const look = (kit: string, validate?: (raw: unknown) => string[]) => refreshCardVision({ configFile: file, kit, now: () => Date.parse('2026-10-16T22:00:00Z'), log: (l) => log.push(l), ...(validate ? { validate } : {}) });
+  const look = (kit: string, validate?: (raw: unknown) => string[]) => refreshCardVision({ configFile: file, kit, now: () => Date.parse('2026-10-16T22:00:00Z'), ramGb: 64, log: (l) => log.push(l), ...(validate ? { validate } : {}) });
   const embed = () => JSON.parse(readFileSync(file, 'utf8')).accelerators[1].embed;
 
   // Not written when it doesn't validate: the record and the log say why, and the next kit tries again.
@@ -720,6 +721,142 @@ test("a PC set up before: each llama-server on its cards and processor keeps no 
   assert.deepEqual(chat({}).changed, [], 'no command: started by someone else');
   assert.deepEqual(chat({ startCommand: server }, { id: 'npu', kind: 'npu' }).changed, [], "an NPU's server is its route's");
   assert.deepEqual(withoutRamCache({ chatEndpoint: { baseUrl: 'http://127.0.0.1:18181' } }).changed, [], 'an old config with no list');
+});
+
+// A Core Ultra 5 225U laptop with 16 GB and no NPU the manor uses: Intel's integrated graphics alone.
+const INTEL_LAPTOP = `adapter|0|32902|134217728|8270987264|0x00000000_0x0000a1a1|0|Intel(R) Graphics
+cpu|9|12|Intel(R) Core(TM) Ultra 5 225U
+ram|16541974528
+`;
+const INTEL_LIST = 'Available devices:\n  Vulkan0: Intel(R) Graphics (7887 MiB, 7000 MiB free)\n';
+const VL = 'qwen3-vl-4b-instruct';
+
+test("setup on Intel's integrated graphics under 32 GB: one Qwen3-VL-4B server for chat and vision, on chat's port; Qwen3-4B not downloaded", async () => {
+  const { chatsOnVision, CHAT_ON_VISION_RAM_GB } = await import('./fixture/src/kit/setup.ts');
+  assert.equal(chatsOnVision({ id: INTEL_ID, memoryGb: 0.1, device: 'Vulkan0' }, 15.4), true);
+  assert.equal(chatsOnVision({ id: INTEL_ID, memoryGb: 0.1, device: 'Vulkan' }, 15.4), true, "the build's backend, before the device's number is known");
+  assert.equal(chatsOnVision({ id: INTEL_ID, memoryGb: 0.1, device: 'Vulkan0' }, CHAT_ON_VISION_RAM_GB), false, 'enough memory for both');
+  assert.equal(chatsOnVision({ id: 'gpu-intel-r-arc-tm-a770-graphics', memoryGb: 16, device: 'Vulkan0' }, 15.4), false, 'a card with memory of its own');
+  assert.equal(chatsOnVision({ id: 'gpu-amd-radeon-tm-890m-graphics', memoryGb: 0.5, device: 'Vulkan0' }, 15.4), false, "another maker's: not measured");
+
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'run-'));
+  const plan = await planSetup({ detection: parseDetection(INTEL_LAPTOP), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.deepEqual(plan.problems, []);
+  const [t] = plan.targets;
+  assert.equal(t.id, INTEL_ID);
+  assert.equal(t.chatOnVision, true);
+  assert.deepEqual(t.kinds, ['chat', 'vision', 'embed'], 'it still serves all three');
+  assert.deepEqual(t.ports, { chat: 18191, embed: 18192 }, 'no port for vision');
+  assert.deepEqual(plan.models.map((m) => [m.kind, m.role]), [['vision', 'model'], ['vision', 'mmproj'], ['embed', 'model']], 'no Qwen3-4B to download');
+  assert.ok(describePlan(plan).some((l) => l.includes(`chat and vision on 18191 (one ${VL} server), embed on 18192`)), describePlan(plan).join('\n'));
+
+  const lines: string[] = [];
+  const r = await runSetup(plan, {}, {
+    log: (l) => lines.push(l),
+    download: async (d) => {
+      mkdirSync(path.dirname(d.dest), { recursive: true });
+      writeFileSync(d.dest, 'x');
+    },
+    unpack: () => {},
+    listDevices: async () => INTEL_LIST,
+  });
+  assert.deepEqual(r.problems, []);
+  const [e] = r.entries;
+  const exe = portablePath(path.join(home, 'servers', 'llama.cpp', 'b11349-vulkan-x64', 'llama-server.exe'));
+  const model = portablePath(path.join(home, 'models', 'Qwen3VL-4B-Instruct-Q4_K_M.gguf'));
+  const mmproj = portablePath(path.join(home, 'models', 'mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf'));
+  assert.deepEqual(e.chat, {
+    baseUrl: 'http://127.0.0.1:18191',
+    model: VL,
+    startCommand: [exe, '--host', '127.0.0.1', '--port', '18191', '--device', 'Vulkan0', '-ngl', '99', '-m', model, '--mmproj', mmproj, '--no-mmproj-offload', '--image-max-tokens', '1024', '-c', '8192', '--parallel', '1', '--jinja', '--alias', VL],
+    env: { LLAMA_ARG_CACHE_RAM: '0' },
+  });
+  assert.deepEqual(e.vision, { model: VL, timeouts: { requestBaseMs: 90_000 } }, "its model and time, on chat's server");
+  assert.equal(e.embed!.baseUrl, 'http://127.0.0.1:18192');
+  assert.deepEqual([e.slots, e.maxContextTokens], [1, 4096]);
+  assert.ok(lines.some((l) => l.endsWith('chat and vision, embed on 18191, 18192')), lines.join('\n'));
+  assert.deepEqual(validateAccelerators(r.raw), []);
+  const { endpointFor } = await import('./fixture/src/kit/accelerator-config.ts');
+  const read = readAccelerators(r.raw).accelerators[0];
+  assert.deepEqual(endpointFor(read, 'vision'), { baseUrl: 'http://127.0.0.1:18191', model: VL, startCommand: e.chat!.startCommand, env: { LLAMA_ARG_CACHE_RAM: '0' } }, "vision's requests go to chat's server");
+
+  // 32 GB: a chat server of its own, as before.
+  const big = await planSetup({ detection: parseDetection(INTEL_LAPTOP.replace('ram|16541974528', 'ram|34359738368')), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.equal(big.targets[0].chatOnVision, undefined);
+  assert.deepEqual(big.targets[0].ports, { chat: 18191, vision: 18192, embed: 18193 });
+  assert.ok(big.models.some((m) => m.kind === 'chat'));
+  // Asked for chat alone: no vision server to share.
+  const alone = await planSetup({ detection: parseDetection(INTEL_LAPTOP), ids: [], kinds: ['chat'], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.equal(alone.targets[0].chatOnVision, undefined);
+
+  // Set up again on a PC an older kit set up: chat takes the port its vision server had, where that model runs; the embeddings keep theirs.
+  const embed = { baseUrl: 'http://127.0.0.1:18193', model: 'qwen3-embedding-0.6b-gguf', startCommand: [VK, '--port', '18193', '--embeddings'] };
+  const older = { accelerators: [{ id: INTEL_ID, kind: 'gpu', slots: 1, maxContextTokens: 4096, quirks: [], memoryGb: 0.1, chat: intelChat, vision: oldVision(), embed }] };
+  const again = await planSetup({ detection: parseDetection(INTEL_LAPTOP), ids: [], raw: older, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.deepEqual(again.targets[0].ports, { chat: 18192, embed: 18193 });
+});
+
+test("a PC set up before: Intel's integrated graphics under 32 GB move chat onto their vision server; anything else stays as it is", async () => {
+  const { withChatOnVision } = await import('./fixture/src/kit/setup.ts');
+  const raw = intelConfig();
+  const r = withChatOnVision(raw, 15.4);
+  assert.deepEqual(r.changed, [INTEL_ID]);
+  const card = r.raw.accelerators[1];
+  assert.deepEqual(card.chat, { baseUrl: 'http://127.0.0.1:18192', model: VL, startCommand: oldVision().startCommand }, "the vision server's port and command, where that model already runs");
+  assert.deepEqual(card.vision, { model: VL });
+  assert.deepEqual(r.raw.accelerators[0], npuEntry, 'the NPU as it was');
+  assert.equal((raw.accelerators[1] as any).chat.model, 'qwen3-4b-instruct-2507', 'the config read is not changed in place');
+  assert.deepEqual(withChatOnVision(r.raw, 15.4).changed, [], 'again: nothing to do');
+  assert.deepEqual(validateAccelerators(r.raw), []);
+  const { endpointFor } = await import('./fixture/src/kit/accelerator-config.ts');
+  const read = readAccelerators(r.raw).accelerators.find((a) => a.id === INTEL_ID)!;
+  assert.equal(endpointFor(read, 'vision').baseUrl, 'http://127.0.0.1:18192');
+  assert.equal(endpointFor(read, 'chat').baseUrl, 'http://127.0.0.1:18192');
+  assert.ok(!readAccelerators(r.raw).accelerators.some((a) => a.chat?.baseUrl === 'http://127.0.0.1:18191'), "chat's old port is no configured server's: the keeper's orphan check stops what runs there");
+
+  // Vision's time and environment go with its server: the time stays vision's, the environment is the server's.
+  const timed = intelConfig() as any;
+  timed.accelerators[1].chat = { ...intelChat, env: { LLAMA_ARG_CACHE_RAM: '0' }, timeouts: { requestBaseMs: 20_000 } };
+  timed.accelerators[1].vision = { ...oldVision(), env: { LLAMA_ARG_CACHE_RAM: '0', GGML_VK_DISABLE_COOPMAT: '1' }, timeouts: { requestBaseMs: 90_000 } };
+  const t = withChatOnVision(timed, 15.4).raw.accelerators[1];
+  assert.deepEqual(t.chat.env, { LLAMA_ARG_CACHE_RAM: '0', GGML_VK_DISABLE_COOPMAT: '1' });
+  assert.deepEqual(t.chat.timeouts, { requestBaseMs: 20_000 }, "chat's own time stays chat's");
+  assert.deepEqual(t.vision, { model: VL, timeouts: { requestBaseMs: 90_000 } });
+
+  // Left as it is.
+  const card1 = (more: Record<string, unknown>) => {
+    const c = intelConfig() as any;
+    c.accelerators[1] = { ...c.accelerators[1], ...more };
+    return withChatOnVision(c, 15.4).changed;
+  };
+  assert.deepEqual(withChatOnVision(intelConfig(), 32).changed, [], '32 GB: room for both');
+  assert.deepEqual(card1({ memoryGb: 8 }), [], 'memory of its own');
+  assert.deepEqual(card1({ id: 'gpu-amd-radeon-tm-890m-graphics' }), [], "another maker's");
+  assert.deepEqual(card1({ slots: 2 }), [], 'two slots: the vision server takes one request at a time');
+  assert.deepEqual(card1({ chat: { ...intelChat, model: 'my-model' } }), [], "a person's own chat model");
+  assert.deepEqual(card1({ vision: { model: VL } }), [], 'already on one server');
+  assert.deepEqual(card1({ chat: { ...intelChat, startCommand: ['C:\\o\\ollama.exe', 'serve'] } }), [], "a chat server that isn't llama-server");
+  assert.deepEqual(card1({ chat: { baseUrl: intelChat.baseUrl, model: intelChat.model } }), [], 'chat started by someone else');
+  assert.deepEqual(card1({ vision: { ...oldVision(), startCommand: oldVision().startCommand.filter((s, i, a) => s !== '--mmproj' && a[i - 1] !== '--mmproj') } }), [], 'a vision command without its projector');
+  assert.deepEqual(card1({ vision: oldVision(18192, 'GPUOpenCL') }), [], 'not on Vulkan');
+  assert.deepEqual(withChatOnVision({ chatEndpoint: { baseUrl: 'http://127.0.0.1:18181' } }, 15.4).changed, [], 'an old config with no list');
+});
+
+test("the keeper's look on a PC under 32 GB: chat moves onto the vision server it brought up to this kit, with no RAM cache", async () => {
+  const { refreshCardVision } = await import('./fixture/src/kit/setup.ts');
+  const dir = mkdtempSync(path.join(process.env.REEVE_HOME!, 'card-share-'));
+  const file = path.join(dir, 'config.json');
+  writeFileSync(file, JSON.stringify(intelConfig(), null, 2));
+  const log: string[] = [];
+  assert.deepEqual(refreshCardVision({ configFile: file, kit: '2.80.0', ramGb: 15.4, now: () => Date.parse('2026-10-16T03:00:00Z'), log: (l) => log.push(l) }), [INTEL_ID]);
+  const card = JSON.parse(readFileSync(file, 'utf8')).accelerators[1];
+  assert.equal(card.chat.baseUrl, 'http://127.0.0.1:18192');
+  assert.equal(card.chat.model, VL);
+  assert.ok(card.chat.startCommand.includes('--no-mmproj-offload') && card.chat.startCommand.includes('--image-max-tokens'), "vision's command as this kit has it");
+  assert.deepEqual(card.chat.env, { LLAMA_ARG_CACHE_RAM: '0' });
+  assert.deepEqual(card.vision, { model: VL, timeouts: { requestBaseMs: 90_000 } });
+  assert.equal(log.length, 3);
+  assert.match(log[1], /^gpu-intel-r-graphics: chat now runs on the vision server, qwen3-vl-4b-instruct for both \(kit 2\.80\.0\)/);
 });
 
 test('a reranker: set up only when asked for, as an add-on that keeps what its accelerator serves, on its own port; the keeper keeps it', async () => {

@@ -123,6 +123,19 @@ A PC set up before gets the flag, the cap and the time at the keeper's next look
 
 A PC set up before gets it at the same look (`withoutRamCache`), each server at its next start. A server whose command or environment already says how much to cache (`--cache-ram`, `-cram`, `LLAMA_ARG_CACHE_RAM`) keeps it, and so does a server that isn't llama-server, an NPU's among them.
 
+**Chat on the vision server.** A card that encodes on the processor (Intel's integrated graphics, above, whose memory is the PC's) on a PC with under 32 GB (setup.ts' `chatsOnVision`, `CHAT_ON_VISION_RAM_GB`) runs one Qwen3-VL-4B server for its chat and vision, in place of a Qwen3-4B chat server beside it. Its chat endpoint has vision's model, flags and port, and its vision endpoint only its model and time, on chat's server (`"vision": { "model": "qwen3-vl-4b-instruct", "timeouts": { "requestBaseMs": 90000 } }`). Setup doesn't download Qwen3-4B for it. Its embeddings keep their own server. Measured on a Core Ultra 5 225U with 15.4 GB (b11669, 2026-10-16, below-normal priority, temperature 0), each server alone on a private port:
+
+| | Qwen3-4B chat, with Qwen3-VL-4B for vision | One Qwen3-VL-4B for both |
+|---|---|---|
+| The PC's memory, both kinds loaded | 3.5 GB + 5.0 GB | 5.0 GB |
+| The Smith's golden, determinism and prefix-leak checks | 13 of 13 | 13 of 13 |
+| 18 of the manor's kind of tasks, scored by code | 16 | 15 |
+| Writes | 11.1–12.4 tokens a second | 12.5–12.6 |
+
+The one task between them: the one server found the wrong line in a 2,700-token log, where Qwen3-4B found the right one. Both were scored wrong on a sum, where Qwen3-4B's answer was right but showed its working and the one server's was wrong, and both missed a logic puzzle. A summary, a commit subject and a plain rewrite read about the same from both. Pictures and text in turn answered on it, through the kit's own requests (`chatBody`, `visionBody`, `endpointFor`): a sum, the Smith's check picture, a question, a table's picture, a sum, each in under 4 s. Requests already take the card's turn one at a time (its one slot), so chat waits behind a picture as before. With 32 GB or more both fit, and chat keeps Qwen3-4B on its own server.
+
+A PC set up before gets it at the same look (`withChatOnVision`): chat moves onto the vision server's port and command, where Qwen3-VL-4B already runs, and vision keeps its model and time. Nothing is started or stopped: a vision server running takes chat as it is, and the Qwen3-4B server left on chat's old port is no configured server's, so the keeper stops it as an orphan once it has run 5 minutes. Setting up again gives chat that port too. Only setup's own pair changes: each llama-server, with setup's models, one slot, on ports of their own. A person who gives chat its own server back keeps it until the next kit.
+
 ## The lock and the line, per accelerator
 
 Reeve's `docs/NPU-QUEUE.md` protocol, unchanged in its rules, once per accelerator:
