@@ -590,7 +590,7 @@ test("pictureTokens: a picture larger than its vision's count is redrawn within 
 
   assert.equal(A.pictureFit({ width: 512, height: 512 }, 1024), null, "the Smith's check picture: 256 tokens, as it is");
   assert.equal(A.pictureFit({ width: 1024, height: 1024 }, 1024), null, 'exactly the count: as it is');
-  for (const [w, h] of [[1920, 1080], [2560, 1440], [3840, 2160], [2880, 1800], [1080, 2400], [1024, 1056], [20000, 50], [50, 20000], [3000, 31]]) {
+  for (const [w, h] of [[1920, 1080], [2560, 1440], [3840, 2160], [2880, 1800], [1080, 2400], [1024, 1056], [20000, 50], [50, 20000], [40000, 31]]) {
     const to = A.pictureFit({ width: w, height: h }, 1024)!;
     assert.ok(to, `${w}x${h}`);
     assert.ok(A.pictureTokensOf(to) <= 1024, `${w}x${h} -> ${to.width}x${to.height}: ${A.pictureTokensOf(to)} tokens`);
@@ -602,14 +602,16 @@ test("pictureTokens: a picture larger than its vision's count is redrawn within 
   assert.deepEqual(A.pictureFit({ width: 3840, height: 2160 }, 1024), { width: 1344, height: 768 });
   assert.deepEqual(A.pictureFit({ width: 1080, height: 2400 }, 1024), { width: 672, height: 1504 }, "a phone's screen (Reeve's)");
   assert.deepEqual(A.pictureFit({ width: 3840, height: 2160 }, 400), { width: 832, height: 480 });
-  assert.deepEqual(A.pictureFit({ width: 20000, height: 50 }, 1024), { width: 19968, height: 32 }, 'a single square tall: the width takes the rest');
+  assert.deepEqual(A.pictureFit({ width: 20000, height: 50 }, 1024), { width: 20000, height: 32 }, 'a single square tall: its width as it was');
+  assert.deepEqual(A.pictureFit({ width: 40000, height: 31 }, 1024), { width: 32768, height: 32 }, 'a single square tall: the width takes the rest');
 
   // pictureSizeFor: the count first, then FastFlowLM's sides (never both today, but in that order).
   const x2 = { quirks: ['prefix-leak', 'image-path'], vision: { model: 'm', pictureTokens: 1024 } } as any;
   assert.deepEqual(A.pictureSizeFor(x2, { width: 3840, height: 2160 }), { width: 1344, height: 768 });
   assert.equal(A.pictureSizeFor(x2, { width: 512, height: 512 }), null);
   assert.equal(A.pictureSizeFor({ quirks: ['image-path'], vision: { model: 'm' } } as any, { width: 3840, height: 2160 }), null, 'no count: as it is');
-  assert.deepEqual(A.pictureSizeFor({ ...x2, quirks: ['sides-of-32'] }, { width: 3840, height: 2160 }), { width: 1345, height: 769 });
+  assert.deepEqual(A.pictureSizeFor({ ...x2, quirks: ['sides-of-32'] }, { width: 3840, height: 2160 }), { width: 1344, height: 768 }, 'over 720 px tall: FastFlowLM resizes it itself');
+  assert.deepEqual(A.pictureSizeFor({ quirks: ['sides-of-32'], vision: { model: 'm', pictureTokens: 400 } } as any, { width: 3840, height: 2160 }), { width: 833, height: 481 });
 
   const dir = mkdtempSync(path.join(home, 'pictures-'));
   const header = (w: number, h: number) => {
