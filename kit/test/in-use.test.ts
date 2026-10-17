@@ -21,6 +21,7 @@ const { port } = await import('./fixture/src/app.ts');
 const { serve } = await import('./fixture/src/kit/server.ts');
 const BELOW_NORMAL = os.constants.priority.PRIORITY_BELOW_NORMAL;
 const NORMAL = os.constants.priority.PRIORITY_NORMAL;
+const ABOVE_NORMAL = os.constants.priority.PRIORITY_ABOVE_NORMAL;
 const capped = `gentle ${gentleCap()}`;
 const { CEILING_CAP } = await import('./fixture/src/kit/pace.ts');
 
@@ -45,8 +46,14 @@ test("viewing a page leaves its pace and its job's cap as they are: a browser's 
     await paceProcess('gentle');
     assert.equal(paceSet(), capped);
     assert.equal(os.getPriority(0), BELOW_NORMAL);
+    // Still starved below normal beside a kit trial, the page didn't read its own request within 3 minutes (2026-10-17,
+    // the whole suite in a build). So the asks go at above normal, which a request must leave as it is too.
+    os.setPriority(0, ABOVE_NORMAL);
     assert.equal(await ask({ 'sec-fetch-site': 'same-origin' }), 200);
     assert.equal(await ask({}), 200);
+    assert.equal(paceSet(), capped, "a request leaves its job's cap");
+    assert.equal(os.getPriority(0), ABOVE_NORMAL, 'a request leaves its priority');
+    os.setPriority(0, BELOW_NORMAL);
     pageInUse();
     assert.equal(paceSet(), capped, 'still in its job at the gentle cap');
     assert.equal(os.getPriority(0), BELOW_NORMAL, 'still below normal');

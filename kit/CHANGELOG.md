@@ -13,6 +13,15 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - **No network:** whether the kit has a release is asked of this PC only. It looks first in the cache (`%USERPROFILE%\.steward\kits\<version>`, kept from a download), then for the tag `kit-v<version>` in the Steward clone that holds the tree (as of that clone's last fetch). When neither can say (a tree in no clone, a clone with no kit tags, no git), it says nothing.
   - **Not told:** the Steward filling its own kit or its fixture (`npm run kit`, a tree in the same checkout), and the Steward's trial, which fills through `STEWARD_KIT`.
 
+## 2.78.12
+
+**npu-reports.ts counts a report against the model its generation runs (`routeFor`), so an X2's reports on its 2B count, and its reports on the route's 4B are stale. Also brings 2.78.10, which wasn't released on its own.**
+
+### What changed
+
+- **`reportsPatch`:** a report is the route as it runs now when its server, its server's version and its chat model match `routeFor(route, generation)`, the generation's own models where it has them. Before, the model was compared with the route's own, so every report from a generation with its own models was stale.
+- **Tests:** npu-reports.test.ts gives the X2 small-PC models in a copy of the catalog, since none ships them now. in-use.test.ts asks its page at above normal priority, starved below normal beside a kit trial, and checks that a request leaves the priority and the job's cap as they are.
+
 ## 2.78.10
 
 **On a PC set up before, a card's embedding server is brought down to setup's smaller context: about 0.6 GB less of the graphics' memory, with the same vectors, from its next start.**

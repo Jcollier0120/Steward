@@ -17,6 +17,22 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
   - Each of the team's drafts into the branch has its kit.json read as a ready PR's is: its head is fetched only when it isn't in the clone yet.
   - A draft whose kit will never be released is told, and its hold says so after "a draft".
 
+## 0.36.84
+
+**The Steward hands out kit 2.78.12: an NPU's reports are counted against the model its generation runs, so a Snapdragon X2's reports on its 2B count. It also fixes the two tests that kept the 10-17 build from releasing anything.**
+
+### What changed
+
+- Reports from a Snapdragon X2 running its own model, the 2B, were counted as stale, measured against the route's 4B, which the X2 no longer runs. Now they count toward the X2, and an X2's reports on the 4B are the stale ones.
+- Two of the Steward's own tests failed in its whole suite during the build, so the Steward, its kit and the agents waiting on that kit weren't released:
+  - The small-PC models test looked for a Snapdragon generation that ships small-PC models, and none does since the X2 runs the 2B on every PC. It now makes one for the test.
+  - The page's pace test asked its page for an answer while the page ran below normal priority beside a kit's trial, and the page didn't get the processor in 3 minutes. It now asks at above normal priority, and still checks that a request changes neither the priority nor the job's cap.
+- This release also brings 0.36.61 to 0.36.83, none of which was released on its own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.82
 
 **In a build, the Steward's own pull requests are tested beside its rounds, which no longer wait for them.**
