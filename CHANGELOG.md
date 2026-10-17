@@ -28,7 +28,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - **A check running on another PC doesn't time out here.** While its task runs elsewhere, the Steward's 20-minute wait for a turn isn't counted, for up to two hours. Before, a long check on another PC would have been run here again after 20 minutes.
-- It hands out kit 2.78.16.
+- It hands out kit 2.78.22.
 
 ### Before you update
 
