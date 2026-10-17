@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.82.1
+
+**The Snapdragon X2's GenieX plugin frees its vision encoder after 60 s without a picture: 1.1 GB less working set (1.3 GB less private) from a minute after the last picture until the server stops.**
+
+### What changed
+
+- **node/geniex/geniex_plugin.dll:** a new build, signed, 304,208 bytes. A thread frees the vision encoder once no request with media has come for GENIEX_VISION_IDLE_SECONDS (60 by default), and the next picture loads it again, as the first does (about 1 s). The encoder is freed only between requests. GENIEX_PATCH_VISION_IDLE=0 keeps it loaded. `geniex-castellan-memory.patch` and `README.md` say so.
+- **spec/npu-vendors.json:** snapdragon-x2's `pluginPatch.patched` pins the new build; its `what` and `basis` say what it does and what was measured.
+- On a PC with 2.81.0's build in, the keeper's next look replaces it with this one, in the NPU's turn and after its test, as for a first put-in. It knows 2.81.0's build by the SHA-256 in `npu-patch.json`.
+- spec/NPU-VENDORS.md: the measurement. The 0.3 to 0.4 GB still held above a chat's is GenieX's OpenCL backend's own (ggml-opencl.dll).
+
+### Before you update
+
+- Nothing for an agent: only the keeper changes the file.
+
 ## 2.81.0
 
 **On the Snapdragon X2, the keeper puts Castellan's build of GenieX 0.8.0's llama.cpp plugin in place of GenieX's own, which holds about 2 GB less with Qwen3-VL-2B loaded: its working set after a chat 1.77 GB instead of 4.0, cold load 2.4 s instead of 5.0. It goes in only over GenieX 0.8.0's own file, in the NPU's turn, and stays only once a picture and a chat answer through it; anything else, and GenieX's own stays or goes back.**

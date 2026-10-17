@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.129
+
+**The Steward hands out kit 2.82.1: on a Snapdragon X2, GenieX lets go of the part that reads pictures a minute after the last one, about 1.1 GB.**
+
+### What changed
+
+- On a Snapdragon X2, GenieX used to keep the part that reads pictures loaded after the first picture, until it stopped after 10 idle minutes. Now it lets it go once no picture has come for a minute, and loads it again for the next picture in about a second. Measured on the X2 Elite with Qwen3-VL-2B: 3.2 GB after a picture, 2.1 GB once it's let go.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The keeper puts the new build in when the NPU is idle, after a picture and a chat answer through it.
+
 ## 0.36.125
 
 **The Steward hands out kit 2.81.0: on a Snapdragon X2, the NPU's model holds about 2 GB less of the PC's memory until it's shown a picture, and starts in half the time.**

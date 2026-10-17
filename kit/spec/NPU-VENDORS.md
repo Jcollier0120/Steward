@@ -397,6 +397,16 @@ The keeper puts it in after the NPU's refresh (npu-patch.ts, npu-vendors.json's 
 
 GENIEX_IMAGE_MAX_TOKENS, which only the build reads, is set to the 2B's `pictureTokens` (`pictureTokensEnv`). That way a picture that didn't come through `fitPicture` is scaled down too, rather than overflowing the window.
 
+From kit 2.82.1 the build also frees the vision encoder once no picture has come for 60 s (GENIEX_VISION_IDLE_SECONDS), and the next picture loads it again in about 1 s. Until then GenieX held it until the keeper stopped the server, 10 idle minutes later. Measured on the X2 Elite with `--nctx 2560`:
+
+| After | Working set | Private |
+|---|---|---|
+| a chat | 1.60 GB | 0.21 GB |
+| a picture | 3.19 GB | 1.97 GB |
+| the encoder is freed | 2.08 GB | 0.67 GB |
+
+What stays above a chat's, 0.3 to 0.4 GB, is the OpenCL backend's own buffers, in GenieX's ggml-opencl.dll, which the kit doesn't build.
+
 ### Resting when unused (kit 2.71.0)
 
 None of the three servers can drop its model and keep running: GenieX's `--keepalive` unloads it, but the process keeps some 340 MB from every load until it exits; OpenVINO Model Server started with `--source_model` can't unload one (only its config-file mode can, by editing the file); FastFlowLM documents no unload. So the keeper stops the server, holding the NPU's turn, and the next request starts it again in its own turn. Intel's embedding server, a second OpenVINO Model Server holding 1.7 GB, is stopped with the chat server now; before 2.71.0 the keeper left every NPU embedding server but llama-server's running.
