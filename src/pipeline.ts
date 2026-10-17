@@ -4,7 +4,7 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 /**
  * The build pipeline (Settings: Build pipeline): how the Steward always works, with no switch to turn it off. It tests
  * and releases at set build times a day (four to start with: 00:00, 06:00, 12:00 and 18:00). It merges no one's PRs
- * (Steward 0.36.119): their authors merge them once vouched, and a build releases each repository's main as it finds it.
+ * (Steward 0.36.121): their authors merge them once vouched, and a build releases each repository's main as it finds it.
  * Between builds its rounds only look (and try a new kit ahead of the build: stages/self.ts's trialAhead). At a build
  * time, a build begins: its rounds stamp main's unstamped entries (stages/stamp.ts), release the Steward's new kit once it
  * passed its trial on every agent, roll it out (its PRs merged by the Steward itself), and once nothing is left that
@@ -39,7 +39,7 @@ export interface BuildPipeline {
   /**
    * A build's rounds go on at most this long (15 to 60 minutes; 30 unless Settings say otherwise), waiting for a new kit's
    * trial and rollout; then the build releases each repository's main as it is, and ends, and the kit waits for the next.
-   * (Before Steward 0.36.119 it also had bisectRuns, for the merges it no longer makes: a settings.json that keeps it
+   * (Before Steward 0.36.121 it also had bisectRuns, for the merges it no longer makes: a settings.json that keeps it
    * loads all the same, and normalizePipeline leaves it out.)
    */
   windowMinutes: number;
@@ -95,14 +95,14 @@ export interface BuildRun {
   employees?: string[] | null;
   /**
    * An urgent fix's build: "<id> <head>" for each main head that began it, which builds once (stages/urgent.ts); "<id>
-   * #<n> <head>", an urgent PR's, in a build from before Steward 0.36.119.
+   * #<n> <head>", an urgent PR's, in a build from before Steward 0.36.121.
    */
   urgent?: string[];
   /** The owner's Build now: its releases let out to customers at once, not on their release day. */
   toCustomers?: boolean;
   /** The rounds it took. */
   rounds: number;
-  /** "<id> #<n>" for each PR it merged: the Steward's own (a kit's rollout, a stamp) since 0.36.119, anyone's before. */
+  /** "<id> #<n>" for each PR it merged: the Steward's own (a kit's rollout, a stamp) since 0.36.121, anyone's before. */
   merged: string[];
   /** "<id> v<version>" for each release it made. */
   released: string[];

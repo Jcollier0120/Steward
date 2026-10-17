@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // What a PR asks for after merging (its steward block, after.ts): read, and kept with the PR (staff.ts' parsePrs). The
-// Steward merges no one's PRs since 0.36.119, so nothing runs it after a merge of its own; a build releases main. And
+// Steward merges no one's PRs since 0.36.121, so nothing runs it after a merge of its own; a build releases main. And
 // what a release decides, and that a repository removed from this PC isn't released back onto it. The Steward's data
 // folder is one of its own.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-after-'));

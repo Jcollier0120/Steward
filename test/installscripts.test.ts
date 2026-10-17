@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 // A rogue package's install script runs, unscanned, the moment npm installs it. The Steward's installs run none but the
 // ones Settings allow, and hold the work for any other; and a PR's lockfile that brings one, or a package new to the
 // repository, is said to be for the owner to look at (review.ts's lockfileHold). (The Steward held such a PR back from
-// merging until 0.36.119; whoever writes a PR merges it now.)
+// merging until 0.36.121; whoever writes a PR merges it now.)
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-install-scripts-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));

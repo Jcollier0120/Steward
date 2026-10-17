@@ -29,7 +29,7 @@ import { pushable } from './found.ts';
  * time, so two workers asking at once get two versions. Asking again for the same branch returns the same claim.
  *
  * A claim lives until its version is on the branch or released (the work landed), until it is given back
- * (`release-version`), or for CLAIM_DAYS with no open PR that names it. The Steward merges no PRs (Steward 0.36.119):
+ * (`release-version`), or for CLAIM_DAYS with no open PR that names it. The Steward merges no PRs (Steward 0.36.121):
  * whoever claimed a version merges their own PR, and a build releases main at the version main carries. A version
  * merged below one released already isn't released (release.ts's releaseDecision): claims come above main's version,
  * so the next build's stamp or claim carries it.
@@ -63,7 +63,7 @@ export interface Claim {
   /** A copy's: when it was copied here from the claims ref (keepCopies), in ms. Never shared. */
   copied?: number;
   /**
-   * The PR this claim moved past the others in its version queue, before Steward 0.36.119 (whose version queues are
+   * The PR this claim moved past the others in its version queue, before Steward 0.36.121 (whose version queues are
    * gone): kept so the claims ref other PCs share still reads.
    */
   moved?: number;

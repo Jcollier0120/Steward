@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // The Steward's look at the Wright's drafts (review.ts): which files a person reviews, dependency changes, and the
-// Bailiff's verdict on a draft's head. (The Steward marked the drafts that passed ready, and merged them, until 0.36.119:
+// Bailiff's verdict on a draft's head. (The Steward marked the drafts that passed ready, and merged them, until 0.36.121:
 // whoever reviews one merges it now.)
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-review-'));
 process.env.STEWARD_HOME = home;

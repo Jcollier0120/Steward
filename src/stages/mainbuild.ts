@@ -14,7 +14,7 @@ import { headsMoved } from '../heads.ts';
 import { treeOf, wholePassOf } from '../whole.ts';
 
 /**
- * Builds release main (Steward 0.36.119). The Claude sessions and dev managers merge their own pull requests once they are
+ * Builds release main (Steward 0.36.121). The Claude sessions and dev managers merge their own pull requests once they are
  * vouched for (`steward vouch`) and GitHub says they merge cleanly; the Steward no longer looks at them. At each build it
  * takes main's latest commit of each repository it looks after and, when that carries a version not released yet, tests
  * it once (mainGate) and releases it once (release.ts, which releases exactly the commit tested).

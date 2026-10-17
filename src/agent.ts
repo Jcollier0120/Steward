@@ -394,7 +394,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     onStop: () => endWholeSuite(),
     ping: () => ({ busy: runs.length > 0, stage: runs.length ? runs.map((r) => r.stage).join(', ') : null, tour: hasTour() }),
     // Its work status (GET /api/peer/work, the kit's work-status.ts), for Manor's Work page: its stages' slots beside the
-    // kit's. Nothing holds a repository's work up here: no PR waits for the Steward (Steward 0.36.119).
+    // kit's. Nothing holds a repository's work up here: no PR waits for the Steward (Steward 0.36.121).
     work: () => ({ slots: [{ kind: 'stage', name: 'Stages at once', of: loadSettings().stagesAtOnce, used: runs.length }], blocked: [] }),
     get: gateGets({
       // The page is drawn in the browser (src/web, the kit's react part): its first data comes with it, and it asks
@@ -409,7 +409,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       // The versions claimed up front and not yet landed (claims.ts): claim one with cli.ts claim-version.
       '/api/versions': () => ({ json: { claims: loadClaims(), claim: 'node %USERPROFILE%\\.steward\\app\\src\\cli.ts claim-version <employee> --branch <b> --for "<what>"' } }),
       '/api/last-stage': () => ({ json: loadLastStage() }),
-      // The version queues are gone (Steward 0.36.119: everyone merges their own PRs). Answered empty, as Manor reads it.
+      // The version queues are gone (Steward 0.36.121: everyone merges their own PRs). Answered empty, as Manor reads it.
       '/api/version-queues': () => ({ json: { at: '', repos: [] } }),
       // The commits whose tests passed here, the last 20 of each employee's (tested.ts): the Surveyor's, for its daily runs.
       '/api/tested': () => ({ json: testedView(loadSettings()) }),
@@ -446,7 +446,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         void roundJob(true, { buildNow: { toCustomers: body?.toCustomers === true }, employees }).catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
         return { json: { started: true, message: `A build has begun${employees.length ? ` for ${employees.join(', ')}` : ''}${body?.toCustomers === true ? ': its releases go out to customers at once' : ''}.` } };
       },
-      // An older `steward vouch` asks for a round once it has vouched. The Steward merges no PRs now (Steward 0.36.119):
+      // An older `steward vouch` asks for a round once it has vouched. The Steward merges no PRs now (Steward 0.36.121):
       // whoever wrote one merges it once vouched, and the next build releases main. A round now only looks, and takes an
       // urgent fix (its changelog entry starting "**Urgent fix:") into a build of its own at once (stages/urgent.ts).
       '/api/round/soon': () => {
@@ -478,7 +478,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         return dismiss(id) ? { json: { ok: true } } : { json: { error: 'no such alarm open' }, status: 404 };
       },
       // An alarm's button (its `action`), on the page or Manor's Needs you, asked first: { id }. None has one now (the
-      // version queues' Move it past went with them, Steward 0.36.119): each is only dismissed.
+      // version queues' Move it past went with them, Steward 0.36.121): each is only dismissed.
       '/api/alarms/act': ({ body }) => {
         const id = typeof body?.id === 'string' ? body.id.slice(0, 300) : '';
         const a = loadAlarms().open.find((x) => x.id === id);

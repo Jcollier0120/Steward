@@ -12,7 +12,7 @@ import { noteVouchTime, vouchLimit } from './vouchtime.ts';
 import { hostFor } from '../hosts/index.ts';
 
 /**
- * A PR whose checks its author ran and saw pass, at its head commit: its author merges it (Steward 0.36.119: the Steward
+ * A PR whose checks its author ran and saw pass, at its head commit: its author merges it (Steward 0.36.121: the Steward
  * merges no one's PRs), and the build that releases it doesn't test that code again.
  *
  * `steward vouch`, run in the clone a PR was pushed from (a Claude Code session's, a person's), runs the repository's

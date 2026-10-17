@@ -31,6 +31,15 @@ function setup(name: string, o: { released?: string[]; titles?: { title: string;
   return { e, ctx, checkout };
 }
 
+/**
+ * The test runs as the maker's laptop, which keeps a claim of the maker's repositories here, whatever PC runs it: on
+ * the maker's other PCs these tests' claims were refused (Steward 0.36.85). Its own PC again once the test ends.
+ */
+function onMakersLaptop(t: { after: (f: () => void) => void }): void {
+  makersPcForTests(() => true);
+  t.after(() => makersPcForTests(null));
+}
+
 test('the next version: above the branch, every release, every open PR and every live claim; the same again for the same branch', async () => {
   rmSync(claimsFile(), { force: true });
   const s = setup('next', { released: ['0.4.10', '0.4.11'], titles: [{ title: 'Fake 0.4.12: something open', headRefName: 'claude/open' }] });
@@ -135,7 +144,7 @@ test("a maker's other PC claims a version of the maker's repositories through it
   }
 });
 
-test("a claim an older Steward moved past the others (its version queues, gone since 0.36.119) still reads from the shared claims ref, its mark kept", () => {
+test("a claim an older Steward moved past the others (its version queues, gone since 0.36.121) still reads from the shared claims ref, its mark kept", () => {
   const c = { repo: 'Jcollier0120/Fake', version: '0.4.14', branch: 'claude/draft', by: 'steward', for: '#7 moved past the others', at: new Date(0).toISOString() };
   assert.deepEqual(parseClaims(JSON.stringify([{ ...c, moved: 7 }])), [{ ...c, moved: 7 }]);
   assert.equal(parseClaims(JSON.stringify([{ ...c, moved: 'seven' }]))[0].moved, undefined, 'a mark that is no number: none');

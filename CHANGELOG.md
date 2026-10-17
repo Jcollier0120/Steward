@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.119
+## 0.36.121
 
 **The Steward stops merging pull requests. Whoever writes a PR merges it once it is vouched, and each build releases what is on main.**
 
@@ -27,6 +27,89 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - **The Steward no longer merges PRs: merge your own once vouched, and each build releases main.** For a PR on GitHub, once its checks pass and it merges cleanly: `gh pr merge <number> --repo <owner/name> --merge`.
 - PRs that were waiting for the Steward to merge them stay open until you merge them.
 - Otherwise nothing: it updates itself as usual.
+
+## 0.36.120
+
+**The Steward hands out kit 2.80.2: pictures fit the Snapdragon X2's Qwen3-VL-2B. A 4K screen is read instead of refused, and the small text on a screen reads right.**
+
+### What changed
+
+- On a Snapdragon X2, a picture is shrunk to at most 1,024 of the 2B's tokens (1344 × 768 for a widescreen screen) before it's sent, and counted so. A 3840 × 2160 screen, refused before, is read now. On five screens up to 4K and a phone's, 35 of 35 questions about their text were right, against 18 of 35 with pictures shrunk to the 400 tokens the kit counted before. Each question takes about 4.5 s.
+- The 2B keeps a 2,560-token window instead of 4,096: 168 MB less of the PC's memory.
+- A PC set up before gets both at the keeper's next look once it has the kit, after the 2B passes its test. Nothing is downloaded.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent still on an older kit sends pictures to the X2 as before until it takes kit 2.80.2.
+
+## 0.36.118
+
+**The Steward hands out kit 2.80.1: FastFlowLM's working set is handed back to Windows once its model has loaded. That's about 3.6 GB of RAM for qwen3.5:2b and 6.4 GB for Gemma 4 E2B, decoding as fast as before.**
+
+### What changed
+
+- **Kit 2.80.1** (kit/CHANGELOG.md): a FastFlowLM server the kit starts has its working set emptied once its model has loaded (`working-set.ts`). Windows keeps those pages compressed, or in the pagefile, and reads back the few the server touches again. `KIT_SERVER_TRIM=0` turns it off.
+- **Tests that passed only on some PCs, so a vouch from the maker's other PCs failed:**
+  - `claims.test.ts`: the two tests of claims kept here now run as the maker's laptop (`makersPcForTests`), whatever PC runs them. On the maker's other PCs they were refused as one of Castellan's own repositories.
+  - `signing.test.ts`: its releases find a Windows SDK signtool of the test's own. On a PC without the SDK, the hung-signtool test was told "signtool isn't installed" instead.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.116
+
+**The Steward hands out kit 2.80.0, with which the Wright's jobs and Reeve's heavy background work can wait their turn from the Seneschal, as the Steward's checks do.**
+
+### What's new
+
+- **Kit 2.80.0** (kit/CHANGELOG.md). Its Seneschal client asks for two new kinds of turn: a job of the Wright's, and Reeve's heavy work (its search-index fills and the hourly `repo-sync`).
+  - **A turn and nothing else.** Only the agent that asks can run that work, so the Seneschal gives it only its place in line. The work is named by the job (an issue, a job, an index) rather than by a commit, so a new commit on main doesn't make it new work.
+  - **What it needs of your PC:** a slot, its memory, and for the Wright, Claude Code's line. An index fill takes no slot, so it never keeps a PR check waiting.
+  - **It can wait for its next round.** When your PC is busy, a Wright job or a Reeve job can be told "later" rather than run beside the work already there. With no Seneschal, one off duty, or an older one, everything runs as before.
+  - **A Wright job is never skipped** because an earlier job on that issue finished.
+
+### What changed
+
+- Nothing in how the Steward runs its own checks: it asks for its turns as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Wright and Reeve start asking once their own updates take this kit, and they need the Seneschal 0.3.0 for their turns. With an older Seneschal they run as before.
+
+## 0.36.112
+
+**Brings kit 2.79.1: on every staff page, the status pill sits beside the name, with the role on the line under them.**
+
+### What changed
+
+- **The status pill** ("On duty · next round in 5 min", "At the forge", "Off duty") moved up from the role's line to beside the staff member's name. The role has the line under them to itself, so it's cut short less often. When it is, hover over it to read it all.
+- **In a narrow window,** the pill goes under the name, and the role under the pill.
+- **The kit it hands out is 2.79.1** (kit/CHANGELOG.md): page.ts and the React shell. Nothing in the Steward's own code changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.79.1.
+
+## 0.36.110
+
+**The Steward hands out kit 2.78.26: the NPU benchmark sets up chat alone, so `--no-setup` downloads nothing. Before, it set up the route's embedding server too. On an Intel NPU 3720 that had its chat model but not its embedder, `--no-setup` pulled Qwen3-Embedding (428 MB) without asking.**
+
+### What changed
+
+- **The NPU benchmark** (kit/node/npu-bench.ts) leaves the route's embedding server and its model out of its plan, since its questions never ask for an embedding. `--no-setup` stops, exit 1, whenever the plan would fetch anything, and the download prompt names the plan's whole size: on a fresh PC about 2.4 GB on Intel, 4.4 GB on a Snapdragon X and 1.9 GB on an X2.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's benchmark changes once it takes kit 2.78.26.
+
+## 0.36.109
+
+**Brings kit 2.78.25: on a PC under 20 GB, the keeper stops an integrated graphics card's model servers after 5 minutes unused, not 10, so their models give the PC its memory back sooner.**
+
+### What changed
+
+- **The kit it hands out is 2.78.25** (kit/CHANGELOG.md): npu-vendors.ts' `cardIdleStopMinutes` and keeper.ts' `serversToReap`. A `gpuIdleStopMinutes` in config.json still wins. Nothing in the Steward's own code changed.
 
 ## 0.36.108
 

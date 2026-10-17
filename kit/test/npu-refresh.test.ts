@@ -463,11 +463,11 @@ test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once 
     // Pulled: its command tested in the NPU's turn, then written, the PC's own timeouts kept.
     const pulled = on(x2, ramGb, () => true);
     const r = await refreshNpu(pulled.deps);
-    assert.deepEqual(r, { did: 'refreshed', changes: [`model ${TWO_B} in qualcomm/Qwen3-VL-4B-Instruct:W4A16's place`, '--compute npu added', '--vit-compute GPUOpenCL added'] }, `${ramGb} GB`);
+    assert.deepEqual(r, { did: 'refreshed', changes: [`model ${TWO_B} in qualcomm/Qwen3-VL-4B-Instruct:W4A16's place`, '--compute npu added', '--vit-compute GPUOpenCL added', '--nctx 2560 added', 'pictures: at most 1024 tokens'] }, `${ramGb} GB`);
     assert.ok(pulled.did.includes('stop geniex.exe http://127.0.0.1:18181') && pulled.did.includes('stop llama-server.exe http://127.0.0.1:18182'), pulled.did.join(', '));
     assert.equal(pulled.npu().chat.model, TWO_B, `${ramGb} GB`);
-    assert.deepEqual(pulled.npu().vision, { model: TWO_B }, `${ramGb} GB`);
-    assert.deepEqual(pulled.npu().chat.startCommand.slice(-4), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL'], `${ramGb} GB`);
+    assert.deepEqual(pulled.npu().vision, { model: TWO_B, pictureTokens: 1024 }, `${ramGb} GB`);
+    assert.deepEqual(pulled.npu().chat.startCommand.slice(-6), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL', '--nctx', '2560'], `${ramGb} GB`);
     assert.deepEqual(pulled.npu().embed, fourB.embed, `${ramGb} GB: its embeddings as they were`);
     assert.deepEqual(pulled.npu().timeouts, MEASURED, `${ramGb} GB`);
     assert.match(pulled.log.join('\n'), /now start with this kit's command \(2\.75\.0\): model unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0 in qualcomm\/Qwen3-VL-4B-Instruct:W4A16's place/);
@@ -475,6 +475,32 @@ test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once 
 
   // An X Elite: the 4B stays at any memory, whatever is on disk.
   for (const ramGb of [15.6, 47.6]) assert.deepEqual(await refreshNpu(on(x1, ramGb, () => true).deps), { did: 'current' }, `X Elite, ${ramGb} GB`);
+});
+
+test("an X2 set up with the 2B by kit 2.78.8 to 2.80.1: its window cut to 2,560 tokens and its pictures fitted within 1,024, after the same test", async () => {
+  const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
+  const x2 = parseNpus(X2, 'arm64')[0];
+  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true })!;
+  const now = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model } }), timeouts: { ...MEASURED } };
+  // What those kits wrote: GenieX's default window (4,096) and every picture at its own size.
+  const before = structuredClone(now) as Record<string, any>;
+  before.chat.startCommand = before.chat.startCommand.slice(0, -2);
+  delete before.vision.pictureTokens;
+  assert.deepEqual(before.chat.startCommand.slice(-4), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL']);
+  const pc = fakePc(before);
+  pc.deps.detect = async () => (pc.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+  const r = await refreshNpu(pc.deps);
+  assert.deepEqual(r, { did: 'refreshed', changes: ['--nctx 2560 added', 'pictures: at most 1024 tokens'] });
+  assert.ok(pc.did.includes('turn') && pc.did.includes('stop geniex.exe http://127.0.0.1:18181'), pc.did.join(', '));
+  assert.deepEqual(pc.npu().chat, now.chat);
+  assert.deepEqual(pc.npu().vision, { model: 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0', pictureTokens: 1024 });
+  assert.deepEqual(pc.npu().embed, now.embed, 'its embeddings as they were');
+  assert.deepEqual(pc.npu().timeouts, MEASURED);
+  assert.match(pc.log.join('\n'), /now start with this kit's command \(2\.75\.0\): --nctx 2560 added; pictures: at most 1024 tokens/);
+  // Set up by this kit: current.
+  const fresh = fakePc(now);
+  fresh.deps.detect = async () => (fresh.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+  assert.deepEqual(await refreshNpu(fresh.deps), { did: 'current' });
 });
 
 test("the changed arguments, as the keeper's log says them", () => {

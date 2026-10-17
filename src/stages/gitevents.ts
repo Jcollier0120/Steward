@@ -10,7 +10,7 @@ import { checkoutOf, hostIs, type Ctx } from './common.ts';
  * Plain git's events (scm.ts): a repository worked with plain git has no pull requests, so what the Steward does where
  * a host would have one is the person's to say, as commands in Settings.
  *
- * - When a branch is ready: the Steward lands no one's work (Steward 0.36.119), so whoever wrote a branch lands it in
+ * - When a branch is ready: the Steward lands no one's work (Steward 0.36.121), so whoever wrote a branch lands it in
  *   the employee's branch themselves, as they would merge a PR; each build releases what is there. The When a branch is
  *   ready command is kept in Settings, and no longer run.
  * - After a release (`whenReleased`): run in the clone once the release's tag is pushed (release.ts).

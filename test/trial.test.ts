@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// Main's new kit tried on every agent before it is released (stages/trial.ts, Steward 0.36.119): on fake employees made
+// Main's new kit tried on every agent before it is released (stages/trial.ts, Steward 0.36.121): on fake employees made
 // with git in a temporary folder, one whose checks pass with the new kit and one whose checks it breaks.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-trial-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
@@ -216,7 +216,7 @@ test('the same kit tried under another key: a done one, newest first, else one s
   const t = (o: Partial<KitTrial>): KitTrial => ({ kit: '1.0.1', failed: [], passed: 1, at: '2026-10-16T10:00:00Z', content: 'X', ...o });
   const kept = { '7@c': t({}), 'main@a': t({}), 'main@b': t({ pending: ['good'] }), 'main@d': t({ content: 'Y' }) };
   assert.equal(sameKitTrial(kept, 'X', 'main@e')?.[0], 'main@a', 'the newest done one');
-  assert.equal(sameKitTrial(kept, 'X', 'main@a')?.[0], '7@c', "one a PR's trial kept before Steward 0.36.119");
+  assert.equal(sameKitTrial(kept, 'X', 'main@a')?.[0], '7@c', "one a PR's trial kept before Steward 0.36.121");
   assert.equal(sameKitTrial({ 'main@b': kept['main@b'] }, 'X', 'main@e')?.[0], 'main@b', 'one still going');
   assert.equal(sameKitTrial({ 'main@b': t({ retry: [{ id: 'busy', name: 'Busy', message: 'EBUSY' }] }) }, 'X', 'main@e')?.[0], 'main@b', 'one with an agent to try once more is going too');
   assert.equal(sameKitTrial(kept, 'Z', 'main@e'), undefined);
@@ -233,7 +233,7 @@ test('the kit held: the newest trial of a main commit, done, failing agents, of 
   assert.equal(heldKit({ 'main@a': t('2026-10-16T10:00:00Z'), 'main@b': t('2026-10-16T12:00:00Z', { failed: [] }) }, []), null, 'the newest passed');
   assert.equal(heldKit({ 'main@b': t('2026-10-16T12:00:00Z', { pending: ['good'] }) }, []), null, 'still going');
   assert.equal(heldKit({ 'main@b': t('2026-10-16T12:00:00Z', { retry: failing }) }, []), null, 'an agent to try once more');
-  assert.equal(heldKit({ '7@x': t('2026-10-16T12:00:00Z') }, []), null, "a PR's trial from before Steward 0.36.119");
+  assert.equal(heldKit({ '7@x': t('2026-10-16T12:00:00Z') }, []), null, "a PR's trial from before Steward 0.36.121");
   assert.equal(heldKit({}, []), null);
 });
 

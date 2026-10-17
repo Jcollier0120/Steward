@@ -579,6 +579,79 @@ test("sides-of-32: a picture FastFlowLM doesn't shrink, with a side of a whole n
   assert.equal(await A.fitPicture(flm, square, async () => { throw new Error('no System.Drawing'); }), square, "a redraw that fails: as it is");
 });
 
+test("pictureTokens: a picture larger than its vision's count is redrawn within it, each side a whole number of 32 px", async () => {
+  // GenieX's llama.cpp plugin, measured on the X2's Qwen3-VL-2B (the question about 36 more): 448 x 448 232 tokens,
+  // 1920 x 1080 2,075, 2560 x 1440 3,636; 3840 x 2160 didn't fit its 4,096-token window.
+  assert.equal(A.pictureTokensOf({ width: 448, height: 448 }), 196);
+  assert.equal(A.pictureTokensOf({ width: 1920, height: 1080 }), 2040);
+  assert.equal(A.pictureTokensOf({ width: 2560, height: 1440 }), 3600);
+  assert.equal(A.pictureTokensOf({ width: 3840, height: 2160 }), 8160);
+  assert.equal(A.pictureTokensOf({ width: 10, height: 10 }), 1, 'a side under 16 px is still a square');
+
+  assert.equal(A.pictureFit({ width: 512, height: 512 }, 1024), null, "the Smith's check picture: 256 tokens, as it is");
+  assert.equal(A.pictureFit({ width: 1024, height: 1024 }, 1024), null, 'exactly the count: as it is');
+  for (const [w, h] of [[1920, 1080], [2560, 1440], [3840, 2160], [2880, 1800], [1080, 2400], [1024, 1056], [20000, 50], [50, 20000], [40000, 31]]) {
+    const to = A.pictureFit({ width: w, height: h }, 1024)!;
+    assert.ok(to, `${w}x${h}`);
+    assert.ok(A.pictureTokensOf(to) <= 1024, `${w}x${h} -> ${to.width}x${to.height}: ${A.pictureTokensOf(to)} tokens`);
+    assert.equal(to.width % 32 + (to.height % 32), 0, `${w}x${h} -> ${to.width}x${to.height}: the server's resize leaves it as it is`);
+    assert.ok(to.width <= Math.max(32, w) && to.height <= Math.max(32, h), `${w}x${h} -> ${to.width}x${to.height}: never enlarged`);
+  }
+  // Its shape kept to within a square a side, as near the count as whole squares allow.
+  assert.deepEqual(A.pictureFit({ width: 1920, height: 1080 }, 1024), { width: 1344, height: 768 });
+  assert.deepEqual(A.pictureFit({ width: 3840, height: 2160 }, 1024), { width: 1344, height: 768 });
+  assert.deepEqual(A.pictureFit({ width: 1080, height: 2400 }, 1024), { width: 672, height: 1504 }, "a phone's screen (Reeve's)");
+  assert.deepEqual(A.pictureFit({ width: 3840, height: 2160 }, 400), { width: 832, height: 480 });
+  assert.deepEqual(A.pictureFit({ width: 20000, height: 50 }, 1024), { width: 20000, height: 32 }, 'a single square tall: its width as it was');
+  assert.deepEqual(A.pictureFit({ width: 40000, height: 31 }, 1024), { width: 32768, height: 32 }, 'a single square tall: the width takes the rest');
+
+  // pictureSizeFor: the count first, then FastFlowLM's sides (never both today, but in that order).
+  const x2 = { quirks: ['prefix-leak', 'image-path'], vision: { model: 'm', pictureTokens: 1024 } } as any;
+  assert.deepEqual(A.pictureSizeFor(x2, { width: 3840, height: 2160 }), { width: 1344, height: 768 });
+  assert.equal(A.pictureSizeFor(x2, { width: 512, height: 512 }), null);
+  assert.equal(A.pictureSizeFor({ quirks: ['image-path'], vision: { model: 'm' } } as any, { width: 3840, height: 2160 }), null, 'no count: as it is');
+  assert.deepEqual(A.pictureSizeFor({ ...x2, quirks: ['sides-of-32'] }, { width: 3840, height: 2160 }), { width: 1344, height: 768 }, 'over 720 px tall: FastFlowLM resizes it itself');
+  assert.deepEqual(A.pictureSizeFor({ quirks: ['sides-of-32'], vision: { model: 'm', pictureTokens: 400 } } as any, { width: 3840, height: 2160 }), { width: 833, height: 481 });
+
+  const dir = mkdtempSync(path.join(home, 'pictures-'));
+  const header = (w: number, h: number) => {
+    const b = Buffer.alloc(33);
+    Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(b);
+    b.writeUInt32BE(w, 16);
+    b.writeUInt32BE(h, 20);
+    return b;
+  };
+  const screen = path.join(dir, 'screen.png');
+  writeFileSync(screen, header(3840, 2160));
+  const check = path.join(dir, 'check.png');
+  writeFileSync(check, header(512, 512));
+  const asked: { from: string; size: object }[] = [];
+  const redraw = async (from: string, to: string, size: { width: number; height: number }) => {
+    asked.push({ from, size });
+    writeFileSync(to, 'redrawn');
+  };
+  assert.equal(await A.fitPicture(x2, check, redraw), check, 'within its count: as it is, a path GenieX reads itself');
+  assert.equal(await A.fitPicture({ quirks: ['image-path'] }, screen, redraw), screen, 'a server that sizes pictures itself: as it is');
+  assert.equal(asked.length, 0);
+  assert.equal(await A.fitPicture(x2, screen, redraw), `data:image/png;base64,${Buffer.from('redrawn').toString('base64')}`, 'GenieX 0.8.0 reads a data: URL too');
+  assert.deepEqual(asked, [{ from: screen, size: { width: 1344, height: 768 } }]);
+});
+
+test('a picture counts its accelerator pictureTokens, imageTokens elsewhere', async () => {
+  const { RULES } = await import('./fixture/src/kit/rules.ts');
+  const x2 = { vision: { baseUrl: 'http://127.0.0.1:18181', model: 'm', pictureTokens: 1024 } } as any;
+  assert.equal(core.pictureTokensFor(RULES, x2), 1024);
+  assert.equal(core.pictureTokensFor(RULES, { vision: { baseUrl: 'http://x', model: 'm' } } as any), RULES.tokens.imageTokens);
+  assert.equal(core.pictureTokensFor(RULES), RULES.tokens.imageTokens);
+  assert.equal(core.visionTokens(RULES, 'What is the title?', x2), 1024 + core.estimateTokens(RULES, 'What is the title?'));
+  assert.equal(core.visionTokens(RULES, 'What is the title?'), RULES.tokens.imageTokens + core.estimateTokens(RULES, 'What is the title?'));
+  // Read from config.json on the vision endpoint, on the chat endpoint's server too; another kind's is ignored by the core.
+  const cfg = core.readConfig(RULES, 'config.json', JSON.stringify({ accelerators: [{ id: 'npu', chat: { baseUrl: 'http://127.0.0.1:18181', model: 'm' }, vision: { model: 'm', pictureTokens: 1024 } }] }));
+  assert.ok(!('error' in cfg));
+  assert.equal((cfg as any).accelerators[0].vision.pictureTokens, 1024);
+  assert.equal(core.pictureTokensFor(RULES, (cfg as any).accelerators[0]), 1024);
+});
+
 test('fitPicture redraws with System.Drawing: a 64 px square comes back 65 px a side, as a PNG', async () => {
   const { picturePng } = await import('./fixture/src/kit/npu-bench.ts');
   const file = path.join(home, 'red-64.png');
@@ -804,6 +877,28 @@ test("a kind's own timeouts: over its accelerator's, for its own requests alone 
     assert.equal((await new Npu(accShort).vision(picture, 'What is it?', { maxTokens: 4 })).text, 'seen');
     fresh();
     await assert.rejects(new Npu(accShort).chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 }), /timed out/);
+  } finally {
+    await server.close();
+  }
+});
+
+test("a picture counts its vision's pictureTokens against the cap, imageTokens on an accelerator without them", async () => {
+  fresh();
+  noGames();
+  const server = await fakeServer(() => ({ text: 'seen' }));
+  const picture = 'data:image/png;base64,iVBORw0KGgo=';
+  const question = 'What is the title of this screen? Answer with the title only.';
+  try {
+    const cfg = (vision: object) => config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: server.baseUrl, model: 'm' }, vision: { model: 'm', maxContextTokens: 1100, ...vision } }] });
+    // At 400 a picture fits vision's cap of 1,100 with its question and 64 for the answer; at 1,024 it doesn't.
+    assert.equal((await new Npu(cfg({})).vision(picture, question)).text, 'seen');
+    fresh();
+    const want = 1024 + Math.ceil(question.length / 3);
+    await assert.rejects(new Npu(cfg({ pictureTokens: 1024 })).vision(picture, question), (e: Error) => e instanceof NpuError && e.message.includes(`~${want}+64 tokens (cap 1100)`));
+    fresh();
+    assert.equal((await new Npu(cfg({ pictureTokens: 1024 })).vision(picture, question, { maxTokens: 16 })).text, 'seen', 'a shorter answer leaves it room');
+    // Its picture went as it was: too small to fit (and not one the kit can read the size of).
+    assert.equal(server.seen.at(-1).messages[1].content[0].image_url.url, picture);
   } finally {
     await server.close();
   }

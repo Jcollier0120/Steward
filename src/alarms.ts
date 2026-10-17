@@ -30,7 +30,7 @@ import type { KitTrial } from './stages/trial.ts';
  * The conditions:
  * - main's new kit failing an agent's checks in its trial (stages/trial.ts's heldKit), so the kit isn't released: at
  *   once, naming each agent and what failed. Only the kit waits: every other repository releases as usual. (Before
- *   Steward 0.36.119 the Steward merged PRs, and a PR that waited, conflicted or held its version queue was an alarm
+ *   Steward 0.36.121 the Steward merged PRs, and a PR that waited, conflicted or held its version queue was an alarm
  *   too; the Steward merges none now, so no PR is.)
  * - a release that failed, which the rounds won't try again at that commit (round-failed.json): at once;
  * - a kit's bump or push that failed, which the rounds won't try again until the branch moves (rollout-failed.json),
@@ -86,7 +86,7 @@ export interface Condition {
 
 /**
  * What an alarm's button does, in its words, and the question asked before it (Steward 0.36.52). Its page and Manor's
- * Needs you show it beside Dismiss. None has one since the version queues went (Steward 0.36.119).
+ * Needs you show it beside Dismiss. None has one since the version queues went (Steward 0.36.121).
  */
 export interface AlarmAction {
   label: string;
@@ -277,7 +277,7 @@ export function roundConditions(o: {
     for (const [id, f] of Object.entries(o.failedRollouts ?? {})) {
       const e = o.employees.find((x) => x.id === id);
       if (!e) continue;
-      // A kit PR a build left out, before Steward 0.36.119: builds no longer merge PRs, so it is no alarm.
+      // A kit PR a build left out, before Steward 0.36.121: builds no longer merge PRs, so it is no alarm.
       if (f.stage === 'build') continue;
       out.push({
         id: `rollout:${id}:${f.kit}`,
@@ -702,7 +702,7 @@ export async function watchAlarms(
     try {
       items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings });
       if (items.length) states = await fileWork({ items, work: wright, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), now, log: o.log });
-      // And the issues whose failure is gone (a bump, a release, and a conflict or kit trial filed before 0.36.119), closed, so the Wright isn't sent to find nothing to do.
+      // And the issues whose failure is gone (a bump, a release, and a conflict or kit trial filed before 0.36.121), closed, so the Wright isn't sent to find nothing to do.
       await closeResolved({ items, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), log: o.log });
     } catch (e) {
       o.log(`work: ${(e as Error).message}`);

@@ -6,7 +6,7 @@ import { after, test } from 'node:test';
 
 // The rollout in a round (stages/rollout.ts): which employees a new kit release reaches, as pure decisions; then whole
 // rounds on a data folder of their own, a fake employee's git, and gh standing in. The rollout merges the kit PRs it
-// opens itself (Steward 0.36.119: no one else merges the Steward's PRs), and the round releases them. Nothing reaches
+// opens itself (Steward 0.36.121: no one else merges the Steward's PRs), and the round releases them. Nothing reaches
 // GitHub, the live ~/.steward or the real checkouts.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-rollout-'));
 process.env.STEWARD_HOME = home;

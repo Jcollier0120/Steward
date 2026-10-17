@@ -120,8 +120,9 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
   assert.match(html, /<header class="titlebar busy" data-agent="[a-z-]+" data-tour="titlebar">/);
   assert.match(html, /<a class="manor-back" href="http:\/\/manor\.localhost:18585\/" title="Back to Weasel Manor">/);
   assert.match(html, /<span class="status-pill busy" title="A round is under way/);
-  // The pill on the role's line, after the role (its whole text its title), plain text in the brand's link; none in the tools.
-  assert.match(html, /<p class="role-line"><span class="role" title="([^"]+)">\1<\/span><span class="status-pill busy" title="A round is under way[^"]*" data-tour="status">[^<]+<\/span><\/p><\/div><\/a>/);
+  // The pill on the name's line, after the name, plain text in the brand's link; the role alone under them (its whole
+  // text its title); none in the tools.
+  assert.match(html, /<div class="name-line"><h1>[^<]+<\/h1><span class="status-pill busy" title="A round is under way[^"]*" data-tour="status">[^<]+<\/span><\/div><p class="role" title="([^"]+)">\1<\/p><\/div><\/a>/);
   assert.match(html, /<div class="tools"><a class="tool-link" id="about-link"/);
   assert.equal((html.match(/class="status-pill/g) ?? []).length, 1);
   assert.match(html, /<a class="tool-link" id="settings-link" href="#\/settings"/);

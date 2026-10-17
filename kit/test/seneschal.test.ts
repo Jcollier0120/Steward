@@ -379,3 +379,119 @@ test('the other PCs whose workers run a kind for a repository, as the Seneschal 
   assert.equal(await seneschalSiblings({ ...ask, at: null }), null, 'no Seneschal');
   assert.equal(await seneschalSiblings({ ...ask, env: { KIT_CHECKS_TURN: '1' } }), null, "inside another's turn");
 });
+
+// The Wright's jobs and Reeve's heavy work (Seneschal 0.3.0, kit 2.80.0): turns only their asker can run, named by job.
+const wrightJob = { kind: 'wright-job' as const, repo: 'Jcollier0120/Reeve', job: '#212', lane: 'background' as const, needs: { clone: true, memoryMb: 2048, line: 'claude-code' as const }, tries: 1, what: "the Wright's job #212 in Reeve", by: 'wright' };
+const reeveFill = { kind: 'reeve-job' as const, repo: 'Jcollier0120/Heiward', job: 'index:Heiward:1a2b3c4d:embed', lane: 'background' as const, needs: { light: true, accelerator: 'npu', memoryMb: 512 }, tries: 2, by: 'reeve' };
+const noRoom = { json: { task: null, why: 'no room: 3 tasks running', state: 'waiting' } };
+
+test("the Wright's and Reeve's work on the wire: its job, what it needs and its tries, and no commit", async () => {
+  routes['/api/tasks/submit'] = () => ({ status: 201, json: waitingTask() });
+  routes['/api/tasks/lease'] = () => ({ json: leased });
+  for (const t of [wrightJob, reeveFill]) {
+    asked.length = 0;
+    const a = await seneschalTurn(t, { ...quick, worker: t.by, defer: true });
+    assert.ok(a && 'turn' in a);
+    assert.deepEqual(asked[0], { route: '/api/tasks/submit', body: t });
+    assert.ok(!('commit' in asked[0].body), 'a turn kind names no code');
+    assert.deepEqual(asked[1].body, { worker: t.by, id: 't7' });
+  }
+});
+
+test("defer: a turn that doesn't come in its wait answers later, with why it waits; without defer, run as before", async () => {
+  routes['/api/tasks/submit'] = () => ({ json: waitingTask() });
+  routes['/api/tasks/lease'] = () => noRoom;
+  lines.length = 0;
+  assert.deepEqual(await seneschalTurn(wrightJob, { ...quick, ...minutes(), waitMs: 5 * 60_000, defer: true, say }), { later: 'no room: 3 tasks running', id: 't7' });
+  assert.match(lines.at(-1)!, /its turn didn't come in 5 minutes \(no room: 3 tasks running\): it asks again later/);
+  assert.ok(!asked.some((x) => x.route === '/api/tasks/report'), 'nothing reported: the task just waits');
+  lines.length = 0;
+  assert.equal(await seneschalTurn(wrightJob, { ...quick, ...minutes(), waitMs: 5 * 60_000, say }), null);
+  assert.match(lines.at(-1)!, /: run as before$/);
+  // A short wait, said in seconds.
+  lines.length = 0;
+  assert.deepEqual(await seneschalTurn(reeveFill, { ...quick, ...minutes(), waitMs: 45_000, defer: true, say }), { later: 'no room: 3 tasks running', id: 't7' });
+  assert.match(lines.at(-1)!, /didn't come in 45 seconds/);
+});
+
+test("defer: its wait counts the time another run of the same work holds it, so it doesn't wait behind that run", async () => {
+  const otherRun = { json: { task: null, why: "it runs now, in reeve's other run", state: 'leased' } };
+  routes['/api/tasks/submit'] = () => ({ json: waitingTask() });
+  routes['/api/tasks/lease'] = () => otherRun;
+  assert.deepEqual(await seneschalTurn(reeveFill, { ...quick, ...minutes(), waitMs: 3 * 60_000, defer: true }), { later: "it runs now, in reeve's other run", id: 't7' });
+  const asks = asked.filter((x) => x.route === '/api/tasks/lease').length;
+  assert.ok(asks <= 4, `asked ${asks} times in its 3 minutes`);
+  // Done by that run while it asked: a Reeve job that finished stands in.
+  const pass = { ok: true, at: '2026-10-17T12:00:00Z', by: 'reeve', ms: 300_000 };
+  routes['/api/tasks/lease'] = (_b, n) => (n <= 2 ? otherRun : { json: { task: null, why: 'it passed', state: 'done', result: pass } });
+  asked.length = 0;
+  assert.deepEqual(await seneschalTurn(reeveFill, { ...quick, ...minutes(), waitMs: 10 * 60_000, defer: true }), { reused: pass, id: 't7' });
+});
+
+test("defer: never later where the Seneschal isn't there, is off duty, refuses the task, or didn't answer its last ask", async () => {
+  const deferring = { ...quick, ...minutes(), waitMs: 2 * 60_000, defer: true };
+  assert.equal(await seneschalTurn(wrightJob, { ...deferring, at: null }), null, 'no Seneschal');
+  routes['/api/tasks/submit'] = () => ({ json: { task: null, why: 'the Seneschal is off duty: it hands out no work, so run it as before', asBefore: true } });
+  assert.equal(await seneschalTurn(wrightJob, deferring), null, 'off duty');
+  routes['/api/tasks/submit'] = () => ({ status: 400, json: { error: '"job" names the job' } });
+  assert.equal(await seneschalTurn(wrightJob, deferring), null, 'refused');
+  // It answered, then not at the ask when the wait ran out.
+  routes['/api/tasks/submit'] = () => ({ json: waitingTask() });
+  routes['/api/tasks/lease'] = (_b, n) => (n < 3 ? noRoom : { status: 503, json: {} });
+  lines.length = 0;
+  assert.equal(await seneschalTurn(wrightJob, { ...quick, ...minutes(), waitMs: 2 * 60_000, defer: true, say }), null);
+  assert.match(lines.at(-1)!, /its turn didn't come in 2 minutes .*: run as before$/);
+  // It stopped answering altogether.
+  asked.length = 0;
+  routes['/api/tasks/lease'] = (_b, n) => (n === 1 ? noRoom : { status: 503, json: {} });
+  lines.length = 0;
+  assert.equal(await seneschalTurn(wrightJob, { ...quick, waitMs: 60 * 60_000, defer: true, say }), null);
+  assert.match(lines.at(-1)!, /stopped answering: run as before/);
+});
+
+test("a Wright's job is never skipped for a run that finished, nor for a failure: it runs as before, saying why", async () => {
+  const pass = { ok: true, at: '2026-10-16T12:00:00Z', by: 'wright', ms: 1_200_000 };
+  const fail = { ok: false, at: '2026-10-16T12:00:00Z', by: 'wright', ms: 1000, note: 'stuck', confirmed: { on: 'DESKTOP' } };
+  // Handed back done when it's asked (an older Seneschal's key, for a caller that sent a commit).
+  routes['/api/tasks/submit'] = () => ({ json: { task: { id: 't3', state: 'done', result: pass }, existing: true, reused: true } });
+  lines.length = 0;
+  assert.equal(await seneschalTurn({ ...wrightJob, commit: 'c'.repeat(40) }, { ...quick, say }), null);
+  assert.match(lines[0], /handed back a run of the Wright's #212 that finished \(t3\), which never stands in for another: run as before/);
+  // Done, or failed on two PCs, while it waited.
+  routes['/api/tasks/submit'] = () => ({ json: waitingTask() });
+  for (const result of [pass, fail]) {
+    routes['/api/tasks/lease'] = () => ({ json: { task: null, why: 'it ended', state: 'done', result } });
+    assert.equal(await seneschalTurn(wrightJob, { ...quick, defer: true }), null, JSON.stringify(result));
+  }
+  // A Reeve job that finished does stand in: another Reeve process just did that work.
+  routes['/api/tasks/lease'] = () => ({ json: { task: null, why: 'it ended', state: 'done', result: pass } });
+  assert.deepEqual(await seneschalTurn(reeveFill, quick), { reused: pass, id: 't7' });
+});
+
+test("an older Seneschal (0.2.x) refuses a Reeve job's kind, and a Wright job with no commit: run as before, deferring or not", async () => {
+  // Seneschal 0.2.x's parseSubmission.
+  routes['/api/tasks/submit'] = (b) =>
+    !['pr-check', 'kit-trial', 'full-suite', 'wright-job'].includes(b.kind)
+      ? { status: 400, json: { error: '"kind" is one of pr-check, kit-trial, full-suite, wright-job' } }
+      : !/^[0-9a-f]{40}$/.test(String(b.commit ?? ''))
+        ? { status: 400, json: { error: "\"commit\" is the exact commit (git's full id)" } }
+        : { json: waitingTask() };
+  routes['/api/tasks/lease'] = () => noRoom;
+  for (const t of [reeveFill, wrightJob]) {
+    for (const defer of [false, true]) {
+      lines.length = 0;
+      assert.equal(await seneschalTurn(t, { ...quick, ...minutes(), waitMs: 2 * 60_000, defer, say }), null, `${t.kind}, defer ${defer}`);
+      assert.match(lines[0], /refused the task: "(kind|commit)" is .*: run as before/);
+    }
+  }
+  assert.ok(!asked.some((x) => x.route === '/api/tasks/lease'), 'never waited for a turn it refused');
+});
+
+test("a worker is never handed the Wright's or Reeve's work unless it names their kinds", () => {
+  const base = { id: 'b4', repo: 'Jcollier0120/Reeve', commit: 'c'.repeat(40), lane: 'normal', what: 'x' };
+  assert.equal(jobOf({ ...base, kind: 'wright-job', job: '#212' }), null);
+  assert.equal(jobOf({ ...base, kind: 'reeve-job', job: 'repo-sync' }), null);
+  assert.ok(jobOf({ ...base, kind: 'pr-check' }), 'a check, by default');
+  assert.ok(jobOf({ ...base, kind: 'full-suite' }));
+  assert.ok(jobOf({ ...base, kind: 'kit-trial', kit: '2.79.0', agent: 'reeve' }));
+});

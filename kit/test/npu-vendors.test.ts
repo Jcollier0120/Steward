@@ -467,10 +467,15 @@ test("every Snapdragon X2 runs Qwen3-VL-2B, its pictures on the Adreno, whatever
     assert.match(describePlan(x2)[0], /\(npu\): GenieX 0\.8\.0, chat and vision and embed on 18181; unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0$/, what);
     const e = V.npuEntry(x2.npu!.route, { tools, exe: G });
     assert.equal(e.chat!.model, TWO_B, what);
-    assert.deepEqual(e.vision, { model: TWO_B }, what);
-    assert.deepEqual(e.chat!.startCommand, [G, 'serve', '--skip-update', '--host', '127.0.0.1:18181', '--keepalive', '3600', '--compute', 'npu', '--vit-compute', 'GPUOpenCL'], `${what}: its language model on the Hexagon, its pictures' encoder on the Adreno (GenieX 0.8.0's llama.cpp reads every picture as grey on the Hexagon)`);
+    assert.deepEqual(e.vision, { model: TWO_B, pictureTokens: 1024 }, `${what}: GenieX's llama.cpp reads a picture at its own size, so the kit fits it within 1,024 tokens and counts it so`);
+    assert.deepEqual(e.chat!.startCommand, [G, 'serve', '--skip-update', '--host', '127.0.0.1:18181', '--keepalive', '3600', '--compute', 'npu', '--vit-compute', 'GPUOpenCL', '--nctx', '2560'], `${what}: its language model on the Hexagon, its pictures' encoder on the Adreno (GenieX 0.8.0's llama.cpp reads every picture as grey on the Hexagon), a 2,560-token window`);
     assert.deepEqual(validateAccelerators({ accelerators: [e] }), [], what);
     assert.deepEqual(validateKeeperConfig({ accelerators: [e] }), [], what);
+    // Its window holds whatever the kit lets through: a request at the route's cap, and a picture at its count with room
+    // left under vision's cap for the question and the answer.
+    const nctx = Number(e.chat!.startCommand![e.chat!.startCommand!.indexOf('--nctx') + 1]);
+    assert.ok(nctx >= x2.npu!.route.maxContextTokens && nctx < 4096, `${what}: ${nctx}, under GenieX's default 4,096`);
+    assert.ok(e.vision!.pictureTokens! + 256 <= x2.npu!.route.caps.vision!, what);
     const pulled = await plan(NPU.x2, arm, [G, 'C:\\Users\\me\\.cache\\geniex\\models\\unsloth\\Qwen3-VL-2B-Instruct-GGUF\\geniex.json']);
     assert.equal(pulled.npu?.models[0].have, true, `${what}: pulled once its geniex.json is there`);
     const four = await plan(NPU.x2, arm, [G, 'C:\\Users\\me\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json']);
@@ -489,6 +494,8 @@ test("every Snapdragon X2 runs Qwen3-VL-2B, its pictures on the Adreno, whatever
     assert.deepEqual(p.npu?.models.map((x) => x.id), [FOUR_B], what);
     const four = V.npuEntry(p.npu!.route, { tools, exe: G });
     assert.ok(!four.chat!.startCommand!.includes('--vit-compute'), `${what}: GenieX's QAIRT model never gets the llama.cpp model's arguments`);
+    assert.ok(!four.chat!.startCommand!.includes('--nctx'), `${what}: nor its window (llama.cpp's only)`);
+    assert.deepEqual(four.vision, { model: FOUR_B }, `${what}: the 4B reads every picture as a fixed 256 tokens, so nothing is fitted and it counts imageTokens`);
   }
   // routeFor alone: a generation's own models whatever the memory; the route's on one that has none (an unknown Snapdragon's too).
   const q = V.NPU_CATALOG.routes.qualcomm;

@@ -12,6 +12,14 @@ import type { Employee } from '../src/settings.ts';
 const tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'steward-signing-')));
 process.env.STEWARD_HOME = tmp;
 after(() => rmSync(tmp, { recursive: true, force: true }));
+// A Windows SDK's signtool where findSignTool looks, whatever this PC has installed (Steward 0.36.85): a release's look
+// before it builds finds it, and the tests' runner answers it. On a PC without the SDK, the release was told "signtool
+// isn't installed" instead of the answer the test gave it.
+const kits = path.join(tmp, 'Program Files (x86)');
+const sdk = path.join(kits, 'Windows Kits', '10', 'bin', '10.0.26100.0', 'x64');
+mkdirSync(sdk, { recursive: true });
+writeFileSync(path.join(sdk, 'signtool.exe'), '');
+process.env['ProgramFiles(x86)'] = kits;
 
 const { forgetSigningLooks, HUNG_MS, loadSigningWaits, noteSigningWaits, signingDown, signingHung, signingProblem, signsWith, TRIAL_MS } = await import('../src/signing.ts');
 const { releaseOne } = await import('../src/stages/release.ts');

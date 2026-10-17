@@ -9,7 +9,7 @@ import { appReleasesIn, checksOf, parsePrs, readPin, staffRow } from '../src/sta
 import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
 
 // The staff's table from gh's JSON (a stand-in runner) and a fake employee's git; which employees release. (Which PRs
-// merge was the Steward's until 0.36.119: whoever writes a PR merges it now.)
+// merge was the Steward's until 0.36.121: whoever writes a PR merges it now.)
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-staff-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 

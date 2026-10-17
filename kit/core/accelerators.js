@@ -28,6 +28,9 @@ import { slotNames } from './queue.js';
  * (`gpu-…`), so it answers beside the NPU's chat. A `gpu-…` id or `cpu`; without it, its accelerator's own: turnOf.
  * @property {Timeouts} [timeouts] This kind's own request timings, over its accelerator's, when they differ (vision on
  * a card whose pictures are encoded on the processor): timeoutsFor.
+ * @property {number} [pictureTokens] Vision's: the most tokens a picture may be on its server, where the server reads a
+ * picture at its own size, a token per 32 × 32 px (Qwen3-VL through GenieX's llama.cpp plugin). The kit redraws a larger
+ * picture to fit first (the node part's fitPicture) and counts each picture so (pictureTokensFor).
  */
 
 /**
@@ -164,7 +167,7 @@ const baseUrlOf = (u) => String(u).replace(/\/(v1\/?)?$/, '');
 /** @param {unknown} v */
 const positiveInt = (v) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined);
 
-/** @typedef {{ baseUrl?: string, model: string, startCommand?: string[], env?: Record<string, string>, maxContextTokens?: number, turn?: string, timeouts?: Timeouts }} Written */
+/** @typedef {{ baseUrl?: string, model: string, startCommand?: string[], env?: Record<string, string>, maxContextTokens?: number, turn?: string, timeouts?: Timeouts, pictureTokens?: number }} Written */
 
 /**
  * A server's own environment as written: names to strings, anything else left out.
@@ -195,6 +198,7 @@ function readEndpoint(v) {
     // Another device's turn: a graphics card's or the processor's, never the NPU's (an NPU's own servers are in its turn).
     ...(kindOfId(v.turn) && v.turn !== 'npu' ? { turn: v.turn } : {}),
     ...(readTimeouts(v.timeouts) ? { timeouts: readTimeouts(v.timeouts) } : {}),
+    ...(positiveInt(v.pictureTokens) ? { pictureTokens: v.pictureTokens } : {}),
   };
 }
 
@@ -249,8 +253,8 @@ function withServers(a, eps) {
   for (const w of WORKS) {
     const ep = eps[w];
     if (!ep) continue;
-    // Its cap and timings are its own, on whichever server.
-    const own = { ...(ep.maxContextTokens ? { maxContextTokens: ep.maxContextTokens } : {}), ...(ep.timeouts ? { timeouts: ep.timeouts } : {}) };
+    // Its cap, timings and picture size are its own, on whichever server.
+    const own = { ...(ep.maxContextTokens ? { maxContextTokens: ep.maxContextTokens } : {}), ...(ep.timeouts ? { timeouts: ep.timeouts } : {}), ...(ep.pictureTokens ? { pictureTokens: ep.pictureTokens } : {}) };
     if (ep.baseUrl) out[w] = { baseUrl: ep.baseUrl, model: ep.model, ...(ep.startCommand ? { startCommand: ep.startCommand } : {}), ...(ep.env ? { env: ep.env } : {}), ...own, ...(ep.turn ? { turn: ep.turn } : {}) };
     // On the chat endpoint's server, it takes that server's turn.
     else if (w === 'vision' && eps.chat?.baseUrl)
@@ -924,13 +928,25 @@ export function chatTokens(rules, messages) {
 }
 
 /**
- * A question about one image, by the estimate: the image counts imageTokens.
+ * What a picture counts for on an accelerator: its vision endpoint's pictureTokens, the size the kit fits each picture
+ * to there, else imageTokens.
  * @param {Rules} rules
- * @param {string} question
+ * @param {Partial<Pick<Accelerator, 'vision'>>} [a]
  * @returns {number}
  */
-export function visionTokens(rules, question) {
-  return rules.tokens.imageTokens + estimateTokens(rules, question);
+export function pictureTokensFor(rules, a) {
+  return a?.vision?.pictureTokens ?? rules.tokens.imageTokens;
+}
+
+/**
+ * A question about one image, by the estimate: the image counts pictureTokensFor `a`, imageTokens without one.
+ * @param {Rules} rules
+ * @param {string} question
+ * @param {Partial<Pick<Accelerator, 'vision'>>} [a]
+ * @returns {number}
+ */
+export function visionTokens(rules, question, a) {
+  return pictureTokensFor(rules, a) + estimateTokens(rules, question);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { alive, startApart } from './apart.ts';
@@ -9,6 +9,7 @@ import { lineState, queueDirFor, readLine, slotDirs, type Lane } from './npu-que
 import { powershell, psQuote } from './ps.ts';
 import { samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
+import { trimWorkingSet } from './working-set.ts';
 
 /**
  * The accelerators the manor's models run on: the NPU, one or more graphics cards, or the processor,
@@ -603,6 +604,32 @@ export function reportsLoaded(startCommand: string[] | undefined): boolean {
   return !!exe && /^flm(\.exe)?$/i.test(path.win32.basename(expandEnv(exe)));
 }
 
+/**
+ * Whether a server this kit starts has its working set handed back to Windows once its model has loaded (working-set.ts,
+ * kit 2.80.1): FastFlowLM's, which keeps its model's lookup tables in ordinary private memory and reads one row
+ * of them a token. qwen3.5:2b's working set went from 3,814 MB to 171 MB, decoding as fast as before.
+ */
+export function trimmedOnceLoaded(startCommand: string[] | undefined): boolean {
+  const exe = startCommand?.[0];
+  return !!exe && /^flm(\.exe)?$/i.test(path.win32.basename(expandEnv(exe)));
+}
+
+/**
+ * Trims a started server's working set (trimmedOnceLoaded) and says what it held, or why it couldn't: in the server's
+ * log when it keeps one (the keeper's restarts), else on stderr, never stdout, which an MCP server answers on. Never
+ * throws.
+ */
+async function trimLoaded(pid: number, program: string, base: string, logFile: string | undefined): Promise<void> {
+  const said = await trimWorkingSet(pid);
+  if (said === null) return;
+  const held = /^trimmed (\d+)$/.exec(said);
+  const line = `${new Date().toISOString()} kit: ${program} at ${base}: ${held ? `its working set handed back to Windows once loaded (it held ${Number(held[1]).toLocaleString('en-US')} MB)` : `its working set stays as it was (${said})`}`;
+  try {
+    if (logFile) return appendFileSync(logFile, `${line}\n`);
+  } catch {}
+  console.error(line);
+}
+
 /** Whether an endpoint answers now, without starting it. */
 export async function ping(baseUrl: string, ms = PROBE_MS): Promise<boolean> {
   return (await probe(baseUrl, ms)) === 'ready';
@@ -744,6 +771,8 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
   let log: number | undefined;
   /** Started apart (apart.ts): its process id, watched for an early exit rather than its exit event. */
   let apart: number | null = null;
+  /** The server's process id, whichever way it started: its working set is trimmed once it's ready (trimmedOnceLoaded). */
+  let pid: number | undefined;
   try {
     if (o.logFile) {
       mkdirSync(path.dirname(o.logFile), { recursive: true });
@@ -754,13 +783,14 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
     // the manor's ceiling (kit 2.78.3).
     const apartPid = await startApart(cmd, args, { cwd: os.homedir(), env, ...(log === undefined ? {} : { out: log }) });
     if (apartPid) {
-      apart = apartPid;
+      apart = pid = apartPid;
       noteStarted({ pid: apartPid, program: cmd, base: ep.baseUrl, atMs: Date.now() });
     } else {
       const child = spawn(cmd, args, { detached: true, stdio: log === undefined ? 'ignore' : ['ignore', log, log], windowsHide: true, cwd: os.homedir(), env });
       child.on('error', (e) => (spawnError = e));
       child.on('exit', (code) => (exited = code));
       child.unref();
+      pid = child.pid;
       if (child.pid) noteStarted({ pid: child.pid, program: cmd, base: ep.baseUrl, atMs: Date.now() });
     }
   } catch (e) {
@@ -770,13 +800,21 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
   }
   const deadline = Date.now() + waitMs;
   const lists = { listsWhenLoaded: listsWhenLoaded(ep.startCommand) };
+  // Once its model has loaded, in the background: the request that started it goes on at once (working-set.ts).
+  const loaded = () => {
+    if (pid && trimmedOnceLoaded(ep.startCommand)) void trimLoaded(pid, program, ep.baseUrl, o.logFile);
+  };
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 250));
     if (spawnError) throw new AcceleratorDown(core.say.couldNotStart(cmd, spawnError.message));
     const state = await probe(ep.baseUrl, 2000, lists);
-    if (state === 'ready') return { started: true, waited: false };
+    if (state === 'ready') {
+      loaded();
+      return { started: true, waited: false };
+    }
     if (state === 'busy') {
       await untilReady(ep.baseUrl, readyMs, lists);
+      loaded();
       return { started: true, waited: true };
     }
     // GenieX exits at once (code 0) when another server holds its port: it is down only if nothing answers.
@@ -915,6 +953,36 @@ export function sidesOff32(size: { width: number; height: number }): { width: nu
   return to.width === size.width && to.height === size.height ? null : to;
 }
 
+/** A side of this many pixels is one token's, on a server that reads a picture at its own size: Qwen-VL's 16 px patches, merged in twos. */
+export const PICTURE_TOKEN_PX = 32;
+
+/**
+ * The tokens a picture is on a server that reads it at its own size (a vision endpoint's pictureTokens): llama.cpp's
+ * Qwen-VL rounds each side to the nearest PICTURE_TOKEN_PX, at least one, and reads a token per square. Measured on the
+ * Snapdragon X2's Qwen3-VL-2B (GenieX 0.8.0, 2026-10-17), each with about 36 for the question: 448 × 448 232 tokens,
+ * 1,920 × 1,080 2,075, 2,560 × 1,440 3,636. Pure.
+ */
+export function pictureTokensOf(size: { width: number; height: number }): number {
+  const squares = (n: number) => Math.max(1, Math.round(n / PICTURE_TOKEN_PX));
+  return squares(size.width) * squares(size.height);
+}
+
+/**
+ * The size a picture should be redrawn at so a server that reads it at its own size makes it `tokens` at most, or null
+ * when it is already: scaled down evenly (never up), each side a whole number of PICTURE_TOKEN_PX, so the server's own
+ * resize leaves it as it is. Its shape is kept to within a square a side. Pure.
+ */
+export function pictureFit(size: { width: number; height: number }, tokens: number): { width: number; height: number } | null {
+  if (size.width < 1 || size.height < 1 || pictureTokensOf(size) <= tokens) return null;
+  const scale = Math.min(1, Math.sqrt((tokens * PICTURE_TOKEN_PX * PICTURE_TOKEN_PX) / (size.width * size.height)));
+  const squares = (n: number) => Math.max(1, Math.floor((n * scale) / PICTURE_TOKEN_PX));
+  let w = squares(size.width);
+  let h = squares(size.height);
+  // A side of a single square (a picture far wider than tall) leaves the other the whole count.
+  if (w * h > tokens) (w > h ? (w = Math.floor(tokens / h)) : (h = Math.floor(tokens / w)));
+  return { width: w * PICTURE_TOKEN_PX, height: h * PICTURE_TOKEN_PX };
+}
+
 /**
  * Redraws the picture `from` at `size` as a PNG at `to`: System.Drawing's high-quality bicubic, its edges not faded.
  * PowerShell gets 30 s, or `o.timeoutMs` (a test on a busy PC, under a kit trial's load).
@@ -944,12 +1012,22 @@ try {
 }
 
 /**
- * The picture as `acc`'s server should get it (a local path, a `data:` URL or a URL): as it is, except where the server
- * has `sides-of-32` and sidesOff32 gives the picture another size. Then it's redrawn at that size and goes as a PNG
- * `data:` URL. A URL, a format whose size it can't read (WebP), and a picture it couldn't redraw go as they are.
+ * The size `acc`'s server should get a picture at, or null when it reads it right as it is: within its vision's
+ * pictureTokens (pictureFit), and then, on a server with `sides-of-32`, sidesOff32's. Pure.
  */
-export async function fitPicture(acc: Pick<Accelerator, 'quirks'>, image: string, redraw: typeof redrawPicture = redrawPicture): Promise<string> {
-  if (!acc.quirks.includes('sides-of-32') || /^https?:/i.test(image)) return image;
+export function pictureSizeFor(acc: Pick<Accelerator, 'quirks'> & Partial<Pick<Accelerator, 'vision'>>, size: { width: number; height: number }): { width: number; height: number } | null {
+  const fit = acc.vision?.pictureTokens ? pictureFit(size, acc.vision.pictureTokens) : null;
+  return (acc.quirks.includes('sides-of-32') ? sidesOff32(fit ?? size) : null) ?? fit;
+}
+
+/**
+ * The picture as `acc`'s server should get it (a local path, a `data:` URL or a URL): as it is, except where
+ * pictureSizeFor gives it another size: larger than its vision's pictureTokens (the Snapdragon X2's Qwen3-VL-2B), or a
+ * side of 32 px on a server with `sides-of-32` (FastFlowLM). Then it's redrawn at that size and goes as a PNG `data:`
+ * URL. A URL, a format whose size it can't read (WebP), and a picture it couldn't redraw go as they are.
+ */
+export async function fitPicture(acc: Pick<Accelerator, 'quirks'> & Partial<Pick<Accelerator, 'vision'>>, image: string, redraw: typeof redrawPicture = redrawPicture): Promise<string> {
+  if ((!acc.quirks.includes('sides-of-32') && !acc.vision?.pictureTokens) || /^https?:/i.test(image)) return image;
   const data = /^data:[^,]*;base64,/i.exec(image);
   if (!data && /^data:/i.test(image)) return image;
   let bytes: Buffer;
@@ -959,7 +1037,7 @@ export async function fitPicture(acc: Pick<Accelerator, 'quirks'>, image: string
     return image; // the request says what's wrong with it, as before
   }
   const size = pictureSize(bytes);
-  const to = size && sidesOff32(size);
+  const to = size && pictureSizeFor(acc, size);
   if (!to) return image;
   const dir = mkdtempSync(path.join(os.tmpdir(), 'kit-picture-'));
   try {

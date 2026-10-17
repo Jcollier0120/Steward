@@ -8,7 +8,7 @@ import { allowedInstallScripts, allowedToRun, lockPackages, named, runsOnInstall
 /**
  * The Steward's look at the Wright's drafts, in code (no model): the Wright opens every pull request as a draft, so
  * nothing it wrote merges unlooked at. A draft the Wright opened (labelled `wright`, by the team) that passes every
- * check below may be merged. Since Steward 0.36.119 the Steward merges no PRs and marks none ready: these checks are
+ * check below may be merged. Since Steward 0.36.121 the Steward merges no PRs and marks none ready: these checks are
  * kept for whoever does (the Bailiff, or a person).
  *
  * The checks: not labelled wright:needs-you (the Wright's own word that a person reviews it); no changed file a person
@@ -21,11 +21,11 @@ import { allowedInstallScripts, allowedToRun, lockPackages, named, runsOnInstall
  * Claude Code, has approved its current head commit. It labels the PR bailiff:approved and ends its review comment
  * with a marker naming the commit it reviewed; both must agree with the head the Steward is about to mark ready.
  * Without the Bailiff, none is marked ready: a person reviews it and marks it ready. (The Steward merges no PRs since
- * 0.36.119, so it no longer marks the Wright's drafts ready either: whoever reviews one merges it.)
+ * 0.36.121, so it no longer marks the Wright's drafts ready either: whoever reviews one merges it.)
  */
 
 export const WRIGHT_LABEL = 'wright';
-/** How a draft of the Wright's held only for the Bailiff's review started its hold, before Steward 0.36.119. */
+/** How a draft of the Wright's held only for the Bailiff's review started its hold, before Steward 0.36.121. */
 export const BAILIFF_WAIT = 'a draft from the Wright, with the Bailiff: ';
 export const NEEDS_YOU_LABEL = 'wright:needs-you';
 export const BAILIFF_LABELS = { approved: 'bailiff:approved', changes: 'bailiff:changes', waiting: 'bailiff:waiting' } as const;

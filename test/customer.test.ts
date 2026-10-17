@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 
 // The Steward on someone else's PC: no owner settings, Reeve's repositories, no Wright, Bailiff or Surveyor. It offers
 // the person's own repositories, looks after the ones they pick, releases only where they said yes, to their own
-// repositories, merges none of their PRs (whoever writes one merges it, since Steward 0.36.119), and nothing of
+// repositories, merges none of their PRs (whoever writes one merges it, since Steward 0.36.121), and nothing of
 // Castellan's runs.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-customer-'));
 process.env.STEWARD_HOME = home;
@@ -189,7 +189,7 @@ test("the held-back wording: on the person's PC the page and Settings speak of t
   for (const key of ['fill', 'install', 'approve', 'installed']) assert.deepEqual(employees.fields.find((f: any) => f.key === key).shownWhen, { key: 'releasesCastellan', is: ['true'] }, key);
   assert.equal(employees.blank.merges, false, 'a repository added by hand merges nothing');
   const merges = employees.fields.find((f: any) => f.key === 'merges');
-  assert.deepEqual([merges.hidden, /^No longer used/.test(merges.help)], [true, true], 'whoever writes a PR merges it (Steward 0.36.119): no switch for it');
+  assert.deepEqual([merges.hidden, /^No longer used/.test(merges.help)], [true, true], 'whoever writes a PR merges it (Steward 0.36.121): no switch for it');
   assert.doesNotMatch(JSON.stringify(ONBOARDING), /kit|Wright|Bailiff|Castellan|employee/i, 'the onboarding is about their repositories');
   // The page, as /api/page's body on this PC.
   const m = await bundleForNode<{ render: (body: unknown) => string }>(
@@ -221,7 +221,7 @@ test("the held-back wording: on the person's PC the page and Settings speak of t
   assert.match(html, /data-post="\/api\/repos\/look-after"/);
   assert.match(html, /aria-label="Pick me\/new"/, 'each one found can be picked');
   assert.match(html, /<button[^>]*disabled=""[^>]*data-post="\/api\/repos\/look-after"[^>]*>Look after the picked</, 'none picked yet: nothing to look after in one go');
-  // The Steward merges none of their PRs (0.36.119): no merge button, and the page says who merges them.
+  // The Steward merges none of their PRs (0.36.121): no merge button, and the page says who merges them.
   assert.doesNotMatch(html, /\/api\/stage\/merge|PRs left to you|Merge your ready PRs/);
   assert.match(html, /The Steward merges no PRs: merge your own once vouched/);
   assert.match(html, /data-post="\/api\/stage\/release"/);

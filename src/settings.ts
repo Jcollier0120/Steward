@@ -89,7 +89,7 @@ export interface Settings {
   /** The GitHub accounts whose vouches are trusted (stages/vouch.ts) and whose work is filed for the Wright (work.ts). Empty: gh's signed-in account (team.ts). */
   team: string[];
   workRoot: string;
-  /** No longer used (Steward 0.36.119); kept so older settings load. */
+  /** No longer used (Steward 0.36.121); kept so older settings load. */
   releaseAfterMerge: boolean;
   stewardRepo: string;
   parallel: number;
@@ -100,7 +100,7 @@ export interface Settings {
   /** On duty, a round every `roundMinutes`: between builds it looks; at a build it releases each repository's main (pipeline.ts). */
   byItself: boolean;
   roundMinutes: number;
-  /** No longer used (Steward 0.36.119: the Steward merges no PRs); kept so older settings load. */
+  /** No longer used (Steward 0.36.121: the Steward merges no PRs); kept so older settings load. */
   mergeMinAgeMinutes?: number;
   /** What needs the person, after each round (alarms.ts). */
   alarms: AlarmSettings;
@@ -112,9 +112,9 @@ export interface Settings {
    * and a PR whose lockfile brings one is held for you. Absent: installscripts.ts's DEFAULT_INSTALL_SCRIPTS.
    */
   installScripts?: string[];
-  /** No longer used (Steward 0.36.119: the Steward catches no PRs up); kept so older settings load. */
+  /** No longer used (Steward 0.36.121: the Steward catches no PRs up); kept so older settings load. */
   catchUp: boolean;
-  /** No longer used (Steward 0.36.119: there are no version queues); kept so older settings load. */
+  /** No longer used (Steward 0.36.121: there are no version queues); kept so older settings load. */
   mergeTrain: boolean;
   /** The build pipeline (pipeline.ts): each repository's main tested and released at set build times. */
   buildPipeline: BuildPipeline;
@@ -128,7 +128,7 @@ export interface Settings {
   rolloutMaxWaitHours: number;
   /** In its rounds, a kit version or a Steward version on the Steward's own main with no release is released (stages/self.ts). */
   releaseSelf: boolean;
-  /** No longer used (Steward 0.36.119): the Steward merges only the kit and stamp PRs it opens itself, always. Kept so older settings load. */
+  /** No longer used (Steward 0.36.121): the Steward merges only the kit and stamp PRs it opens itself, always. Kept so older settings load. */
   mergeSelf: boolean;
   /** The Steward's own checkout, which those releases are made from (a worktree of it at origin/main). */
   stewardCheckout: string;
@@ -395,7 +395,7 @@ export const SETTINGS_SCHEMA: Field[] = [
         kind: 'switch',
         label: 'Merges PRs',
         inline: true,
-        help: 'No longer used: the Steward merges no PRs (0.36.119). Whoever writes one merges it once vouched.',
+        help: 'No longer used: the Steward merges no PRs (0.36.121). Whoever writes one merges it once vouched.',
         hidden: true,
       },
       {
@@ -413,7 +413,7 @@ export const SETTINGS_SCHEMA: Field[] = [
         key: 'whenReady',
         kind: 'text',
         label: 'When a branch is ready',
-        help: 'No longer run: the Steward lands no branches (0.36.119). Whoever writes one lands it in the branch; each build releases what is there.',
+        help: 'No longer run: the Steward lands no branches (0.36.121). Whoever writes one lands it in the branch; each build releases what is there.',
         empty: 'Claimed branches are left to you',
         optional: true,
         hidden: true,
@@ -450,7 +450,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       // Whether it takes the kit is the Steward's to decide, from the kit.json on its branch: kept, never shown.
       { key: 'usesKit', kind: 'switch', label: "Takes the Steward's kit", hidden: true },
       { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'Fills its kit at the version kit.json pins.', empty: 'None: it has no kit', chip: 'kit', ...command, ...CASTELLAN, hidden: true },
-      { key: 'install', kind: 'text', label: 'Install it', help: 'No longer run: steps a merged PR asks for are not run since 0.36.119.', empty: 'Not installed by the Steward', ...command, ...CASTELLAN, hidden: true },
+      { key: 'install', kind: 'text', label: 'Install it', help: 'No longer run: steps a merged PR asks for are not run since 0.36.121.', empty: 'Not installed by the Steward', ...command, ...CASTELLAN, hidden: true },
       { key: 'approve', kind: 'text', label: 'Approve a job', help: "Approves one of its jobs, with {job} its name and {sha256} the hash of the script merged on its branch.", empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command, ...CASTELLAN, hidden: true },
       { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true }, ...CASTELLAN, hidden: true },
       {
@@ -482,15 +482,15 @@ export const SETTINGS_SCHEMA: Field[] = [
     help: "On duty, at each build time it releases what is new on each repository's branch. Whoever writes a PR merges it once vouched. Off: only when you press a button.",
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', tab: 'How it works', help: 'How often it looks, while on duty.' },
-  { key: 'mergeMinAgeMinutes', kind: 'whole', min: 0, max: 1440, unit: 'minutes', label: 'A PR merges once it is', tab: 'How it works', help: 'No longer used: the Steward merges no PRs (0.36.119).', hidden: true },
-  { key: 'releaseAfterMerge', kind: 'switch', advanced: true, label: 'Release right after merging', tab: 'How it works', help: 'No longer used: each build releases what is on the branch (0.36.119).', hidden: true },
+  { key: 'mergeMinAgeMinutes', kind: 'whole', min: 0, max: 1440, unit: 'minutes', label: 'A PR merges once it is', tab: 'How it works', help: 'No longer used: the Steward merges no PRs (0.36.121).', hidden: true },
+  { key: 'releaseAfterMerge', kind: 'switch', advanced: true, label: 'Release right after merging', tab: 'How it works', help: 'No longer used: each build releases what is on the branch (0.36.121).', hidden: true },
   {
     key: 'catchUp',
     kind: 'switch',
     advanced: true,
     label: 'Catches PRs up with their branch',
     tab: 'How it works',
-    help: 'No longer used: the Steward catches no PRs up (0.36.119). Whoever writes one brings it up to date and merges it.',
+    help: 'No longer used: the Steward catches no PRs up (0.36.121). Whoever writes one brings it up to date and merges it.',
     hidden: true,
   },
   {
@@ -499,7 +499,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     advanced: true,
     label: 'Merges ready PRs together',
     tab: 'How it works',
-    help: 'No longer used: the Steward merges no PRs (0.36.119).',
+    help: 'No longer used: the Steward merges no PRs (0.36.121).',
     hidden: true,
   },
   {
@@ -512,9 +512,9 @@ export const SETTINGS_SCHEMA: Field[] = [
       // The switch it had (0.36.40 to 0.36.62), never drawn: a Manor that still sends it saves this group as before, and
       // whatever it says is left out (pipeline.ts' normalizePipeline).
       { key: 'on', kind: 'switch', label: 'Build at set times', help: 'No longer used: the Steward always builds at its build times.', optional: true, hidden: true },
-      // So had finding the PR that broke a build (until 0.36.118), gone with the merges: kept so a Manor that sends it
+      // So had finding the PR that broke a build (until 0.36.120), gone with the merges: kept so a Manor that sends it
       // still saves, and left out the same way.
-      { key: 'bisectRuns', kind: 'whole', min: 0, max: 6, unit: 'test runs', label: 'To find the PR that breaks a build, at most', help: 'No longer used: builds merge no PRs (0.36.119).', optional: true, hidden: true },
+      { key: 'bisectRuns', kind: 'whole', min: 0, max: 6, unit: 'test runs', label: 'To find the PR that breaks a build, at most', help: 'No longer used: builds merge no PRs (0.36.121).', optional: true, hidden: true },
       {
         key: 'times',
         kind: 'list',
@@ -636,7 +636,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'on', kind: 'switch', label: 'Raise alarms' },
       { key: 'toast', kind: 'switch', label: 'A Windows notification for each', help: 'Clicking it opens this page.' },
       { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'Something waiting for', help: "A new kit waiting for the Steward to carry it; work filed for the Wright that hasn't landed." },
-      { key: 'blockingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR holding others up for', help: 'No longer used: there are no version queues (0.36.119).', hidden: true },
+      { key: 'blockingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR holding others up for', help: 'No longer used: there are no version queues (0.36.121).', hidden: true },
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
       { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Aletaster's tasting holds for" },
     ],
@@ -647,7 +647,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     tab: 'How it works',
     label: "The Wright's drafts",
     ...WRIGHT,
-    help: "No longer used: the Steward merges no PRs (0.36.119), so it no longer looks at the Wright's drafts. Whoever reviews one merges it.",
+    help: "No longer used: the Steward merges no PRs (0.36.121), so it no longer looks at the Wright's drafts. Whoever reviews one merges it.",
     hidden: true,
     fields: [
       { key: 'on', kind: 'switch', label: "Look at the Wright's drafts" },
@@ -689,7 +689,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Merges its own PRs',
     tab: 'Castellan',
     ...CASTELLAN,
-    help: "No longer used: the Steward merges no PRs to itself (0.36.119); it merges only the kit and stamp PRs it opens, and releases itself from main.",
+    help: "No longer used: the Steward merges no PRs to itself (0.36.121); it merges only the kit and stamp PRs it opens, and releases itself from main.",
     hidden: true,
   },
   { key: 'stewardRepo', kind: 'text', label: "The Steward's repository", tab: 'Castellan', help: 'Where its kit releases (kit-v<version>) are, and where it releases itself.', empty: "None: it doesn't release itself, and a kit rollout needs a kit you name", maxLength: 140, ...REPO, ...CASTELLAN, hidden: true },

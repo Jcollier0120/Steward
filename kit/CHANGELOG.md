@@ -2,6 +2,135 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.80.2
+
+**Pictures fit the Snapdragon X2's Qwen3-VL-2B. It reads a picture at its own size, a token for each 32 × 32 px, so a 3840 × 2160 screen came to about 8,160 tokens and GenieX refused it, while the kit counted every picture as 400. Now a picture over 1,024 of its tokens is redrawn to fit before it's sent, and counted as 1,024 against the NPU's cap. And its window is 2,560 tokens instead of 4,096, 168 MB less memory.**
+
+### What's new
+
+- **The core:** `pictureTokensFor(rules, a)`, the tokens a picture counts on an accelerator: its vision's `pictureTokens`, else the rules' `imageTokens` (400). `visionTokens(rules, question, a)` takes the accelerator as its third argument; without it a picture counts 400, as before.
+- **accelerators.ts:**
+  - `pictureTokensOf(size)`: the tokens such a server reads a picture as. `PICTURE_TOKEN_PX` is 32.
+  - `pictureFit(size, tokens)`: the size to redraw it at, within that many tokens, each side a multiple of 32, never larger; null when it fits already.
+  - `pictureSizeFor(acc, size)`: the size `fitPicture` redraws at on that server, with `sides-of-32` applied after.
+- **config.json:** `vision.pictureTokens`, a whole number from 64 to 4,096, on a vision endpoint only (`validateAccelerators` says so otherwise). `NpuModel.pictureTokens` in npu-vendors.json, written by `npuEntry`.
+
+### What changed
+
+- **`fitPicture`** redraws a picture over its server's `vision.pictureTokens` to fit, and takes the accelerator's `vision` beside its `quirks`. A picture within it goes as it is.
+- **A picture's request** (npu.ts's `vision`) counts its picture with each serving accelerator's own count, and the largest of them goes against the cap.
+- **The X2's Qwen3-VL-2B** has `--nctx 2560` in its own `serve` and `pictureTokens: 1024`. Measured on the X2 Elite: on five screens from 1920 × 1080 to 3840 × 2160 and a phone's, 35 of 35 questions about their text right at 1,024 tokens, against 18 of 35 had they been fitted to 400 (the small text misread); 3840 × 2160, refused before, answered right. A question takes 4.4 to 4.7 s, against about 1.5 s at 400; fitting a picture 65 to 112 ms. spec/NPU-VENDORS.md has the measurements.
+- **The keeper's NPU refresh** brings both to an X2 set up before, after the same test as any new command. Its log says `--nctx 2560 added, pictures: at most 1024 tokens`.
+- **The Smith's check picture** still reads "Tally 827" on the 2B, as before this kit: at 512 × 512 it is 256 tokens and isn't fitted (spec/NPU-VENDORS.md).
+
+### Before you update
+
+- Nothing for an agent that sends pictures through the kit's `vision`. One that counts a picture with `visionTokens` itself should pass the accelerator.
+- An agent still on an older kit ignores `pictureTokens`: on an X2 it sends pictures at their own size, and a 4K screen is refused until it takes this kit.
+
+## 2.80.1
+
+**FastFlowLM's working set is handed back to Windows once its model has loaded: qwen3.5:2b's went from 3,814 MB to 171 MB, and Gemma 4 E2B's from 6,595 MB to 173 MB. Both decode as fast as before.**
+
+### What's new
+
+- **working-set.ts:**
+  - `trimWorkingSet(pid)` empties a process's working set (EmptyWorkingSet) through the asker's PowerShell worker. `working-set.cs` is compiled once to `working-set-<hash>.dll`, beside the accelerators' locks, and every agent on the PC shares it.
+  - It answers `trimmed <MB it held>`, or why it couldn't, and never throws.
+  - `KIT_SERVER_TRIM=0` leaves every server's working set as it is.
+
+### What changed
+
+- **accelerators.ts:**
+  - A server the kit starts with FastFlowLM's command (`trimmedOnceLoaded`) has its working set trimmed once it first answers. The trim runs in the background, so the request that started the server goes on at once.
+  - The server's log says what it held, or stderr where there's no log. Other servers are left as they are.
+- **Why FastFlowLM:** 1.0.7 copies its model's lookup tables into ordinary private memory and reads one row of them a token, so most of what it holds is never read again.
+- **Where the trimmed pages go:** Windows keeps them compressed in RAM, or writes them to the pagefile when it needs the room. What the NPU holds is untouched.
+- **What it doesn't change:** RAM is freed, not commit, because the server's private memory stays the same. The upstream fix reads the tables from a mapping of the model's file, which frees both (FastFlowLM#807).
+- **Measured on a Ryzen AI 7 350 (16 GB):**
+  - Decoding was the same before and after: 22.8 to 22.9 tokens a second for qwen3.5:2b, and 20.7 to 21.1 for gemma4-it:e2b.
+  - The first request after a trim took 6,360 ms against 6,350 before it for qwen3.5:2b, and 7,709 ms against 7,260 for gemma4-it:e2b.
+  - A 1,500-token prompt of new words read 25 MB back from disk, in 8,866 ms against 8,948.
+- **What an agent must do:** nothing.
+
+## 2.80.0
+
+**seneschal.ts asks for the Wright's and Reeve's turns (Seneschal 0.3.0): two turn kinds named by their job rather than a commit, what a task needs of the room, and `defer` for an asker that can come back at its next round instead of running beside a full PC.**
+
+### What's new
+
+- **The turn kinds, `wright-job` and `reeve-job`** (`SeneschalTurnKind`). Only their asker can run them, so the Seneschal hands out a turn and nothing else.
+  - **`SeneschalTask` names its `job`** (the key): the Wright's issue `#212`, or `pr#41` for a conflict run; Reeve's `repo-sync`, or `index:<name>:<8 hex>:<model>` for an index fill. A turn kind needs no `commit`: it names no code, so a new commit on main isn't new work.
+  - `SeneschalCheckKind` is the other three (`pr-check`, `kit-trial`, `full-suite`), which still name their commit. `SeneschalTask` is a union of the two, so a check without a commit, or a turn kind without a job, doesn't typecheck.
+- **`SeneschalTask.needs`** (`SeneschalNeeds`): `clone`, `accelerator`, `memoryMb`, and two for the turn kinds only:
+  - `light: true` takes no processor slot (an index fill spends the NPU, not the processors);
+  - `line: 'claude-code'` holds Claude Code's line, which has a cap of its own.
+- **`SeneschalTask.tries`**: how many runs a task gets before it fails for good. A lost lease counts as one, so 1 means it never starts twice (the Wright's job).
+- **`SeneschalTurnOptions.defer`**: a turn that doesn't come in `waitMs` answers **`{ later, id }`** instead of null. `later` is why it waits, in the Seneschal's words ("no room: 3 tasks running"), for the agent's status. Run nothing then, and ask again at the next round.
+  - **Only while the Seneschal answers.** No Seneschal, one off duty or without Developer Pro, a refused task, one that stopped answering, or a last ask that went unanswered: null, run as before, as without `defer`.
+  - **A deferring asker's wait counts all the time it asks,** including the time another run of the same work holds the task (another Reeve process filling that index). So a short `waitMs` (Reeve's 45 s, while it holds its runner lock) is the longest it waits.
+
+### What changed
+
+- **A `wright-job` never answers `{ reused }` or `{ failed }`.** An issue is never skipped for a job that finished: the client says so in its log and answers null (run as before). The Seneschal 0.3.0 never hands one back; this is in case an older one, keyed by commit, would.
+- **`jobOf` takes the check kinds by default** (it took `wright-job` too). A worker is never handed a turn kind, which only its asker runs.
+
+### Before you update
+
+- Nothing for an agent to do: the Steward's own calls are unchanged, and an agent that never asks for a turn kind sees no difference.
+- **An older Seneschal (0.2.x)** refuses a `reeve-job` (an unknown kind) and a `wright-job` with no commit: `seneschalTurn` answers null, and the work runs as before. Only the turn is lost.
+- An agent that switches on the answer and says `defer` should handle `{ later }`.
+
+## 2.79.1
+
+**The title bar's status pill sits beside the agent's name, with the role alone on the line under them.**
+
+### What changed
+
+- **The title bar (page.ts and the React shell, shell.tsx):** the pill moved up from the role's line to the name's: `<div class="name-line"><h1>…</h1><span class="status-pill …">…</span></div><p class="role" title="…">…</p>`. `.role-line` is gone, and the role is a `p` of its own. The pill is still plain text in the brand's link, nothing to press. Its classes (on, off, busy and the busy pulse), its title and `data-tour="status"` are as they were.
+  - **The name and the pill** stay whole. The pill (16px) is centred on the name's 19.5px line, so the brand stays 43.7px high and the bar 57px.
+  - **The role** has its line to itself, up to its own width. It's cut with an ellipsis at a word when the bar has no room for it: one clamped line (`-webkit-line-clamp: 1`), not `nowrap`, so its least width is a word's. Its whole text is its title.
+  - **Wrapping:** the brand is never narrower than its icon, the name and the pill (`min-width: min-content`, now set by the name line). A window too narrow for that wraps the tools to a second row.
+  - **In a narrow window** (640px or less): the pill goes under the name when they don't fit side by side, and is cut with an ellipsis when it's longer than the line. The role keeps its one line under them. `--titlebar-h`'s narrow default stays 109px.
+- **Checked in a Chromium browser,** at 780px and 375px wide, for the Smith while it works ("At the forge") and the Porter on duty (a long pill and a long role): no sideways scroll, and the bar 57px and 109px.
+
+### Before you update
+
+- An agent whose own CSS styles `.brand .role-line`, or `.brand .role` as a `span`, should look at its title bar. No agent in the manor does. Otherwise there's nothing to do: it updates itself as usual.
+
+## 2.78.26
+
+**The NPU benchmark sets up chat alone, so `--no-setup` downloads nothing. Before, it set up the route's embedding server too, and its check for what was missing counted only the route's models. On an Intel NPU 3720, whose chat model was there and embedder wasn't, `--no-setup` went on and pulled Qwen3-Embedding (428 MB) through OpenVINO Model Server.**
+
+### What changed
+
+- **npu-bench.ts plans the route without its embeddings (`planNpu`'s `noEmbed`, as the NPU check's hardening does).** The suite never asks for an embedding, so the embedding server and its model (Intel's second OpenVINO Model Server and Qwen3-Embedding, the Snapdragon's llama-server and its model) are no longer fetched or set up for a run. FastFlowLM's route is as it was.
+  - **`--no-setup`** stops with a `setup` mark, exit 1, whenever the plan would fetch anything: the server, its runtime, its model, or an embedding server and its model, if a plan ever carries one.
+  - **The download prompt** names the plan's own total (`downloadBytes`): on a fresh PC about 2.4 GB on Intel (was 2.8), 4.4 GB on a Snapdragon X (was 5.1) and 1.9 GB on an X2 (was 2.6).
+- **NPU-BENCHMARK.md** says what `--yes` fetches now, and that `--no-setup` refuses instead.
+
+### Before you update
+
+- Nothing to do: it updates itself as usual. A bench run in a tools home where setup already ran fetches nothing, as before.
+
+## 2.78.25
+
+**On a PC under 20 GB, the keeper stops a graphics card's model servers after 5 minutes unused, not 10, when the card shares the PC's memory (integrated graphics). Their models hold the PC's own memory, as the NPU's do, and they start again from the disk cache in 2 to 5 s.**
+
+### What changed
+
+- **npu-vendors.ts' `cardIdleStopMinutes`:** the NPU's small-PC rule (20 times the cold start, never under `floorMinutes`), for a card with under `OWN_MEMORY_GB` (2) of its own, from llama.cpp's cold start (`idleStop.cardColdStartMs`, 6 s in npu-vendors.json): 5 minutes. On a PC of 20 GB or more, for a card with memory of its own, or one whose `memoryGb` config.json doesn't give, it's `gpuIdleStopMinutes` (rules.json's 10), as before.
+- **keeper.ts:**
+  - **`serversToReap`** gives a card's servers that time when config.json has no `gpuIdleStopMinutes`, as it gives the NPU's servers their route's minutes when it has no `npuIdleStopMinutes`. A `gpuIdleStopMinutes` in config.json still wins, on any PC: longer, shorter or 0 for never. The processor keeps its 10.
+  - **`reapedServers`** takes `idle.otherMsFor`, a card's or the processor's own idle time, over `idle.otherMs`.
+- **Measured on a Core Ultra 5 225U with 15.4 GB** (Intel Graphics with 0.1 GB of their own; llama.cpp b11669-vulkan, from the disk cache), from start to the first answer:
+  - Qwen3-4B chat: 3.8 to 5.2 s.
+  - Qwen3-VL-4B vision with its projector: 3.8 to 5.4 s.
+  - The embedding model: 1.6 to 2.9 s.
+  - Its keeper had stopped the vision server three times in a day, each after 10 to 11 minutes unused, holding some 5 GB of the 15.4 for 5 minutes longer than this keeps it. spec/NPU-VENDORS.md has the table.
+- **spec:** NPU-VENDORS.md, A card that shares the PC's memory rests the same way, and ACCELERATORS.md's idle stop.
+- **What an agent must do:** nothing. The keeper takes the new time at its next look with this kit, and a `gpuIdleStopMinutes` the owner set stays theirs.
+
 ## 2.78.24
 
 **The local models take less of a PC's memory. llama-server keeps no RAM cache of earlier prompts: by default each server keeps up to 8 GB of them in the PC's memory, beside what its card holds, for prompts that start the same way, and the manor's rarely do. On a Core Ultra 5 225U's Intel Graphics, the chat server held 3.59 GB instead of 4.54 GB after 34 of the manor's kind of requests, and gave the same answers a little faster. And Intel's integrated graphics on a PC with under 32 GB chat on their vision server: one Qwen3-VL-4B for both, 5.0 GB of the PC's memory where Qwen3-4B beside it made 8.5 GB. On text it is as fast and passes the Smith's checks, but it got one of 18 of the manor's kind of tasks wrong that Qwen3-4B got right. A PC set up before gets both at the keeper's next look; nothing to download, nothing to set up again.**

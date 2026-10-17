@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // Plain git's events (stages/gitevents.ts): with no pull requests, Settings say what the Steward does once a release's
-// tag is pushed (After a release). When a branch is ready is no longer run (Steward 0.36.119): whoever writes a branch
+// tag is pushed (After a release). When a branch is ready is no longer run (Steward 0.36.121): whoever writes a branch
 // lands it, and a build releases what is on the branch. Real git, local origins; nothing reaches GitHub, the live
 // ~/.steward or the real checkouts.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-gitevents-'));
