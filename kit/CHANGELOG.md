@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.25
+
+**On a PC under 20 GB, the keeper stops a graphics card's model servers after 5 minutes unused, not 10, when the card shares the PC's memory (integrated graphics). Their models hold the PC's own memory, as the NPU's do, and they start again from the disk cache in 2 to 5 s.**
+
+### What changed
+
+- **npu-vendors.ts' `cardIdleStopMinutes`:** the NPU's small-PC rule (20 times the cold start, never under `floorMinutes`), for a card with under `OWN_MEMORY_GB` (2) of its own, from llama.cpp's cold start (`idleStop.cardColdStartMs`, 6 s in npu-vendors.json): 5 minutes. On a PC of 20 GB or more, for a card with memory of its own, or one whose `memoryGb` config.json doesn't give, it's `gpuIdleStopMinutes` (rules.json's 10), as before.
+- **keeper.ts:**
+  - **`serversToReap`** gives a card's servers that time when config.json has no `gpuIdleStopMinutes`, as it gives the NPU's servers their route's minutes when it has no `npuIdleStopMinutes`. A `gpuIdleStopMinutes` in config.json still wins, on any PC: longer, shorter or 0 for never. The processor keeps its 10.
+  - **`reapedServers`** takes `idle.otherMsFor`, a card's or the processor's own idle time, over `idle.otherMs`.
+- **Measured on a Core Ultra 5 225U with 15.4 GB** (Intel Graphics with 0.1 GB of their own; llama.cpp b11669-vulkan, from the disk cache), from start to the first answer:
+  - Qwen3-4B chat: 3.8 to 5.2 s.
+  - Qwen3-VL-4B vision with its projector: 3.8 to 5.4 s.
+  - The embedding model: 1.6 to 2.9 s.
+  - Its keeper had stopped the vision server three times in a day, each after 10 to 11 minutes unused, holding some 5 GB of the 15.4 for 5 minutes longer than this keeps it. spec/NPU-VENDORS.md has the table.
+- **spec:** NPU-VENDORS.md, A card that shares the PC's memory rests the same way, and ACCELERATORS.md's idle stop.
+- **What an agent must do:** nothing. The keeper takes the new time at its next look with this kit, and a `gpuIdleStopMinutes` the owner set stays theirs.
+
 ## 2.78.24
 
 **The local models take less of a PC's memory. llama-server keeps no RAM cache of earlier prompts: by default each server keeps up to 8 GB of them in the PC's memory, beside what its card holds, for prompts that start the same way, and the manor's rarely do. On a Core Ultra 5 225U's Intel Graphics, the chat server held 3.59 GB instead of 4.54 GB after 34 of the manor's kind of requests, and gave the same answers a little faster. And Intel's integrated graphics on a PC with under 32 GB chat on their vision server: one Qwen3-VL-4B for both, 5.0 GB of the PC's memory where Qwen3-4B beside it made 8.5 GB. On text it is as fast and passes the Smith's checks, but it got one of 18 of the manor's kind of tasks wrong that Qwen3-4B got right. A PC set up before gets both at the keeper's next look; nothing to download, nothing to set up again.**

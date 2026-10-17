@@ -10,7 +10,7 @@ import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { lineSnapshot, lineState, LockTimeout, QueueFull, queueDirFor, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
 import { refreshNpu, whatAnswers } from './npu-refresh.ts';
-import { NPU_CATALOG, npuIdleStopMinutes, smallPc } from './npu-vendors.ts';
+import { cardIdleStopMinutes, NPU_CATALOG, npuIdleStopMinutes, smallPc } from './npu-vendors.ts';
 import { powershell, psQuote } from './ps.ts';
 import { keyInside, pathKey, samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
@@ -39,7 +39,10 @@ import { kitVersion, refreshCardVision, testNpuEmbed, testNpuEntry } from './set
  *   graphics card, or the processor), both 10 by default (rules.json's keeper), it is stopped. The next request
  *   starts it again (ensureServer). With no `npuIdleStopMinutes` in config.json, a PC with little memory (under
  *   npu-vendors.json's idleStop.smallPcGb) stops each NPU server after its route's own minutes, from its cold start
- *   (npu-vendors.ts' npuIdleStopMinutes: 5 for GenieX and OpenVINO Model Server, 10 for FastFlowLM). An idle stop
+ *   (npu-vendors.ts' npuIdleStopMinutes: 5 for GenieX and OpenVINO Model Server, 10 for FastFlowLM). With no
+ *   `gpuIdleStopMinutes` in config.json, such a PC stops a card that shares its memory (integrated graphics, under 2 GB
+ *   of their own) by the same rule, from llama.cpp's cold start (npu-vendors.ts' cardIdleStopMinutes: 5): its models
+ *   hold the PC's own memory, as the NPU's do. An idle stop
  *   gives way when the keeper's turn wasn't had at once (TURN_AT_ONCE_MS): someone took the accelerator after the look.
  * - **A game**: when a game is using its graphics card (games.json) and nobody has used the card for 2 minutes, it
  *   is stopped, so the game gets the card's memory.
@@ -485,12 +488,13 @@ export function otherTurn(a: Accelerator, kind: EndpointKind, list: Accelerator[
  * reranking endpoints, when they have a startCommand. `lockDirs` gives an accelerator's lock folders (or is the NPU's lock
  * folder, the others beside it, as Reeve's reaper took it). `keptOut` marks a card's servers while gpuWithNpu keeps the card out
  * (`keepGpuOut`), all but those for the work no NPU here serves (the core's withoutGpuBesideNpu): the card on demand.
- * `idle.npuMsFor`, when given, is an NPU server's own idle time by its program and kind, over `idle.npuMs`.
+ * `idle.npuMsFor`, when given, is an NPU server's own idle time by its program and kind, over `idle.npuMs`;
+ * `idle.otherMsFor`, a card's or the processor's own by its accelerator, over `idle.otherMs` (undefined: `otherMs`).
  */
 export function reapedServers(
   accelerators: Accelerator[],
   logDir = path.join(toolsHome(), 'servers', 'logs'),
-  idle: { npuMs?: number; otherMs?: number; npuMsFor?: (program: string, kind: EndpointKind) => number } = {},
+  idle: { npuMs?: number; otherMs?: number; npuMsFor?: (program: string, kind: EndpointKind) => number; otherMsFor?: (a: Accelerator) => number | undefined } = {},
   lockDirs: ((a: Accelerator) => string[]) | string = lockDirsOf,
   o: { keepGpuOut?: boolean } = {},
 ): ReapedServer[] {
@@ -524,7 +528,7 @@ export function reapedServers(
         continue;
       }
       if (!ep.startCommand?.length || out.has(ep.baseUrl)) continue;
-      const idleMs = a.kind === 'npu' ? (idle.npuMsFor?.(expandEnv(ep.startCommand[0]), kind) ?? idle.npuMs) : idle.otherMs;
+      const idleMs = a.kind === 'npu' ? (idle.npuMsFor?.(expandEnv(ep.startCommand[0]), kind) ?? idle.npuMs) : (idle.otherMsFor?.(a) ?? idle.otherMs);
       // A server on another device (its endpoint's `turn`: the NPU 3720's embeddings, on the processor's graphics) is
       // used, and stopped, in that device's turn, not its accelerator's.
       const on = otherTurn(a, kind, accelerators);
@@ -738,15 +742,19 @@ export function pcReaper(o: { who?: string; logFile?: string; config?: () => Rec
  * The servers as config.json has them now, each with its accelerator's idle time, and the card kept out when Manor says so.
  * The NPU's: config.json's npuIdleStopMinutes for every NPU server when it gives one (0 never stops them), on any PC;
  * without it, each server's own by this PC's memory (`ramBytes`, os.totalmem() when not given): its route's minutes on
- * a PC with little memory, rules.json's elsewhere (npu-vendors.ts' npuIdleStopMinutes).
+ * a PC with little memory, rules.json's elsewhere (npu-vendors.ts' npuIdleStopMinutes). A card's and the processor's:
+ * config.json's gpuIdleStopMinutes when it gives one, on any PC; without it, on a PC with little memory, a card that
+ * shares the PC's memory by the NPU's rule (npu-vendors.ts' cardIdleStopMinutes), rules.json's for every other.
  */
 export function serversToReap(raw: Record<string, any>, o: { withNpu?: boolean; logDir?: string; ramBytes?: number | null } = {}): ReapedServer[] {
   const k = keeperSettings(raw);
   const accs = configuredAccelerators(raw);
   const given = raw?.npuIdleStopMinutes === k.npuIdleStopMinutes;
+  const gpuGiven = raw?.gpuIdleStopMinutes === k.gpuIdleStopMinutes;
   const ramBytes = o.ramBytes === undefined ? os.totalmem() : o.ramBytes;
   const npuMsFor = given ? undefined : (program: string, kind: EndpointKind) => npuIdleStopMinutes({ program, kind: kind === 'rerank' ? 'chat' : kind, ramBytes, otherwise: k.npuIdleStopMinutes }) * 60_000;
-  return reapedServers(accs, o.logDir, { npuMs: k.npuIdleStopMinutes * 60_000, otherMs: k.gpuIdleStopMinutes * 60_000, npuMsFor }, undefined, { keepGpuOut: gpuKeptOut(accs, o.withNpu ?? gpuWithNpu().on) });
+  const otherMsFor = gpuGiven ? undefined : (a: Accelerator) => (a.kind === 'gpu' ? cardIdleStopMinutes({ memoryGb: a.memoryGb, ramBytes, otherwise: k.gpuIdleStopMinutes }) * 60_000 : undefined);
+  return reapedServers(accs, o.logDir, { npuMs: k.npuIdleStopMinutes * 60_000, otherMs: k.gpuIdleStopMinutes * 60_000, npuMsFor, otherMsFor }, undefined, { keepGpuOut: gpuKeptOut(accs, o.withNpu ?? gpuWithNpu().on) });
 }
 
 // ------------------------------------------------------------------------------------------------
