@@ -683,6 +683,8 @@ export function validateKeeperConfig(raw: unknown): string[] {
     const v = r[key];
     if (v !== undefined && !(Number.isInteger(v) && v >= rule.min && v <= rule.max)) problems.push(`${key} (${rule.what}) must be a whole number from ${rule.min} to ${rule.max}`);
   }
+  // false puts the NPU server's own file back where the kit patches it (npu-patch.ts); true, or none, lets it.
+  if (r.npuPatch !== undefined && typeof r.npuPatch !== 'boolean') problems.push("npuPatch (whether the kit's build of the NPU server's file may replace its own) must be true or false");
   return problems;
 }
 

@@ -9,6 +9,7 @@ import { withLock } from './lock.ts';
 import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { lineSnapshot, lineState, LockTimeout, QueueFull, queueDirFor, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
+import { patchNpu } from './npu-patch.ts';
 import { refreshNpu, whatAnswers } from './npu-refresh.ts';
 import { cardIdleStopMinutes, NPU_CATALOG, npuIdleStopMinutes, smallPc } from './npu-vendors.ts';
 import { powershell, psQuote } from './ps.ts';
@@ -928,7 +929,7 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
     const on = npu ? otherTurn(npu, 'embed', accs) : null;
     return on ? kitLockDirsOf({ id: on.id, slots: on.slots }) : [];
   };
-  npuRefresh = refreshNpu({
+  const shared = {
     kit: kitVersion(),
     configFile: acceleratorConfigFile(),
     tools: toolsHome(),
@@ -946,12 +947,12 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
           return !l.held && !l.waiting && Date.now() - lastActivityMs(d) >= NPU_REFRESH_QUIET_MS;
         }),
     // A first compile with a new command can take minutes: the turn isn't taken as a dead holder's meanwhile.
-    withTurn: (fn) => {
+    withTurn: <T>(fn: () => Promise<T>) => {
       const e = embedDirs();
       const who = o.who ?? 'keeper';
       return reaperTurn(dirs, () => (e.length ? reaperTurn(e, fn, who, 40 * 60_000) : fn()), who, 40 * 60_000);
     },
-    stopServer: async (program, base) => {
+    stopServer: async (program: string, base: string) => {
       for (const p of await serverProcesses(program, base)) {
         try {
           process.kill(p.pid);
@@ -959,7 +960,11 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
       }
       for (let i = 0; i < 40 && (await serverProcesses(program, base)).length; i++) await sleep(250);
     },
-    answering: (base) => whatAnswers(base),
+    answering: (base: string) => whatAnswers(base),
+    log: (line: string) => logLine(logFile, line),
+  };
+  npuRefresh = refreshNpu({
+    ...shared,
     testChat: (e) => {
       logLine(serverLog, `the NPU's refresh (kit ${kitVersion()}) tests ${e.chat?.model}: ${e.chat?.startCommand?.join(' ')}`);
       return testNpuEntry(e, { held: true, logFile: serverLog });
@@ -969,10 +974,21 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
       return testNpuEmbed(e, { dims, held: true, logFile: serverLog });
     },
     serverLog,
-    log: (line) => logLine(logFile, line),
   })
     .then(() => {})
     .catch((e: any) => logLine(logFile, `the NPU's command couldn't be looked at: ${e?.message ?? e}`))
+    // Then its server's patched file (npu-patch.ts), tested with the command the refresh left: its own look, its own record.
+    .then(() =>
+      patchNpu({
+        ...shared,
+        test: (e) => {
+          logLine(serverLog, `the NPU's patch (kit ${kitVersion()}) tests ${e.chat?.model}: ${e.chat?.startCommand?.join(' ')}`);
+          return testNpuEntry(e, { held: true, logFile: serverLog, seeRed: true });
+        },
+      }),
+    )
+    .then(() => {})
+    .catch((e: any) => logLine(logFile, `the NPU server's patch couldn't be looked at: ${e?.message ?? e}`))
     .finally(() => (npuRefresh = null));
 }
 
