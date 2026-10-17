@@ -5,7 +5,7 @@ import path from 'node:path';
 import { locksDir } from './lock.ts';
 import { manorHome } from './manor.ts';
 import { pidAlive } from './npu-queue.ts';
-import { AGENTS_AT_ONCE, CEILING_CAP } from './pace.ts';
+import { AGENTS_AT_ONCE, CEILING_CAP, CEILING_ENV, ceilingCap } from './pace.ts';
 import { powershell, psQuote } from './ps.ts';
 import { currentWork } from './work-tasks.ts';
 
@@ -244,7 +244,9 @@ export interface Paced {
 /**
  * The command `file args` at the checks pace: through the launcher with its limits (checksPaceCap(), checksMemory(), a
  * turn of checksAtOnce()), or as it is under node --test (no cap) or when the launcher can't be had. The environment
- * keeps .NET's build servers from staying behind in the job (the job ends what is left in it once its runs are done).
+ * keeps .NET's build servers from staying behind in the job (the job ends what is left in it once its runs are done),
+ * and gives the launcher the manor's ceiling (CEILING_ENV, kit 2.78.7), the job the PC's check runs share with the
+ * agents and the model servers.
  * A `node --test` runs as many test files at once as the cap has room for (pacedTestConcurrency), and every command is
  * told how much slower it runs (CHECKS_SLOWER_ENV). Never throws.
  */
@@ -265,7 +267,7 @@ export async function pacedCommand(file: string, args: string[], o: { home?: str
   return {
     file: exe,
     args: [checksLimits(cap, checksMemory(), checksAtOnce(o.home)), file, ...testArgs],
-    env: { MSBUILDDISABLENODEREUSE: '1', [CHECKS_SLOWER_ENV]: String(slower), [CHECKS_RUNS_ENV]: checksRunsDir(), [CHECKS_WHO_ENV]: checksWho(file, args, o.what, APP.id) },
+    env: { MSBUILDDISABLENODEREUSE: '1', [CHECKS_SLOWER_ENV]: String(slower), [CHECKS_RUNS_ENV]: checksRunsDir(), [CHECKS_WHO_ENV]: checksWho(file, args, o.what, APP.id), [CEILING_ENV]: String(ceilingCap(env)) },
     slower,
     waitMs: CHECKS_TURN_MS,
   };

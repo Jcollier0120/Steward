@@ -5,6 +5,7 @@ import { ago } from './page.ts';
 import { duty, setDuty, type Duty } from './duty.ts';
 import { licenseNow, licensePing, TRIAL_ENDED_TEXT } from './license-check.ts';
 import { namedBuilt, namedId } from './named.ts';
+import { CEILING_ENV, ceilingCap } from './pace.ts';
 import { dataFile, readJson } from './store.ts';
 
 /**
@@ -109,6 +110,9 @@ export async function open(cliFile: string, opts: { quiet?: boolean } = {}): Pro
     // The data folder, not the program's: Windows won't move a folder that is a process's current folder
     // (or its children's, like PowerShell's), and an install swaps the program's folder.
     cwd: dataDir,
+    // The launcher puts the page in the manor's ceiling (kit 2.78.7; named.cs), and gentle.ts an agent it didn't
+    // start; Manor's own page stays out of it (gentle.ts keepResponsive()).
+    env: { ...process.env, [CEILING_ENV]: String(APP.id === 'manor' ? 0 : ceilingCap()) },
   });
   child.unref();
   for (let i = 0; i < 40; i++) {

@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.78
+
+**The 85% limit now holds for everything the manor runs at once, not for each part on its own. And the NPU check and the NPU benchmark measure the local AI's server as the agents get it.**
+
+### What changed
+
+- The agents, the checks they run and the AI model servers were each held to 85% of the processor, but separately, so all three busy at once could still take the whole PC. Now they share one 85% limit, so Windows and you always keep at least 15%, however busy the manor is. Manor's own page stays outside it, so it stays quick. On an 18-thread laptop with all three busy at once, the PC went from 100% busy to 89%.
+- The NPU check and the NPU benchmark start the NPU's AI server themselves, to measure it. They used to start it with no limit at all. Now they start it the way the agents' own servers start: with every other AI model server, held together to 85% of the processor. So a benchmark's numbers are the speeds the agents get. On an AMD PC, FastFlowLM ran just as fast within the limit as without it.
+- This Steward hands out kit 2.78.7, which brings this to every agent.
+
+### Before you update
+
+- On a busy hour, with agents, checks and AI servers all working at once, the manor's work may take a little longer than before: it now gets 85% of the processor together, where it could take all of it. Each agent joins the shared limit when it next starts.
+- Nothing: it updates itself as usual. A benchmark run after the update is measured within the limit, so on a PC whose AI server leans on the processor, it may score a little lower than the same PC did before.
+
 ## 0.36.73
 
 **A build tests the kit once: kit pull requests go last, all together, in one trial on the agents, and a trial's result stays with the kit it tried.**

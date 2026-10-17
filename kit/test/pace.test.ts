@@ -156,6 +156,44 @@ test('on Windows, a process set gentle and back: efficiency mode, disk priority 
   }
 });
 
+test("on Windows, with the manor's ceiling, an agent's job is made inside it (kit 2.78.7)", { skip: process.platform !== 'win32' }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { readFileSync: read } = await import('node:fs');
+  const { powershell, stopPowerShellWorker } = await import('./fixture/src/kit/ps.ts');
+  const source = read(new URL('./fixture/src/kit/gentle.cs', import.meta.url), 'utf8');
+  const dll = path.join(home, 'gentle-test.dll');
+  const ceiling = `kit-test-ceiling-${process.pid}`;
+  const was = process.env.KIT_CEILING_JOB_NAME;
+  // A worker of its own, started with the test's ceiling's name: the helper reads it from the worker's environment.
+  stopPowerShellWorker();
+  process.env.KIT_CEILING_JOB_NAME = ceiling;
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 900000)'], { stdio: 'ignore', windowsHide: true });
+  try {
+    assert.equal((await powershell(gentleScript(child.pid!, false, CEILING_CAP, dll, source, 9000), { timeoutMs: 120_000 })).trim(), 'eco io cap worker');
+    const inJobs = (await powershell(`Add-Type @'
+using System; using System.Runtime.InteropServices;
+public static class GentleTestJob {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr OpenJobObject(uint access, bool inherit, string name);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsProcessInJob(IntPtr p, IntPtr job, out bool result);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  public static string In(int pid, string name) {
+    IntPtr j = OpenJobObject(0x4, false, name); if (j == IntPtr.Zero) return "no job";
+    IntPtr p = OpenProcess(0x1000, false, pid); bool r = false; bool ok = p != IntPtr.Zero && IsProcessInJob(p, j, out r);
+    if (p != IntPtr.Zero) CloseHandle(p); CloseHandle(j); return ok ? r.ToString() : "unknown";
+  }
+}
+'@
+[GentleTestJob]::In(${child.pid}, 'Local\\${ceiling}') + ' ' + [GentleTestJob]::In(${child.pid}, 'Local\\Castellan-pace-${child.pid}')`, { timeoutMs: 60_000 })).trim();
+    assert.equal(inJobs, 'True True', "in the ceiling, and in its own job inside it");
+  } finally {
+    child.kill();
+    stopPowerShellWorker();
+    if (was === undefined) delete process.env.KIT_CEILING_JOB_NAME;
+    else process.env.KIT_CEILING_JOB_NAME = was;
+  }
+});
+
 test("agents at once: Manor's agentsAtOnce, else two at a gentle pace and four at a full one; 0 lifts the line", () => {
   const none = path.join(home, 'no-manor');
   assert.deepEqual([agentsAtOnce('gentle', none, {}), agentsAtOnce('full', none, {})], [AGENTS_AT_ONCE.gentle, AGENTS_AT_ONCE.full]);
