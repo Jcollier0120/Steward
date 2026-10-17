@@ -4,6 +4,22 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## Unreleased (its version needs claiming on the main laptop)
 
+**llama-server keeps no RAM cache of earlier prompts. By default each server keeps up to 8 GB of them in the PC's memory, beside what its card holds, for prompts that start the same way, and the manor's rarely do. On a Core Ultra 5 225U's Intel Graphics, the chat server held 3.59 GB instead of 4.54 GB after 34 of the manor's kind of requests, and gave the same answers a little faster. A PC set up before gets it at the keeper's next look, each server at its next start; nothing to download, nothing to set up again.**
+
+### What's new
+
+- **setup.ts:**
+  - `NO_RAM_CACHE`: `{ LLAMA_ARG_CACHE_RAM: '0' }`, the environment that turns the cache off. It goes in the environment, not the command, because a build from before `--cache-ram` ignores the variable but refuses the flag.
+  - `withoutRamCache(raw)`: config.json with it in the `env` of each llama-server on the cards and the processor that lacks it, and the accelerators changed. A server that already says how much to cache (`--cache-ram`, `-cram`, or the variable: a person's) is left as it is, and so is a command that isn't llama-server's, an NPU's among them.
+  - `refreshCardVision` adds it too, once for each kit version, as it adds the vision flag. Its log says which accelerators it changed, and a person who takes it out keeps it out until the next kit.
+
+### What changed
+
+- **Setup** (`acceleratorEntry`) writes it into the `env` of every llama-server it sets up: chat, vision, embeddings and a reranker.
+- **spec/ACCELERATORS.md** says why, with the measurements.
+
+## Unreleased (its version needs claiming on the main laptop)
+
 **`tools/kit.ts` says when a kit.json pin is for development only. It fills from a kit tree (`--from`, or the sibling `..\Steward\kit`) at the version kit.json pins, as before, and then warns if that kit has no release. A build releases one kit, the top of the stack of every kit PR ready then, so most versions on the Steward's main are never released. Commit main's pin instead, and the build's kit reaches the PR by catch-up. Nothing for an agent to do: the new tools/kit.ts comes with the kit.**
 
 ### What changed

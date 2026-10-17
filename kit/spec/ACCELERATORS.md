@@ -114,6 +114,15 @@ Every answer was right both ways: a bold heading quoted word for word, a count o
 
 A PC set up before gets the flag, the cap and the time at the keeper's next look (setup.ts' `refreshCardVision`): once for each kit version, recorded in `card-refresh.json` beside config.json. It adds each one missing from such a card's llama-server vision (the flag after the projector, the cap after the flag), so a cap or time a person set stays theirs; it leaves alone a command that keeps its encoder on the card (`--mmproj-offload`), and starts and stops nothing. A person who takes one out keeps it out until the next kit. Intel's cards with memory of their own (Arc A and B) and other makers' integrated graphics weren't measured, and keep their encoder on the card, uncapped, on the rules' time.
 
+**No RAM cache of earlier prompts.** llama-server keeps the states of earlier prompts in the PC's memory, up to 8,192 MiB for each server by default (`--cache-ram`), beside what its card holds, so that a later prompt starting the same way skips reading that start again. The manor's agents share little more than a short system prompt, and each slot still reuses its own last prompt without it. Setup writes `LLAMA_ARG_CACHE_RAM=0` into the `env` of every llama-server it sets up on a card or the processor (setup.ts' `NO_RAM_CACHE`): in the environment, because a build from before the flag ignores it, where it would refuse the flag and not start. On a Core Ultra 5 225U's Intel Graphics (b11669, 2026-10-16), 34 of the manor's kind of requests through the chat server, the same ones each way:
+
+| The chat server | Its memory after them | The 34 requests took | Answers |
+|---|---|---|---|
+| As set up before | 4.54 GB | 118 s | |
+| `LLAMA_ARG_CACHE_RAM=0` | 3.59 GB | 111 s | the same |
+
+A PC set up before gets it at the same look (`withoutRamCache`), each server at its next start. A server whose command or environment already says how much to cache (`--cache-ram`, `-cram`, `LLAMA_ARG_CACHE_RAM`) keeps it, and so does a server that isn't llama-server, an NPU's among them.
+
 ## The lock and the line, per accelerator
 
 Reeve's `docs/NPU-QUEUE.md` protocol, unchanged in its rules, once per accelerator:

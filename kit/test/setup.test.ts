@@ -318,7 +318,9 @@ test('entries: llama-server pinned to its device, ports, models, cap and slots; 
     baseUrl: 'http://127.0.0.1:18191',
     model: 'qwen3-4b-instruct-2507',
     startCommand: [portablePath(exe), '--host', '127.0.0.1', '--port', '18191', '--device', 'GPUOpenCL', '-ngl', '99', '-m', portablePath(path.join(home, 'models', 'Qwen3-4B-Instruct-2507-Q4_K_M.gguf')), '-c', '8192', '--parallel', '1', '--jinja', '--alias', 'qwen3-4b-instruct-2507'],
+    env: { LLAMA_ARG_CACHE_RAM: '0' },
   });
+  assert.ok(['vision', 'embed'].every((k) => (e as any)[k].env.LLAMA_ARG_CACHE_RAM === '0'), 'no RAM cache of earlier prompts on any of its servers');
   assert.ok(e.vision!.startCommand!.includes('--mmproj'));
   assert.ok(e.vision!.startCommand!.some((s) => s.endsWith('mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf')));
   assert.ok(!e.vision!.startCommand!.includes('--no-mmproj-offload'), "the Adreno's encoder stays on the card");
@@ -583,6 +585,8 @@ test("the keeper's look adds it once for each kit version: config.json written, 
   assert.ok(vision().includes('--no-mmproj-offload') && vision().includes('--image-max-tokens'));
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).accelerators[1].vision.timeouts, { requestBaseMs: 90_000 });
   assert.match(log[0], /^gpu-intel-r-graphics: vision now encodes pictures on the processor, at most 1024 tokens each, with 90 s a request \(kit 2\.80\.0\)/);
+  assert.match(log[1], /^gpu-intel-r-graphics: llama-server keeps no RAM cache of earlier prompts from its next start \(kit 2\.80\.0\)/);
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).accelerators[1].chat.env.LLAMA_ARG_CACHE_RAM, '0');
   assert.deepEqual(readCardRefresh(file), { kit: '2.80.0', at: '2026-10-16T03:00:00.000Z', changed: [INTEL_ID] });
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).accelerators[0].chat.startCommand[0], 'C:\\o\\ovms.exe', "the NPU's entry as it was");
 
@@ -593,7 +597,7 @@ test("the keeper's look adds it once for each kit version: config.json written, 
   assert.ok(!vision().includes('--no-mmproj-offload'));
   assert.deepEqual(look('2.81.0'), [INTEL_ID]);
   assert.ok(vision().includes('--no-mmproj-offload'));
-  assert.equal(log.length, 2);
+  assert.equal(log.length, 4, 'two lines a look that changed both');
 
   // Nothing to change: recorded, config.json untouched.
   const before = readFileSync(file, 'utf8');
@@ -610,7 +614,8 @@ test("the keeper's look adds it once for each kit version: config.json written, 
   assert.deepEqual(refreshCardVision({ configFile: file, kit: '2.84.0', validate: () => ['nope'], log: (l) => log.push(l) }), []);
   assert.ok(!vision().includes('--no-mmproj-offload'));
   assert.deepEqual(readCardRefresh(file)!.problems, ['nope']);
-  assert.match(log.at(-1)!, /keeps its command and time: config\.json wasn't written: nope/);
+  assert.match(log.at(-2)!, /^the vision of gpu-intel-r-graphics keeps its command and time: config\.json wasn't written: nope$/);
+  assert.match(log.at(-1)!, /^the llama-servers of gpu-intel-r-graphics keep their environments: config\.json wasn't written: nope$/);
   assert.ok(existsSync(cardRefreshFile(file)));
 });
 
@@ -668,23 +673,53 @@ test("the keeper's card look brings the embedding server down too, once for each
   // Not written when it doesn't validate: the record and the log say why, and the next kit tries again.
   assert.deepEqual(look('2.79.0', () => ['nope']), []);
   assert.ok(embed().startCommand.includes('8192'));
-  assert.match(log.at(-1)!, /^the embedding server of gpu-amd-radeon-860m-graphics keeps its command: config\.json wasn't written: nope$/);
+  assert.match(log.at(-2)!, /^the embedding server of gpu-amd-radeon-860m-graphics keeps its command: config\.json wasn't written: nope$/);
+  assert.match(log.at(-1)!, /^the llama-servers of gpu-amd-radeon-860m-graphics keep their environments: /);
 
   assert.deepEqual(look('2.80.0'), [AMD_ID]);
   assert.ok(embed().startCommand.includes('4096') && embed().startCommand.includes('512') && !embed().startCommand.includes('8192'));
   assert.equal(embed().maxContextTokens, 1365);
-  assert.match(log.at(-1)!, /^gpu-amd-radeon-860m-graphics: the embedding server now starts at -c 4096 -ub 512, its requests capped at 1365 tokens \(kit 2\.80\.0\)/);
+  assert.deepEqual(embed().env, { LLAMA_ARG_CACHE_RAM: '0' }, 'and no RAM cache');
+  assert.match(log.at(-2)!, /^gpu-amd-radeon-860m-graphics: the embedding server now starts at -c 4096 -ub 512, its requests capped at 1365 tokens \(kit 2\.80\.0\)/);
   assert.equal(log.filter((l) => /vision/.test(l)).length, 0, 'no vision to change on this card');
   assert.deepEqual(readCardRefresh(file), { kit: '2.80.0', at: '2026-10-16T22:00:00.000Z', changed: [AMD_ID] });
   assert.deepEqual(look('2.80.0'), [], 'this kit looked already');
 
-  // An Intel card with both: one write, a line for each, the card counted once.
+  // An Intel card with both: one write, a line for each (and one for the RAM cache), the card counted once.
   writeFileSync(file, JSON.stringify({ ...intelConfig(), accelerators: [npuEntry, { ...intelConfig().accelerators[1], embed: oldEmbed() }] }, null, 2));
   const before = log.length;
   assert.deepEqual(look('2.81.0'), [INTEL_ID]);
-  assert.equal(log.length, before + 2);
+  assert.equal(log.length, before + 3);
   const card = JSON.parse(readFileSync(file, 'utf8')).accelerators[1];
   assert.ok(card.vision.startCommand.includes('--no-mmproj-offload') && card.embed.startCommand.includes('512'));
+});
+
+test("a PC set up before: each llama-server on its cards and processor keeps no RAM cache of earlier prompts; a person's own setting stays", async () => {
+  const { withoutRamCache } = await import('./fixture/src/kit/setup.ts');
+  const raw = intelConfig();
+  const r = withoutRamCache(raw);
+  assert.deepEqual(r.changed, [INTEL_ID]);
+  const card = r.raw.accelerators[1];
+  for (const k of ['chat', 'vision', 'embed'] as const) if (card[k]?.startCommand) assert.deepEqual(card[k].env, { LLAMA_ARG_CACHE_RAM: '0' }, k);
+  assert.deepEqual(card.vision.startCommand, (raw.accelerators[1] as any).vision.startCommand, 'its commands as they were');
+  assert.deepEqual(r.raw.accelerators[0], npuEntry, "the NPU's OpenVINO Model Server: not llama-server");
+  assert.equal((raw.accelerators[1] as any).chat.env, undefined, 'the config read is not changed in place');
+  assert.deepEqual(withoutRamCache(r.raw).changed, [], 'again: nothing to do');
+
+  const chat = (ep: Record<string, unknown>, more: Record<string, unknown> = {}) => withoutRamCache({ accelerators: [{ id: 'cpu', kind: 'cpu', slots: 1, maxContextTokens: 4096, quirks: [], chat: { baseUrl: 'http://127.0.0.1:18194', model: 'q', ...ep }, ...more }] });
+  const server = ['C:\\s\\llama-server.exe', '--port', '18194', '-m', 'C:\\m\\q.gguf'];
+  assert.deepEqual(chat({ startCommand: server }).raw.accelerators[0].chat.env, { LLAMA_ARG_CACHE_RAM: '0' }, 'the processor too');
+  assert.deepEqual(chat({ startCommand: server, env: { GGML_VK_DISABLE_COOPMAT: '1' } }).raw.accelerators[0].chat.env, { GGML_VK_DISABLE_COOPMAT: '1', LLAMA_ARG_CACHE_RAM: '0' }, 'its environment kept');
+  // A person's own: left as it is.
+  assert.deepEqual(chat({ startCommand: [...server, '--cache-ram', '2048'] }).changed, []);
+  assert.deepEqual(chat({ startCommand: [...server, '-cram', '-1'] }).changed, []);
+  assert.deepEqual(chat({ startCommand: [...server, '--cache-ram=512'] }).changed, []);
+  assert.deepEqual(chat({ startCommand: server, env: { llama_arg_cache_ram: '4096' } }).changed, []);
+  // Not llama-server's, or not started by the manor: left alone.
+  assert.deepEqual(chat({ startCommand: ['C:\\o\\ollama.exe', 'serve'] }).changed, []);
+  assert.deepEqual(chat({}).changed, [], 'no command: started by someone else');
+  assert.deepEqual(chat({ startCommand: server }, { id: 'npu', kind: 'npu' }).changed, [], "an NPU's server is its route's");
+  assert.deepEqual(withoutRamCache({ chatEndpoint: { baseUrl: 'http://127.0.0.1:18181' } }).changed, [], 'an old config with no list');
 });
 
 test('a reranker: set up only when asked for, as an add-on that keeps what its accelerator serves, on its own port; the keeper keeps it', async () => {

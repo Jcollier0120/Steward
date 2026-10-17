@@ -288,6 +288,16 @@ export const PICTURE_TOKENS = 1024;
  */
 export const VISION_ON_PROCESSOR_TIMEOUTS = { requestBaseMs: 90_000 } as const;
 
+/**
+ * llama-server's RAM cache of earlier prompts' states, turned off. By default it keeps up to 8,192 MiB of them in the PC's
+ * memory, for each server, beside what the card holds. On a Core Ultra 5 225U's Intel Graphics (b11669, 2026-10-16), the
+ * chat server held 4.54 GB after 34 of the manor's kind of requests with it and 3.59 GB without, with the same answers,
+ * in 111 s rather than 118 s. The agents share little more than a short system prompt, and a slot still reuses its own
+ * last prompt. It's given in the server's environment (LLAMA_ARG_CACHE_RAM): a build from before the flag ignores that,
+ * where it would refuse `--cache-ram` and not start.
+ */
+export const NO_RAM_CACHE: Readonly<Record<string, string>> = { LLAMA_ARG_CACHE_RAM: '0' };
+
 /** A server's own flags after its model, by kind: what it serves, its context and batch, one request at a time but chat's. */
 function kindFlags(kind: EndpointKind, e: Pick<EntryInput, 'id' | 'memoryGb' | 'device' | 'slots' | 'maxContextTokens'>, mmproj: string | undefined, model: string): string[] {
   switch (kind) {
@@ -396,7 +406,7 @@ export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
     if (!m || !port) continue;
     const model = MODEL_SPECS[kind].model;
     const common = ['--host', '127.0.0.1', '--port', String(port), ...pin, '-m', portablePath(m.path)];
-    a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand: [server, ...common, ...kindFlags(kind, e, m.mmproj, model)] };
+    a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand: [server, ...common, ...kindFlags(kind, e, m.mmproj, model)], env: { ...NO_RAM_CACHE } };
     if (kind === 'embed') a.embed!.maxContextTokens = Math.min(EMBED_CAP, e.maxContextTokens);
     if (kind === 'vision' && encodesOnProcessor(e)) a.vision!.timeouts = { ...VISION_ON_PROCESSOR_TIMEOUTS };
   }
@@ -1393,13 +1403,40 @@ export function withSmallerEmbedServer(raw: Record<string, any>): { raw: Record<
 }
 
 /**
- * The cards' vision and embedding commands brought up to this kit's (withEncoderOnProcessor, withSmallerEmbedServer)
- * on a PC an older kit set up: setup writes them once, so the keeper's look does it, once for each kit version, as the
- * NPU's refresh does (npu-refresh.ts), and a kit never redoes what a newer one looked at. Nothing is started or stopped:
- * on the cards it's for, a vision command without the flag never stays up, a server running takes the cap or its
- * smaller context at its next start, and an agent takes the time or the embedding cap when it next reads config.json.
- * A person who takes the flag, the cap or the time out again, or sets the embedding server's context back, keeps it
- * until the next kit. The cards changed; none when config.json couldn't be read (the next look tries).
+ * config.json with NO_RAM_CACHE in the environment of each llama-server on the cards and the processor, where an older
+ * kit's setup didn't give it. A server whose command or environment already says what it caches (`--cache-ram`,
+ * `-cram`, LLAMA_ARG_CACHE_RAM: a person's) is left as it is, and so is a command that isn't llama-server's.
+ */
+export function withoutRamCache(raw: Record<string, any>): { raw: Record<string, any>; changed: string[] } {
+  if (!Array.isArray(raw.accelerators)) return { raw, changed: [] };
+  const changed: string[] = [];
+  const accelerators = raw.accelerators.map((a: any) => {
+    if ((a?.kind !== 'gpu' && a?.kind !== 'cpu') || typeof a.id !== 'string') return a;
+    let next = a;
+    for (const k of ENDPOINT_KINDS) {
+      const ep = a[k];
+      const cmd: unknown = ep?.startCommand;
+      if (!Array.isArray(cmd) || !cmd.every((s) => typeof s === 'string') || !/^llama-server(\.exe)?$/i.test(path.win32.basename(cmd[0] ?? ''))) continue;
+      if (cmd.some((s) => s === '-cram' || s === '--cache-ram' || s.startsWith('--cache-ram='))) continue;
+      const env = ep.env && typeof ep.env === 'object' && !Array.isArray(ep.env) ? ep.env : {};
+      if (Object.keys(env).some((n) => n.toUpperCase() === 'LLAMA_ARG_CACHE_RAM')) continue;
+      next = { ...next, [k]: { ...ep, env: { ...env, ...NO_RAM_CACHE } } };
+    }
+    if (next !== a) changed.push(a.id);
+    return next;
+  });
+  return changed.length ? { raw: { ...raw, accelerators }, changed } : { raw, changed };
+}
+
+/**
+ * The cards' vision and embedding commands (withEncoderOnProcessor, withSmallerEmbedServer) and their servers' RAM cache
+ * (withoutRamCache) brought up to this kit's on a PC an older kit set up: setup writes them once, so the keeper's look
+ * does it, once for each kit version, as the NPU's refresh does (npu-refresh.ts), and a kit never redoes what a newer
+ * one looked at. Nothing is started or stopped: on the cards it's for, a vision command without the flag never stays
+ * up, a server running takes the cap, its smaller context or its environment at its next start, and an agent takes the
+ * time or the embedding cap when it next reads config.json. A person who takes the flag, the cap, the time or the
+ * environment out again, or sets the embedding server's context back, keeps it until the next kit. The cards and
+ * processor changed; none when config.json couldn't be read (the next look tries).
  */
 export function refreshCardVision(o: { configFile: string; kit: string; now?: () => number; validate?: (raw: unknown) => string[]; log: (line: string) => void }): string[] {
   const had = readCardRefresh(o.configFile);
@@ -1408,13 +1445,15 @@ export function refreshCardVision(o: { configFile: string; kit: string; now?: ()
   if (file.error) return [];
   const vision = withEncoderOnProcessor(file.raw);
   const embed = withSmallerEmbedServer(vision.raw);
-  const { raw } = embed;
-  const changed = [...new Set([...vision.changed, ...embed.changed])];
+  const cache = withoutRamCache(embed.raw);
+  const { raw } = cache;
+  const changed = [...new Set([...vision.changed, ...embed.changed, ...cache.changed])];
   const saved = changed.length ? writeConfigFile(o.configFile, raw, o.validate ?? validateKeeperConfig) : { problems: [] };
   if (saved.problems.length) {
     const why = `config.json wasn't written: ${saved.problems.join('; ')}`;
     if (vision.changed.length) o.log(`the vision of ${vision.changed.join(', ')} keeps its command and time: ${why}`);
     if (embed.changed.length) o.log(`the embedding server of ${embed.changed.join(', ')} keeps its command: ${why}`);
+    if (cache.changed.length) o.log(`the llama-servers of ${cache.changed.join(', ')} keep their environments: ${why}`);
   } else {
     if (vision.changed.length)
       o.log(
@@ -1424,6 +1463,7 @@ export function refreshCardVision(o: { configFile: string; kit: string; now?: ()
       o.log(
         `${embed.changed.join(', ')}: the embedding server now starts at -c ${EMBED_CONTEXT} -ub 512, its requests capped at ${EMBED_CAP} tokens (kit ${o.kit}): about 0.6 GB less of the graphics' memory, the same vectors, from its next start`,
       );
+    if (cache.changed.length) o.log(`${cache.changed.join(', ')}: llama-server keeps no RAM cache of earlier prompts from its next start (kit ${o.kit}): up to 8 GB a server by default, for little gain here`);
   }
   const record: CardRefreshRecord = { kit: o.kit, at: new Date((o.now ?? Date.now)()).toISOString(), ...(changed.length && !saved.problems.length ? { changed } : {}), ...(saved.problems.length ? { problems: saved.problems } : {}) };
   try {
