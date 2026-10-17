@@ -536,16 +536,28 @@ export function runsRoute(entry: { chat?: { startCommand?: string[] } } | undefi
 // Per generation, memory and calibration
 
 /**
+ * Whether a route's models are its own as npu-vendors.json has them (the same ids, in order), not a caller's. A route
+ * the catalog doesn't ship (a test's) counts as its own.
+ */
+function ownModels(route: NpuRoute): boolean {
+  const shipped = Object.values(NPU_CATALOG.routes).find((r) => r.server === route.server && r.arch === route.arch);
+  return !shipped || (shipped.models.length === route.models.length && shipped.models.every((m, i) => m.id === route.models[i].id));
+}
+
+/**
  * The route as it runs on one generation: the generation's own timeouts, caps and server arguments over the route's
  * (Meteor Lake's NPU 3720, about a quarter of Lunar Lake's speed, gets more time and a shorter compiled prompt); on
  * UNKNOWN_GENERATION, the route's most cautious (unknownGeneration). The generation's own models in the route's place
  * (a Snapdragon X2's Qwen3-VL-2B), and on a PC with little memory (`small`: smallPc of its memory) its smallPc models
- * over those. The route itself when the generation has none of these, or isn't the route's.
+ * over those. A caller's own models stay (the Smith's try of another model): a generation's go only in place of the
+ * route's own, as npu-vendors.json has them (ownModels). The route itself when the generation has none of these, or
+ * isn't the route's.
  */
 export function routeFor(route: NpuRoute, generation: string | null | undefined, small = false): NpuRoute {
   const g = generationOf(route, generation);
-  if (g?.models) route = { ...route, models: g.models };
-  if (small && g?.smallPc) route = { ...route, models: g.smallPc.models };
+  const own = ownModels(route);
+  if (own && g?.models) route = { ...route, models: g.models };
+  if (own && small && g?.smallPc) route = { ...route, models: g.smallPc.models };
   if (!g || (!g.timeouts && !g.caps && !g.maxContextTokens && !g.args && !g.embedArgs && !g.memoryGb)) return route;
   const replaced = (args: string[], values: Record<string, string> | undefined) => {
     const serve = [...args];

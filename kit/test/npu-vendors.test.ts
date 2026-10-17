@@ -504,6 +504,11 @@ test("every Snapdragon X2 runs Qwen3-VL-2B, its pictures on the Adreno, whatever
   withSmall.generations['snapdragon-x2'].smallPc = { models: [tiny], basis: 'a test' };
   assert.equal(V.routeFor(withSmall, 'snapdragon-x2', true).models[0].id, 'a/tiny');
   assert.equal(V.routeFor(withSmall, 'snapdragon-x2').models[0].id, TWO_B);
+  // A caller's own models stay (the Smith's try of another model, as it builds its route): a generation's and a small
+  // PC's go only in place of the route's own.
+  const eight = { ...m, id: 'qualcomm/Qwen3-VL-8B-Instruct:W4A16' };
+  assert.equal(V.routeFor({ ...structuredClone(q), models: [eight] }, 'snapdragon-x2').models[0].id, eight.id);
+  assert.equal(V.routeFor({ ...structuredClone(withSmall), models: [eight] }, 'snapdragon-x2', true).models[0].id, eight.id);
   assert.ok(V.smallPc(16876666880) && !V.smallPc(51127103488) && !V.smallPc(0), "unknown memory isn't small");
 });
 
