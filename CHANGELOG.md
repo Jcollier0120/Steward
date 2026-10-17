@@ -2,6 +2,32 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.108
+
+**The Steward hands out kit 2.78.24: the local models take less of a PC's memory. Each llama.cpp server keeps no RAM cache of earlier prompts, and Intel's integrated graphics on a PC with under 32 GB answer chat and pictures from one Qwen3-VL-4B server, 5.0 GB where two servers took 8.5 GB.**
+
+### What changed
+
+- llama.cpp's servers each kept up to 8 GB of earlier prompts in the PC's memory, for prompts that start the same way, which the manor's rarely do. They keep none now. On a Core Ultra 5 225U the chat server held 3.59 GB instead of 4.54 GB after 34 requests, with the same answers.
+- On Intel's integrated graphics, whose memory is the PC's, chat runs on the vision server's Qwen3-VL-4B instead of on a Qwen3-4B server of its own, on a PC with under 32 GB. It got one of 18 text tasks wrong that Qwen3-4B got right. The smaller Qwen3-VL-2B misread the Smith's check picture, so it isn't used.
+- A PC set up before gets both at the keeper's next look once it has the kit. Nothing is downloaded or set up again, and the old chat server stops on its own after 5 minutes.
+
+## 0.36.105
+
+**An issue the Steward filed for a failed release closes by itself once that failure no longer stands, so the Wright isn't left stuck on it and Manor shows no alarm for it.**
+
+### What changed
+
+- **A staff member's failed-release issue closes once that failure is behind it.** Until now, the issue for "<name>'s release at <commit> fails" stayed open after the staff member released a later version. If the Wright had got stuck on it, Manor kept saying so for days. Now each round closes it as completed, in one of two cases:
+  - **It has released since.** The comment names the release, for example "Porter has released v1.4.2 from main since".
+  - **A newer commit's release failed too.** The comment links the newer failure's issue, which is the one to work on now.
+- **Nothing closes on missing information.** An issue stays open while the record of failed releases still names its commit, or when that record can't be read. It also stays open when the staff member's releases can't be listed, when no release has been made since the issue was filed (one waiting for the signing key, say), or when the staff member is no longer in Settings.
+- An issue someone already closed is forgotten quietly, as bump issues are.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Release issues left open from before close in the first round after the update, if their failure no longer stands.
+
 ## 0.36.98
 
 **The Steward runs your other PCs' checks: with the Seneschal on each PC, a PR check, whole suite or kit trial waiting for room on one runs on another of your PCs that has room, a PR's failure is tried once more on another PC before it counts, and the whole suite before a kit's release is shared out between them.**
