@@ -5,7 +5,7 @@ import { locksDir } from './lock.ts';
 import { powershell, psQuote } from './ps.ts';
 
 /**
- * A model server's working set handed back to Windows once its model has loaded (kit 2.78.27), for a server
+ * A model server's working set handed back to Windows once its model has loaded (kit 2.80.1), for a server
  * that holds much it never reads again: FastFlowLM 1.0.7 (accelerators.ts' trimmedOnceLoaded). It copies its model's
  * lookup tables into ordinary private memory, the token embeddings as a whole bf16 table, and reads one row of them a
  * token. Measured on a Ryzen AI 7 350 (16 GB), each model started fresh, warmed, then trimmed:

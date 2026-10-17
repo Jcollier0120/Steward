@@ -4,11 +4,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.113
 
-**The Steward hands out kit 2.78.27: FastFlowLM's working set is handed back to Windows once its model has loaded. That's about 3.6 GB of RAM for qwen3.5:2b and 6.4 GB for Gemma 4 E2B, decoding as fast as before.**
+**The Steward hands out kit 2.80.1: FastFlowLM's working set is handed back to Windows once its model has loaded. That's about 3.6 GB of RAM for qwen3.5:2b and 6.4 GB for Gemma 4 E2B, decoding as fast as before.**
 
 ### What changed
 
-- **Kit 2.78.27** (kit/CHANGELOG.md): a FastFlowLM server the kit starts has its working set emptied once its model has loaded (`working-set.ts`). Windows keeps those pages compressed, or in the pagefile, and reads back the few the server touches again. `KIT_SERVER_TRIM=0` turns it off.
+- **Kit 2.80.1** (kit/CHANGELOG.md): a FastFlowLM server the kit starts has its working set emptied once its model has loaded (`working-set.ts`). Windows keeps those pages compressed, or in the pagefile, and reads back the few the server touches again. `KIT_SERVER_TRIM=0` turns it off.
 - **Tests that passed only on some PCs, so a vouch from the maker's other PCs failed:**
   - `claims.test.ts`: the two tests of claims kept here now run as the maker's laptop (`makersPcForTests`), whatever PC runs them. On the maker's other PCs they were refused as one of Castellan's own repositories.
   - `signing.test.ts`: its releases find a Windows SDK signtool of the test's own. On a PC without the SDK, the hung-signtool test was told "signtool isn't installed" instead.
@@ -16,6 +16,20 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.112
+
+**Brings kit 2.79.1: on every staff page, the status pill sits beside the name, with the role on the line under them.**
+
+### What changed
+
+- **The status pill** ("On duty · next round in 5 min", "At the forge", "Off duty") moved up from the role's line to beside the staff member's name. The role has the line under them to itself, so it's cut short less often. When it is, hover over it to read it all.
+- **In a narrow window,** the pill goes under the name, and the role under the pill.
+- **The kit it hands out is 2.79.1** (kit/CHANGELOG.md): page.ts and the React shell. Nothing in the Steward's own code changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.79.1.
 
 ## 0.36.110
 
