@@ -1341,6 +1341,10 @@ export interface NpuRefreshRecord {
   at: string;
   did: 'set-up' | 'current' | 'refreshed' | 'failed' | 'needs-setup' | 'not-route' | 'no-npu';
   problems?: string[];
+  /** A `failed` look's: the tests this kit has made of the new command. */
+  tries?: number;
+  /** A `failed` look whose test failed for its server (npu-refresh.ts' serverFailed): a look from then on tests again. Without it, this kit doesn't. */
+  retryAt?: string;
 }
 
 export const npuRefreshFile = (configFile: string) => path.join(path.dirname(configFile), 'npu-refresh.json');
@@ -1557,9 +1561,9 @@ export function refreshCardVision(o: { configFile: string; kit: string; now?: ()
 /**
  * The embedding server's test request, as testNpuEntry's: in the NPU's turn, the server started if it isn't running,
  * then EMBED_TEST's three sentences, whose vectors must make sense (embedSanity). Problems in words; none when they do.
- * `held`: the caller holds the NPU's turn already (npu-refresh.ts).
+ * `held`: the caller holds the NPU's turn already (npu-refresh.ts). `logFile`, as testNpuEntry's.
  */
-export async function testNpuEmbed(e: AcceleratorEntry, o: { dims?: number; held?: boolean } = {}): Promise<string[]> {
+export async function testNpuEmbed(e: AcceleratorEntry, o: { dims?: number; held?: boolean; logFile?: string } = {}): Promise<string[]> {
   const ep = readAccelerator(e)?.embed;
   if (!ep?.baseUrl) return ['the entry has no embedding server'];
   const problems: string[] = [];
@@ -1567,7 +1571,7 @@ export async function testNpuEmbed(e: AcceleratorEntry, o: { dims?: number; held
     !!o.held,
     async () => {
       const s = { baseUrl: ep.baseUrl!, model: ep.model, startCommand: ep.startCommand, ...(ep.env ? { env: ep.env } : {}) };
-      await ensureServer(s, { waitMs: 120_000, readyMs: 5 * 60_000 });
+      await ensureServer(s, { waitMs: 120_000, readyMs: 5 * 60_000, ...(o.logFile ? { logFile: o.logFile } : {}) });
       const r = await postJson(s, '/v1/embeddings', { model: ep.model, input: EMBED_TEST }, 5 * 60_000, { loading: true });
       const rows = Array.isArray(r.json?.data) ? (r.json.data as { index?: number; embedding?: unknown }[]) : [];
       const vectors: unknown[] = [];
@@ -1682,9 +1686,11 @@ export async function measureNpu(e: AcceleratorEntry): Promise<NpuMeasuring | { 
  * XDNA 2, which kit 2.74.4 and before measured as a short answer, warm, and wrote timeouts five times too long from). Problems in
  * words; none when each answered. A model's first load on the NPU (OpenVINO compiles it) may take minutes, so it is
  * given 15, or `timeoutMs` (the NPU check's forced timeout). `held`: the caller holds the
- * NPU's turn already, and has stopped its servers, so the entry's own command answers (npu-refresh.ts).
+ * NPU's turn already, and has stopped its servers, so the entry's own command answers (npu-refresh.ts). `logFile` takes
+ * what a server it starts prints (ensureServer's): the NPU's refresh keeps one, since its test on WEASELDEV03 (kit
+ * 2.78.12, 2026-10-17) was refused and left nothing to say why.
  */
-export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number; held?: boolean; onReady?: (r: ServerReady) => void } = {}): Promise<string[]> {
+export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number; held?: boolean; onReady?: (r: ServerReady) => void; logFile?: string } = {}): Promise<string[]> {
   const acc = readAccelerator(e);
   if (!acc?.chat?.baseUrl) return ['the entry has no chat server'];
   const problems: string[] = [];
@@ -1696,8 +1702,11 @@ export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeo
     !!o.held,
     async () => {
       const chat = { baseUrl: acc.chat!.baseUrl!, model: acc.chat!.model, startCommand: acc.chat!.startCommand, ...(acc.chat!.env ? { env: acc.chat!.env } : {}) };
-      // Whether it was started for the test (setup's report times a cold start only then).
-      o.onReady?.(await ensureServer(chat, { waitMs: Math.min(120_000, limit), readyMs: limit }));
+      // Whether it was started for the test (setup's report times a cold start only then). Started whoever asks: as
+      // `o.onReady?.(await ensureServer(…))` (from kit 2.78.9, released in 2.78.12), a caller without onReady never
+      // started it, so the NPU's refresh, which stops the servers first, was refused on every PC.
+      const ready = await ensureServer(chat, { waitMs: Math.min(120_000, limit), readyMs: limit, ...(o.logFile ? { logFile: o.logFile } : {}) });
+      o.onReady?.(ready);
       if (acc.vision?.model) {
         const v = { ...chat, model: acc.vision.model };
         const img = testImage(o.dir ?? path.join(toolsHome(), 'servers', 'downloads'));

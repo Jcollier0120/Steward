@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.78.15
+## 2.78.21
 
 **The local models take less of a PC's memory. llama-server keeps no RAM cache of earlier prompts: by default each server keeps up to 8 GB of them in the PC's memory, beside what its card holds, for prompts that start the same way, and the manor's rarely do. On a Core Ultra 5 225U's Intel Graphics, the chat server held 3.59 GB instead of 4.54 GB after 34 of the manor's kind of requests, and gave the same answers a little faster. And Intel's integrated graphics on a PC with under 32 GB chat on their vision server: one Qwen3-VL-4B for both, 5.0 GB of the PC's memory where Qwen3-4B beside it made 8.5 GB. On text it is as fast and passes the Smith's checks, but it got one of 18 of the manor's kind of tasks wrong that Qwen3-4B got right. A PC set up before gets both at the keeper's next look; nothing to download, nothing to set up again.**
 
@@ -26,6 +26,38 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing. An agent that finds a server with `endpointFor` finds vision on chat's, as it always could. One that reads a card's `vision.baseUrl` itself finds none on such a card now.
+
+## 2.78.18
+
+**The keeper's NPU refresh starts the server it tests again. In kit 2.78.12 it never did, so every refresh was refused on every vendor's NPU, and each PC kept its old command for the whole kit. It now waits until the old servers' ports are quiet before its test, its test's servers print to a log, and a test that failed for its server is made again an hour later.**
+
+### What changed
+
+- **setup.ts `testNpuEntry` starts its server whoever asks.** Kit 2.78.9 wrote `o.onReady?.(await ensureServer(…))`. With no `onReady`, the optional call skips its arguments, so `ensureServer` was never called.
+  - **Who passed none:** the keeper's NPU refresh, which stops the NPU's servers first and so was refused on every PC (`/v1/chat/completions on … refused the connection (ECONNREFUSED)`). Also npu-check's kit-test, harden-timeout, harden-nonsense and calibrate steps, which stop the server first too.
+  - **Setup passes one,** so Set up local AI was never affected.
+  - **Seen on all three vendors under kit 2.78.12, on 2026-10-17:**
+    - **Snapdragon X2 (WEASELDEV01, GenieX), 01:31Z:** refused on 127.0.0.1:18181, so it kept Qwen3-VL-4B instead of Qwen3-VL-2B.
+    - **AMD XDNA 2 (WEASELDEV03, FastFlowLM), 01:32Z:** refused on 18184, so it kept qwen3-it:4b and qwen3vl-it:4b instead of qwen3.5:2b.
+    - **Intel NPU (WEASELDEV02, OpenVINO Model Server), 02:46Z:** refused on 18183, so it kept a 5.98 GB command instead of 3.72 GB.
+    - The managers put the cost at about 1 to 1.2 GB on the X2 and the XDNA 2, and 2.3 GB on Intel's.
+    - No new server was started on any of them: no `started.<pid>.json` for 18181, and no new OVMS graph or NPU cache. A refresh replayed by hand passed on the X2 in 20 s and on the XDNA 2 in 22 s. The XDNA 2's started its server through `ensureServer` itself before the test.
+  - A PC whose `npu-refresh.json` says `failed` for 2.78.12 looks again with this kit, as with any newer kit.
+- **The refresh's test servers print to `<tools>\servers\logs\npu-refresh.log`** (keeper.ts `npuRefreshLog`), each test after a line naming its command. A failed test's line in the keeper's log names that file.
+  - `testNpuEntry` and `testNpuEmbed` take a `logFile`, passed to `ensureServer`. Nothing else passes one, so their other callers keep no log, as before.
+- **The old servers' ports are waited on before the test** (npu-refresh.ts `stillAnswering`). The keeper's stop gives up after 10 s, and an old server still on its port would answer the test itself, so the new command would be written untested.
+  - After the stop, each port the test will ask is asked every `NPU_REFRESH_PORT_STEP_MS` (0.5 s) until nothing takes the connection, for up to `NPU_REFRESH_PORT_WAIT_MS` (30 s).
+  - **What it asks:** `whatAnswers`, the port's `/v1/models` with a 2 s limit. Any answer counts, a 404 too.
+  - **One still answering after that:** no test, and the problem names the port and what it said (`stillAnswered`).
+- **A test that failed for its server is made again** (npu-refresh.ts `serverFailed`). That's a server that refused the connection, exited while starting, or an old server still answering.
+  - The record keeps `tries` and `retryAt`, an hour on, and a look from then on tests again, up to `NPU_REFRESH_TRIES` (3) tests for a kit.
+  - An answer that makes no sense, vectors that don't, or a config.json that won't be written stay final for the kit, as before.
+  - A look that finds the NPU in use writes nothing, so a test that's due stays due.
+- **Tests:** npu-refresh.test.ts runs `testNpuEntry` with no `onReady` against a real server program, one that answers and one that exits while starting. The first fails on main's setup.ts with the refusal above. The tests also cover the port wait (a port that goes quiet, and one that doesn't), `whatAnswers` against real sockets, the retries, their record and log lines, and which failures count as the server's.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A PC whose `npu-refresh.json` says `failed` for 2.78.12 tests its NPU's new command again by itself, once nobody is using the NPU.
 
 ## 2.78.14
 

@@ -4,13 +4,24 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.99
 
-**The Steward hands out kit 2.78.15: the local models take less of a PC's memory. Each llama.cpp server keeps no RAM cache of earlier prompts, and Intel's integrated graphics on a PC with under 32 GB answer chat and pictures from one Qwen3-VL-4B server, 5.0 GB where two servers took 8.5 GB.**
+**The Steward hands out kit 2.78.21: the local models take less of a PC's memory. Each llama.cpp server keeps no RAM cache of earlier prompts, and Intel's integrated graphics on a PC with under 32 GB answer chat and pictures from one Qwen3-VL-4B server, 5.0 GB where two servers took 8.5 GB.**
 
 ### What changed
 
 - llama.cpp's servers each kept up to 8 GB of earlier prompts in the PC's memory, for prompts that start the same way, which the manor's rarely do. They keep none now. On a Core Ultra 5 225U the chat server held 3.59 GB instead of 4.54 GB after 34 requests, with the same answers.
 - On Intel's integrated graphics, whose memory is the PC's, chat runs on the vision server's Qwen3-VL-4B instead of on a Qwen3-4B server of its own, on a PC with under 32 GB. It got one of 18 text tasks wrong that Qwen3-4B got right. The smaller Qwen3-VL-2B misread the Smith's check picture, so it isn't used.
 - A PC set up before gets both at the keeper's next look once it has the kit. Nothing is downloaded or set up again, and the old chat server stops on its own after 5 minutes.
+
+## 0.36.96
+
+**The Steward hands out kit 2.78.18: the keeper's NPU refresh starts the server it tests again, so a PC set up on an older kit gets its route's new command. In kit 2.78.12 every refresh was refused, on the Snapdragon X2, AMD's XDNA 2 and Intel's NPU alike.**
+
+### What changed
+
+- **Kit 2.78.18** (kit/CHANGELOG.md):
+  - The kit's `testNpuEntry` starts its server for a caller that passes no `onReady`, the keeper's NPU refresh among them.
+  - The refresh waits until the old server stops answering before its test, and its test's servers print to `npu-refresh.log`.
+  - A test whose server went away, or whose old server still answered, is made again an hour later, three tests in all.
 
 ### Before you update
 
