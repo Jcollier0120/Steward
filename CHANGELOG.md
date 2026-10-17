@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.88
+## 0.36.94
 
 **The Steward hands out kit 2.78.15: the local models take less of a PC's memory. Each llama.cpp server keeps no RAM cache of earlier prompts, and Intel's integrated graphics on a PC with under 32 GB answer chat and pictures from one Qwen3-VL-4B server, 5.0 GB where two servers took 8.5 GB.**
 
@@ -11,6 +11,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - llama.cpp's servers each kept up to 8 GB of earlier prompts in the PC's memory, for prompts that start the same way, which the manor's rarely do. They keep none now. On a Core Ultra 5 225U the chat server held 3.59 GB instead of 4.54 GB after 34 requests, with the same answers.
 - On Intel's integrated graphics, whose memory is the PC's, chat runs on the vision server's Qwen3-VL-4B instead of on a Qwen3-4B server of its own, on a PC with under 32 GB. It got one of 18 text tasks wrong that Qwen3-4B got right. The smaller Qwen3-VL-2B misread the Smith's check picture, so it isn't used.
 - A PC set up before gets both at the keeper's next look once it has the kit. Nothing is downloaded or set up again, and the old chat server stops on its own after 5 minutes.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.89
+
+**The Last stage card says what the stage was asked in words, and a pull request made a draft again just before its merge waits instead of failing.**
+
+### What changed
+
+- After a Build now, the Last stage card read "(full true; buildNow [object Object])". It now says "(every employee looked at; Build now)", or "Build now, to customers" when that was ticked, and names the employees a stage was for.
+- A pull request made a draft again while the Steward was testing it, before its merge, now waits as any draft does. Before, GitHub refused the merge ("Pull Request is still a draft") and the round showed it as a failed merge, though nothing had gone wrong.
 
 ### Before you update
 
