@@ -821,7 +821,7 @@ export async function watchAlarms(
     try {
       items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings, held: o.held, now });
       if (items.length) states = await fileWork({ items, work: wright, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), now, log: o.log });
-      // And the bump issues whose failure is gone, closed, so the Wright isn't sent to find nothing to do.
+      // And the issues whose failure is gone (a bump, a release, a conflict, a kit trial), closed, so the Wright isn't sent to find nothing to do.
       await closeResolved({ items, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), log: o.log });
     } catch (e) {
       o.log(`work: ${(e as Error).message}`);
