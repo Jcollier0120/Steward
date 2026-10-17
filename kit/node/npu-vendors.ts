@@ -32,6 +32,12 @@ export interface NpuModel {
    * models mustn't get.
    */
   serve?: string[];
+  /**
+   * The most tokens a picture may be, where its server reads a picture at its own size, a token per 32 × 32 px (GenieX's
+   * llama.cpp plugin, the X2's Qwen3-VL-2B): written as its vision endpoint's pictureTokens, so the kit redraws a larger
+   * picture to fit (fitPicture) and counts each picture so. A model whose server sizes pictures itself has none.
+   */
+  pictureTokens?: number;
   /** A file that is there once it's downloaded, when the server keeps it in a known place. */
   present?: string;
   /** About how much it downloads, in bytes. */
@@ -479,7 +485,8 @@ export function embedPaths(route: NpuRoute, tools: string, env?: Record<string, 
 
 /**
  * The config.json entry for the NPU on this route: one server on its port, chat and every other kind it serves, the
- * route's caps (per kind where they differ), its own timeouts, quirks. A kind on the chat model's server shares it
+ * route's caps (per kind where they differ), its own timeouts, quirks, and its vision model's pictureTokens where it
+ * has one. A kind on the chat model's server shares it
  * (no baseUrl of its own); its startCommand starts it with the chat model, and that model's own arguments after the
  * route's. `exe` is written as setup found it. The route's embedding server, when it has one and `embed` says where
  * setup put it, is the embed endpoint, on its own port.
@@ -501,7 +508,7 @@ export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?
   e.chat = { baseUrl, model: chat.id, ...server, ...cap('chat') };
   for (const k of ['vision', 'embed'] as const) {
     const m = firstModel(route, k);
-    if (m) e[k] = { model: m.id, ...cap(k), ...(k === 'embed' ? { baseUrl, ...server } : {}) };
+    if (m) e[k] = { model: m.id, ...cap(k), ...(k === 'embed' ? { baseUrl, ...server } : {}), ...(k === 'vision' && m.pictureTokens ? { pictureTokens: m.pictureTokens } : {}) };
   }
   const es = route.embedServer;
   if (es && o.embed && !e.embed) {

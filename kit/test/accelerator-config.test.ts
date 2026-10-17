@@ -148,6 +148,19 @@ test("an endpoint's turn: a graphics card's id or the processor's, read by the k
   assert.equal(C.configuredAccelerators(entry('npu'))[0].embed!.turn, undefined);
 });
 
+test("vision's pictureTokens: a whole number from 64 to 4096, read by the keeper; on another kind, or out of range, named", () => {
+  const entry = (pictureTokens: unknown, kind: 'vision' | 'chat' = 'vision') => ({
+    accelerators: [{ id: 'npu', kind: 'npu', chat: { baseUrl: 'http://127.0.0.1:18181', model: 'm', ...(kind === 'chat' ? { pictureTokens } : {}) }, vision: { model: 'm', ...(kind === 'vision' ? { pictureTokens } : {}) } }],
+  });
+  assert.deepEqual(C.validateAccelerators(entry(1024)), []);
+  assert.deepEqual(C.validateAccelerators(entry(C.MIN_PICTURE_TOKENS)), []);
+  assert.deepEqual(C.validateAccelerators(entry(C.MAX_PICTURE_TOKENS)), []);
+  for (const bad of [0, 63, 4097, 1024.5, '1024']) assert.match(C.validateAccelerators(entry(bad)).join('\n'), /vision: pictureTokens is vision's, a whole number from 64 to 4096/, String(bad));
+  assert.match(C.validateAccelerators(entry(1024, 'chat')).join('\n'), /chat: pictureTokens is vision's/);
+  assert.equal(C.configuredAccelerators(entry(1024))[0].vision!.pictureTokens, 1024);
+  assert.equal(C.configuredAccelerators(entry('1024'))[0].vision!.pictureTokens, undefined);
+});
+
 test("a save: only the keeper's keys, everything else kept, refused when the file changed since it was read or doesn't validate", () => {
   const file = path.join(home, 'save.json');
   writeFileSync(file, JSON.stringify({ repos: { roots: ['C:\Projects'] }, jobs: { toast: false }, accelerators: [NPU] }));

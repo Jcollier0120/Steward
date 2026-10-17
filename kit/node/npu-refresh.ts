@@ -214,6 +214,8 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
     ...(entry.embed?.startCommand && next.embed?.startCommand ? argChanges(entry.embed.startCommand, next.embed.startCommand).map((c) => `embeddings: ${c}`) : []),
     ...(next.embed && (entry.embed?.turn ?? null) !== (next.embed.turn ?? null) ? [`embeddings: in ${next.embed.turn ? `${next.embed.turn}'s` : "the NPU's"} turn`] : []),
     ...(stable(entry.quirks ?? []) !== stable(next.quirks ?? []) ? [`quirks: ${next.quirks?.length ? next.quirks.join(', ') : 'none'}`] : []),
+    // A picture fitted within its vision's count (the X2's Qwen3-VL-2B), or sent at its own size again.
+    ...((entry.vision?.pictureTokens ?? null) !== (next.vision?.pictureTokens ?? null) ? [next.vision?.pictureTokens ? `pictures: at most ${next.vision.pictureTokens} tokens` : 'pictures: at their own size'] : []),
   ];
   if (!d.idle()) return { did: 'busy' };
   let problems: string[];
