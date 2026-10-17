@@ -2,6 +2,31 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.80.1
+
+**FastFlowLM's working set is handed back to Windows once its model has loaded: qwen3.5:2b's went from 3,814 MB to 171 MB, and Gemma 4 E2B's from 6,595 MB to 173 MB. Both decode as fast as before.**
+
+### What's new
+
+- **working-set.ts:**
+  - `trimWorkingSet(pid)` empties a process's working set (EmptyWorkingSet) through the asker's PowerShell worker. `working-set.cs` is compiled once to `working-set-<hash>.dll`, beside the accelerators' locks, and every agent on the PC shares it.
+  - It answers `trimmed <MB it held>`, or why it couldn't, and never throws.
+  - `KIT_SERVER_TRIM=0` leaves every server's working set as it is.
+
+### What changed
+
+- **accelerators.ts:**
+  - A server the kit starts with FastFlowLM's command (`trimmedOnceLoaded`) has its working set trimmed once it first answers. The trim runs in the background, so the request that started the server goes on at once.
+  - The server's log says what it held, or stderr where there's no log. Other servers are left as they are.
+- **Why FastFlowLM:** 1.0.7 copies its model's lookup tables into ordinary private memory and reads one row of them a token, so most of what it holds is never read again.
+- **Where the trimmed pages go:** Windows keeps them compressed in RAM, or writes them to the pagefile when it needs the room. What the NPU holds is untouched.
+- **What it doesn't change:** RAM is freed, not commit, because the server's private memory stays the same. The upstream fix reads the tables from a mapping of the model's file, which frees both (FastFlowLM#807).
+- **Measured on a Ryzen AI 7 350 (16 GB):**
+  - Decoding was the same before and after: 22.8 to 22.9 tokens a second for qwen3.5:2b, and 20.7 to 21.1 for gemma4-it:e2b.
+  - The first request after a trim took 6,360 ms against 6,350 before it for qwen3.5:2b, and 7,709 ms against 7,260 for gemma4-it:e2b.
+  - A 1,500-token prompt of new words read 25 MB back from disk, in 8,866 ms against 8,948.
+- **What an agent must do:** nothing.
+
 ## 2.80.0
 
 **seneschal.ts asks for the Wright's and Reeve's turns (Seneschal 0.3.0): two turn kinds named by their job rather than a commit, what a task needs of the room, and `defer` for an asker that can come back at its next round instead of running beside a full PC.**

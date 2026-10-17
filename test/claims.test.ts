@@ -32,6 +32,15 @@ function setup(name: string, o: { released?: string[]; titles?: { title: string;
   return { e, ctx, checkout };
 }
 
+/**
+ * The test runs as the maker's laptop, which keeps a claim of the maker's repositories here, whatever PC runs it: on
+ * the maker's other PCs these tests' claims were refused (Steward 0.36.85). Its own PC again once the test ends.
+ */
+function onMakersLaptop(t: { after: (f: () => void) => void }): void {
+  makersPcForTests(() => true);
+  t.after(() => makersPcForTests(null));
+}
+
 test('the next version: above the branch, every release, every open PR and every live claim; the same again for the same branch', async () => {
   rmSync(claimsFile(), { force: true });
   const s = setup('next', { released: ['0.4.10', '0.4.11'], titles: [{ title: 'Fake 0.4.12: something open', headRefName: 'claude/open' }] });
@@ -149,9 +158,10 @@ test("a maker's other PC claims a version of the maker's repositories through it
   }
 });
 
-test("a PR moved past the others: its branch's claim made again above every version in line, marked, once; shared with its mark", async () => {
+test("a PR moved past the others: its branch's claim made again above every version in line, marked, once; shared with its mark", async (t) => {
   rmSync(claimsFile(), { force: true });
   const { movedTo } = await import('../src/claims.ts');
+  onMakersLaptop(t);
   const s = setup('moved', { titles: [{ title: 'Fake 0.4.11: a draft', headRefName: 'claude/draft' }] });
   writeFileSync(claimsFile(), JSON.stringify([{ repo: s.e.repo, version: '0.4.11', branch: 'claude/draft', by: 'claude', for: 'the draft', at: new Date().toISOString() }]));
   // The queue's versions too: a ready PR whose title names none sets 0.4.12, another 0.4.13.
@@ -169,28 +179,24 @@ test("a PR moved past the others: its branch's claim made again above every vers
 
   // Through the repository's claims ref, as every PC that looks after it reads it: the mark goes with it.
   rmSync(claimsFile(), { force: true });
-  const t = setup('moved-shared', { titles: [{ title: 'Fake 0.4.11: a draft', headRefName: 'claude/draft' }] });
+  const u = setup('moved-shared', { titles: [{ title: 'Fake 0.4.11: a draft', headRefName: 'claude/draft' }] });
   const remote = { key: 'jcollier0120/fake', url: path.join(home, 'moved-shared', 'origin.git'), scratch: path.join(home, 'moved-shared', 'turns.git') };
   const shared = async () => {
-    const r = await readRef(t.ctx.run, remote, CLAIMS_REF, CLAIMS_FILE);
+    const r = await readRef(u.ctx.run, remote, CLAIMS_REF, CLAIMS_FILE);
     return parseClaims(r.kind === 'found' ? r.text : '').map((c) => [c.branch, c.version, c.moved ?? null]);
   };
-  makersPcForTests(() => true);
-  try {
-    const canPush = async () => true;
-    assert.equal((await claimVersion(t.ctx, t.e, { branch: 'claude/draft', by: 'claude', for: 'the draft', remote, canPush })).claim.version, '0.4.12');
-    const sm = await claimVersion(t.ctx, t.e, { branch: 'claude/draft', by: 'steward', for: '#7 moved', moved: 7, above: ['0.4.12', '0.4.13'], remote, canPush });
-    assert.deepEqual([sm.claim.version, sm.claim.moved, sm.claim.source], ['0.4.14', 7, 'shared']);
-    assert.deepEqual(await shared(), [['claude/draft', '0.4.14', 7]]);
-    assert.deepEqual(loadClaims().map((c) => [c.branch, c.version, c.moved, c.source]), [['claude/draft', '0.4.14', 7, 'shared']]);
-  } finally {
-    makersPcForTests(null);
-  }
+  const canPush = async () => true;
+  assert.equal((await claimVersion(u.ctx, u.e, { branch: 'claude/draft', by: 'claude', for: 'the draft', remote, canPush })).claim.version, '0.4.12');
+  const sm = await claimVersion(u.ctx, u.e, { branch: 'claude/draft', by: 'steward', for: '#7 moved', moved: 7, above: ['0.4.12', '0.4.13'], remote, canPush });
+  assert.deepEqual([sm.claim.version, sm.claim.moved, sm.claim.source], ['0.4.14', 7, 'shared']);
+  assert.deepEqual(await shared(), [['claude/draft', '0.4.14', 7]]);
+  assert.deepEqual(loadClaims().map((c) => [c.branch, c.version, c.moved, c.source]), [['claude/draft', '0.4.14', 7, 'shared']]);
 });
 
-test("a catch-up's new version moves its branch's claim: the old one is free, the new one held, its worker given it again", async () => {
+test("a catch-up's new version moves its branch's claim: the old one is free, the new one held, its worker given it again", async (t) => {
   rmSync(claimsFile(), { force: true });
   const { reclaim } = await import('../src/claims.ts');
+  onMakersLaptop(t);
   const s = setup('reclaim', { released: ['0.4.10'] });
   const a = await claimVersion(s.ctx, s.e, { branch: 'claude/a', by: 'claude', for: 'a fix' });
   assert.equal(a.claim.version, '0.4.11');
