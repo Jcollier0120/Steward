@@ -7,7 +7,7 @@ import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, section
 import { unsignedGitVars } from '../kit/unsigned-git.ts';
 import { codeAt, recordResult, toolchainHere, withWork } from '../kit/work-status.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
-import { affectedTests, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
+import { affectedTests, filesIn, globRe, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { errorLines, failedTests, runLine, tail, type Runner } from '../run.ts';
@@ -22,7 +22,7 @@ import { keepWhole, ranWhole } from '../whole.ts';
 import { trialPassOf } from './trialpass.ts';
 import { withRepo } from './slots.ts';
 import { standIn, type StoodIn } from './standin.ts';
-import { seneschalTurn, TURN_HELD_ENV, type SeneschalAnswer } from '../kit/seneschal.ts';
+import { seneschalTurn, TURN_HELD_ENV, type SeneschalAnswer, type SeneschalShard } from '../kit/seneschal.ts';
 import { APP } from '../app.ts';
 import { checksTask, type CheckTask } from './seneschal.ts';
 
@@ -173,7 +173,7 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOpt
       return null;
     }
     // Its turn from the Seneschal, where it's on this PC (stages/seneschal.ts); null: as before, at the checks pace.
-    const ask = await checksTask(ctx, e, dir, { commit, tree, clean, env: o.env, here: o.here, affected: o.affected, task: o.task });
+    const ask = await checksTask(ctx, e, dir, { commit, tree, clean, env: o.env, here: o.here, affected: o.affected, task: o.task, shard: o.shard });
     const answer: SeneschalAnswer | null =
       'not' in ask
         ? null
@@ -219,7 +219,8 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOpt
           : checksIn(ctx, e, dir, o),
       ctx.log,
     );
-    const after = trial || !commit ? null : await codeAt(dir);
+    // A shard ran only some of the whole suite, never kept as the tree's checks (wholesuite.ts keeps the whole once all pass).
+    const after = trial || !commit || o.shard ? null : await codeAt(dir);
     if (after?.clean && after.commit === commit) recordResult({ kind: ranWhole(o.affected?.chose) ? 'checks' : 'affected checks', repo: e.repo, tree: tree ?? null, commit, ok: !failed, what, commands: e.test, ...toolchainHere(), ...(failed ? { note: failed.slice(0, 500) } : {}) });
     // A failure here the Seneschal tries once more on another PC (Seneschal 0.2.0), where the caller waits for that: a
     // pass there stands in, said as this PC's failure; a failure there too is the change's (`failed.confirmed`).
@@ -261,6 +262,11 @@ export type ChecksOptions = {
    * (`stoodIn.flaky`), a failure there too fills `failed.confirmed`. Left out, the try still runs there, unwaited for.
    */
   elsewhere?: boolean;
+  /**
+   * One part of the whole suite (wholesuite.ts, or another PC's full-suite task): `npm test` runs only its test files
+   * (shardSteps), and the employee's other test steps run in the first shard alone.
+   */
+  shard?: SeneschalShard;
 };
 
 /** How a run whose packages Settings held begins its answer. */
@@ -285,7 +291,15 @@ export async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOpti
   if (e.fill) before.push(e.fill);
   // Each test step worked out once the dependencies and the kit are in place, so the kit's files are there to follow.
   const steps: (string | (() => Promise<string[]>))[] = [...before];
+  // A shard of checks without `npm test` to cut runs them all, never none: more than asked, never less.
+  const cuts = !!o.shard && e.test.some((s) => s.trim() === 'npm test');
   for (const step of e.test) {
+    // One shard of the whole suite: its part of `npm test`; the other steps (a typecheck) in the first shard only.
+    if (cuts) {
+      if (step.trim() === 'npm test') steps.push(async () => shardSteps(dir, o.shard!, o.say));
+      else if (o.shard!.index === 1) steps.push(step);
+      continue;
+    }
     // Only the tests the change reaches (affected.ts), where the caller asks and `npm test` is a plain node --test.
     if (o.affected && step.trim() === 'npm test') steps.push(() => affectedSteps(ctx, dir, o.affected!, o.say));
     // The whole suite, run as node itself so the checks pace sees its test runner (wholeTestSteps).
@@ -325,7 +339,7 @@ export async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOpti
     }
   }
   // The Steward's own checks passed whole: kept by tree, so a kit released from the same code doesn't run them again (whole.ts).
-  await keepWhole(ctx.run, e, { dir, chose: o.affected?.chose, env: o.env });
+  if (!o.shard) await keepWhole(ctx.run, e, { dir, chose: o.affected?.chose, env: o.env });
   return null;
 }
 
@@ -457,6 +471,44 @@ export function wholeTestSteps(dir: string): string[] {
     ...(scripts.pretest ? ['npm run pretest'] : []),
     ['node', ...plain.flags, '--test', ...plain.globs.map((g) => `"${g}"`)].join(' '),
     ...(scripts.posttest ? ['npm run posttest'] : []),
+  ];
+}
+
+/**
+ * The test files `npm test` runs in `dir`, by name (its plain node --test's globs, as affected.ts reads them), with the
+ * script's flags and whether it has a pretest and a posttest; null when the script isn't a plain node --test. Pure but for
+ * the files in `dir`.
+ */
+export function wholeTestFiles(dir: string): { files: string[]; flags: string[]; pretest: boolean; posttest: boolean } | null {
+  const scripts = scriptsIn(dir);
+  const plain = nodeTestScript(scripts.test);
+  if (!plain) return null;
+  const globs = plain.globs.map(globRe);
+  const files = filesIn(dir).filter((f) => globs.some((g) => g.test(f))).sort();
+  return { files, flags: plain.flags, pretest: !!scripts.pretest, posttest: !!scripts.posttest };
+}
+
+/** A shard's part of `files` (sorted by name): dealt out in turn, so each PC at the same commit deals the same. Pure. */
+export const dealt = (files: string[], shard: SeneschalShard): string[] => files.filter((_, i) => i % shard.of === shard.index - 1);
+
+/**
+ * What runs in place of `npm test` for one shard of the whole suite (Steward 0.36.92): its pretest (each shard sets the
+ * code up), `node <its flags> --test <its part of the test files>` (dealt), and in the last shard its posttest, which npm
+ * runs once after the tests. The whole suite (wholeTestSteps) when the script isn't a plain node --test to cut: more than
+ * asked, never less. Pure but for the files in `dir`.
+ */
+export function shardSteps(dir: string, shard: SeneschalShard, say: (line: string) => void = () => {}): string[] {
+  const t = wholeTestFiles(dir);
+  if (!t) {
+    say(`npm test: the whole suite, as its test script isn't a plain node --test to cut into shards`);
+    return wholeTestSteps(dir);
+  }
+  const mine = dealt(t.files, shard);
+  say(`npm test: shard ${shard.index} of ${shard.of}, ${mine.length} of ${t.files.length} test files`);
+  return [
+    ...(t.pretest ? ['npm run pretest'] : []),
+    ...(mine.length ? [['node', ...t.flags, '--test', ...mine.map((f) => `"${f}"`)].join(' ')] : []),
+    ...(t.posttest && shard.index === shard.of ? ['npm run posttest'] : []),
   ];
 }
 

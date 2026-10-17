@@ -29,6 +29,9 @@ import path from 'node:path';
  * handed back as **{ failed }**: the change's failure, not run again here. After a failure its own `hold` reported, the
  * turn's `elsewhere()` waits for the try on another PC. And `seneschalWork` is a worker's side: any task of the kinds
  * and repositories it runs, this PC's or another's, at its turn.
+ *
+ * A whole suite may be cut into shards by test file (kit 2.78.16): each its own task (`shard`, part of its key), so the
+ * PCs whose workers run it (`seneschalSiblings`) each take a part.
  */
 
 export type SeneschalLane = 'person' | 'blocking' | 'normal' | 'background';
@@ -51,12 +54,23 @@ export interface SeneschalTask {
   kit?: string;
   /** A kit trial's agent, by its id. */
   agent?: string;
+  /** One part of a whole suite (a full-suite task only): its test files dealt out by name (part of the key). */
+  shard?: SeneschalShard;
   lane?: SeneschalLane;
   /** In words: "Reeve#212's checks". The Seneschal makes them up when left out. */
   what?: string;
   /** The agent that asks, by its id. */
   by: string;
 }
+
+/** One part of a whole suite: the `index`th of `of`, from 1. */
+export interface SeneschalShard {
+  index: number;
+  of: number;
+}
+
+/** The most shards a whole suite is cut into (the Seneschal's MOST_SHARDS). */
+export const SENESCHAL_MOST_SHARDS = 64;
 
 /** A PC on the licence, as Manor names it. */
 export interface SeneschalPc {
@@ -433,6 +447,8 @@ export interface SeneschalJob {
   base?: string;
   pr?: number;
   branch?: string;
+  /** One part of a whole suite: run only its test files. */
+  shard?: SeneschalShard;
   lane: SeneschalLane;
   what: string;
   /** Another PC's task: that PC, and the task's id there. */
@@ -468,6 +484,12 @@ const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 /** A branch git takes as one: no leading dash or dot, no "..", no "//", not ending in "/" or ".lock". */
 const BRANCH = /^(?![-./])(?!.*\.\.)(?!.*\/\/)(?!.*\/$)(?!.*\.lock$)[A-Za-z0-9_./-]{1,200}$/;
 
+/** A shard as the Seneschal names one, checked: whole numbers, 1 <= index <= of <= SENESCHAL_MOST_SHARDS. Pure. */
+export function shardOf(v: any): SeneschalShard | null {
+  if (!v || typeof v !== 'object' || !Number.isInteger(v.index) || !Number.isInteger(v.of)) return null;
+  return v.of >= 1 && v.of <= SENESCHAL_MOST_SHARDS && v.index >= 1 && v.index <= v.of ? { index: v.index, of: v.of } : null;
+}
+
 /** The job in a lease's task, checked again here (it may come from another PC); null when any of it isn't as it should be. Pure. */
 export function jobOf(t: any, kinds: readonly SeneschalKind[] = KINDS): Omit<SeneschalJob, 'turn'> | null {
   if (!t || typeof t !== 'object') return null;
@@ -477,6 +499,8 @@ export function jobOf(t: any, kinds: readonly SeneschalKind[] = KINDS): Omit<Sen
   if (t.base != null && !OID.test(String(t.base))) return null;
   if (t.branch != null && !BRANCH.test(String(t.branch))) return null;
   if (t.pr != null && !(Number.isInteger(t.pr) && t.pr > 0)) return null;
+  const shard = t.shard == null ? null : shardOf(t.shard);
+  if (t.shard != null && (!shard || t.kind !== 'full-suite')) return null;
   const from = t.from && typeof t.from === 'object' && t.from.pc && typeof t.from.pc.name === 'string' ? { pc: { id: String(t.from.pc.id ?? ''), name: String(t.from.pc.name).slice(0, 60) }, id: String(t.from.id ?? '') } : undefined;
   return {
     id,
@@ -487,6 +511,7 @@ export function jobOf(t: any, kinds: readonly SeneschalKind[] = KINDS): Omit<Sen
     ...(t.base ? { base: t.base } : {}),
     ...(t.pr ? { pr: t.pr } : {}),
     ...(t.branch ? { branch: t.branch } : {}),
+    ...(shard ? { shard } : {}),
     lane: LANES.includes(t.lane) ? t.lane : 'normal',
     what: typeof t.what === 'string' && t.what ? t.what.slice(0, 200) : `${t.repo}'s ${t.kind}`,
     ...(from ? { from } : {}),
@@ -526,4 +551,28 @@ export async function seneschalWork(o: SeneschalWorkOptions): Promise<{ job: Sen
     return { idle: `the Seneschal handed it a task it couldn't read (${String(b.task.id ?? '?').slice(0, 20)}), given back`, retryMs: SENESCHAL_IDLE_MS };
   }
   return { job: { ...job, turn } };
+}
+
+/**
+ * The other PCs on the licence whose workers run `kind` for `repo` now (Seneschal 0.2.0: each sibling's `works`, as
+ * this PC's Seneschal last read it): what a whole suite may be cut for (kit 2.78.16). Empty when none does, or the
+ * Seneschal shares no work; null when there's no Seneschal to ask, or it doesn't answer. Never throws.
+ */
+export async function seneschalSiblings(o: { kind: SeneschalKind; repo: string; at?: SeneschalAt | null; env?: NodeJS.ProcessEnv }): Promise<SeneschalPc[] | null> {
+  const env = o.env ?? process.env;
+  if (env[TURN_HELD_ENV]) return null;
+  const at = seneschalFor(o);
+  if (!at) return null;
+  try {
+    const r = await fetch(new URL('/api/tasks', at.base), { headers: { 'x-token': at.token }, signal: AbortSignal.timeout(CALL_MS) });
+    if (!r.ok) return null;
+    const b: any = await r.json();
+    const list = b?.siblings?.on && Array.isArray(b.siblings.siblings) ? b.siblings.siblings : [];
+    const repo = o.repo.toLowerCase();
+    return list
+      .filter((s: any) => s && typeof s.id === 'string' && typeof s.name === 'string' && Array.isArray(s.works?.kinds) && s.works.kinds.includes(o.kind) && (!Array.isArray(s.works.repos) || s.works.repos.some((x: unknown) => String(x).toLowerCase() === repo)))
+      .map((s: any) => ({ id: s.id, name: s.name.slice(0, 60) }));
+  } catch {
+    return null;
+  }
 }

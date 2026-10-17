@@ -24,6 +24,8 @@ import { apart, repoBusy, withRepo } from './slots.ts';
  * - One at a time, and never for a repository a stage holds now: a round holds an employee's repository while it waits
  *   for its turn, and that very task may be its own. A stage that takes the repository meanwhile keeps it, and the task
  *   goes back to the Seneschal unstarted.
+ * - A shard of another PC's whole suite (wholesuite.ts) runs only its part of the test files (bump.ts's shardSteps),
+ *   dealt from the same commit as that PC deals them.
  * - A run is stopped after OTHERS_LIMIT_MS, and one that couldn't finish (stopped, packages held, Windows ended it) is
  *   reported as such: the Seneschal tries it again, and passes this PC over for that kind a while.
  */
@@ -133,14 +135,14 @@ export async function workForOthers(o: { settings: Settings; ctxOf: () => Promis
   }
   const seen: FailedChecks = {};
   const limit = { ms: OTHERS_LIMIT_MS, why: `${OTHERS_LIMIT_MS / 60_000} minutes, the most a run for the Seneschal takes here` };
-  // Only the tests the change reaches, against the base the task names; else the whole suite.
-  const affected = job.base ? { affected: { base: job.base } } : {};
+  // Only the tests the change reaches, against the base the task names; one shard of the whole suite; else all of it.
+  const scope = job.shard ? { shard: job.shard } : job.base ? { affected: { base: job.base } } : {};
   try {
     const failed = await apart('checks for the Seneschal', () =>
       whileAwake(
         `${e.name}'s checks for ${whose} Seneschal`,
         () => job.turn.hold(
-          () => checksIn(ctx, e, dir, { say: line, ...affected, doing: job.what, timeLimit: () => limit, failed: seen }, true),
+          () => checksIn(ctx, e, dir, { say: line, ...scope, doing: job.what, timeLimit: () => limit, failed: seen }, true),
           (f) => outcomeOf(f, seen, e.test),
         ),
         ctx.log,

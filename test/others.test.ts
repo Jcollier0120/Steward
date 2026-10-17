@@ -112,6 +112,13 @@ test("another PC's task runs here in a worktree of its own, and its pass goes ba
   assert.ok(lines.some((l) => /\[fake\] for DESKTOP's Seneschal \(b1, t4 there\): passed/.test(l)), lines.join('\n'));
 });
 
+test("a shard of another PC's whole suite, for checks with no npm test to cut, runs them all: never none", async () => {
+  const j = jobAt(onBranch, { kind: 'full-suite', shard: { index: 2, of: 2 }, what: "Fake's full suite, shard 2 of 2" });
+  const r = await work(j.ask);
+  assert.deepEqual(r, { ran: 'b1', why: 'passed', retryMs: 0 });
+  assert.equal(readFileSync(RAN, 'utf8').trim().split('\n').length, 1, 'node check.mjs ran');
+});
+
 test('a failure goes back as one, with its note', async () => {
   const j = jobAt(fails, { branch: 'claude/fails' });
   const r = await work(j.ask);

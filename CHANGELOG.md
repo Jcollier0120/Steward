@@ -4,7 +4,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.92
 
-**The Steward runs your other PCs' checks: with the Seneschal 0.2.0 on each PC, a PR check or whole suite waiting for room on one runs on another of your PCs that has room, and a PR's failure is tried once more on another PC before it counts.**
+**The Steward runs your other PCs' checks: with the Seneschal 0.2.0 on each PC, a PR check or whole suite waiting for room on one runs on another of your PCs that has room, a PR's failure is tried once more on another PC before it counts, and the whole suite before a kit's release is shared out between them.**
 
 ### What's new
 
@@ -19,6 +19,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
   - **A failure there too** is the change's. The PR fails at once, without a third run here.
   - **With no other PC**, or none taking it in time, it's tried again here as before.
 - **A failure confirmed on two PCs** while a run waited for its turn isn't run here again: it's the change's.
+- **The whole suite before a kit's release is shared out** (stages/wholesuite.ts). Where the Seneschal says another of your PCs runs the Steward's whole suite too, it's cut into shards by test file: one for this PC and one for each of the others, four at most, and at least 10 test files each.
+  - **Each shard is a task of its own.** Whichever PC has room first runs it, and a shard another PC ran comes back as its pass or failure. The test files are dealt out by name, so every PC deals the same shards from the same commit.
+  - **The typecheck runs in the first shard, the posttest in the last.** Each shard here runs in a worktree of its own, removed after.
+  - **A failure runs once more, only the shards that failed.** A shard that failed on two PCs already isn't run a third time.
+  - **With no other PC**, it runs whole here, as before.
 
 ### What changed
 

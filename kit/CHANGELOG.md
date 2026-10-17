@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.16
 
-**seneschal.ts knows the Seneschal's other PCs (Seneschal 0.2.0): a task running on another PC isn't timed out, results name the PC they ran on and say flaky or confirmed, a failure's try on another PC can be waited for, and `seneschalWork` is the worker's side.**
+**seneschal.ts knows the Seneschal's other PCs (Seneschal 0.2.0): a task running on another PC isn't timed out, results name the PC they ran on and say flaky or confirmed, a failure's try on another PC can be waited for, `seneschalWork` is the worker's side, and a whole suite can be cut into shards.**
 
 ### What's new
 
@@ -16,6 +16,8 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **`turn.elsewhere()`**: after a failure `hold` reported, the Seneschal may try the task once more on another PC. This waits for that run and gives back its result (`flaky` or `confirmed`), or null when it isn't tried elsewhere or the first failure stands.
 - **`turn.giveBack(note)`** hands a task back unstarted: it spends no try.
 - **`seneschalWork({ worker, kinds, repos, slot? })`** is a worker's ask: any task of those kinds and repositories, this PC's or another PC's (`from`), at its turn. It answers `{ job }` (run it under `job.turn.hold`), `{ idle, retryMs }`, or null with no Seneschal. A task it can't read is given back. `jobOf` checks a task again: an owner/name repository, full commit ids, and a branch git takes as one.
+- **Shards of a whole suite.** `SeneschalTask.shard` and `SeneschalJob.shard` (`{ index, of }`, from 1, `SENESCHAL_MOST_SHARDS` at most): one part of a full-suite task, part of its key. `jobOf` refuses a shard that's out of range or on any other kind, and `shardOf` checks one.
+- **`seneschalSiblings({ kind, repo })`**: the other PCs whose workers run that kind for that repository now, as this PC's Seneschal last read them. Empty while it shares no work; null with no Seneschal.
 - `SENESCHAL_RUN_MS` (2 hours) and `SENESCHAL_IDLE_MS` (30 s).
 
 ### What changed

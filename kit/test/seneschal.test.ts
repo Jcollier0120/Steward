@@ -332,3 +332,37 @@ test("a task a worker is handed is read again: one that names anything but a rep
   assert.match(got.idle, /couldn't read \(b4\), given back/);
   assert.equal(asked.find((x) => x.route === '/api/tasks/report')!.body.returned, true);
 });
+
+const { seneschalSiblings, shardOf } = await import('./fixture/src/kit/seneschal.ts');
+
+test('a shard of a whole suite: handed to a worker with its part, and only for a full-suite task', () => {
+  const whole = { id: 'b5', kind: 'full-suite', repo: 'Jcollier0120/Steward', commit: 'c'.repeat(40), lane: 'blocking', what: 'x', shard: { index: 2, of: 3 } };
+  assert.deepEqual(jobOf(whole)!.shard, { index: 2, of: 3 });
+  for (const bad of [{ index: 0, of: 3 }, { index: 4, of: 3 }, { index: 1, of: 65 }, { index: 1.5, of: 3 }, { index: '1', of: 3 }, 'all']) {
+    assert.equal(jobOf({ ...whole, shard: bad }), null, JSON.stringify(bad));
+  }
+  assert.equal(jobOf({ ...whole, kind: 'pr-check' }), null, 'only a whole suite has shards');
+  assert.deepEqual(shardOf({ index: 64, of: 64, extra: 1 }), { index: 64, of: 64 });
+});
+
+test('the other PCs whose workers run a kind for a repository, as the Seneschal last read them; none while it shares no work', async () => {
+  const sibling = (name: string, works: unknown) => ({ id: `pc-${name}`, name, offers: 0, works, room: null, problem: null });
+  const siblings = [
+    sibling('LAPTOP', { kinds: ['pr-check', 'full-suite'], repos: ['jcollier0120/steward'] }),
+    sibling('STUDIO', { kinds: ['full-suite'], repos: null }),
+    sibling('DESK', { kinds: ['pr-check'], repos: null }),
+    sibling('OLD', null),
+    sibling('ELSE', { kinds: ['full-suite'], repos: ['Jcollier0120/Reeve'] }),
+  ];
+  routes['/api/tasks'] = () => ({ json: { counts: {}, siblings: { on: true, self: null, siblings, borrowed: [], wants: [] } } });
+  const ask = { kind: 'full-suite' as const, repo: 'Jcollier0120/Steward', at: at(), env: {} };
+  assert.deepEqual(await seneschalSiblings(ask), [{ id: 'pc-LAPTOP', name: 'LAPTOP' }, { id: 'pc-STUDIO', name: 'STUDIO' }]);
+  routes['/api/tasks'] = () => ({ json: { counts: {}, siblings: { on: false, self: null, siblings, borrowed: [], wants: [] } } });
+  assert.deepEqual(await seneschalSiblings(ask), [], 'Other PCs off: none takes a share');
+  routes['/api/tasks'] = () => ({ json: { counts: {}, siblings: null } });
+  assert.deepEqual(await seneschalSiblings(ask), [], 'a Seneschal before 0.2.0');
+  routes['/api/tasks'] = () => ({ status: 500, json: {} });
+  assert.equal(await seneschalSiblings(ask), null);
+  assert.equal(await seneschalSiblings({ ...ask, at: null }), null, 'no Seneschal');
+  assert.equal(await seneschalSiblings({ ...ask, env: { KIT_CHECKS_TURN: '1' } }), null, "inside another's turn");
+});
