@@ -369,6 +369,31 @@ The keeper (the Smith, else Reeve) starts and restarts each server from its entr
 
 A route's command changes between kits: Intel's NPU 3720 got its 128-token prompt chunks (`--plugin_config`), and a generation its own `--max_prompt_len`. Setup leaves a configured NPU alone, so before this a PC kept the command it was set up with until someone ran setup again. On the 225U the shipped command answered a short question in 3.1 s and the chunked one in 0.5 s, with the same answers. The keeper now brings the entry up to its kit's command once for each kit version, only when nobody is using the NPU and the new command answers its test, and never takes back a newer kit's ([ACCELERATORS.md](ACCELERATORS.md), the keeper). A command that needs a download, such as a new server version or another model, is still left for setup.
 
+### Castellan's build of GenieX's llama.cpp plugin (kit 2.81.0)
+
+GenieX 0.8.0 held about 4 GB of the X2's memory for Qwen3-VL-2B, half of it for nothing (qualcomm/GenieX#1557). It read the model file into memory rather than mapping it, reserved logits for 512 outputs where the vision model asks for one, and loaded the vision encoder before any picture came.
+
+Castellan's build of the plugin (`node/geniex/`, its README says what changed) fixes those three. Measured on the X2 Elite with the 2B:
+
+| | GenieX's own | The build |
+|---|---|---|
+| After a chat: working set | 4.0 GB | 1.77 GB |
+| After a chat: private | 2.15 GB | 0.21 GB |
+| After a picture: working set | 4.08 GB | 3.36 GB |
+| Cold load | 5.0 s | 2.4 s |
+| Writing speed | 70.4 t/s | 75.5 t/s |
+
+The same items came out right on both: quality 21 and 22 of 24, pictures 4 of 4, and 34 of 36 screen questions at 1,024 tokens.
+
+The keeper puts it in after the NPU's refresh (npu-patch.ts, npu-vendors.json's `pluginPatch`), with the refresh's care:
+- **When:** only over GenieX 0.8.0's own file, while the files it links against are 0.8.0's, and only when nobody uses the NPU.
+- **How:** in the NPU's turn, GenieX stopped first. GenieX's file is kept as `geniex_plugin.dll.stock`.
+- **Kept:** only once a picture and a chat answer through it. Otherwise GenieX's own goes back, as it does when config.json says `npuPatch: false` or a later kit drops the patch.
+- **Left alone:** a GenieX update.
+- **Files moved by renaming:** Windows lets a loaded DLL be renamed but not replaced, so a GenieX the keeper didn't stop keeps running on what it loaded.
+
+GENIEX_IMAGE_MAX_TOKENS, which only the build reads, is set to the 2B's `pictureTokens` (`pictureTokensEnv`). That way a picture that didn't come through `fitPicture` is scaled down too, rather than overflowing the window.
+
 ### Resting when unused (kit 2.71.0)
 
 None of the three servers can drop its model and keep running: GenieX's `--keepalive` unloads it, but the process keeps some 340 MB from every load until it exits; OpenVINO Model Server started with `--source_model` can't unload one (only its config-file mode can, by editing the file); FastFlowLM documents no unload. So the keeper stops the server, holding the NPU's turn, and the next request starts it again in its own turn. Intel's embedding server, a second OpenVINO Model Server holding 1.7 GB, is stopped with the chat server now; before 2.71.0 the keeper left every NPU embedding server but llama-server's running.
@@ -463,6 +488,7 @@ Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embedd
 | What | Licence | Note |
 |---|---|---|
 | GenieX | BSD-3-Clause, and Qualcomm's Terms of Use | Its bundled QAIRT runtime's terms aren't stated in its NOTICE: **have it reviewed**. The installer isn't code-signed. |
+| Castellan's build of GenieX's llama.cpp plugin (the kit's `node/geniex/`) | BSD-3-Clause, GenieX's | A modified build that Castellan redistributes, signed with its certificate. GenieX's copyright notice and license go with it (`LICENSE` beside it), and its README says it isn't Qualcomm's release. The license forbids using Qualcomm's name to endorse it. |
 | Qualcomm AI Hub's W4A16 builds | the base model's licence (Apache-2.0 for Qwen3), with AI Hub's "Usage and Limitations" | Those limitations exclude some uses (among them education, employment, law enforcement, biometrics, critical infrastructure): **have them reviewed** against Castellan's terms. |
 | llama.cpp (the Snapdragon's embedding server) | MIT | Run over GenieX's own libraries, under GenieX's terms. |
 | OpenVINO Model Server | Apache-2.0 | Its zip carries its third-party licences. |
@@ -474,7 +500,7 @@ Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embedd
 | Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov, on Hugging Face | Apache-2.0, the base model's | Castellan's own export, so Castellan publishes this one: with the base model's LICENSE, and a model card saying what was changed (the weights converted and compressed, nothing else) and how, as Apache-2.0 asks. |
 | Avoided | Llama 3.2 (community licence), Gemma and EmbeddingGemma (Gemma's terms flow down to users), AMD's Ryzen AI ONNX runtime (AMD's software licence) | Not installed by setup. |
 
-Each customer's PC downloads the servers, runtimes and models from their makers (GitHub releases, Microsoft, Hugging Face, Qualcomm AI Hub); Castellan doesn't redistribute them, except Intel's NPU model, its own export, which it publishes on Hugging Face as Castellan-AI.
+Each customer's PC downloads the servers, runtimes and models from their makers (GitHub releases, Microsoft, Hugging Face, Qualcomm AI Hub); Castellan doesn't redistribute them, except Intel's NPU model, its own export, which it publishes on Hugging Face as Castellan-AI, and its build of GenieX's llama.cpp plugin, which the kit carries.
 
 ## The NPU check (on a new maker's hardware)
 

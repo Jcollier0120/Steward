@@ -103,7 +103,7 @@ function stable(x: unknown): string {
 const served = (e: Record<string, any>) => stable({ maxContextTokens: e.maxContextTokens, quirks: e.quirks ?? [], chat: e.chat, vision: e.vision, embed: e.embed });
 
 /** Each server the entry starts, once (an embedding server of its own beside the chat's). */
-function servers(e: Record<string, any>): { program: string; base: string }[] {
+export function servers(e: Record<string, any>): { program: string; base: string }[] {
   const out = new Map<string, string>();
   for (const k of ['chat', 'vision', 'embed']) {
     const ep = e[k];
@@ -127,7 +127,7 @@ export async function whatAnswers(base: string, ms = 2_000): Promise<string | nu
 }
 
 /** Each port the test will ask, waited on until nothing answers there (NPU_REFRESH_PORT_WAIT_MS): what still answers, as problems. */
-async function stillAnswering(d: NpuRefreshDeps, bases: string[]): Promise<string[]> {
+export async function stillAnswering(d: Pick<NpuRefreshDeps, 'answering' | 'sleep'>, bases: string[]): Promise<string[]> {
   if (!d.answering) return [];
   const sleep = d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const out: string[] = [];
@@ -157,6 +157,13 @@ export function argChanges(from: string[], to: string[]): string[] {
   };
   const a = pairs(from);
   const b = pairs(to);
+  return [...b.filter((x) => !a.includes(x)).map((x) => `${x} added`), ...a.filter((x) => !b.includes(x)).map((x) => `${x} removed`)];
+}
+
+/** The variables one environment sets that the other doesn't, or sets otherwise, as `NAME=value added` and `NAME=value removed`. */
+export function envChanges(from: Record<string, string> | undefined, to: Record<string, string> | undefined): string[] {
+  const a = Object.entries(from ?? {}).map(([k, v]) => `${k}=${v}`);
+  const b = Object.entries(to ?? {}).map(([k, v]) => `${k}=${v}`);
   return [...b.filter((x) => !a.includes(x)).map((x) => `${x} added`), ...a.filter((x) => !b.includes(x)).map((x) => `${x} removed`)];
 }
 
@@ -211,6 +218,7 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
     // Another model (its generation's own, once setup has pulled it: a Snapdragon X2's Qwen3-VL-2B).
     ...(entry.chat.model !== next.chat!.model ? [`model ${next.chat!.model} in ${entry.chat.model}'s place`] : []),
     ...argChanges(entry.chat.startCommand, next.chat!.startCommand ?? []),
+    ...envChanges(entry.chat.env, next.chat!.env),
     ...(entry.embed?.startCommand && next.embed?.startCommand ? argChanges(entry.embed.startCommand, next.embed.startCommand).map((c) => `embeddings: ${c}`) : []),
     ...(next.embed && (entry.embed?.turn ?? null) !== (next.embed.turn ?? null) ? [`embeddings: in ${next.embed.turn ? `${next.embed.turn}'s` : "the NPU's"} turn`] : []),
     ...(stable(entry.quirks ?? []) !== stable(next.quirks ?? []) ? [`quirks: ${next.quirks?.length ? next.quirks.join(', ') : 'none'}`] : []),

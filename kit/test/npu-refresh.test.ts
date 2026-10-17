@@ -14,7 +14,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseNpus } = await import('./fixture/src/kit/detect.ts');
-const { argChanges, NPU_REFRESH_PORT_STEP_MS, NPU_REFRESH_PORT_WAIT_MS, refreshNpu, serverFailed, stillAnswered, whatAnswers } = await import('./fixture/src/kit/npu-refresh.ts');
+const { argChanges, envChanges, NPU_REFRESH_PORT_STEP_MS, NPU_REFRESH_PORT_WAIT_MS, refreshNpu, serverFailed, stillAnswered, whatAnswers } = await import('./fixture/src/kit/npu-refresh.ts');
 const core = await import('../core/index.js');
 const { npuRefreshFile, portablePath, readNpuRefresh } = await import('./fixture/src/kit/setup.ts');
 type Deps = Parameters<typeof refreshNpu>[0];
@@ -463,7 +463,7 @@ test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once 
     // Pulled: its command tested in the NPU's turn, then written, the PC's own timeouts kept.
     const pulled = on(x2, ramGb, () => true);
     const r = await refreshNpu(pulled.deps);
-    assert.deepEqual(r, { did: 'refreshed', changes: [`model ${TWO_B} in qualcomm/Qwen3-VL-4B-Instruct:W4A16's place`, '--compute npu added', '--vit-compute GPUOpenCL added', '--nctx 2560 added', 'pictures: at most 1024 tokens'] }, `${ramGb} GB`);
+    assert.deepEqual(r, { did: 'refreshed', changes: [`model ${TWO_B} in qualcomm/Qwen3-VL-4B-Instruct:W4A16's place`, '--compute npu added', '--vit-compute GPUOpenCL added', '--nctx 2560 added', 'GENIEX_IMAGE_MAX_TOKENS=1024 added', 'pictures: at most 1024 tokens'] }, `${ramGb} GB`);
     assert.ok(pulled.did.includes('stop geniex.exe http://127.0.0.1:18181') && pulled.did.includes('stop llama-server.exe http://127.0.0.1:18182'), pulled.did.join(', '));
     assert.equal(pulled.npu().chat.model, TWO_B, `${ramGb} GB`);
     assert.deepEqual(pulled.npu().vision, { model: TWO_B, pictureTokens: 1024 }, `${ramGb} GB`);
@@ -482,21 +482,30 @@ test("an X2 set up with the 2B by kit 2.78.8 to 2.80.1: its window cut to 2,560 
   const x2 = parseNpus(X2, 'arm64')[0];
   const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true })!;
   const now = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model } }), timeouts: { ...MEASURED } };
-  // What those kits wrote: GenieX's default window (4,096) and every picture at its own size.
+  // What those kits wrote: GenieX's default window (4,096), every picture at its own size, and no cap for GenieX itself.
   const before = structuredClone(now) as Record<string, any>;
   before.chat.startCommand = before.chat.startCommand.slice(0, -2);
   delete before.vision.pictureTokens;
+  delete before.chat.env;
   assert.deepEqual(before.chat.startCommand.slice(-4), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL']);
   const pc = fakePc(before);
   pc.deps.detect = async () => (pc.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
   const r = await refreshNpu(pc.deps);
-  assert.deepEqual(r, { did: 'refreshed', changes: ['--nctx 2560 added', 'pictures: at most 1024 tokens'] });
+  assert.deepEqual(r, { did: 'refreshed', changes: ['--nctx 2560 added', 'GENIEX_IMAGE_MAX_TOKENS=1024 added', 'pictures: at most 1024 tokens'] });
   assert.ok(pc.did.includes('turn') && pc.did.includes('stop geniex.exe http://127.0.0.1:18181'), pc.did.join(', '));
   assert.deepEqual(pc.npu().chat, now.chat);
   assert.deepEqual(pc.npu().vision, { model: 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0', pictureTokens: 1024 });
   assert.deepEqual(pc.npu().embed, now.embed, 'its embeddings as they were');
   assert.deepEqual(pc.npu().timeouts, MEASURED);
-  assert.match(pc.log.join('\n'), /now start with this kit's command \(2\.75\.0\): --nctx 2560 added; pictures: at most 1024 tokens/);
+  assert.match(pc.log.join('\n'), /now start with this kit's command \(2\.75\.0\): --nctx 2560 added; GENIEX_IMAGE_MAX_TOKENS=1024 added; pictures: at most 1024 tokens/);
+  // Set up by kit 2.80.2: GenieX given the same cap as the kit's pictures (its patched plugin reads it), after the same test.
+  const lastKit = structuredClone(now) as Record<string, any>;
+  delete lastKit.chat.env;
+  const capped = fakePc(lastKit);
+  capped.deps.detect = async () => (capped.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+  assert.deepEqual(await refreshNpu(capped.deps), { did: 'refreshed', changes: ['GENIEX_IMAGE_MAX_TOKENS=1024 added'] });
+  assert.deepEqual(capped.npu().chat.env, { GENIEX_IMAGE_MAX_TOKENS: '1024' });
+  assert.ok(capped.did.includes('stop geniex.exe http://127.0.0.1:18181'), capped.did.join(', '));
   // Set up by this kit: current.
   const fresh = fakePc(now);
   fresh.deps.detect = async () => (fresh.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
@@ -510,4 +519,11 @@ test("the changed arguments, as the keeper's log says them", () => {
     '--max_prompt_len 4096 removed',
   ]);
   assert.deepEqual(argChanges(['x.exe', '--a', '1'], ['x.exe', '--a', '1']), []);
+});
+
+test("the changed environment, as the keeper's log says it", () => {
+  assert.deepEqual(envChanges(undefined, { GENIEX_IMAGE_MAX_TOKENS: '1024' }), ['GENIEX_IMAGE_MAX_TOKENS=1024 added']);
+  assert.deepEqual(envChanges({ A: '1', B: '2' }, { A: '1', B: '3' }), ['B=3 added', 'B=2 removed']);
+  assert.deepEqual(envChanges({ A: '1' }, undefined), ['A=1 removed']);
+  assert.deepEqual(envChanges({ A: '1' }, { A: '1' }), []);
 });

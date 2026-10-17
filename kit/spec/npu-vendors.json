@@ -26,6 +26,48 @@
           "verified": true,
           "hexagonArch": "v81",
           "aiHubChipset": "qualcomm-snapdragon-x2-elite",
+          "pluginPatch": {
+            "what": "Castellan's build of GenieX 0.8.0's llama.cpp plugin: qualcomm/GenieX v0.8.0 with two commits of Castellan's (kit node/geniex/README.md), signed with Castellan's certificate. The model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row (its compute buffer on the NPU 128 MiB, not 601); the vision encoder loads with the first picture; and GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens",
+            "serverVersion": "0.8.0",
+            "folder": "%LOCALAPPDATA%\\GenieX CLI\\llama_cpp",
+            "file": "geniex_plugin.dll",
+            "stock": {
+              "size": 292352,
+              "sha256": "4eabfa6c518c597935b3e5487fce85e1287bdba191236587cdb519a720dfe28a"
+            },
+            "patched": {
+              "from": "geniex/geniex_plugin.dll",
+              "size": 301136,
+              "sha256": "a167bfbdd3a672caf2e629a5b56f4017e4f1bf4f442200b542ff2d602121f21b"
+            },
+            "needs": {
+              "llama.dll": {
+                "size": 2783232,
+                "sha256": "208f66a257f3c2bd4ec95c650bb9ba9ef6d25ebcd794c1bed4ac76745a7df66a"
+              },
+              "llama-common.dll": {
+                "size": 5059072,
+                "sha256": "3db418ac7b967c8c4f10efada3da3abe20493f62e282113fda3d8204fe33e45f"
+              },
+              "mtmd.dll": {
+                "size": 1498112,
+                "sha256": "b4abe314a41cde8ed90da7172bd5c21e08d55615a3b52393b4698a1954254d3e"
+              },
+              "ggml.dll": {
+                "size": 72704,
+                "sha256": "58f200b482a8239c0851d22e0a3a414883f7cdfc692039340a858b756b31862c"
+              },
+              "ggml-base.dll": {
+                "size": 664064,
+                "sha256": "16bb50b27aa67128ce9b558427325fdb2889c8915fb21783c1db05f109cdab96"
+              },
+              "..\\geniex.dll": {
+                "size": 4992000,
+                "sha256": "2a7f0a85e12d689cf39a8b772981c803445b0a5223a25a3b9fb68d4dbac05c4e"
+              }
+            },
+            "basis": "Measured on the X2 Elite with Qwen3-VL-2B Q4_0 (--compute npu --vit-compute GPUOpenCL, 2026-10-17), GenieX's own plugin against this build: after a chat, 4.0 GB working set and 2.15 GB private against 1.77 and 0.21; after a picture, 4.08 GB against 3.36; cold load to the first answer 5.0 s against 2.4; 70.4 tokens written a second against 75.5; quality 21 of 24 against 22, pictures 4 of 4 on both, and 34 of 36 screen questions at 1,024 tokens on both. The first picture takes about 0.8 s longer (its encoder loads then)."
+          },
           "models": [
             {
               "id": "unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0",
@@ -111,6 +153,7 @@
         "--keepalive",
         "3600"
       ],
+      "pictureTokensEnv": "GENIEX_IMAGE_MAX_TOKENS",
       "models": [
         {
           "id": "qualcomm/Qwen3-VL-4B-Instruct:W4A16",
