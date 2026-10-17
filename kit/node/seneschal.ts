@@ -32,18 +32,42 @@ import path from 'node:path';
  *
  * A whole suite may be cut into shards by test file (kit 2.78.22): each its own task (`shard`, part of its key), so the
  * PCs whose workers run it (`seneschalSiblings`) each take a part.
+ *
+ * The Wright's jobs and Reeve's heavy background work ask too (Seneschal 0.3.0, kit 2.80.0): the turn kinds. Only their
+ * asker can run them, so the Seneschal hands out a turn and nothing else. Such a task is named by its `job` (an issue,
+ * a job, an index), never by code, so it needs no commit, and it says what it `needs` of the room (`light`: no
+ * processor slot; `line`: a line of the PC's own, Claude Code's). An asker that can come back later (`defer`) is told
+ * so (**{ later }**) when its turn doesn't come in its wait, instead of being told to run as before; and a Wright's job
+ * is never skipped for a run that finished. An older Seneschal refuses these tasks, and they run as before.
  */
 
 export type SeneschalLane = 'person' | 'blocking' | 'normal' | 'background';
-export type SeneschalKind = 'pr-check' | 'kit-trial' | 'full-suite' | 'wright-job';
+/** The kinds any worker may run, since they name code (a commit), never a command: the Steward's checks. */
+export type SeneschalCheckKind = 'pr-check' | 'kit-trial' | 'full-suite';
+/** The turn kinds (Seneschal 0.3.0): work only its asker can run, named by its job. Never leased to any other worker, never moved to another PC. */
+export type SeneschalTurnKind = 'wright-job' | 'reeve-job';
+export type SeneschalKind = SeneschalCheckKind | SeneschalTurnKind;
 
-/** A task as the agent submits it (the Seneschal's tasks.ts Submission): what it runs on, never a command. */
-export interface SeneschalTask {
-  kind: SeneschalKind;
+/** A line of this PC with a cap of its own, held besides a processor slot (the Seneschal's LINES). */
+export type SeneschalLine = 'claude-code';
+
+/** What a task needs of the room it runs in (the Seneschal's tasks.ts Needs). */
+export interface SeneschalNeeds {
+  /** A clone of the repository. */
+  clone?: boolean;
+  /** An accelerator by its id ("npu", "gpu-…"), or "any": leased only while that accelerator's line is free. */
+  accelerator?: string;
+  /** The memory it takes at its peak, in MB: leased only while that much is free. */
+  memoryMb?: number;
+  /** Takes no processor slot (a turn kind only): held back by its accelerator's line and its memory alone. */
+  light?: boolean;
+  /** A line of this PC it holds while it runs (a turn kind only): leased only while the line has room. */
+  line?: SeneschalLine;
+}
+
+interface SeneschalTaskBase {
   /** owner/name. */
   repo: string;
-  /** The commit's full id. */
-  commit: string;
   /** Its code tree's full id, when the checkout has nothing uncommitted: the same code is the same work. */
   tree?: string;
   /** For only the tests a change reaches: the commit they're picked against (part of the key). */
@@ -56,12 +80,24 @@ export interface SeneschalTask {
   agent?: string;
   /** One part of a whole suite (a full-suite task only): its test files dealt out by name (part of the key). */
   shard?: SeneschalShard;
+  /** The work a turn kind is about (its key): the Wright's issue "#212", or "pr#41" for a conflict run; Reeve's "repo-sync", "index:…". */
+  job?: string;
+  /** What it needs of the room. */
+  needs?: SeneschalNeeds;
+  /** How many runs it gets before it fails for good (a lost lease counts as one): 1 for work that must never start twice. */
+  tries?: number;
   lane?: SeneschalLane;
   /** In words: "Reeve#212's checks". The Seneschal makes them up when left out. */
   what?: string;
   /** The agent that asks, by its id. */
   by: string;
 }
+
+/**
+ * A task as the agent submits it (the Seneschal's tasks.ts Submission): what it's about, never a command. A check names
+ * its commit; a turn kind names its job, and a commit only if it has one (it isn't part of its key).
+ */
+export type SeneschalTask = (SeneschalTaskBase & { kind: SeneschalCheckKind; /** The commit's full id. */ commit: string }) | (SeneschalTaskBase & { kind: SeneschalTurnKind; commit?: string; job: string });
 
 /** One part of a whole suite: the `index`th of `of`, from 1. */
 export interface SeneschalShard {
@@ -127,7 +163,17 @@ export interface SeneschalTurn {
   giveBack(note: string): Promise<void>;
 }
 
-export type SeneschalAnswer = { reused: SeneschalResult; id: string } | { failed: SeneschalResult; id: string } | { turn: SeneschalTurn };
+/**
+ * A task that stands done or failed, handed back in place of its turn: a pass that stands in, or a failure confirmed on
+ * two PCs. Never for a Wright's job.
+ */
+type SeneschalSettled = { reused: SeneschalResult; id: string } | { failed: SeneschalResult; id: string };
+
+/**
+ * `later`: the turn didn't come in its wait, and the asker said it can come back (`defer`): why it waits, in the
+ * Seneschal's words. Only while the Seneschal answers and the PC is busy; never to an asker that didn't say `defer`.
+ */
+export type SeneschalAnswer = SeneschalSettled | { turn: SeneschalTurn } | { later: string; id: string };
 
 /** Where the Seneschal's page listens, and its token. */
 export interface SeneschalAt {
@@ -189,6 +235,12 @@ export interface SeneschalTurnOptions {
   say?: (line: string) => void;
   /** Told each new reason it waits (the room is full, a merge goes first), for the agent's work status. */
   waiting?: (why: string) => void;
+  /**
+   * It can come back later (the Wright's next round, Reeve's): a turn that doesn't come in `waitMs`, counting all the
+   * time it asks, answers `{ later }` instead of null, so the work waits rather than runs beside what fills the PC.
+   * Only while the Seneschal answers: one that doesn't, or refuses the task, still answers null (run as before).
+   */
+  defer?: boolean;
   /** Tests: where the Seneschal is (null: none), the environment, the clock, and how often and long it asks. */
   at?: SeneschalAt | null;
   env?: NodeJS.ProcessEnv;
@@ -203,6 +255,8 @@ type Reply = { status: number; body: any } | null;
 type Call = (route: string, body: unknown) => Promise<Reply>;
 
 const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** A wait in words: "45 seconds", "20 minutes". */
+const howLong = (ms: number) => (ms < 120_000 ? `${Math.round(ms / 1000)} seconds` : `${Math.round(ms / 60_000)} minutes`);
 
 /** The Seneschal these options reach: under node --test, only one the test gave a home of its own (or `at`), never this PC's. */
 function seneschalFor(o: { at?: SeneschalAt | null; env?: NodeJS.ProcessEnv }): SeneschalAt | null {
@@ -281,13 +335,26 @@ export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions
    * A task that stands done or failed: a pass that ran these commands stands in, and so does a failure of them confirmed
    * on two PCs while this asked (`fresh`): the change's. Anything else is asked for again.
    */
-  const settled = (id: string, state: string, result: SeneschalResult | null | undefined, fresh: boolean): SeneschalAnswer | 'again' | 'other' => {
+  const settled = (id: string, state: string, result: SeneschalResult | null | undefined, fresh: boolean): SeneschalSettled | 'again' | 'other' => {
     if (state === 'done' && result?.ok) {
       if (sameCommands(result.commands, o.commands)) return { reused: result, id };
       return 'other';
     }
     if (fresh && state === 'done' && result && !result.ok && result.confirmed && sameCommands(result.commands, o.commands)) return { failed: result, id };
     return 'again';
+  };
+  // A Wright's job is never skipped for a run that finished: its issue is worked again whatever a past job came to. A
+  // Seneschal from 0.3.0 never hands one back; an older one keyed by commit could, for a caller that sent a commit.
+  const standsIn = (s: SeneschalSettled): SeneschalAnswer | null =>
+    task.kind === 'wright-job' ? asBefore(`the Seneschal handed back a run of the Wright's ${task.job} that finished (${s.id}), which never stands in for another`) : s;
+  /**
+   * The turn didn't come in time: an asker that can come back later is told so while the Seneschal answers (the PC is
+   * busy), with why it waits; any other, or one whose last ask went unanswered, runs as before.
+   */
+  const late = (id: string, why: string): SeneschalAnswer | null => {
+    if (!o.defer || misses > 0) return asBefore(why);
+    say(`${why}: it asks again later`);
+    return { later: lastWhy || 'it waits its turn', id };
   };
 
   let sub = await submit(false);
@@ -298,7 +365,7 @@ export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions
     if (t.state === 'done' || t.state === 'failed') {
       const s = settled(id, t.state, t.result, false);
       if (s === 'other') return asBefore('the Seneschal has a pass of this code that ran other checks');
-      if (s !== 'again') return s;
+      if (s !== 'again') return standsIn(s);
       if (++afresh > AFRESH) return asBefore('the Seneschal kept handing back a failure');
       sub = await submit(true);
       continue;
@@ -325,7 +392,7 @@ export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions
         if (b.state === 'done' || b.state === 'failed') {
           const s = settled(id, b.state, b.result, true);
           if (s === 'other') return asBefore('it passed elsewhere running other checks');
-          if (s !== 'again') return s;
+          if (s !== 'again') return standsIn(s);
           if (++afresh > AFRESH) return asBefore('the Seneschal kept handing back a failure');
           next = await submit(true);
           break;
@@ -336,8 +403,9 @@ export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions
           o.waiting?.(why);
         }
       }
-      if (clock.waited() >= waitMs) return asBefore(`its turn didn't come in ${Math.round(waitMs / 60_000)} minutes (${lastWhy || 'no answer'})`);
-      if (clock.ran() >= runMs) return asBefore(`it ran elsewhere for more than ${Math.round(runMs / 60_000)} minutes (${lastWhy})`);
+      // A deferring asker's wait counts all the time it asks: it said how long it can wait, whoever runs the task meanwhile.
+      if ((o.defer ? now() - started : clock.waited()) >= waitMs) return late(id, `its turn didn't come in ${howLong(waitMs)} (${lastWhy || 'no answer'})`);
+      if (clock.ran() >= runMs) return late(id, `it ran elsewhere for more than ${howLong(runMs)} (${lastWhy})`);
       await sleep(pollMs);
     }
     sub = next;
@@ -480,7 +548,8 @@ export interface SeneschalWorkOptions {
   runMs?: number;
 }
 
-const KINDS: readonly SeneschalKind[] = ['pr-check', 'kit-trial', 'full-suite', 'wright-job'];
+/** What a worker that doesn't say runs: the checks. The turn kinds are only ever their asker's, never a worker's. */
+const CHECK_KINDS: readonly SeneschalKind[] = ['pr-check', 'kit-trial', 'full-suite'];
 const LANES: readonly SeneschalLane[] = ['person', 'blocking', 'normal', 'background'];
 /** owner/name, neither of them "." or "..". */
 const REPO = /^(?!\.\.?\/)[A-Za-z0-9_.-]{1,100}\/(?!\.\.?$)[A-Za-z0-9_.-]{1,100}$/;
@@ -498,7 +567,7 @@ export function shardOf(v: any): SeneschalShard | null {
 }
 
 /** The job in a lease's task, checked again here (it may come from another PC); null when any of it isn't as it should be. Pure. */
-export function jobOf(t: any, kinds: readonly SeneschalKind[] = KINDS): Omit<SeneschalJob, 'turn'> | null {
+export function jobOf(t: any, kinds: readonly SeneschalKind[] = CHECK_KINDS): Omit<SeneschalJob, 'turn'> | null {
   if (!t || typeof t !== 'object') return null;
   const id = String(t.id ?? '');
   if (!/^[tb]\d{1,12}$/.test(id) || !kinds.includes(t.kind) || !REPO.test(String(t.repo)) || !OID.test(String(t.commit))) return null;

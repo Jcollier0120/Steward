@@ -477,7 +477,7 @@ test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once 
   for (const ramGb of [15.6, 47.6]) assert.deepEqual(await refreshNpu(on(x1, ramGb, () => true).deps), { did: 'current' }, `X Elite, ${ramGb} GB`);
 });
 
-test("an X2 set up with the 2B by kit 2.78.8 to 2.79.1: its window cut to 2,560 tokens and its pictures fitted within 1,024, after the same test", async () => {
+test("an X2 set up with the 2B by kit 2.78.8 to 2.80.1: its window cut to 2,560 tokens and its pictures fitted within 1,024, after the same test", async () => {
   const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
   const x2 = parseNpus(X2, 'arm64')[0];
   const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true })!;
