@@ -1,7 +1,7 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, totalmem } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -288,6 +288,36 @@ export const PICTURE_TOKENS = 1024;
  */
 export const VISION_ON_PROCESSOR_TIMEOUTS = { requestBaseMs: 90_000 } as const;
 
+/**
+ * llama-server's RAM cache of earlier prompts' states, turned off. By default it keeps up to 8,192 MiB of them in the PC's
+ * memory, for each server, beside what the card holds. On a Core Ultra 5 225U's Intel Graphics (b11669, 2026-10-16), the
+ * chat server held 4.54 GB after 34 of the manor's kind of requests with it and 3.59 GB without, with the same answers,
+ * in 111 s rather than 118 s. The agents share little more than a short system prompt, and a slot still reuses its own
+ * last prompt. It's given in the server's environment (LLAMA_ARG_CACHE_RAM): a build from before the flag ignores that,
+ * where it would refuse `--cache-ram` and not start.
+ */
+export const NO_RAM_CACHE: Readonly<Record<string, string>> = { LLAMA_ARG_CACHE_RAM: '0' };
+
+/** The PC's memory, in GB, from which a card that encodes on the processor keeps its chat on a server of its own (chatsOnVision). */
+export const CHAT_ON_VISION_RAM_GB = 32;
+
+/**
+ * Whether a card's chat runs on its vision server: one Qwen3-VL-4B for both, on chat's endpoint, with vision's flags, in
+ * place of a Qwen3-4B beside it. That is a card that encodes on the processor (encodesOnProcessor: Intel's integrated
+ * graphics, whose memory is the PC's) on a PC with under CHAT_ON_VISION_RAM_GB. On a Core Ultra 5 225U with 15.4 GB
+ * (b11669, 2026-10-16), the chat server held 3.5 GB and the vision server 5.0 GB, both of the PC's memory, so the two at
+ * once came to 8.5 GB of it and the one server to 5.0. On text the one server wrote as fast (12.5 tokens a second
+ * against 11.1 to 12.4) and passed the Smith's golden, determinism and prefix-leak checks (13 of 13, as Qwen3-4B did),
+ * but got 15 of 18 of the manor's kind of tasks right against Qwen3-4B's 16: it found the wrong line in a 2,700-token
+ * log, and its sum was wrong where Qwen3-4B's was right (but for its working shown). A picture, text, then a picture
+ * again all answered on the one server. Qwen3-VL-2B (2026-10-17) would hold 3.3 GB, but it read the Smith's check
+ * picture, TALLY 4827, as "Tally 827".
+ * `device` may be the build's backend before its device's number is known (planSetup).
+ */
+export function chatsOnVision(card: { id: string; memoryGb?: number; device: string | null }, ramGb: number): boolean {
+  return encodesOnProcessor(card) && ramGb < CHAT_ON_VISION_RAM_GB;
+}
+
 /** A server's own flags after its model, by kind: what it serves, its context and batch, one request at a time but chat's. */
 function kindFlags(kind: EndpointKind, e: Pick<EntryInput, 'id' | 'memoryGb' | 'device' | 'slots' | 'maxContextTokens'>, mmproj: string | undefined, model: string): string[] {
   switch (kind) {
@@ -379,24 +409,35 @@ export interface EntryInput {
   ports: Partial<Record<EndpointKind, number>>;
   slots: number;
   maxContextTokens: number;
+  /** Chat on the vision server (chatsOnVision): chat's port runs vision's model and flags, and vision has no server of its own. */
+  chatOnVision?: boolean;
 }
 
 /**
- * The config.json entry: one llama-server per kind it serves, each on its own port, pinned to its device. No name: an
- * accelerator's name comes from the PC (the core's acceleratorName), never from config.json.
+ * The config.json entry: one llama-server per kind it serves, each on its own port, pinned to its device; or, chat on
+ * the vision server (`chatOnVision`), one for both on chat's port, and vision on it. No name: an accelerator's name
+ * comes from the PC (the core's acceleratorName), never from config.json.
  */
 export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
   const a: AcceleratorEntry = { id: e.id, kind: e.kind, slots: e.slots, maxContextTokens: e.maxContextTokens, quirks: [] };
   if (e.memoryGb !== undefined) a.memoryGb = e.memoryGb;
   const server = portablePath(e.server);
   const pin = e.device ? ['--device', e.device, '-ngl', '99'] : ['-ngl', '0'];
+  const shared = !!(e.chatOnVision && e.models.vision && e.ports.chat);
   for (const kind of ENDPOINT_KINDS) {
-    const m = e.models[kind];
+    // Vision on chat's server: the core's endpointFor gives it chat's.
+    if (shared && kind === 'vision') {
+      a.vision = { model: MODEL_SPECS.vision.model, ...(encodesOnProcessor(e) ? { timeouts: { ...VISION_ON_PROCESSOR_TIMEOUTS } } : {}) };
+      continue;
+    }
+    // The server it runs: vision's, for chat on it.
+    const runs: EndpointKind = shared && kind === 'chat' ? 'vision' : kind;
+    const m = e.models[runs];
     const port = e.ports[kind];
     if (!m || !port) continue;
-    const model = MODEL_SPECS[kind].model;
+    const model = MODEL_SPECS[runs].model;
     const common = ['--host', '127.0.0.1', '--port', String(port), ...pin, '-m', portablePath(m.path)];
-    a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand: [server, ...common, ...kindFlags(kind, e, m.mmproj, model)] };
+    a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand: [server, ...common, ...kindFlags(runs, e, m.mmproj, model)], env: { ...NO_RAM_CACHE } };
     if (kind === 'embed') a.embed!.maxContextTokens = Math.min(EMBED_CAP, e.maxContextTokens);
     if (kind === 'vision' && encodesOnProcessor(e)) a.vision!.timeouts = { ...VISION_ON_PROCESSOR_TIMEOUTS };
   }
@@ -507,6 +548,8 @@ export interface SetupTarget {
    * had for them is kept as it was (keepingAddOns), never removed.
    */
   leftToNpu?: EndpointKind[];
+  /** Its chat runs on its vision server (chatsOnVision): Qwen3-4B isn't downloaded for it, and vision has no port of its own. */
+  chatOnVision?: boolean;
   /** Filled in once its build is here (llama-server --list-devices). */
   device?: string | null;
   problem?: string;
@@ -659,7 +702,10 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
       ...(left.length ? { leftToNpu: left } : {}),
     };
     if ('none' in v) t.problem = v.none;
-    else t.variant = v;
+    else {
+      t.variant = v;
+      if (card && size.kinds.includes('chat') && size.kinds.includes('vision') && chatsOnVision({ id, memoryGb: card.memoryGb, device: v.backend }, ramGb)) t.chatOnVision = true;
+    }
     targets.push(t);
   }
 
@@ -690,7 +736,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   }
 
   // Which models.
-  const needed = [...new Set(targets.filter((t) => t.variant).flatMap((t) => t.kinds))];
+  const needed = [...new Set(targets.filter((t) => t.variant).flatMap((t) => (t.chatOnVision ? t.kinds.filter((k) => k !== 'chat') : t.kinds)))];
   const found = needed.length ? await findModels(needed, o.hfFiles) : { models: [], problems: [] };
   problems.push(...found.problems);
   for (const m of found.models) {
@@ -712,9 +758,12 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   for (const t of targets.filter((t) => t.variant)) {
     const mine = current.find((a) => a.id === t.id);
     // The kinds it had first, so one it gains (the switch turned on) never takes the port of one it keeps.
-    const hadOne = (k: EndpointKind) => (mine?.[k]?.baseUrl ? 1 : 0);
-    for (const k of [...t.kinds].sort((a, b) => hadOne(b) - hadOne(a))) {
-      const had = mine?.[k]?.baseUrl ? Number(new URL(serverBase(mine[k]!.baseUrl!)).port) : 0;
+    // Chat on the vision server takes the port its vision server had, where that model already runs (as the keeper's
+    // withChatOnVision does), and vision takes none.
+    const was = (k: EndpointKind): string | undefined => (t.chatOnVision && k === 'chat' ? (mine?.vision?.baseUrl ?? mine?.chat?.baseUrl) : mine?.[k]?.baseUrl);
+    const hadOne = (k: EndpointKind) => (was(k) ? 1 : 0);
+    for (const k of [...t.kinds].filter((k) => !(t.chatOnVision && k === 'vision')).sort((a, b) => hadOne(b) - hadOne(a))) {
+      const had = was(k) ? Number(new URL(serverBase(was(k)!)).port) : 0;
       if (had && !taken.has(had)) {
         t.ports[k] = had;
       } else {
@@ -760,7 +809,10 @@ export function describePlan(p: SetupPlan): string[] {
       lines.push(`${t.name} (${t.id}): skipped, ${t.problem}`);
       continue;
     }
-    const serves = t.kinds.map((k) => `${k} on ${t.ports[k]}`).join(', ');
+    const serves = t.kinds
+      .filter((k) => !(t.chatOnVision && k === 'vision'))
+      .map((k) => (t.chatOnVision && k === 'chat' ? `chat and vision on ${t.ports.chat} (one ${MODEL_SPECS.vision.model} server)` : `${k} on ${t.ports[k]}`))
+      .join(', ');
     lines.push(`${t.name} (${t.id}): llama.cpp ${p.build ?? '?'} ${t.variant?.variant}, ${t.slots} slot${t.slots === 1 ? '' : 's'}, ${t.maxContextTokens} tokens a request; ${serves}${t.device ? `; device ${t.device}` : ''}`);
     if (t.left?.length) lines.push(`  ${t.left.join(' and ')} left off: the card's ${t.memoryGb} GB won't hold it beside ${t.kinds.join(' and ')} at once (to have it anyway: accelerators setup --serve chat,vision,embed)`);
   }
@@ -898,10 +950,11 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
       if (p) models[k] = { path: p, mmproj: k === 'vision' ? modelPath(k, 'mmproj') : undefined };
     }
     // Named as detection named it, for the caller; config.json gets the entry without it (mergeEntries).
-    const made = acceleratorEntry({ id: t.id, kind: t.kind, memoryGb: t.memoryGb, device, server, models, ports: t.ports, slots: t.slots, maxContextTokens: t.maxContextTokens });
+    const made = acceleratorEntry({ id: t.id, kind: t.kind, memoryGb: t.memoryGb, device, server, models, ports: t.ports, slots: t.slots, maxContextTokens: t.maxContextTokens, ...(t.chatOnVision ? { chatOnVision: true } : {}) });
     const had = readAccelerators(raw).accelerators.find((a) => a.id === t.id);
     entries.push({ ...keepingAddOns(made, had, t.kinds, t.leftToNpu), name: core.deviceName(t.name) });
-    io.log(`${t.name}: ${device ? `device ${device}, ` : ''}${Object.keys(models).join(', ')} on ${Object.values(t.ports).join(', ')}`);
+    const serving = Object.keys(models).filter((k) => !(t.chatOnVision && k === 'chat')).map((k) => (t.chatOnVision && k === 'vision' ? 'chat and vision' : k));
+    io.log(`${t.name}: ${device ? `device ${device}, ` : ''}${serving.join(', ')} on ${Object.values(t.ports).join(', ')}`);
   }
   return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems, ...(npu ? { npu } : {}) };
 }
@@ -1397,28 +1450,95 @@ export function withSmallerEmbedServer(raw: Record<string, any>): { raw: Record<
 }
 
 /**
- * The cards' vision and embedding commands brought up to this kit's (withEncoderOnProcessor, withSmallerEmbedServer)
- * on a PC an older kit set up: setup writes them once, so the keeper's look does it, once for each kit version, as the
- * NPU's refresh does (npu-refresh.ts), and a kit never redoes what a newer one looked at. Nothing is started or stopped:
- * on the cards it's for, a vision command without the flag never stays up, a server running takes the cap or its
- * smaller context at its next start, and an agent takes the time or the embedding cap when it next reads config.json.
- * A person who takes the flag, the cap or the time out again, or sets the embedding server's context back, keeps it
- * until the next kit. The cards changed; none when config.json couldn't be read (the next look tries).
+ * config.json with NO_RAM_CACHE in the environment of each llama-server on the cards and the processor, where an older
+ * kit's setup didn't give it. A server whose command or environment already says what it caches (`--cache-ram`,
+ * `-cram`, LLAMA_ARG_CACHE_RAM: a person's) is left as it is, and so is a command that isn't llama-server's.
  */
-export function refreshCardVision(o: { configFile: string; kit: string; now?: () => number; validate?: (raw: unknown) => string[]; log: (line: string) => void }): string[] {
+export function withoutRamCache(raw: Record<string, any>): { raw: Record<string, any>; changed: string[] } {
+  if (!Array.isArray(raw.accelerators)) return { raw, changed: [] };
+  const changed: string[] = [];
+  const accelerators = raw.accelerators.map((a: any) => {
+    if ((a?.kind !== 'gpu' && a?.kind !== 'cpu') || typeof a.id !== 'string') return a;
+    let next = a;
+    for (const k of ENDPOINT_KINDS) {
+      const ep = a[k];
+      const cmd: unknown = ep?.startCommand;
+      if (!Array.isArray(cmd) || !cmd.every((s) => typeof s === 'string') || !/^llama-server(\.exe)?$/i.test(path.win32.basename(cmd[0] ?? ''))) continue;
+      if (cmd.some((s) => s === '-cram' || s === '--cache-ram' || s.startsWith('--cache-ram='))) continue;
+      const env = ep.env && typeof ep.env === 'object' && !Array.isArray(ep.env) ? ep.env : {};
+      if (Object.keys(env).some((n) => n.toUpperCase() === 'LLAMA_ARG_CACHE_RAM')) continue;
+      next = { ...next, [k]: { ...ep, env: { ...env, ...NO_RAM_CACHE } } };
+    }
+    if (next !== a) changed.push(a.id);
+    return next;
+  });
+  return changed.length ? { raw: { ...raw, accelerators }, changed } : { raw, changed };
+}
+
+/**
+ * config.json with each card that now chats on its vision server (chatsOnVision on a PC of `ramGb`) brought to that,
+ * where an older kit's setup gave it a Qwen3-4B chat server beside its Qwen3-VL-4B one, and the cards changed. Chat
+ * moves onto the vision server's port and command, where that model already runs, and vision keeps its model and
+ * time, on chat's server (the core's endpointFor). So nothing is started or stopped: a vision server running takes chat
+ * as it is, and the Qwen3-4B server left on chat's old port is the keeper's orphan, stopped once it has run 5 minutes
+ * with no configured server its own. Only setup's own pair is changed, each llama-server's, with setup's models, one
+ * slot, on ports of their own: a card with another model, more slots or chat and vision on one port already is left as it is.
+ */
+export function withChatOnVision(raw: Record<string, any>, ramGb: number): { raw: Record<string, any>; changed: string[] } {
+  if (!Array.isArray(raw.accelerators)) return { raw, changed: [] };
+  const changed: string[] = [];
+  const llama = (cmd: unknown): cmd is string[] => Array.isArray(cmd) && cmd.length > 0 && cmd.every((s) => typeof s === 'string') && /^llama-server(\.exe)?$/i.test(path.win32.basename(cmd[0]));
+  const accelerators = raw.accelerators.map((a: any) => {
+    const chat = a?.chat;
+    const vision = a?.vision;
+    if (a?.kind !== 'gpu' || typeof a.id !== 'string' || (a.slots ?? 1) !== 1 || !chat || !vision) return a;
+    if (chat.model !== MODEL_SPECS.chat.model || vision.model !== MODEL_SPECS.vision.model) return a;
+    if (typeof chat.baseUrl !== 'string' || typeof vision.baseUrl !== 'string' || chat.baseUrl === vision.baseUrl) return a;
+    if (!llama(chat.startCommand) || !llama(vision.startCommand) || !vision.startCommand.includes('--mmproj')) return a;
+    const dev = vision.startCommand.indexOf('--device');
+    if (!chatsOnVision({ id: a.id, memoryGb: typeof a.memoryGb === 'number' ? a.memoryGb : undefined, device: dev >= 0 ? (vision.startCommand[dev + 1] ?? null) : null }, ramGb)) return a;
+    changed.push(a.id);
+    const { baseUrl: _b, startCommand: _s, env: _e, turn: _t, ...visionOwn } = vision;
+    const { env: _ce, turn: _ct, ...chatOwn } = chat;
+    return {
+      ...a,
+      chat: { ...chatOwn, baseUrl: vision.baseUrl, model: vision.model, startCommand: vision.startCommand, ...(vision.env ? { env: vision.env } : {}), ...(vision.turn ? { turn: vision.turn } : {}) },
+      vision: visionOwn,
+    };
+  });
+  return changed.length ? { raw: { ...raw, accelerators }, changed } : { raw, changed };
+}
+
+/**
+ * The cards' vision and embedding commands (withEncoderOnProcessor, withSmallerEmbedServer), their chat on the vision
+ * server (withChatOnVision) and their servers' RAM cache (withoutRamCache) brought up to this kit's on a PC an older kit
+ * set up: setup writes them once, so the keeper's look does it, once for each kit version, as the NPU's refresh does
+ * (npu-refresh.ts), and a kit never redoes what a newer one looked at. Nothing is started or stopped: on the cards it's
+ * for, a vision command without the flag never stays up, a server running takes the cap, its smaller context or its
+ * environment at its next start, chat goes to the vision server already running (its old server is the keeper's
+ * orphan), and an agent takes the time or the embedding cap when it next reads config.json. A person who takes the
+ * flag, the cap, the time or the environment out again, sets the embedding server's context back or gives chat its own
+ * server back, keeps it so until the next kit. The cards and processor changed; none when config.json couldn't be read
+ * (the next look tries). `ramGb`: this PC's memory (os.totalmem() when not given).
+ */
+export function refreshCardVision(o: { configFile: string; kit: string; now?: () => number; ramGb?: number; validate?: (raw: unknown) => string[]; log: (line: string) => void }): string[] {
   const had = readCardRefresh(o.configFile);
   if (had?.kit === o.kit || (had?.kit && compareVersions(had.kit, o.kit) > 0)) return [];
   const file = readConfigFile(o.configFile);
   if (file.error) return [];
   const vision = withEncoderOnProcessor(file.raw);
   const embed = withSmallerEmbedServer(vision.raw);
-  const { raw } = embed;
-  const changed = [...new Set([...vision.changed, ...embed.changed])];
+  const shared = withChatOnVision(embed.raw, o.ramGb ?? totalmem() / 1024 ** 3);
+  const cache = withoutRamCache(shared.raw);
+  const { raw } = cache;
+  const changed = [...new Set([...vision.changed, ...embed.changed, ...shared.changed, ...cache.changed])];
   const saved = changed.length ? writeConfigFile(o.configFile, raw, o.validate ?? validateKeeperConfig) : { problems: [] };
   if (saved.problems.length) {
     const why = `config.json wasn't written: ${saved.problems.join('; ')}`;
     if (vision.changed.length) o.log(`the vision of ${vision.changed.join(', ')} keeps its command and time: ${why}`);
     if (embed.changed.length) o.log(`the embedding server of ${embed.changed.join(', ')} keeps its command: ${why}`);
+    if (shared.changed.length) o.log(`the chat of ${shared.changed.join(', ')} keeps its own server: ${why}`);
+    if (cache.changed.length) o.log(`the llama-servers of ${cache.changed.join(', ')} keep their environments: ${why}`);
   } else {
     if (vision.changed.length)
       o.log(
@@ -1428,6 +1548,8 @@ export function refreshCardVision(o: { configFile: string; kit: string; now?: ()
       o.log(
         `${embed.changed.join(', ')}: the embedding server now starts at -c ${EMBED_CONTEXT} -ub 512, its requests capped at ${EMBED_CAP} tokens (kit ${o.kit}): about 0.6 GB less of the graphics' memory, the same vectors, from its next start`,
       );
+    if (shared.changed.length) o.log(`${shared.changed.join(', ')}: chat now runs on the vision server, ${MODEL_SPECS.vision.model} for both (kit ${o.kit}): one server in the PC's memory where there were two, about 3.5 GB less while both are used; chat's old server stops as an orphan`);
+    if (cache.changed.length) o.log(`${cache.changed.join(', ')}: llama-server keeps no RAM cache of earlier prompts from its next start (kit ${o.kit}): up to 8 GB a server by default, for little gain here`);
   }
   const record: CardRefreshRecord = { kit: o.kit, at: new Date((o.now ?? Date.now)()).toISOString(), ...(changed.length && !saved.problems.length ? { changed } : {}), ...(saved.problems.length ? { problems: saved.problems } : {}) };
   try {
