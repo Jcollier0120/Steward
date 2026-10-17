@@ -14,6 +14,29 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.36.125
+
+**The Steward hands out kit 2.81.0: on a Snapdragon X2, the NPU's model holds about 2 GB less of the PC's memory until it's shown a picture, and starts in half the time.**
+
+### What's new
+
+- On a Snapdragon X2, the staff now run GenieX with Castellan's own build of one of its files, its llama.cpp plugin, fixing how it uses memory, until Qualcomm ships the fixes itself. Measured on the X2 Elite with Qwen3-VL-2B, as the kit put it in:
+  - After a chat, GenieX holds 1.7 GB instead of 3.7 GB.
+  - After a picture, it holds 3.3 GB instead of 3.8 GB.
+  - It is ready to answer in 2.4 s instead of 5.0 s, and writes a little faster.
+  - Answers and pictures came out the same.
+- It goes in on its own once the NPU is idle, and stays only after a picture and a chat answer through it. If anything goes wrong, GenieX's own file goes back, with no message for you.
+- A GenieX update is never undone: the new version runs as Qualcomm made it.
+
+### What changed
+
+- GenieX is told the same picture size the staff send it (1,024 tokens on the X2), so a picture from anywhere else is scaled down too, rather than refused.
+- The first picture after GenieX starts takes about 0.8 s longer: the part that reads pictures now loads then, not at start.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To keep GenieX's own file, add `"npuPatch": false` to the keeper's config.json; the next look puts it back.
+
 ## 0.36.124
 
 **The Steward stops merging pull requests. Whoever writes a PR merges it once it is vouched, and each build releases what is on main.**

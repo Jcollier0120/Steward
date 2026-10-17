@@ -1,0 +1,358 @@
+diff --git a/sdk/plugins/llama_cpp/include/params.h b/sdk/plugins/llama_cpp/include/params.h
+index 887002e..cecd600 100644
+--- a/sdk/plugins/llama_cpp/include/params.h
++++ b/sdk/plugins/llama_cpp/include/params.h
+@@ -76,4 +76,14 @@ common_params_sampling build_sampling_params(const geniex_SamplerConfig* cfg);
+ void apply_tool_fields(common_chat_msg& msg, const geniex_ToolCall* tool_calls, int32_t tool_call_count,
+     const char* tool_call_id, const char* tool_name);
+ 
++// Castellan's memory patches (GenieX#1557) are on unless their variable is set to "0".
++bool patch_enabled(const char* env_name);
++
++// A positive integer from the environment, or fallback when it is unset or not one.
++int32_t env_int(const char* env_name, int32_t fallback);
++
++// Windows: take a mapped model file's pages out of the working set once its tensors are in their buffers. They stay
++// on the standby list (clean, file-backed), and the rows still read on the CPU fault back in. Elsewhere, nothing.
++void release_mapped_file_pages(const char* model_path);
++
+ }  // namespace geniex
+diff --git a/sdk/plugins/llama_cpp/include/vlm.h b/sdk/plugins/llama_cpp/include/vlm.h
+index f31ca38..9f2c8ae 100644
+--- a/sdk/plugins/llama_cpp/include/vlm.h
++++ b/sdk/plugins/llama_cpp/include/vlm.h
+@@ -39,6 +39,11 @@ class LlamaVlm : public IVlm {
+     // Tracks whether this instance pinned an HTP session; releases on last handoff.
+     htp::SessionGuard htp_guard_;
+ 
++    // Castellan patch: the vision encoder loads on the first request that carries media, not in create().
++    std::string         mmproj_path_;
++    mtmd_context_params vision_params_{};
++    bool                vision_pending_ = false;
++
+    public:
+     ~LlamaVlm() override;
+ 
+@@ -55,6 +60,7 @@ class LlamaVlm : public IVlm {
+ 
+    private:
+     void set_sampler(const geniex_SamplerConfig* cfg);
++    void init_vision();
+     bool vlm_message_to_common_chat_msg(const geniex_VlmChatMessage* input, common_chat_msg* output);
+ };
+ 
+diff --git a/sdk/plugins/llama_cpp/src/llm.cpp b/sdk/plugins/llama_cpp/src/llm.cpp
+index f648f72..9b0d695 100644
+--- a/sdk/plugins/llama_cpp/src/llm.cpp
++++ b/sdk/plugins/llama_cpp/src/llm.cpp
+@@ -125,6 +125,12 @@ int32_t LlamaLlm::create(const geniex_LlmCreateInput* input) {
+         }
+     }
+ 
++    // Castellan patch: as in vlm.cpp, let the mapped file's pages go once the NPU's tensors are loaded; not when
++    // tensors were overridden onto the CPU, which read the file on every token. GENIEX_PATCH_TRIM=0 restores upstream.
++    if (mpar.load_mode == LLAMA_LOAD_MODE_MMAP && !mpar.tensor_buft_overrides && patch_enabled("GENIEX_PATCH_TRIM")) {
++        release_mapped_file_pages(input->model_path);
++    }
++
+     // Load chat template if path is provided
+     if (config.chat_template_content) {
+         try {
+diff --git a/sdk/plugins/llama_cpp/src/params.cpp b/sdk/plugins/llama_cpp/src/params.cpp
+index fa6d2c1..d651772 100644
+--- a/sdk/plugins/llama_cpp/src/params.cpp
++++ b/sdk/plugins/llama_cpp/src/params.cpp
+@@ -4,6 +4,8 @@
+ #include "params.h"
+ 
+ #include <algorithm>
++#include <climits>
++#include <cstdlib>
+ #include <cstring>
+ #include <fstream>
+ #include <sstream>
+@@ -15,6 +17,11 @@
+ #include "logging.h"
+ #include "speculative.h"
+ 
++#if defined(_WIN32)
++#include <windows.h>
++#include <psapi.h>
++#endif
++
+ namespace geniex {
+ 
+ // Platform
+@@ -43,6 +50,55 @@ Device classify_device(const char* device_id, int n_gpu_layers) {
+ 
+ int resolve_n_threads(int requested) { return requested > 0 ? requested : common_cpu_get_num_math(); }
+ 
++bool patch_enabled(const char* env_name) {
++    const char* value = std::getenv(env_name);
++    return !(value && std::strcmp(value, "0") == 0);
++}
++
++int32_t env_int(const char* env_name, int32_t fallback) {
++    const char* value = std::getenv(env_name);
++    if (!value || value[0] == '\0') return fallback;
++    char*      end    = nullptr;
++    const long parsed = std::strtol(value, &end, 10);
++    return (end && *end == '\0' && parsed > 0 && parsed <= INT32_MAX) ? static_cast<int32_t>(parsed) : fallback;
++}
++
++void release_mapped_file_pages(const char* model_path) {
++#if defined(_WIN32)
++    if (!model_path) return;
++    const std::string path(model_path);
++    const size_t      cut  = path.find_last_of("/\\");
++    const std::string base = cut == std::string::npos ? path : path.substr(cut + 1);
++    const int         n    = MultiByteToWideChar(CP_UTF8, 0, base.c_str(), -1, nullptr, 0);
++    if (n <= 1) return;
++    std::wstring want(static_cast<size_t>(n - 1), L'\0');
++    MultiByteToWideChar(CP_UTF8, 0, base.c_str(), -1, want.data(), n);
++    want.insert(want.begin(), L'\\');
++
++    SYSTEM_INFO info;
++    GetSystemInfo(&info);
++    size_t                   released = 0;
++    MEMORY_BASIC_INFORMATION mbi{};
++    for (auto* at = static_cast<char*>(info.lpMinimumApplicationAddress);
++         at < static_cast<char*>(info.lpMaximumApplicationAddress);
++         at = static_cast<char*>(mbi.BaseAddress) + mbi.RegionSize) {
++        if (VirtualQuery(at, &mbi, sizeof(mbi)) != sizeof(mbi)) break;
++        if (mbi.State != MEM_COMMIT || mbi.Type != MEM_MAPPED) continue;
++        wchar_t     name[1024];
++        const DWORD len = K32GetMappedFileNameW(GetCurrentProcess(), mbi.BaseAddress, name, 1024);
++        if (len < want.size() || _wcsicmp(name + len - want.size(), want.c_str()) != 0) continue;
++        // The view isn't locked, so this only takes its pages out of the working set.
++        VirtualUnlock(mbi.BaseAddress, mbi.RegionSize);
++        released += mbi.RegionSize;
++    }
++    if (released) {
++        GENIEX_LOG_INFO("[Castellan] {} MB of the mapped model file left the working set", released >> 20);
++    }
++#else
++    (void)model_path;
++#endif
++}
++
+ llama_model_params build_model_params(const geniex_ModelConfig& config, Device device) {
+     static const bool mmap_matrix[3][3] = {
+         {true, false, false},   // Linux
+@@ -51,6 +107,11 @@ llama_model_params build_model_params(const geniex_ModelConfig& config, Device d
+     };
+ 
+     bool use_mmap = mmap_matrix[static_cast<int>(kHostPlatform)][static_cast<int>(device)];
++    // Castellan patch: on the Windows NPU, map the model file, so the tensors left on the CPU (token_embd) stay
++    // file-backed instead of being read into private memory. GENIEX_PATCH_MMAP=0 restores upstream.
++    if (kHostPlatform == Platform::Windows && device == Device::NPU && patch_enabled("GENIEX_PATCH_MMAP")) {
++        use_mmap = true;
++    }
+ 
+     llama_model_params mpar = llama_model_default_params();
+     mpar.load_mode          = use_mmap ? LLAMA_LOAD_MODE_MMAP : LLAMA_LOAD_MODE_NONE;
+diff --git a/sdk/plugins/llama_cpp/src/vlm.cpp b/sdk/plugins/llama_cpp/src/vlm.cpp
+index aa54195..0ef8a1a 100644
+--- a/sdk/plugins/llama_cpp/src/vlm.cpp
++++ b/sdk/plugins/llama_cpp/src/vlm.cpp
+@@ -9,6 +9,7 @@
+ #include "chat.h"
+ #include "common.h"
+ #include "geniex.h"
++#include "gguf.h"
+ #include "htp_session.h"
+ #include "llama.h"
+ #include "logging.h"
+@@ -90,6 +91,14 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
+     }
+ 
+     llama_context_params cpar = build_context_params(config, /*n_ctx_default=*/16384, device);
++    // Castellan patch: generate() samples only the last position (common_sampler_sample(..., -1)), so reserve logits
++    // for one output per sequence instead of a whole ubatch: n_ubatch x n_vocab floats are ~590 MiB of compute buffer
++    // on the Windows NPU for a 152k vocabulary. GENIEX_PATCH_OUTPUTS=0 restores upstream.
++    if (patch_enabled("GENIEX_PATCH_OUTPUTS")) {
++        cpar.n_outputs_max         = cpar.n_seq_max;
++        cpar.n_outputs_max_per_seq = 1;
++        GENIEX_LOG_INFO("[Castellan] VLM context reserves {} output(s)", cpar.n_outputs_max);
++    }
+ 
+     this->ctx = llama_init_from_model(this->model, cpar);
+     if (!this->ctx) {
+@@ -105,6 +114,12 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
+         return tp_ret;
+     }
+ 
++    // Castellan patch: the NPU's tensors were copied out of the mapped file while loading; let its pages go from the
++    // working set instead of keeping ~1 GB resident. GENIEX_PATCH_TRIM=0 restores upstream.
++    if (mpar.load_mode == LLAMA_LOAD_MODE_MMAP && patch_enabled("GENIEX_PATCH_TRIM")) {
++        release_mapped_file_pages(input->model_path);
++    }
++
+     // Initialize vision context if mmproj_path provided
+     if (input->mmproj_path) {
+         mtmd_context_params mparams = mtmd_context_params_default();
+@@ -119,18 +134,43 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
+         // Zack TODO: elegant fix this error:  no member named 'verbosity' in 'mtmd_context_params'
+         // mparams.verbosity           = GGML_LOG_LEVEL_ERROR;
+ 
+-        this->ctx_vision = mtmd_init_from_file(input->mmproj_path, this->model, mparams);
+-        if (!this->ctx_vision && vision_device) {
+-            GENIEX_LOG_WARN("mtmd failed to initialize the vision encoder on HTP; falling back to CPU");
+-            mparams.use_gpu  = false;
+-            mparams.device   = nullptr;
+-            this->ctx_vision = mtmd_init_from_file(input->mmproj_path, this->model, mparams);
++        // Castellan patch: GENIEX_IMAGE_MAX_TOKENS caps each picture's tokens (mtmd scales bigger pictures down)
++        // instead of the model's own maximum. The encoder's warm-up buffer keeps its size.
++        const int32_t image_max_tokens = env_int("GENIEX_IMAGE_MAX_TOKENS", 0);
++        if (image_max_tokens > 0) {
++            mparams.image_max_tokens = image_max_tokens;
++            GENIEX_LOG_INFO("[Castellan] pictures capped at {} tokens", image_max_tokens);
+         }
+-        // Continue even if vision context fails
+-        if (this->ctx_vision) {
+-            this->supports_vision = mtmd_support_vision(this->ctx_vision);
+-            this->supports_audio  = mtmd_support_audio(this->ctx_vision);
+-            GENIEX_LOG_INFO("mmproj loaded: vision={}, audio={}", this->supports_vision, this->supports_audio);
++
++        this->mmproj_path_   = input->mmproj_path;
++        this->vision_params_ = mparams;
++
++        // Castellan patch: the encoder (its weights and warm-up buffer, ~1.1 GB on the Adreno for Qwen3-VL-2B) loads
++        // on the first request with media. The mmproj's own metadata says what it supports meanwhile; a file that
++        // doesn't say loads at once, as upstream. GENIEX_PATCH_LAZY_VISION=0 restores upstream.
++        bool has_vision = false, has_audio = false, metadata_read = false;
++        if (patch_enabled("GENIEX_PATCH_LAZY_VISION")) {
++            gguf_init_params gparams = {/*no_alloc=*/true, /*ctx=*/nullptr};
++            if (gguf_context* meta = gguf_init_from_file(input->mmproj_path, gparams)) {
++                auto flag = [meta](const char* key) {
++                    const int64_t id = gguf_find_key(meta, key);
++                    return id >= 0 && gguf_get_kv_type(meta, id) == GGUF_TYPE_BOOL && gguf_get_val_bool(meta, id);
++                };
++                has_vision    = flag("clip.has_vision_encoder");
++                has_audio     = flag("clip.has_audio_encoder");
++                metadata_read = has_vision || has_audio;
++                gguf_free(meta);
++            }
++        }
++        if (metadata_read) {
++            this->supports_vision = has_vision;
++            this->supports_audio  = has_audio;
++            this->vision_pending_ = true;
++            GENIEX_LOG_INFO("[Castellan] mmproj loads with the first picture: vision={}, audio={}",
++                this->supports_vision,
++                this->supports_audio);
++        } else {
++            this->init_vision();
+         }
+     }
+ 
+@@ -139,6 +179,28 @@ int32_t LlamaVlm::create(const geniex_VlmCreateInput* input) {
+     return GENIEX_SUCCESS;
+ }
+ 
++void LlamaVlm::init_vision() {
++    this->vision_pending_       = false;
++    mtmd_context_params mparams = this->vision_params_;
++
++    this->ctx_vision = mtmd_init_from_file(this->mmproj_path_.c_str(), this->model, mparams);
++    if (!this->ctx_vision && mparams.device) {
++        GENIEX_LOG_WARN("mtmd failed to initialize the vision encoder on HTP; falling back to CPU");
++        mparams.use_gpu  = false;
++        mparams.device   = nullptr;
++        this->ctx_vision = mtmd_init_from_file(this->mmproj_path_.c_str(), this->model, mparams);
++    }
++    // Continue even if vision context fails
++    if (this->ctx_vision) {
++        this->supports_vision = mtmd_support_vision(this->ctx_vision);
++        this->supports_audio  = mtmd_support_audio(this->ctx_vision);
++        GENIEX_LOG_INFO("mmproj loaded: vision={}, audio={}", this->supports_vision, this->supports_audio);
++    } else {
++        this->supports_vision = false;
++        this->supports_audio  = false;
++    }
++}
++
+ int32_t LlamaVlm::get_capabilities(geniex_VlmCapabilities* output) {
+     if (!output) return GENIEX_ERROR_COMMON_INVALID_INPUT;
+     output->supports_vision = this->supports_vision;
+@@ -240,6 +302,13 @@ int32_t LlamaVlm::generate(const geniex_VlmGenerateInput* input, geniex_VlmGener
+     std::vector<mtmd_bitmap*> bitmaps;
+     int                       n_media = 0;
+ 
++    const bool has_media =
++        input->config && ((input->config->image_paths && input->config->image_count > 0) ||
++                             (input->config->audio_paths && input->config->audio_count > 0));
++    if (has_media && this->vision_pending_) {
++        this->init_vision();
++    }
++
+     if (input->config && input->config->image_paths && input->config->image_count > 0 && this->ctx_vision) {
+         if (!this->supports_vision) {
+             GENIEX_LOG_WARN("model does not support image input; skipping {} image(s)", input->config->image_count);
+@@ -420,41 +489,39 @@ int32_t LlamaVlm::generate(const geniex_VlmGenerateInput* input, geniex_VlmGener
+ 
+         // Only process if there's new text content
+         if (!new_text_portion.empty()) {
+-            // Fallback to direct llama path when ctx_vision is not available
+-            const llama_vocab* vocab = llama_model_get_vocab(this->model);
+-
+-            // Get required length
+-            int32_t needed = llama_tokenize(
+-                vocab, new_text_portion.c_str(), (int32_t)new_text_portion.length(), nullptr, 0, true, true);
+-            if (needed < 0) needed = -needed;
+-            if (needed == 0) return GENIEX_ERROR_LLM_TOKENIZATION_FAILED;
+-
+-            // Allocate and tokenize
+-            int32_t* prompt_tokens = (int32_t*)malloc(sizeof(int32_t) * needed);
+-            if (!prompt_tokens) return GENIEX_ERROR_COMMON_MEMORY_ALLOCATION;
+-
+-            int32_t prompt_len = llama_tokenize(
+-                vocab, new_text_portion.c_str(), (int32_t)new_text_portion.length(), prompt_tokens, needed, true, true);
+-            if (prompt_len < 0) {
+-                free(prompt_tokens);
+-                return GENIEX_ERROR_LLM_TOKENIZATION_FAILED;
+-            }
++            // Castellan patch: with the encoder loaded lazily, text-only turns come here. Tokenize and feed the text
++            // as mtmd_tokenize + mtmd_helper_eval_chunk_single do (BOS/EOS on the first turn only; batches of n_batch
++            // with positions from n_past; logits for the last token alone), so this path matches the multimodal one
++            // token for token. Upstream's version wrote positions into llama_batch_get_one's null pos array.
++            const llama_vocab*       vocab = llama_model_get_vocab(this->model);
++            std::vector<llama_token> tokens =
++                common_tokenize(vocab, new_text_portion, /*add_special=*/this->n_past == 0, /*parse_special=*/true);
++            if (tokens.empty()) return GENIEX_ERROR_LLM_TOKENIZATION_FAILED;
++            const int32_t prompt_len = static_cast<int32_t>(tokens.size());
+ 
+             GENIEX_LOG_DEBUG("_ml_vlm_generate_internal: Tokenized new text portion into {} tokens", prompt_len);
+ 
+             profiler.update_prompt_tokens(prompt_len);
+ 
+-            llama_batch batch = llama_batch_get_one(prompt_tokens, prompt_len);
+-            // Set positions based on current n_past
+-            for (int i = 0; i < batch.n_tokens; ++i) {
+-                batch.pos[i] = this->n_past + i;
+-            }
+-
++            const int32_t n_batch    = llama_n_batch(this->ctx);
++            llama_batch   batch      = llama_batch_init(n_batch, 0, 1);
++            int32_t       decode_ret = 0;
+             profiler.prompt_start();
+-            int32_t decode_ret = llama_decode(this->ctx, batch);
++            for (int32_t i = 0; i < prompt_len && decode_ret == 0;) {
++                batch.n_tokens = 0;
++                for (; i < prompt_len && batch.n_tokens < n_batch; ++i) {
++                    const int32_t j    = batch.n_tokens++;
++                    batch.token[j]     = tokens[i];
++                    batch.pos[j]       = this->n_past + i;
++                    batch.n_seq_id[j]  = 1;
++                    batch.seq_id[j][0] = 0;
++                    batch.logits[j]    = i == prompt_len - 1;
++                }
++                decode_ret = llama_decode(this->ctx, batch);
++            }
+             profiler.prompt_end();
+             profiler.decode_start();
+-            free(prompt_tokens);
++            llama_batch_free(batch);
+             // 1 means the prompt does not fit the KV cache: since this is
+             // prefill, the prompt itself is too long, not a generic failure.
+             switch (decode_ret) {

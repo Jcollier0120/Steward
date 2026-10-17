@@ -20,6 +20,34 @@ On WEASELDEV03 (an AMD Ryzen AI 7 350, qwen3.5:2b on FastFlowLM 1.0.7), a boot t
 
 - Nothing: agents keep speeds as they answer, through `npu.ts`. Manor shows the notice once it pins this kit. A driver that builds its own rules object (not from rules.json through `checkRules`) needs the `speed` section.
 
+## 2.81.0
+
+**On the Snapdragon X2, the keeper puts Castellan's build of GenieX 0.8.0's llama.cpp plugin in place of GenieX's own, which holds about 2 GB less with Qwen3-VL-2B loaded: its working set after a chat 1.77 GB instead of 4.0, cold load 2.4 s instead of 5.0. It goes in only over GenieX 0.8.0's own file, in the NPU's turn, and stays only once a picture and a chat answer through it; anything else, and GenieX's own stays or goes back.**
+
+### What's new
+
+- **node/npu-patch.ts:** `patchNpu(deps)`, one look at the NPU server's patched file, after the NPU's refresh in the keeper (`startNpuRefresh`). Its outcome goes to `npu-patch.json` beside config.json (`readNpuPatch`). It looks once for each kit version, and again when the file changes (GenieX installed or updated since), or when config.json's NPU entry appears.
+  - The build goes in only if three things hold: the file is GenieX's own (`pluginPatch.stock`), the files it links against are 0.8.0's (`pluginPatch.needs`), and config.json's NPU entry runs GenieX.
+  - It waits until nobody uses the NPU, then, holding the NPU's turn, stops GenieX. It keeps GenieX's file as `geniex_plugin.dll.stock`, renames the kit's build in, and asks the entry's test (`testNpuEntry` with `seeRed`).
+  - A build that fails its test is taken out and GenieX's own goes back. A test that failed for its server is made again an hour on, three tests in all, as the NPU's refresh does.
+  - A file that is neither GenieX 0.8.0's nor a kit's build (a GenieX update) is left alone, and the old `.stock` copy is removed.
+- **node/geniex/:** the build, `geniex_plugin.dll` (signed, 301,136 bytes), with GenieX's BSD-3-Clause `LICENSE`, `README.md` (what changed and how it was measured), `geniex-castellan-memory.patch` (the change, against qualcomm/GenieX v0.8.0) and `build-geniex-plugin.bat`.
+- **npu-vendors.json:**
+  - `pluginPatch` on the snapdragon-x2 generation (`NpuPluginPatch`): the file, GenieX's own and the build's sizes and SHA-256s, and the files the build needs.
+  - `pictureTokensEnv` on the Qualcomm route: `npuEntry` sets that variable (GENIEX_IMAGE_MAX_TOKENS) in GenieX's environment to the vision model's `pictureTokens`, so the build scales down a picture that didn't come through `fitPicture`. GenieX's own plugin ignores it.
+- **config.json:** `npuPatch: false` puts GenieX's own file back at the keeper's next look and keeps it; `validateKeeperConfig` takes only true or false.
+- **npu-refresh.ts:** `envChanges(from, to)`. The refresh's log names a changed environment (`GENIEX_IMAGE_MAX_TOKENS=1024 added`). `servers` and `stillAnswering` are exported.
+- **setup.ts:** `testNpuEntry`'s `seeRed`: the vision answer must say the test picture is red.
+
+### What changed
+
+- An X2 set up before gets GENIEX_IMAGE_MAX_TOKENS=1024 in its NPU entry at the keeper's next look, after the refresh's usual test. Then the patch look puts the build in, after its own test.
+- A later kit that no longer patches a PC puts GenieX's own file back. It knows the build by the SHA-256 the earlier look recorded. A newer kit's look is never taken back by an older one.
+
+### Before you update
+
+- Nothing for an agent. Only the keeper (the Smith, else Reeve) changes the file. Every agent's kit carries the build (295 KB) in `src\kit\geniex\`.
+
 ## 2.80.3
 
 **spec/NPU-VENDORS.md says why the Smith's check picture read "Tally 827" on the Snapdragon X2's Qwen3-VL-2B, and why the kit doesn't change pictures for it.**

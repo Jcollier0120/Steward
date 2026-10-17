@@ -1690,7 +1690,10 @@ export async function measureNpu(e: AcceleratorEntry): Promise<NpuMeasuring | { 
  * what a server it starts prints (ensureServer's): the NPU's refresh keeps one, since its test on WEASELDEV03 (kit
  * 2.78.12, 2026-10-17) was refused and left nothing to say why.
  */
-export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number; held?: boolean; onReady?: (r: ServerReady) => void; logFile?: string } = {}): Promise<string[]> {
+export async function testNpuEntry(
+  e: AcceleratorEntry,
+  o: { dir?: string; timeoutMs?: number; held?: boolean; onReady?: (r: ServerReady) => void; logFile?: string; /** The picture (red) must be seen: npu-patch.ts' test of a build that changes how pictures load. */ seeRed?: boolean } = {},
+): Promise<string[]> {
   const acc = readAccelerator(e);
   if (!acc?.chat?.baseUrl) return ['the entry has no chat server'];
   const problems: string[] = [];
@@ -1712,6 +1715,7 @@ export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeo
         const img = testImage(o.dir ?? path.join(toolsHome(), 'servers', 'downloads'));
         const r = await postJson(v, '/v1/chat/completions', visionBody(kitAcc, v, await fitPicture(kitAcc, img), 'What colour is this picture? One word.', 8), limit, { loading: true });
         if (typeof text(r.json) !== 'string') problems.push(`vision gave no answer (${JSON.stringify(r.json).slice(0, 160)})`);
+        else if (o.seeRed && !/\bred\b/i.test(withoutThinking(text(r.json)))) problems.push(`vision answered "${withoutThinking(text(r.json)).slice(0, 40)}" about a red picture`);
       }
       const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 32), limit, { loading: true });
       if (typeof text(c.json) !== 'string') problems.push(`chat gave no answer (${JSON.stringify(c.json).slice(0, 160)})`);
