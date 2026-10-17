@@ -1,6 +1,11 @@
-import { claimsOn, employeeFor } from '../claims.ts';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { claimsOn, employeeFor, pushesHere } from '../claims.ts';
+import { identityOf } from '../employ.ts';
 import { gitMaybe } from '../git.ts';
 import { originRepo } from '../kit/manor.ts';
+import { makersPc, makersRepo } from '../maker.ts';
+import { employeeFromClone } from '../migrate.ts';
 import { originUrl, repoFromUrl } from '../scm.ts';
 import type { Employee } from '../settings.ts';
 import { checkKind, runChecks, type AffectedScope } from './bump.ts';
@@ -27,6 +32,9 @@ import { hostFor } from '../hosts/index.ts';
  * record of who created the status), on main's head itself, or on the PR head a merge commit brought in unchanged (a PR
  * merged while up to date with main). Anything else on main is tested there before it is released. The status isn't a
  * check GitHub runs (checksOf leaves it out), so it never makes a PR's checks "passing" on its own.
+ *
+ * On a maker's other PC, a clone of one of Castellan's own repositories, which only the maker's laptop looks after, is
+ * vouched for with the checks the clone itself gives (makersClone), when GitHub says this PC's account can push there.
  */
 
 /** The label the Wright puts on its PRs. */
@@ -89,8 +97,12 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   const url = originUrl(o.dir);
   const repo = originRepo(o.dir) ?? (url ? repoFromUrl(url) : null);
   if (!repo) return { ok: false, message: `${o.dir} isn't a clone of a repository (it has no origin)` };
-  const e = employeeFor(ctx.settings, repo, o.dir);
-  if (!e) return { ok: false, message: `${repo} isn't a repository the Steward looks after (Settings), nor its own: it has no checks to run` };
+  const e = employeeFor(ctx.settings, repo, o.dir) ?? (await makersClone(ctx, repo, o.dir));
+  if (!e)
+    return {
+      ok: false,
+      message: makersRepo(repo) && !makersPc() ? `${repo} is one of Castellan's own, and GitHub doesn't say this PC's account can push to it: only those who can vouch for it` : `${repo} isn't a repository the Steward looks after (Settings), nor its own: it has no checks to run`,
+    };
   const dirty = (await gitMaybe(run, o.dir, 'status', '--porcelain'))?.trim();
   if (dirty === undefined) return { ok: false, message: `git couldn't read ${o.dir}` };
   if (dirty) return { ok: false, message: 'it has uncommitted changes: commit and push them first, as it vouches only for a commit as pushed' };
@@ -110,6 +122,34 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   const failed = await checkAndRecord(ctx, e, { ...o, repo, head });
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `#${pr.number}'s checks failed at ${head.slice(0, 7)}: ${failed}. Nothing was recorded` };
   return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): ${MERGE_IT_YOURSELF(pr.number, repo)}. Push to it again, and vouch again.` };
+}
+
+/**
+ * The employee a vouch on a maker's other PC runs a clone's checks as, for one of Castellan's own repositories: those are
+ * looked after only on the maker's laptop (maker.ts' makersOwn), so Settings here have none of them, and through Steward
+ * 0.36.127 `steward vouch` refused every one ("isn't a repository the Steward looks after"). It is the employee the clone
+ * makes (migrate.ts' employeeFromClone: its kit filled when it has tools/kit.ts, then its typecheck and npm test), named
+ * as the clone names itself (employ.ts' identityOf) or else by its repository, for this vouch only: never kept in
+ * Settings, and no stage runs it.
+ *
+ * Only where GitHub says this PC's account can push to the repository (pushesHere, the rule claimRefused applies to a
+ * version claim there): the vouch records a pass on GitHub, so a clone of a repository the account can't push to gives
+ * no checks to take. Null for that, for a repository that isn't Castellan's, on the maker's laptop (whose Settings look
+ * after them), or when the clone can't be read as one.
+ */
+export async function makersClone(ctx: Pick<Ctx, 'run' | 'neutralDir'>, repo: string, dir: string, o: { makers?: boolean; canPush?: (repo: string) => Promise<boolean> } = {}): Promise<Employee | null> {
+  if ((o.makers ?? makersPc()) || !makersRepo(repo)) return null;
+  if (!(await (o.canPush ?? pushesHere(ctx))(repo).catch(() => false))) return null;
+  const read = (rel: string) => {
+    try {
+      return readFileSync(path.join(dir, rel), 'utf8');
+    } catch {
+      return null;
+    }
+  };
+  const own = repo.split('/').pop() ?? '';
+  const me = identityOf(read) ?? { id: own.toLowerCase().replace(/[^a-z0-9-]/g, ''), name: own };
+  return employeeFromClone({ id: me.id, name: me.name, repo, checkout: { path: dir } }, true)?.employee ?? null;
 }
 
 /**

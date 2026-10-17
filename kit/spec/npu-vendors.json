@@ -27,7 +27,7 @@
           "hexagonArch": "v81",
           "aiHubChipset": "qualcomm-snapdragon-x2-elite",
           "pluginPatch": {
-            "what": "Castellan's build of GenieX 0.8.0's llama.cpp plugin: qualcomm/GenieX v0.8.0 with two commits of Castellan's (kit node/geniex/README.md), signed with Castellan's certificate. The model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row (its compute buffer on the NPU 128 MiB, not 601); the vision encoder loads with the first picture; and GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens",
+            "what": "Castellan's build of GenieX 0.8.0's llama.cpp plugin: qualcomm/GenieX v0.8.0 with three commits of Castellan's (kit node/geniex/README.md), signed with Castellan's certificate. The model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row (its compute buffer on the NPU 128 MiB, not 601); the vision encoder loads with the first picture, and is freed again after 60 s without one; and GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens",
             "serverVersion": "0.8.0",
             "folder": "%LOCALAPPDATA%\\GenieX CLI\\llama_cpp",
             "file": "geniex_plugin.dll",
@@ -37,8 +37,8 @@
             },
             "patched": {
               "from": "geniex/geniex_plugin.dll",
-              "size": 301136,
-              "sha256": "a167bfbdd3a672caf2e629a5b56f4017e4f1bf4f442200b542ff2d602121f21b"
+              "size": 304208,
+              "sha256": "f58eb6239500f124a0e5bc88adc92b372861883b6fb2a3df7279ec2abc9c4e0f"
             },
             "needs": {
               "llama.dll": {
@@ -66,7 +66,7 @@
                 "sha256": "2a7f0a85e12d689cf39a8b772981c803445b0a5223a25a3b9fb68d4dbac05c4e"
               }
             },
-            "basis": "Measured on the X2 Elite with Qwen3-VL-2B Q4_0 (--compute npu --vit-compute GPUOpenCL, 2026-10-17), GenieX's own plugin against this build: after a chat, 4.0 GB working set and 2.15 GB private against 1.77 and 0.21; after a picture, 4.08 GB against 3.36; cold load to the first answer 5.0 s against 2.4; 70.4 tokens written a second against 75.5; quality 21 of 24 against 22, pictures 4 of 4 on both, and 34 of 36 screen questions at 1,024 tokens on both. The first picture takes about 0.8 s longer (its encoder loads then)."
+            "basis": "Measured on the X2 Elite with Qwen3-VL-2B Q4_0 (--compute npu --vit-compute GPUOpenCL, 2026-10-17), GenieX's own plugin against this build: after a chat, 4.0 GB working set and 2.15 GB private against 1.77 and 0.21; after a picture, 4.08 GB against 3.36; cold load to the first answer 5.0 s against 2.4; 70.4 tokens written a second against 75.5; quality 21 of 24 against 22, pictures 4 of 4 on both, and 34 of 36 screen questions at 1,024 tokens on both. The first picture takes about 0.8 s longer (its encoder loads then). With the encoder freed after a quiet spell (kit 2.82.1, --nctx 2560, GENIEX_VISION_IDLE_SECONDS=10 to measure): 3.19 GB working set and 1.97 GB private after a picture, 2.08 and 0.67 once it was freed, the next picture read right in 1.2 s; the 0.3 to 0.4 GB still held is GenieX's OpenCL backend's own (ggml-opencl.dll, not built here)."
           },
           "models": [
             {
