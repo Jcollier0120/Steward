@@ -27,6 +27,22 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - A 1,500-token prompt of new words read 25 MB back from disk, in 8,866 ms against 8,948.
 - **What an agent must do:** nothing.
 
+## 2.78.14
+
+**The title bar's status pill sits on the role's line, after the role, so it no longer pushes the title bar to a second row in a normal desktop window.**
+
+### What changed
+
+- **The title bar (page.ts and the React shell, shell.tsx):** the status pill moved out of `.tools` and into the brand, after the role: `<p class="role-line"><span class="role" title="…">…</span><span class="status-pill …">…</span></p>`. It is plain text in the brand's link, nothing to press. Its classes (on, off, busy and the busy pulse), its title and `data-tour="status"` are as they were.
+  - **The role** takes the room the pill leaves, at least 96px, and is cut with an ellipsis. Its whole text is its title.
+  - **The pill** stays whole, 16px high (padding `0 8px`, no taller than the role's line), so the bar keeps its 57px. It is `inline-block` now (was `inline-flex`), so a pill that is cut shows its ellipsis.
+  - **Wrapping:** the brand is never narrower than its icon, the pill and 96px of role (`min-width: min-content`, from the role line's grid). A window too narrow for that wraps the tools to a second row, rather than squeezing the role away. With the manor's link, About, Settings and Run now, the Steward's bar is one row from about 1,010px wide. Before, it needed about 1,090px.
+  - **In a narrow window** (640px or less): the pill goes under the role when they don't fit side by side, and is cut with an ellipsis when it is longer than the line. The role keeps one line (it was two), and the tools sit at the end of their own row. `--titlebar-h`'s narrow default is 109px (was 97px). The script keeps it to the bar's real height, as before.
+
+### Before you update
+
+- An agent whose own CSS styles `.brand .role` or the pill in `.tools` should look at its title bar: the role is a `span` in `.role-line` now, and the pill is beside it. No agent in the manor does. Otherwise nothing to do: it updates itself as usual.
+
 ## 2.78.12
 
 **npu-reports.ts counts a report against the model its generation runs (`routeFor`), so an X2's reports on its 2B count, and its reports on the route's 4B are stale. tools/kit.ts warns when a pin is a kit that has no release. Also brings 2.78.10, which wasn't released on its own.**
