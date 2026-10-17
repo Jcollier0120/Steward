@@ -130,6 +130,52 @@ function PrTable({ r }: { r: StaffRowView }) {
   );
 }
 
+/**
+ * What a repository's next build releases (StaffRow.nextBuild): the commits on its branch since its last release, newest
+ * first, a merged PR as its number and title. Linked on GitHub, where a compare shows them all. Nothing when there are none.
+ */
+function NextBuild({ r }: { r: StaffRowView }) {
+  const n = r.nextBuild;
+  if (!n?.count) return null;
+  const gh = (r.host ?? 'github') === 'github' ? `https://github.com/${r.repo}` : null;
+  const commits = `${n.count} ${n.count === 1 ? 'commit' : 'commits'} since ${n.tag}`;
+  const more = n.count - n.commits.length;
+  return (
+    <>
+      <div className="pr-head">
+        {r.releases === false ? `Not released by the Steward: ${commits}` : `Next build brings ${commits}`}
+        {gh && (
+          <>
+            {' '}
+            (<Link url={`${gh}/compare/${n.commit}...${r.branch}`}>compare</Link>)
+          </>
+        )}
+      </div>
+      <table className="pr-table next-build">
+        <tbody>
+          {n.commits.map((c) => {
+            // A merged PR by its number, a commit pushed without one by its own.
+            const label = c.pr !== null ? <>#{c.pr}</> : <code>{c.sha}</code>;
+            return (
+              <tr key={c.sha}>
+                <td className="pr-num">{gh ? <Link url={c.pr !== null ? `${gh}/pull/${c.pr}` : `${gh}/commit/${c.sha}`}>{label}</Link> : label}</td>
+                <td>{c.title}</td>
+              </tr>
+            );
+          })}
+          {more > 0 && (
+            <tr>
+              <td colSpan={2}>
+                <Text variant="muted">and {more} more</Text>
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
 /** What Settings let the Steward do with a repository: release it. Off until the person says yes. Its PRs are merged by whoever wrote them. */
 function Allowed({ r }: { r: StaffRowView }) {
   return (
@@ -144,16 +190,17 @@ const shownNotes = (r: StaffRowView) => r.notes.filter((n) => n !== 'not using t
 
 /**
  * One repository's row: its repository, checkout, branch, kit (on Castellan's own PC), release, release PC and notes
- * (`notes` false: no row has any, so no column). Its open PRs, when it has some, in a small table on a line under it.
+ * (`notes` false: no row has any, so no column). On a line under it, when it has them: what its next build brings, then
+ * its open PRs, each in a small table.
  */
 function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRowView; kit: string | null; castellan: boolean; turn?: TurnRow | null; notes: boolean }) {
   const co = r.checkout;
   const notes = shownNotes(r);
-  const hasPrs = r.prs.length > 0 || !!r.prepared;
+  const below = r.prs.length > 0 || !!r.prepared || !!r.nextBuild?.count;
   const rest = (castellan ? 2 : 1) + (turn !== undefined ? 1 : 0) + (notesColumn ? 1 : 0);
   return (
     <>
-      <tr className={hasPrs ? 'has-prs' : undefined}>
+      <tr className={below ? 'has-prs' : undefined}>
         <td>
           <strong>
             <Link url={`https://github.com/${r.repo}`}>{r.name}</Link>
@@ -197,10 +244,11 @@ function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRow
         {turn !== undefined && <td>{turn && <TurnCell x={turn} />}</td>}
         {notesColumn && <td>{notes.length > 0 && <Notes items={notes} />}</td>}
       </tr>
-      {hasPrs && (
+      {below && (
         <tr className="prs-row">
           <td colSpan={3}>
-            <PrTable r={r} />
+            <NextBuild r={r} />
+            {(r.prs.length > 0 || r.prepared) && <PrTable r={r} />}
           </td>
           <td colSpan={rest} />
         </tr>
@@ -786,6 +834,7 @@ td.pick-cell { width: 1%; padding-right: 0; }
 .pr-table { font-size: 13px; }
 .pr-table td { padding: 3px 12px 3px 0; border-bottom: 0; }
 .pr-table .pr-num, .pr-table .pr-state { white-space: nowrap; }
+.pr-table.next-build + .pr-head { margin-top: 6px; }
 .turn-cell button { white-space: nowrap; }
 .alarms { border-left: 3px solid var(--alert, #c0392b); }
 .alarm + .alarm, .alarm + details, details + details { margin-top: 10px; }

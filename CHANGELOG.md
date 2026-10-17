@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.135
+
+**The Steward's page shows what each repository's next build will release.**
+
+### What's new
+
+- Under each repository in the table, **Next build brings** lists the commits on its branch since its last release, newest first.
+  - A merged pull request is one line, with its number and title. A commit pushed without a pull request shows its own short id and subject.
+  - The newest ten are shown, with a count of the rest. On GitHub, each line is a link, and **compare** opens them all side by side.
+  - A repository the Steward doesn't release says so in the same place.
+- Builds release whatever is on the branch, so this is the list of what goes out at the next one. Open pull requests are still listed under it, apart.
+- It is read from the repository's own clone on this PC, so it costs no extra calls to GitHub and works the same with any git host.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each repository's row is read again once after the update.
+
 ## 0.36.134
 
 **The kit 2.82.4: each member of the staff keeps its PowerShell helper 4 minutes after its last use, not 2, so it starts PowerShell less often.**

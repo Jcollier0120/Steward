@@ -156,6 +156,24 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.match(withPr, /<th>Notes<\/th>/);
   assert.match(withPr, /<tr class="prs-row"><td colSpan="3"><div class="pr-head">Pull requests<\/div><table class="pr-table">.*#7.*Fix the thing.*claude\/fix, octocat(&#x27;|')s/);
   assert.match(withPr, /title="Opened by octocat: whoever opened it merges it once it is vouched"/, 'a team PR is merged by whoever opened it');
+  // What the next build brings (Steward 0.36.135): under the row, above its open PRs, a merged PR by its number and
+  // title and a commit pushed without one by its own, linked on GitHub, with a compare of them all.
+  const nextBuild = { tag: 'v0.4.0', commit: 'c'.repeat(40), commits: [{ sha: 'aaaaaaa', pr: 12, title: 'Fix the thing' }, { sha: 'bbbbbbb', pr: null, title: 'Changelog: a line' }], count: 12 };
+  const withNext = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], releases: true, nextBuild, prs: [pr] }] }, round: { ...body.round, repos: true } });
+  assert.match(withNext, /<tr class="prs-row"><td colSpan="3"><div class="pr-head">Next build brings 12 commits since v0\.4\.0 \(<a href="https:\/\/github\.com\/octocat\/fake\/compare\/c{40}\.\.\.main"[^>]*>compare<\/a>\)<\/div><table class="pr-table next-build">/);
+  assert.match(withNext, /href="https:\/\/github\.com\/octocat\/fake\/pull\/12"[^>]*>#12<\/a><\/td><td>Fix the thing<\/td>/);
+  assert.match(withNext, /href="https:\/\/github\.com\/octocat\/fake\/commit\/bbbbbbb"[^>]*><code>bbbbbbb<\/code><\/a><\/td><td>Changelog: a line<\/td>/);
+  assert.match(withNext, /and 10 more/);
+  assert.ok(withNext.indexOf('Next build brings') < withNext.indexOf('>Pull requests<'), 'above its open PRs');
+  // One the Steward doesn't release says so; over plain git, nothing is linked; with nothing new, nothing is said.
+  const notReleased = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], releases: false, nextBuild }] }, round: { ...body.round, repos: true } });
+  assert.match(notReleased, /Not released by the Steward: 12 commits since v0\.4\.0/);
+  const plain = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], host: 'git', nextBuild: { ...nextBuild, commits: nextBuild.commits.slice(0, 1), count: 1 } }] }, round: { ...body.round, repos: true } });
+  assert.match(plain, /Next build brings 1 commit since v0\.4\.0<\/div>/);
+  assert.match(plain, /<td class="pr-num">#12<\/td><td>Fix the thing<\/td>/);
+  assert.doesNotMatch(plain, /\/compare\/|and \d+ more/);
+  const nothing = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], nextBuild: { ...nextBuild, commits: [], count: 0 } }] }, round: { ...body.round, repos: true } });
+  assert.doesNotMatch(nothing, /Next build brings|<tr class="prs-row">/);
   // No Merge conflicts card any more: the Steward catches no PR up (Steward 0.36.124).
   assert.doesNotMatch(withPr, /Merge conflicts|<table class="conflicts">/);
   // Read now and then, in About: the kit. The last stage is on the page, above the staff. About carries no tour names:
