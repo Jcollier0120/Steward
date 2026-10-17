@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.82.3
+
+**The NPU's refresh and patch looks wait for the NPU to be quiet, not the whole manor. They counted every agent's work turn as use of the NPU, so on a PC with a dozen staff they hardly ever ran: kit 2.82.1's GenieX build, which frees the vision encoder after a minute, waited on this X2 for over an hour.**
+
+The looks wait until nobody has used the NPU for 2 minutes (`NPU_REFRESH_QUIET_MS`). That wait read `lastActivityMs`, which counts the time of the folder every lock shares. The agents' work turns (pace.ts' `work` and `first-rounds` locks) are taken and let go in that folder too. On the X2 Elite, over ten minutes, the Smith, the Pinder, the Wright, the Shepherd, the Lamplighter and the Porter took one every one to three minutes, so the NPU was almost never quiet for 2 minutes by that count. Asked every 15 seconds for 45 minutes, the look found it busy every time.
+
+### What changed
+
+- **keeper.ts:** `lastUseMs(lockDirs)` is when an accelerator was last in use, reckoned the way the Reaper reckons its idle time (`letGoMs`):
+  - it counts now while the accelerator is held or waited on;
+  - it counts when its lock was last taken (`ownActivityMs`);
+  - it counts the folder every lock shares only when the accelerator was in use since the process's last look, which dates its let-go.
+- **The NPU refresh's and patch's quiet wait** (`startNpuRefresh`'s `idle`) uses `lastUseMs` for the NPU and for its embedding turn's device. The 2 minutes are unchanged.
+- **`lastActivityMs` is unchanged.** The Smith's quiet look still uses it, since it asks whether anything changed at all.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On a PC where kit 2.82.1's GenieX build is still waiting, the keeper's next look with this kit puts it in.
+
 ## 2.82.2
 
 **A slow start is noticed. Some PCs come up from a restart with the NPU decoding well below its usual speed until the next restart, and nothing but the speed shows it. The kit now keeps the decode speed each chat answer was written at, by boot, so Manor can say when this boot is slow and that a restart usually fixes it.**

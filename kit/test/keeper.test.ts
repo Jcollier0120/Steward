@@ -14,7 +14,7 @@ process.env.MANOR_HOME = path.join(home, 'no-manor'); // never this PC's Manor a
 process.env.SMITH_HOME = path.join(home, 'no-smith');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { Reaper, reapedServers, servesBase, lastActivityMs, locksActivityMs, ownActivityMs, UNANSWERED_MS, serverProcesses, wqlName } = await import('./fixture/src/kit/keeper.ts');
+const { Reaper, reapedServers, servesBase, lastActivityMs, lastUseMs, locksActivityMs, ownActivityMs, UNANSWERED_MS, serverProcesses, wqlName } = await import('./fixture/src/kit/keeper.ts');
 const { QueueFull } = await import('./fixture/src/kit/npu-queue.ts');
 type Deps = ConstructorParameters<typeof Reaper>[0];
 
@@ -261,6 +261,59 @@ test("the NPU was last taken when its own lock or line last changed; anyone's le
   rmSync(cardLock, { recursive: true });
   assert.equal(ownActivityMs(lock), npuBefore, "the card's lock isn't the NPU's use");
   assert.ok(locksActivityMs(lock) > sharedBefore);
+});
+
+test("the NPU refresh's quiet wait counts the NPU's own use and let-go, never another lock's, such as the agents' work turns", () => {
+  const QUIET = 2 * MIN;
+  const at = (name: string) => {
+    const locks = path.join(home, name);
+    const lock = path.join(locks, 'npu');
+    const queue = path.join(locks, 'npu.queue');
+    mkdirSync(queue, { recursive: true });
+    const back = (Date.now() - 30 * MIN) / 1000;
+    utimesSync(queue, back, back);
+    utimesSync(locks, back, back);
+    const workTurn = () => {
+      mkdirSync(path.join(locks, 'work'));
+      rmSync(path.join(locks, 'work'), { recursive: true });
+    };
+    // As the kit takes a slot: its ticket in the line, then its folder with its owner.
+    const take = () => {
+      writeFileSync(path.join(queue, `1-0-${process.pid}-t.ticket`), '');
+      rmSync(path.join(queue, `1-0-${process.pid}-t.ticket`));
+      mkdirSync(lock);
+      writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, since: Date.now() }));
+    };
+    const letGo = () => rmSync(lock, { recursive: true });
+    const quiet = (now?: number) => Date.now() - lastUseMs(lock, now) >= QUIET;
+    return { lock, workTurn, take, letGo, quiet };
+  };
+
+  // Last used half an hour ago; then the Smith's work turns, a minute apart.
+  const a = at('locks-quiet');
+  assert.ok(a.quiet(), 'quiet at the first look');
+  a.workTurn();
+  assert.ok(Date.now() - lastActivityMs(a.lock) < QUIET, 'the work turn moved the folder every lock shares');
+  assert.ok(a.quiet(), "a work turn isn't the NPU's use");
+  a.workTurn();
+  assert.ok(a.quiet());
+  // Held at a look: in use, and its let-go counts at the next.
+  a.take();
+  assert.ok(!a.quiet(), 'held');
+  a.letGo();
+  a.workTurn();
+  assert.ok(!a.quiet(), 'let go just now');
+
+  // Taken and let go between two looks: the folder every lock shares dates its let-go.
+  const b = at('locks-between');
+  assert.ok(b.quiet(Date.now() - 1000));
+  b.take();
+  b.letGo();
+  // Each look a millisecond on, so a time on disk within this millisecond counts as before it.
+  const used = lastUseMs(b.lock, Date.now() + 1);
+  assert.ok(Date.now() - used < QUIET, 'used since the last look');
+  b.workTurn();
+  assert.equal(lastUseMs(b.lock, Date.now() + 1), used, 'a later work turn adds nothing');
 });
 
 /**
