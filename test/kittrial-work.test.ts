@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
 
 // A kit PR's trial handed each agent it failed to the Wright as an issue in the agent's repository (before Steward
-// 0.36.121, which tries the kit on main instead and files nothing for it). Such an issue still open is closed once the
+// 0.36.124, which tries the kit on main instead and files nothing for it). Such an issue still open is closed once the
 // kit PR it waited on merged or was closed (work.ts's closeResolved).
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-kittrial-work-'));
 process.env.STEWARD_HOME = home;

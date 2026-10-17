@@ -9,7 +9,7 @@ import type { Settings } from './settings.ts';
  * - build: main's head, tested here before a build released it (stages/mainbuild.ts), where no vouch covered it;
  * - release: the commit of the branch a release was built from and published (stages/release.ts), whose release
  *   command ran there.
- * Records kept from before Steward 0.36.121 may say catch-up or merge: a PR's head, tested before the Steward merged it.
+ * Records kept from before Steward 0.36.124 may say catch-up or merge: a PR's head, tested before the Steward merged it.
  */
 
 export type TestedStage = 'bump' | 'catch-up' | 'merge' | 'build' | 'release';

@@ -23,9 +23,9 @@ import { mergeOwn } from './mainbuild.ts';
  * kit already (an agent's own work, which brings the kit with it: a kit-only PR beside it took the same version, and
  * was closed or conflicted, 0.27.13), and no bump to that kit that failed at its branch's head, the round bumps it (a
  * worktree of its branch, the new pin and a version claimed for it (claims.ts), its checks run, committed) and pushes
- * the PR, a few employees at a time (Settings' parallel), and merges it at once (push.ts, Steward 0.36.121): its checks
+ * the PR, a few employees at a time (Settings' parallel), and merges it at once (push.ts, Steward 0.36.124): its checks
  * passed in the bump, and no one else merges the Steward's PRs. The build releases it. A kit PR of the Steward's left
- * open (one GitHub wouldn't merge at once, or one from before 0.36.121) is merged by the next rollout that finds it at
+ * open (one GitHub wouldn't merge at once, or one from before 0.36.124) is merged by the next rollout that finds it at
  * the kit rolled out.
  *
  * A kit PR of the Steward's still open for an older kit (waiting its turn behind the employee's other PRs, which its
@@ -206,7 +206,7 @@ async function settledKit(ctx: Ctx, newest: string | null, changelog: (kit: stri
 
 /**
  * A bump or push that failed in a round: for which kit, at which head of the employee's branch, and what it said. Or,
- * kept from before Steward 0.36.121, a kit PR a build left out (stage 'build'): its head then.
+ * kept from before Steward 0.36.124, a kit PR a build left out (stage 'build'): its head then.
  */
 export interface RolloutHold {
   kit: string;
@@ -244,7 +244,7 @@ export interface RolloutFacts {
   kitPrs: string[];
   /** The one of them that pins an older kit than the one rolled out, which takes the new kit (the fold). */
   fold?: KitFold;
-  /** The one of them that pins the kit rolled out already, at its head: merged by the rollout (Steward 0.36.121). */
+  /** The one of them that pins the kit rolled out already, at its head: merged by the rollout (Steward 0.36.124). */
   own?: { number: number; head: string };
   /** Its other open PRs that pin the kit rolled out already, or a newer one (#20 (claude/developer-options, kit 2.39.0)). */
   pinPrs?: string[];

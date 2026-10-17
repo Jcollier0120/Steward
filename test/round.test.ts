@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // The Steward's round, start to finish, on a data folder of its own: a fake employee's git, gh standing in. It merges no
-// one's PRs (Steward 0.36.121): what their authors merge, main's head, is tested once unless a vouch covers it, and
+// one's PRs (Steward 0.36.124): what their authors merge, main's head, is tested once unless a vouch covers it, and
 // released; a quiet round leaves no trace; and a release that fails isn't tried again at the same commit.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-round-'));
 process.env.STEWARD_HOME = home;

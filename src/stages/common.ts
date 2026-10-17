@@ -45,7 +45,7 @@ export interface EmployeeResult {
   kitWaits?: string;
 }
 
-/** The stages. A stage kept from before Steward 0.36.121 may say 'merge', which is gone. */
+/** The stages. A stage kept from before Steward 0.36.124 may say 'merge', which is gone. */
 export type StageName = 'bump' | 'push' | 'release' | 'round' | 'staff';
 
 export interface StageResult {

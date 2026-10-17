@@ -8,7 +8,7 @@ import type { RolloutRun } from '../src/stages/rollout.ts';
 
 // Steward 0.36.60: a kit's rollout runs beside the rounds on the Steward's page (stages/rollout.ts: rolloutsBeside), never
 // inside one. Inside the round, its bumps' checks held every round until it ended: rounds that rolled a kit out took 20
-// to 56 minutes on 2026-10-12 to 15, against 15 to 20 for those that didn't. Since Steward 0.36.121 the rollout merges
+// to 56 minutes on 2026-10-12 to 15, against 15 to 20 for those that didn't. Since Steward 0.36.124 the rollout merges
 // the kit PR it opens itself, at once (push.ts's `merge`, mainbuild.ts's mergeOwn), and no one's ready PR is merged by
 // the Steward: whoever wrote one merges it, and a round releases main. Whole rounds here, on a data folder of their own,
 // two fake employees' git and gh standing in: Fake's bump to the new kit waits on its checks, which wait for the test to

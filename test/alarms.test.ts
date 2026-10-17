@@ -98,7 +98,7 @@ test("from the round: main's kit held by its trial, at once, naming each failing
   assert.deepEqual(roundConditions({ round, heldKit: null, failedReleases: {}, employees: DEFAULT_EMPLOYEES, settings }).filter((x) => x.id.startsWith('kittrial:')), [], 'none held: no alarm');
 });
 
-test('a kit PR a build left out (stage "build", kept from before Steward 0.36.121) is no alarm; a failed bump still is', () => {
+test('a kit PR a build left out (stage "build", kept from before Steward 0.36.124) is no alarm; a failed bump still is', () => {
   const s = structuredClone(settings);
   s.rollout = true;
   const failedRollouts = {

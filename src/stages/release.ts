@@ -91,7 +91,7 @@ export function releaseDecision(c: ReleaseCandidate, kit: string | null): { rele
   }
   if (!c.version) return { release: false, why: 'no version found on its branch' };
   if (c.released.includes(c.version)) return { release: false, why: `v${c.version} is already released` };
-  // Merged out of order (Steward 0.36.121: PRs merge as their authors merge them): a version below one released isn't
+  // Merged out of order (Steward 0.36.124: PRs merge as their authors merge them): a version below one released isn't
   // released. claim-version hands out one above main's and every release's, for the work that brings it up.
   const newest = [...c.released].sort(compareVersions).at(-1);
   if (newest && compareVersions(c.version, newest) < 0) return { release: false, why: `v${c.version} on its branch is below v${newest}, released already: a version above it (claim-version) releases what is merged` };

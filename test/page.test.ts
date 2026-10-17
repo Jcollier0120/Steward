@@ -103,7 +103,7 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const withOne = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true } });
   assert.match(withOne, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
   for (const stage of ['bump', 'push', 'release']) assert.match(withOne, new RegExp(`data-post="/api/stage/${stage}"[^>]*>`));
-  // The Steward merges no one's PRs (Steward 0.36.121): no Merge stage, nor Merge the team's PRs, even once Settings
+  // The Steward merges no one's PRs (Steward 0.36.124): no Merge stage, nor Merge the team's PRs, even once Settings
   // name a team.
   const withTeam = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true }, team: ['someone'], teamNote: null });
   for (const h of [withOne, withTeam]) assert.doesNotMatch(h, /data-post="\/api\/stage\/merge|>Merge the team/);
@@ -156,7 +156,7 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.match(withPr, /<th>Notes<\/th>/);
   assert.match(withPr, /<tr class="prs-row"><td colSpan="3"><div class="pr-head">Pull requests<\/div><table class="pr-table">.*#7.*Fix the thing.*claude\/fix, octocat(&#x27;|')s/);
   assert.match(withPr, /title="Opened by octocat: whoever opened it merges it once it is vouched"/, 'a team PR is merged by whoever opened it');
-  // No Merge conflicts card any more: the Steward catches no PR up (Steward 0.36.121).
+  // No Merge conflicts card any more: the Steward catches no PR up (Steward 0.36.124).
   assert.doesNotMatch(withPr, /Merge conflicts|<table class="conflicts">/);
   // Read now and then, in About: the kit. The last stage is on the page, above the staff. About carries no tour names:
   // the tour shows the page.
@@ -187,7 +187,7 @@ test('a stage needs the token, from its own origin or none: without it nothing s
   assert.equal(last.stage, 'release');
   assert.deepEqual(last.asked, { employees: [], kit: '1.0.0' }, 'the ticked employees (none) and the kit, as the page posts them');
   assert.deepEqual(last.results, []);
-  // Merge and Merge the team's PRs are gone (Steward 0.36.121: whoever wrote a PR merges it), even with the token.
+  // Merge and Merge the team's PRs are gone (Steward 0.36.124: whoever wrote a PR merges it), even with the token.
   for (const gone of ['/api/stage/merge', '/api/stage/merge-team']) assert.equal((await post(gone, page)).status, 404, gone);
   // Run now: a round, with the same token. With no employees it does nothing, and leaves no trace.
   assert.equal((await post('/api/run', {})).status, 403);

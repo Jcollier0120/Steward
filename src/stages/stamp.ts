@@ -14,7 +14,7 @@ import { coveredBy, mergeOwn, prNumberOf } from './mainbuild.ts';
 import { setVouch } from './vouch.ts';
 
 /**
- * The stamp (entries.ts), at a build (Steward 0.36.121): a repository that writes its entries in changes/ (Manor, and
+ * The stamp (entries.ts), at a build (Steward 0.36.124): a repository that writes its entries in changes/ (Manor, and
  * any whose changes/README.md says so) merges its PRs with their entries unstamped, as changes/<version>.md or
  * changes/<branch>.md, and the version lines left alone. When main carries such files, the build stamps them before it
  * releases: in a worktree of main's head, it sets the version they get in the version files, moves each entry into

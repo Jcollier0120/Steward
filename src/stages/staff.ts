@@ -136,7 +136,7 @@ function checkState(c: any): Checks {
 export const VOUCH_CONTEXT = 'steward/tested';
 
 /**
- * The commit status a build set on each PR it took, before Steward 0.36.121 (builds no longer take PRs). It said what the
+ * The commit status a build set on each PR it took, before Steward 0.36.124 (builds no longer take PRs). It said what the
  * build did, and isn't a check either: checksOf leaves it out too.
  */
 export const BUILD_CONTEXT = 'steward/build';

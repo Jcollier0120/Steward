@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.121
+## 0.36.124
 
 **The Steward stops merging pull requests. Whoever writes a PR merges it once it is vouched, and each build releases what is on main.**
 
@@ -28,6 +28,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - **The Steward no longer merges PRs: merge your own once vouched, and each build releases main.** For a PR on GitHub, once its checks pass and it merges cleanly: `gh pr merge <number> --repo <owner/name> --merge`.
 - PRs that were waiting for the Steward to merge them stay open until you merge them.
 - Otherwise nothing: it updates itself as usual.
+
+## 0.36.122
+
+**The Steward hands out kit 2.80.3: its notes on the Snapdragon X2's model say why the Smith's vision check failed there.**
+
+### What changed
+
+- Kit 2.80.3 records why the Smith's check picture read "Tally 827" on the X2's Qwen3-VL-2B: the model misreads large smoothed text on a picture whose sides are both a whole number of 32 px. The Smith 0.8.45 draws its picture a pixel wider, and it reads right. Nothing in the kit's code changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.36.120
 

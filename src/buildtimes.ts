@@ -11,7 +11,7 @@ import { loadPipeline, savePipeline, type BuildRun } from './pipeline.ts';
  * the kit's rollout (`rollout`), the releases, signing included (`releases`), and Manor told (`manor`). Some run beside
  * the rounds, so phases overlap: each one's minutes count its own spans once, however many ran at the same time.
  *
- * Before Steward 0.36.121, work done between builds for the next one was kept under the next build's time, marked
+ * Before Steward 0.36.124, work done between builds for the next one was kept under the next build's time, marked
  * `ahead`; such records still read. A build now only tests and releases each main.
  */
 
@@ -26,7 +26,7 @@ export interface BuildPhase {
   of?: string;
   started: string;
   finished: string;
-  /** Done between builds, for this build: only in records from before Steward 0.36.121. */
+  /** Done between builds, for this build: only in records from before Steward 0.36.124. */
   ahead?: boolean;
 }
 
@@ -38,7 +38,7 @@ export interface PhaseOf {
 
 /**
  * The build a stage's work counts for: the build under way, else none. (`ahead` and `prepare` are read for callers
- * that still pass them; nothing sets them since Steward 0.36.121.)
+ * that still pass them; nothing sets them since Steward 0.36.124.)
  */
 export const phaseOf = (ctx: { build?: { due: string; ahead?: boolean } | null; prepare?: { due: string; inBuild?: boolean } | null }): PhaseOf | null =>
   ctx.build ? { due: ctx.build.due, ...(ctx.build.ahead ? { ahead: true } : {}) } : ctx.prepare ? { due: ctx.prepare.due, ...(ctx.prepare.inBuild ? {} : { ahead: true }) } : null;

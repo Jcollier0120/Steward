@@ -144,7 +144,7 @@ test("a maker's other PC claims a version of the maker's repositories through it
   }
 });
 
-test("a claim an older Steward moved past the others (its version queues, gone since 0.36.121) still reads from the shared claims ref, its mark kept", () => {
+test("a claim an older Steward moved past the others (its version queues, gone since 0.36.124) still reads from the shared claims ref, its mark kept", () => {
   const c = { repo: 'Jcollier0120/Fake', version: '0.4.14', branch: 'claude/draft', by: 'steward', for: '#7 moved past the others', at: new Date(0).toISOString() };
   assert.deepEqual(parseClaims(JSON.stringify([{ ...c, moved: 7 }])), [{ ...c, moved: 7 }]);
   assert.equal(parseClaims(JSON.stringify([{ ...c, moved: 'seven' }]))[0].moved, undefined, 'a mark that is no number: none');

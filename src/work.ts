@@ -25,7 +25,7 @@ import { hostFor } from './hosts/index.ts';
  *   (round-failed.json), and one of Reeve's alerts that is code work in an employee's repository: a new high or
  *   critical security advisory (his dependency-health job), a Maestro flow that failed (maestro-runs). Reeve's other
  *   alerts (the NPU driver, the test phone, a job that crashed) are a person's, and stay alarms. So do the Steward's
- *   own releases: its repository isn't one the Wright works in. Before Steward 0.36.121 a PR's conflict its author left,
+ *   own releases: its repository isn't one the Wright works in. Before Steward 0.36.124 a PR's conflict its author left,
  *   and an agent a kit PR's trial waited for, were filed too; the Steward merges no PRs now, so neither is, and the
  *   issues filed for them close by themselves once their PR has merged or closed (closeResolved).
  * - **Where:** only an employee's repository (never one of the PC's other projects the Wright helps with), and only one
@@ -563,7 +563,7 @@ async function closeRelease(o: { employees: Employee[]; run: Runner; cwd: string
 }
 
 /**
- * A kit trial's issue (filed before Steward 0.36.121, for a kit PR's trial) whose kit PR no longer waits: it merged or
+ * A kit trial's issue (filed before Steward 0.36.124, for a kit PR's trial) whose kit PR no longer waits: it merged or
  * was closed. True once it is closed, or found closed already.
  */
 async function closeKitTrial(o: { employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }, f: FiledWork, agent: string, kit: string): Promise<boolean> {

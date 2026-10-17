@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// PRs are merged as their authors merge them (Steward 0.36.121), so main may come to carry a version below one released
+// PRs are merged as their authors merge them (Steward 0.36.124), so main may come to carry a version below one released
 // already: it isn't released (release.ts's releaseDecision), and the reason names the newest release. A version above it
 // is tested by the build first (ReleaseOptions.gate: mainbuild.ts's mainGate), whose refusal fails the release.
 // By its real path, as git and the work folder (workRootOf) spell it.

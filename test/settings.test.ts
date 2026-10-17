@@ -55,7 +55,7 @@ test('an employee named with nothing more is a Node agent on the kit, with no re
   assert.deepEqual([off.usesKit, off.branch], [false, 'master']);
 });
 
-test("Settings from before the Steward stopped merging PRs (0.36.121) still load and save: their fields hidden, each saying it's no longer used, their values kept", async () => {
+test("Settings from before the Steward stopped merging PRs (0.36.124) still load and save: their fields hidden, each saying it's no longer used, their values kept", async () => {
   const field = (key: string, fields = SETTINGS_SPEC.schema) => fields.find((x) => x.key === key);
   const fieldsOf = (key: string) => {
     const g = field(key);

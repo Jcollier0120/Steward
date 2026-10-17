@@ -409,7 +409,7 @@ test("a release issue closes once round-failed.json no longer names its commit: 
   assert.deepEqual([filedNow(), quiet], [{}, []]);
 });
 
-test("a conflict issue filed before Steward 0.36.121 closes once its PR no longer needs it: resolved, merged or closed; never while it still conflicts, or its PR can't be read", async () => {
+test("a conflict issue filed before Steward 0.36.124 closes once its PR no longer needs it: resolved, merged or closed; never while it still conflicts, or its PR can't be read", async () => {
   const entry = (n: number) => ({ url: `https://github.com/Jcollier0120/Porter/issues/${n}`, number: n, repo: 'Jcollier0120/Porter', at: at(0).toISOString(), condition: 'waiting:Jcollier0120/Porter#60' });
   const filedNow = () => JSON.parse(readFileSync(workFiledFile(), 'utf8'));
   const id = 'conflict:Jcollier0120/Porter#60:aaaaaaa';

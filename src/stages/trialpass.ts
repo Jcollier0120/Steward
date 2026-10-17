@@ -38,7 +38,7 @@ export const blobOf = (text: string): string => {
 };
 
 /**
- * The kept trial (by its key, "main@<commit>"; "<PR>@<head>" in one kept before Steward 0.36.121) that passed this employee bumped from `base` with kit `kit`, where the
+ * The kept trial (by its key, "main@<commit>"; "<PR>@<head>" in one kept before Steward 0.36.124) that passed this employee bumped from `base` with kit `kit`, where the
  * kit released is the tree it tried (`tree`) and the tools/kit.ts handed out (`tool`: its blob, or undefined for an
  * agent that fills its kit otherwise) is the one it tried. Null when there is none. Pure.
  */

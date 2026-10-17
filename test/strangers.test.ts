@@ -168,7 +168,7 @@ test('the git probe: a PR head in the branch is merged; one that never reached i
 });
 
 // Whole rounds: a fake Porter on kit 1.0.0, rolled out to new kits by this Steward, its kit PRs merged by it at once
-// (Steward 0.36.121), or, one GitHub wouldn't merge for it, by someone else.
+// (Steward 0.36.124), or, one GitHub wouldn't merge for it, by someone else.
 test('whole rounds: no alarm for what the rounds merged and released; one when someone else merged and released', async () => {
   const f = fakeEmployee(path.join(home, 'porter'), { version: '0.5.12', kit: '1.0.0' });
   const attempts = path.join(home, 'released.txt');

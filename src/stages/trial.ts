@@ -16,7 +16,7 @@ import { withRepo } from './slots.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
 
 /**
- * A new kit tried on every employee before it is released (Steward 0.36.121: on main, at a build). When the kit on the
+ * A new kit tried on every employee before it is released (Steward 0.36.124: on main, at a build). When the kit on the
  * Steward's main (kit/VERSION) has no kit-v<version> release, the build, before it releases the kit (stages/self.ts),
  * bumps each employee on the kit to it as the rollout will once it's released (stages/bump.ts, in a trial: a worktree of
  * its own, the kit filled from main's kit\ and tools\kit.ts, nothing committed, nothing pushed), and runs its checks.
@@ -29,7 +29,7 @@ import { phaseOf, timed } from '../buildtimes.ts';
  *
  * Kept by main's commit (kit-trials.json, "main@<commit>"), and by the kit an agent gets (KitTrial's `content`: its
  * parts' trees and tools/kit.ts): main moving on with the same kit, but for versions and changelogs, keeps the verdict
- * (sameKitTrial), as does a kit a PR's trial tried before Steward 0.36.121. Each agent that passes is kept with the
+ * (sameKitTrial), as does a kit a PR's trial tried before Steward 0.36.124. Each agent that passes is kept with the
  * commit it was bumped from: its rollout bump from that same commit, once the kit is released as tried, isn't checked a
  * second time (trialpass.ts).
  *
@@ -81,7 +81,7 @@ export interface KitTrial extends TrialPasses {
    * tried once more, alone, once the rest are tried, and only then failed. Gone once tried.
    */
   retry?: { id: string; name: string; message: string }[];
-  /** main's commit it tried (its kit\ and tools\kit.ts); none in one a PR's trial kept before Steward 0.36.121. */
+  /** main's commit it tried (its kit\ and tools\kit.ts); none in one a PR's trial kept before Steward 0.36.124. */
   commit?: string;
   /** Carried from another trial (its key): the same kit (`content`) at another commit. */
   from?: string;
@@ -278,7 +278,7 @@ export async function kitContentOf(ctx: Ctx, repo: string, commit: string): Prom
 
 /**
  * The trial kept under another key whose kit is `content` (kitContentOf): the same kit an agent gets, whichever commit
- * (or, before Steward 0.36.121, PR) it was tried at. A done one, newest first, else one still going. Pure.
+ * (or, before Steward 0.36.124, PR) it was tried at. A done one, newest first, else one still going. Pure.
  */
 export function sameKitTrial(kept: Record<string, KitTrial>, content: string, except: string): [string, KitTrial] | undefined {
   const same = Object.entries(kept).filter(([k, t]) => k !== except && t.content === content).reverse();

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // Faster builds (Steward 0.36.67): where a build's time goes (buildtimes.ts), and a build's releases side by side
-// (stages/round.ts). Nothing is done between builds for the next one now (Steward 0.36.121), but the records of builds
+// (stages/round.ts). Nothing is done between builds for the next one now (Steward 0.36.124), but the records of builds
 // from before, whose tests ran ahead of them, still read. On a data folder of its own; nothing reaches GitHub.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-buildtimes-'));
 process.env.STEWARD_HOME = home;
@@ -45,7 +45,7 @@ test("the page's line says how long the last build took, and where its time went
       { phase: 'releases' as const, ...span(31, 40) },
       // Manor told comes after the build is recorded as finished: the build took until then.
       { phase: 'manor' as const, ...span(40, 42) },
-      // Done between builds, for this one, as builds before Steward 0.36.121 were prepared.
+      // Done between builds, for this one, as builds before Steward 0.36.124 were prepared.
       { phase: 'tests' as const, of: 'clerk', ahead: true, ...span(-120, -100) },
     ],
   };

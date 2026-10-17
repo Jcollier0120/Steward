@@ -19,7 +19,7 @@ import { mergeOwn, prNumberOf } from './mainbuild.ts';
  * A fold (the rollout's: a newer kit onto the Steward's kit PR still open for an older one) is pushed onto that PR's
  * branch the same way, once GitHub says the PR is still open, and the PR's title and description become the new kit's.
  *
- * The rollout's (PushOptions' `merge`, Steward 0.36.121) are merged at once too, by the Steward itself (mainbuild.ts's
+ * The rollout's (PushOptions' `merge`, Steward 0.36.124) are merged at once too, by the Steward itself (mainbuild.ts's
  * mergeOwn): their checks passed in the bump, and no one else merges the Steward's PRs. The build releases them.
  */
 

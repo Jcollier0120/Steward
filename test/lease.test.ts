@@ -236,7 +236,7 @@ function raise(checkout: string, from: string, to: string): string {
 /**
  * A fake employee whose main carries 0.4.1, not released yet (v0.4.0 is): the team's PR #7, merged by its author once
  * vouched (`vouched`: its head's steward/tested status by a team account), as the Steward merges no one's PRs (Steward
- * 0.36.121). Its release command notes each version it releases: GitHub's releases, as the stand-in answers them.
+ * 0.36.124). Its release command notes each version it releases: GitHub's releases, as the stand-in answers them.
  */
 function roundSetup(name: string, o: { vouched: boolean }) {
   const f = fakeEmployee(path.join(home, name), { version: '0.4.0' });

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// Steward 0.36.121: builds release main, and the Steward merges no one's PRs (whoever wrote one merges it once vouched).
+// Steward 0.36.124: builds release main, and the Steward merges no one's PRs (whoever wrote one merges it once vouched).
 // Whole build rounds here (the owner's Build now), the Steward's own repository beside an agent's, on a data folder of
 // their own, git and gh standing in, and npm for the Steward's checks and its release: the Steward's own new version on
 // main is tested once at main's head (stages/mainbuild.ts) and released with the agent's main in the same build; a new

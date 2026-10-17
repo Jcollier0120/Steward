@@ -13,7 +13,7 @@ export const stewardEmployee = (s: Settings, checkout = s.stewardCheckout): Empl
   repo: s.stewardRepo,
   checkout,
   branch: 'main',
-  // Its own repository: the Steward merges only the kit and stamp PRs it opens there itself (Steward 0.36.121).
+  // Its own repository: the Steward merges only the kit and stamp PRs it opens there itself (Steward 0.36.124).
   merges: true,
   // Not "on the kit": a rollout passes it over.
   usesKit: false,

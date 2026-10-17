@@ -6,7 +6,7 @@ import { after, test } from 'node:test';
 
 // A repository refreshed after releases (stages/refresh.ts): a site whose `npm run sync` lists every release's notes.
 // It runs only after a round that released something; it pushes only what changed, and only once its tests pass; a
-// failure is an alarm, never a push. A round merges no one's PRs (Steward 0.36.121): the Exchequer's stays open.
+// failure is an alarm, never a push. A round merges no one's PRs (Steward 0.36.124): the Exchequer's stays open.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-refresh-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
