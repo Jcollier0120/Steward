@@ -15,9 +15,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 const { hostFor, must } = await import('../src/hosts/index.ts');
 const { answered, mergeStatesOf, prOf, teaLogins, unwip, whereGitea } = await import('../src/hosts/gitea.ts');
 const { autoWords, findScm, hostOf, isGiteaRepo, repoFromUrl } = await import('../src/scm.ts');
-const { merge } = await import('../src/stages/merge.ts');
 const { parsePrs } = await import('../src/stages/staff.ts');
-const { ctxFor, employee, fakeEmployee, runner, sh } = await import('./helpers.ts');
 type Ran = import('../src/run.ts').Ran;
 type ScmLook = import('../src/scm.ts').ScmLook;
 
@@ -218,43 +216,4 @@ test("releases, their files and issues in GitHub's words", async () => {
     ['PATCH', `${P}/issues/3`, { state: 'closed' }],
     ['POST', `${P}/labels`, { name: 'manor:work', color: '#1d76db', description: 'Queued for the Wright' }],
   ]);
-});
-
-test("a merge round on Codeberg: the team's pull request, its checks passed, merged at the head it read", async () => {
-  const f = fakeEmployee(path.join(tmp, 'round'), { version: '0.4.0' });
-  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/feature');
-  for (const file of ['package.json', 'package-lock.json', 'src/app.ts']) writeFileSync(path.join(f.checkout, file), readFileSync(path.join(f.checkout, file), 'utf8').split('0.4.0').join('0.4.1'));
-  writeFileSync(path.join(f.checkout, 'feature.txt'), 'a feature\n');
-  sh(f.checkout, 'add', '-A');
-  sh(f.checkout, 'commit', '--quiet', '-m', 'A feature');
-  const head = sh(f.checkout, 'rev-parse', 'HEAD');
-  sh(f.checkout, 'push', '--quiet', 'origin', 'claude/feature');
-  sh(f.origin, 'update-ref', 'refs/pull/7/head', head);
-  sh(f.checkout, 'switch', '--quiet', 'main');
-
-  const tea: ReturnType<typeof call>[] = [];
-  const gh = runner();
-  const run = async (cmd: string, args: string[], opts?: any): Promise<Ran> => {
-    if (cmd !== 'tea') return gh.run(cmd, args, opts);
-    if (args[0] === 'logins') return { code: 0, out: LOGINS, err: '' };
-    const c = call(args);
-    tea.push(c);
-    const sha = { ref: 'claude/feature', sha: head, repo: { full_name: 'acme/fake' } };
-    if (c.at === `${P}/pulls?state=open&sort=recentupdate&limit=50&page=1`) return http(200, [pull({ head: sha })]);
-    if (c.at === `${P}/pulls/7/files?limit=50&page=1`) return http(200, [{ filename: 'feature.txt' }, { filename: 'package.json' }]);
-    if (c.at === `${P}/commits/${head}/status`) return http(200, { state: 'success', statuses: [{ context: 'ci/test', status: 'success' }] });
-    if (c.at === `${P}/releases?limit=50&page=1`) return http(200, [{ tag_name: 'v0.4.0', published_at: '2026-10-03T00:00:00Z', target_commitish: 'c0' }]);
-    if (c.method === 'POST' && c.at === `${P}/pulls/7/merge`) return http(200, '');
-    if (c.method === 'POST') return http(201, {});
-    return http(404, { message: `${c.method} ${c.at}` });
-  };
-  // Checks that would fail, were they run here: Gitea's checks passed, so they aren't.
-  const e = employee(f.checkout, { repo: R, fill: '', test: ['node -e process.exit(1)'] });
-  const ctx = { ...ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run, neutralDir: tmp }), host: () => 'gitea' as const };
-  const [m] = await merge(ctx, [e], { yes: true, team: true });
-  assert.equal(m.outcome, 'done', `${m.message}\n${ctx.lines.join('\n')}`);
-  assert.match(m.message, /merged #7/);
-  assert.deepEqual(gh.gh, [], 'GitHub is never asked');
-  const merged = tea.find((c) => c.at === `${P}/pulls/7/merge`);
-  assert.deepEqual(merged?.body, { Do: 'merge', head_commit_id: head });
 });

@@ -11,7 +11,7 @@ import { kitClaimKey } from './stages/kitpart.ts';
 import { claimPort, clashes, portUses, releasePort } from './ports.ts';
 import { anyRepo } from './found.ts';
 import { addEmployee, employeeFor as employeeFromCheckout } from './employ.ts';
-import { loadSettings, settingsFile, type Employee, type Settings } from './settings.ts';
+import { loadSettings, settingsFile } from './settings.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { open, shutdown, start, status, stop } from './kit/service.ts';
 import type { StageResult } from './stages/common.ts';
@@ -19,8 +19,7 @@ import type { Staff } from './stages/staff.ts';
 import { context, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import { markMine } from './strangers.ts';
 import { claimRefused, DEVELOPER_ONLY, makersOnly, makersPc, stewardActs } from './maker.ts';
-import { askRoundSoon, vouch } from './stages/vouch.ts';
-import { movePast } from './move-past.ts';
+import { vouch } from './stages/vouch.ts';
 import { usesChanges } from './stages/stamp.ts';
 import { CHANGES_DIR, fragmentFor, KIT_CHANGES_DIR } from './entries.ts';
 import { CHANGELOG } from './kit/notes.ts';
@@ -33,7 +32,7 @@ const USAGE = `${APP.id}: ${APP.role}
 
   Each stage reports for every repository it looks after (Settings). bump and push are Castellan's kit
   rollout, only on the PC that releases Castellan itself; elsewhere release takes each repository's
-  own version, and merge merges only where Settings say yes (Merges your ready PRs). Castellan's own
+  own version. The Steward merges no one's PRs: their authors merge them once vouched. Castellan's own
   repositories (Manor, its agents, its site) are its makers' alone: refused on any other PC. Except on
   that PC, the commands that work on repositories run only while Developer options are on in Manor.
   bump [--kit <version>] [--employees a,b]
@@ -44,22 +43,17 @@ const USAGE = `${APP.id}: ${APP.role}
                    from a local ref instead of origin (both for a trial)
   push [--kit <version>] [--employees a,b]
                    push each bump (never forced) and open its PR
-  merge [--yes] [--team] [--employees a,b]
-                   list the Steward's open PRs, with their checks and whether they merge; with --yes,
-                   merge those that merge cleanly with no failing or running checks. --team: the team's
-                   PRs too (the GitHub accounts in Settings), to any employee; their branches stay.
-                   Then what each merged PR's steward block asks for: release, install, and
-                   approve-jobs (merging counts as reading the scripts it names)
   release [--kit <version>] [--employees a,b] [--hire]
                    release each employee whose branch has the kit and an unreleased version, from its branch.
                    --hire, with --employees: the first install on this PC of an agent built here (this PC's
                    own staff), at its branch's version: Manor's Hire for one of them asks for it
   round [--employees a,b]
-                   one round, as the Steward runs by itself on duty (Settings): merge --yes --team, with
-                   what each merged PR asks for after, then a release of every version not yet released.
-                   It goes by the build pipeline (Settings: Build pipeline): between builds a round only looks,
-                   except for an urgent fix (a ready PR whose changelog entry starts "**Urgent fix:"),
-                   which builds at once for its repository
+                   one round, as the Steward runs by itself on duty (Settings): main's unstamped entries
+                   stamped, a new kit released once its trial passes and rolled out, then each main with a
+                   version not yet released tested (unless a vouch covers it) and released. It goes by the
+                   build pipeline (Settings: Build pipeline): between builds a round only looks, except for an
+                   urgent fix (a commit on main whose changelog entry starts "**Urgent fix:"), which builds at
+                   once for its repository
   build [--employees a,b] [--to-customers]
                    the owner's override of the build pipeline: a build now, outside the set times, for the
                    repositories named or all; --to-customers lets its releases out to customers at once, not
@@ -72,8 +66,8 @@ const USAGE = `${APP.id}: ${APP.role}
   employ <its clone> [--branch <b>] [--dry-run]
                    take on a new agent: add it to Settings' employees from its clone (its id and name
                    from manor-agent.json or src/app.ts, its repository from origin, its kit parts, how
-                   to fill, test, version and release it), so the page lists it and the rounds test,
-                   merge and release it. One that announces itself is published; Manor's internal staff,
+                   to fill, test, version and release it), so the page lists it and the builds test and
+                   release it. One that announces itself is published; Manor's internal staff,
                    and one that doesn't announce itself, are built and installed here. --dry-run: only show it
 
   start            on duty, and its page up at ${pageUrl}
@@ -94,15 +88,12 @@ const USAGE = `${APP.id}: ${APP.role}
                    Reeve found on this PC, or the clone this runs in
   release-version <employee or owner/repo> <version>
                    give a claimed version back (the work was dropped)
-  move-past <employee or owner/repo> <pr number>
-                   a PR that isn't ready and holds its version queue moved past the others: a version above
-                   the rest claimed for its branch, its author told on GitHub, nothing pushed to it; with the
-                   drafts that would hold the queue next. The PRs that waited merge at the next round
   vouch [<pr number>]
                    in the clone a PR was pushed from, once it is pushed: run the repository's checks (Settings')
                    at HEAD, which must be the PR's head with nothing uncommitted, and once they pass, record it
-                   on that commit on GitHub (status steward/tested). The Steward then merges the PR without
-                   testing it again, unless it is pushed to first. Without a number: the PR for this branch.
+                   on that commit on GitHub (status steward/tested). Then merge the PR yourself, once GitHub
+                   says it merges cleanly: the next build releases main without testing that code again.
+                   Without a number: the PR for this branch.
                    The checks run at the checks pace, a share of the processor (Manor's Settings change it).
                    When the Assayer already passed every check on exactly HEAD's tree (same
                    dependencies and kit, within a day), nothing runs again: its pass is taken.
@@ -154,7 +145,6 @@ function opt(args: string[], ...names: string[]): string | undefined {
 const STAGE_FLAGS: Record<string, string[]> = {
   bump: ['--kit', '--employees', '--hires', '--kit-from', '--base'],
   push: ['--kit', '--employees', '--hires'],
-  merge: ['--yes', '--team', '--employees', '--hires', '--kit'],
   release: ['--kit', '--employees', '--hires', '--hire'],
   round: ['--employees', '--hires'],
   staff: ['--json', '--no-fetch'],
@@ -197,7 +187,7 @@ const [cmd, ...rest] = process.argv.slice(2);
 const cliFile = fileURLToPath(import.meta.url);
 
 /** The commands that work on repositories: a developer's, so only while Developer options are on (maker.ts' stewardActs). */
-const DEVELOPER_COMMANDS = ['bump', 'push', 'merge', 'release', 'round', 'build', 'staff','employ', 'claim-version', 'release-version', 'move-past', 'claims', 'vouch'];
+const DEVELOPER_COMMANDS = ['bump', 'push', 'release', 'round', 'build', 'staff','employ', 'claim-version', 'release-version', 'claims', 'vouch'];
 /** The commands only the PC Castellan is made on has: the ports of Castellan's new agents, and its merges done by hand. */
 const MAKERS_COMMANDS: Record<string, string> = {
   'claim-port': "Claiming a port for a new agent of Castellan's",
@@ -211,7 +201,7 @@ const MAKERS_COMMANDS: Record<string, string> = {
   'release-now': "Letting a release of Castellan's out early",
 };
 
-async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Promise<number> {
+async function stage(name: 'bump' | 'push' | 'release' | 'round'): Promise<number> {
   const bad = unknownFlags(name, rest);
   if (bad.length) {
     console.error(`${name}: unknown ${bad.join(' ')} (it takes ${STAGE_FLAGS[name].join(' ')})`);
@@ -223,8 +213,6 @@ async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Pro
     kit: opt(rest, '--kit') ?? null,
     base: opt(rest, '--base') ?? null,
     kitFrom: opt(rest, '--kit-from') ?? null,
-    yes: rest.includes('--yes'),
-    team: rest.includes('--team'),
     hire: rest.includes('--hire'),
     // A round asked for in a terminal looks at every employee, as Run now does.
     ...(name === 'round' ? { full: true } : {}),
@@ -260,7 +248,7 @@ async function buildNow(): Promise<number> {
     return 2;
   }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error("build is the owner's override, asked at a console: it isn't run from a script or a coding session. Ready PRs go into the next build at its set time (Settings: Build pipeline).");
+    console.error("build is the owner's override, asked at a console: it isn't run from a script or a coding session. What is merged to main goes into the next build at its set time (Settings: Build pipeline).");
     return 1;
   }
   const list = opt(rest, '--employees');
@@ -314,7 +302,6 @@ switch (cmd) {
     break;
   case 'bump':
   case 'push':
-  case 'merge':
   case 'release':
   case 'round':
     process.exitCode = await stage(cmd);
@@ -394,21 +381,21 @@ switch (cmd) {
       break;
     }
     // The build pipeline (always), in a repository that writes its entries in changes/: no version to claim. The work
-    // writes changes/<branch>.md, and the Steward gives it the next release's version as it merges (stages/stamp.ts).
+    // writes changes/<branch>.md, and the build gives it the next release's version (stages/stamp.ts).
     if (!kit && (await usesChanges(ctx, e).catch(() => false))) {
       const branch = opt(rest, '--branch');
       const entry = fragmentFor(branch ?? 'your-branch');
       if (rest.includes('--json')) console.log(JSON.stringify({ fragment: entry, version: null }));
-      else console.log(`${e.name} rides the build pipeline: no version to claim or set. Write its changelog entry in ${entry}${branch ? '' : ' (named by your branch)'}, and leave ${e.versionFiles.join(', ')} and ${CHANGELOG} as they are: the Steward gives it the next release's version as it merges, at the next build. A first line "minor: true" asks for a minor step.`);
+      else console.log(`${e.name} rides the build pipeline: no version to claim or set. Write its changelog entry in ${entry}${branch ? '' : ' (named by your branch)'}, and leave ${e.versionFiles.join(', ')} and ${CHANGELOG} as they are: the next build gives it the next release's version, once you have merged it. A first line "minor: true" asks for a minor step.`);
       break;
     }
     const { claim, again } = await claimVersion(ctx, e, { branch: opt(rest, '--branch') ?? null, by: opt(rest, '--by') ?? 'claude', for: opt(rest, '--for') ?? '', minor: rest.includes('--minor'), canPush, ...(kit ? { part: 'kit' as const } : {}) });
     // A repository that writes its entries in changes/ (entries.ts): the work writes changes/<version>.md and leaves the
-    // version files and the changelog alone; the Steward stamps them as it merges (stages/stamp.ts).
+    // version files and the changelog alone; the build stamps them (stages/stamp.ts).
     const entry = (await usesChanges(ctx, e).catch(() => false)) ? `${kit ? KIT_CHANGES_DIR : CHANGES_DIR}/${claim.version}.md` : null;
     const mine = again ? ' (claimed already for this branch)' : '';
     if (rest.includes('--json')) console.log(JSON.stringify({ ...claim, again, ...(entry ? { entry } : {}) }));
-    else if (entry) console.log(`${kit ? 'Kit' : e.name} ${claim.version}${mine}: yours. Write its changelog entry in ${entry}, and leave ${kit ? 'kit/VERSION, kit/CHANGELOG.md and kit.json' : `${e.versionFiles.join(', ')} and ${CHANGELOG}`} as they are: the Steward sets the version as it merges.`);
+    else if (entry) console.log(`${kit ? 'Kit' : e.name} ${claim.version}${mine}: yours. Write its changelog entry in ${entry}, and leave ${kit ? 'kit/VERSION, kit/CHANGELOG.md and kit.json' : `${e.versionFiles.join(', ')} and ${CHANGELOG}`} as they are: the next build sets the version, once you have merged it.`);
     else if (kit) console.log(`Kit ${claim.version}${mine}: yours. Set it in kit/VERSION, and in kit.json where the Steward pins its own kit.`);
     else console.log(`${e.name} ${claim.version}${mine}: yours. Set it in ${e.versionFiles.join(', ')}.`);
     break;
@@ -433,25 +420,6 @@ switch (cmd) {
     console.log((await releaseClaim(kit ? kitClaimKey(e.repo) : e.repo, rest[1], { remote: await remoteFor(ctx.run, ctx.settings, e).catch(() => null), run: ctx.run })) ? `${name} ${rest[1]} is free again.` : `${name} ${rest[1]} wasn't claimed.`);
     break;
   }
-  case 'move-past': {
-    const n = Number(rest[1]);
-    const ctx = rest[0] && Number.isInteger(n) && n > 0 ? await context({ glance: false, log: (line) => console.log(line) }) : null;
-    const e = ctx ? employeeFor(ctx.settings, rest[0]) : null;
-    if (!ctx || !e) {
-      console.error(ctx ? `${rest[0]} isn't one the Steward looks after.` : 'move-past takes an employee and a PR number: move-past steward 233');
-      process.exitCode = 2;
-      break;
-    }
-    const r = await movePast(ctx, e, n, { by: 'owner' });
-    if (r.status !== 200) {
-      console.error(r.message);
-      process.exitCode = 1;
-      break;
-    }
-    console.log(r.message);
-    console.log(await askRoundSoon({ look: e.id }));
-    break;
-  }
   case 'vouch': {
     // Its checks run at the checks pace (kit/checks-pace.ts). --fast, which once lifted that, is gone: Manor's Settings
     // pace is the only way out. Said once rather than refused, so a script that still passes it keeps working.
@@ -466,8 +434,6 @@ switch (cmd) {
     const ctx = await context({ glance: false, team: false });
     const v = await vouch(ctx, { dir: process.cwd(), ...(n ? { pr: Number(n.replace('#', '')) } : {}), say: (line) => console.log(line) });
     console[v.ok ? 'log' : 'error'](v.message);
-    // Its round now, so the PR merges in minutes rather than at the next round.
-    if (v.ok) console.log(await askRoundSoon(v.look ? { look: v.look } : {}));
     process.exitCode = v.ok ? 0 : 1;
     break;
   }

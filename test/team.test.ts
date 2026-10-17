@@ -12,9 +12,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const { NO_TEAM, realOwner, teamOf } = await import('../src/team.ts');
 const { context, withTeam } = await import('../src/steward.ts');
-const { mergeOne } = await import('../src/stages/merge.ts');
 const { DEFAULT_SETTINGS } = await import('../src/settings.ts');
-const { ctxFor, employee, ok, runner } = await import('./helpers.ts');
 
 test("Settings' own team is used as it is, and gh isn't asked", () => {
   let asked = 0;
@@ -42,12 +40,4 @@ test("the stages' context takes the derived team; with none, the log says so and
   assert.deepEqual(withTeam({ ...s, team: ['someone'] }, () => assert.fail('nothing to say'), () => assert.fail('gh asked')).team, ['someone']);
   // Claims never merge, so they never ask.
   assert.deepEqual((await context({ settings: s, glance: false, offline: true, team: false, owner: () => assert.fail('gh asked') })).settings.team, []);
-});
-
-test("Merge the team's PRs with no team merges the Steward's own, and says why there is no team", async () => {
-  const { run } = runner((args) => (args[0] === 'pr' && args[1] === 'list' ? ok([]) : undefined));
-  const ctx = ctxFor({ employees: [], workRoot: path.join(home, 'work'), run, neutralDir: home, team: [] });
-  const out = await mergeOne(ctx, employee(path.join(home, 'nowhere')), { yes: true, team: true });
-  assert.equal(out.outcome, 'skipped');
-  assert.ok(out.message.includes(NO_TEAM), out.message);
 });

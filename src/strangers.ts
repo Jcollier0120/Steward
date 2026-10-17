@@ -14,7 +14,7 @@ import { checkoutOf, freshBranch, type Ctx } from './stages/common.ts';
  *
  * Seen from what a round already has, with nothing more asked of GitHub:
  * - this Steward notes what it does itself, as it does it (acted.json): each PR it opens (stages/push.ts), each it
- *   merges (stages/merge.ts), each release it makes (stages/release.ts), whichever stage or button ran it;
+ *   merges (stages/mainbuild.ts's mergeOwn), each release it makes (stages/release.ts), whichever stage or button ran it;
  * - each round's glance lists the Steward's open PRs (steward/…), which are watched with their head commit. One that is
  *   no longer open, and whose head is now in its employee's branch (git, in the checkout here), was merged; if not by
  *   this Steward, by someone else. One closed without merging is let go;

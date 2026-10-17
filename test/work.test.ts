@@ -281,7 +281,7 @@ test('watching: a failed release is filed and its alarm waits a day; stuck, it i
   let work: unknown = WORK();
   const g = gh();
   const watch = (h: number, more: Partial<typeof s> = {}) =>
-    watchAlarms({ settings: { ...s, ...more }, round: roundResult(), held: [], failedReleases: { porter: 'abc1234' }, employees, log: () => {}, run: g.run, neutralDir: home }, { pages: { manor: '', surveyor: '', wright: 'http://127.0.0.1:29797', reeve: '' }, getJson: async (u: string) => (u === 'http://127.0.0.1:29797/api/work' ? work : { error: 'none' }), toast: async () => {}, now: at(h) });
+    watchAlarms({ settings: { ...s, ...more }, round: roundResult(), failedReleases: { porter: 'abc1234' }, employees, log: () => {}, run: g.run, neutralDir: home }, { pages: { manor: '', surveyor: '', wright: 'http://127.0.0.1:29797', reeve: '' }, getJson: async (u: string) => (u === 'http://127.0.0.1:29797/api/work' ? work : { error: 'none' }), toast: async () => {}, now: at(h) });
   let st = await watch(0);
   assert.deepEqual(st.open.map((a) => a.id), [], 'filed: no alarm yet');
   assert.equal(g.creates().length, 1);
@@ -407,4 +407,44 @@ test("a release issue closes once round-failed.json no longer names its commit: 
   const closed = runner((args) => (args[1] === 'list' ? ok(releases) : { code: 1, out: '', err: 'issue #9 is already closed' }));
   await closeResolved({ items: [], employees, run: closed.run, cwd: home, log: (l) => quiet.push(l) });
   assert.deepEqual([filedNow(), quiet], [{}, []]);
+});
+
+test("a conflict issue filed before Steward 0.36.124 closes once its PR no longer needs it: resolved, merged or closed; never while it still conflicts, or its PR can't be read", async () => {
+  const entry = (n: number) => ({ url: `https://github.com/Jcollier0120/Porter/issues/${n}`, number: n, repo: 'Jcollier0120/Porter', at: at(0).toISOString(), condition: 'waiting:Jcollier0120/Porter#60' });
+  const filedNow = () => JSON.parse(readFileSync(workFiledFile(), 'utf8'));
+  const id = 'conflict:Jcollier0120/Porter#60:aaaaaaa';
+  writeFileSync(workFiledFile(), JSON.stringify({ [id]: entry(70) }));
+  let view: { code: number; out: string; err: string } = ok({ state: 'OPEN', mergeable: 'CONFLICTING' });
+  const closes: string[][] = [];
+  const lines: string[] = [];
+  const r = runner((args) => {
+    if (args[0] === 'pr' && args[1] === 'view') return view;
+    if (args[0] === 'issue' && args[1] === 'close') return closes.push(args), ok('');
+    return undefined;
+  });
+  const close = () => closeResolved({ items: [], employees, run: r.run, cwd: home, log: (l) => lines.push(l) });
+  await close();
+  assert.equal(closes.length, 0, 'still conflicting: it stays');
+  assert.deepEqual(r.gh.find((a) => a[1] === 'view')!.slice(0, 5), ['pr', 'view', '60', '--repo', 'Jcollier0120/Porter']);
+  for (const v of [{ code: 1, out: '', err: 'HTTP 502' }, ok('not json')]) {
+    view = v;
+    await close();
+  }
+  assert.equal(closes.length, 0, "its PR can't be read: it stays");
+  view = ok({ state: 'OPEN', mergeable: 'MERGEABLE' });
+  await close();
+  assert.deepEqual(closes.map((a) => [a[2], a[4], a[6]]), [['70', 'Jcollier0120/Porter', 'completed']]);
+  assert.equal(closes[0].at(-1), 'Nothing left to do: #60 no longer conflicts. Closed by the Steward.');
+  assert.deepEqual([filedNow(), lines], [{}, ['work: closed https://github.com/Jcollier0120/Porter/issues/70: #60 no longer conflicts']]);
+  await close();
+  assert.equal(closes.length, 1, 'forgotten once closed');
+
+  // Merged, or closed, by its author: closed as well.
+  for (const [state, why] of [['MERGED', 'has merged'], ['CLOSED', 'was closed']]) {
+    writeFileSync(workFiledFile(), JSON.stringify({ [id]: entry(71) }));
+    view = ok({ state, mergeable: 'UNKNOWN' });
+    await close();
+    assert.equal(closes.at(-1)!.at(-1), `Nothing left to do: #60 ${why}. Closed by the Steward.`);
+    assert.deepEqual(filedNow(), {});
+  }
 });

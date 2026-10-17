@@ -1,23 +1,22 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// Urgent fixes between builds (stages/urgent.ts): a ready PR whose changelog entry is marked "**Urgent fix:" builds at
-// once, for its repository alone, rather than at the next build time. On a data folder of its own, a fake employee's
-// git, and gh standing in.
+// Urgent fixes between builds (stages/urgent.ts): main's newest commit, when the lines it adds to its changelog since the
+// newest release mark it "**Urgent fix:", builds at once, for its repository alone, rather than at the next build time;
+// once at that head. On a data folder of its own, a fake employee's git, and gh standing in.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-urgent-'));
 process.env.STEWARD_HOME = home;
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { addedLines, candidates, marksUrgent, urgentReady } = await import('../src/stages/urgent.ts');
+const { addedLines, marksUrgent, urgentReady } = await import('../src/stages/urgent.ts');
 const { boardedUrgent, loadPipeline, savePipeline, urgentKey } = await import('../src/pipeline.ts');
 const { runStage } = await import('../src/steward.ts');
-const { prFromGraph } = await import('../src/glance.ts');
-const { parsePrs } = await import('../src/stages/staff.ts');
+const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
 const { ctxFor, employee, fakeEmployee, ok, sh } = await import('./helpers.ts');
 const { run: realRun } = await import('../src/run.ts');
 type Runner = import('../src/run.ts').Runner;
@@ -25,40 +24,34 @@ type Runner = import('../src/run.ts').Runner;
 const OLD = "# Fake's changelog\n\n## 0.4.0\n\n**Urgent fix: an old one, released long ago.**\n";
 const f = fakeEmployee(path.join(home, 'fake'), { version: '0.4.0', files: { 'CHANGELOG.md': OLD } });
 const e = employee(f.checkout);
+// v0.4.0 is released: its tag on origin.
+sh(f.checkout, 'tag', 'v0.4.0');
+sh(f.checkout, 'push', '--quiet', 'origin', 'v0.4.0');
 
-/** A PR from main: a branch with these files, pushed, and its head as GitHub's refs/pull/<n>/head. GraphQL's shape, as the glance reads it. */
-function open(number: number, files: Record<string, string>, o: { draft?: boolean } = {}) {
-  const head = `claude/pr-${number}`;
-  sh(f.checkout, 'switch', '--quiet', '-c', head, 'main');
+/** A commit of these files on `branch` (made from `from` when new), pushed to origin's main when asked: its sha. */
+function commit(branch: string, files: Record<string, string>, o: { from?: string; push?: boolean } = {}): string {
+  sh(f.checkout, 'switch', '--quiet', ...(o.from ? ['-c', branch, o.from] : [branch]));
   for (const [file, text] of Object.entries(files)) {
     mkdirSync(path.dirname(path.join(f.checkout, file)), { recursive: true });
     writeFileSync(path.join(f.checkout, file), text);
   }
   sh(f.checkout, 'add', '-A');
-  sh(f.checkout, 'commit', '--quiet', '-m', `#${number}`);
-  sh(f.checkout, 'push', '--quiet', 'origin', head);
-  const oid = sh(f.checkout, 'rev-parse', 'HEAD');
-  sh(f.origin, 'update-ref', `refs/pull/${number}/head`, oid);
+  sh(f.checkout, 'commit', '--quiet', '-m', `${branch}: ${Object.keys(files).join(', ')}`);
+  const sha = sh(f.checkout, 'rev-parse', 'HEAD');
+  if (o.push) sh(f.checkout, 'push', '--quiet', 'origin', `${sha}:refs/heads/main`);
   sh(f.checkout, 'switch', '--quiet', 'main');
-  return {
-    oid,
-    node: { number, title: `Fake: #${number}`, url: `https://github.com/Jcollier0120/Fake/pull/${number}`, body: '', createdAt: '2026-10-13T08:00:00Z', headRefName: head, headRefOid: oid, baseRefName: 'main', isCrossRepository: false, isDraft: !!o.draft, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', additions: 5, deletions: 0, author: { __typename: 'User', login: 'Jcollier0120' }, labels: { nodes: [] }, files: { nodes: Object.keys(files).map((p) => ({ path: p })) }, commits: { nodes: [] } },
-  };
+  return sha;
 }
 
-const entry = (line: string) => `# Fake's changelog\n\n## 0.4.1\n\n**${line}**\n\n### What changed\n\n- ${line}\n\n${OLD.split('\n').slice(2).join('\n')}`;
-const urgentLog = open(41, { 'src/fix.ts': 'export const fix = 1;\n', 'CHANGELOG.md': entry('Urgent fix: updates no longer stop.') });
-const urgentFragment = open(42, { 'src/frag.ts': 'export const frag = 1;\n', 'changes/claude-pr-42.md': '**Urgent fix: pages open again.**\n\n### What changed\n\n- Pages open again.\n' });
-const plain = open(43, { 'src/pages.ts': 'export const pages = 1;\n', 'CHANGELOG.md': entry('Faster pages.') });
-const code = open(44, { 'src/code.ts': 'export const code = 1;\n' });
-const draft = open(45, { 'src/draft.ts': 'export const draft = 1;\n', 'CHANGELOG.md': entry('Urgent fix: not ready yet.') }, { draft: true });
+/** CHANGELOG.md with a 0.4.1 entry on top of the released one. */
+const entry = (...lines: string[]) => `# Fake's changelog\n\n## 0.4.1\n\n**${lines[0]}**\n\n### What changed\n\n${lines.map((l) => `- ${l}`).join('\n')}\n\n${OLD.split('\n').slice(2).join('\n')}`;
 
 /** Every command run, for counting the reads. */
 let calls: string[][] = [];
 const counting: Runner = async (cmd, args, opts) => (calls.push([cmd, ...args]), realRun(cmd, args, opts));
 const diffs = () => calls.filter((c) => c[0] === 'git' && c[1] === 'diff').length;
 
-test('the lines a PR adds to its changelog, and whether one marks it urgent', () => {
+test('the lines main adds to its changelog, and whether one marks it urgent', () => {
   const diff = ['diff --git a/CHANGELOG.md b/CHANGELOG.md', '--- a/CHANGELOG.md', '+++ b/CHANGELOG.md', '@@ -1,0 +2,3 @@', '+## 0.4.1', '+', '+**Urgent fix: updates no longer stop.**', '-**Urgent fix: an old one.**'].join('\r\n');
   assert.deepEqual(addedLines(diff), ['## 0.4.1', '', '**Urgent fix: updates no longer stop.**']);
   assert.equal(marksUrgent(diff), true);
@@ -66,51 +59,67 @@ test('the lines a PR adds to its changelog, and whether one marks it urgent', ()
   assert.equal(marksUrgent('+Mentions **Urgent fix: in passing.'), false, 'the mark starts its line');
 });
 
-test('which PRs may board as urgent: the team\'s, ready, to the branch, touching a changelog', () => {
-  const prs = parsePrs(JSON.stringify([urgentLog, urgentFragment, plain, code, draft].map((p) => prFromGraph(p.node))), ['Jcollier0120']);
-  assert.deepEqual(candidates(e, prs).map((p) => p.number), [41, 42, 43]);
-  assert.deepEqual(candidates(e, parsePrs(JSON.stringify([prFromGraph({ ...urgentLog.node, author: { __typename: 'User', login: 'someone' } })]), ['Jcollier0120'])), [], "a stranger's is never one");
-  assert.deepEqual(candidates(e, parsePrs(JSON.stringify([prFromGraph({ ...urgentLog.node, baseRefName: 'other' })]), ['Jcollier0120'])), [], 'nor one to another branch');
-});
-
-test("an urgent PR is found from its head: the entry it adds, in CHANGELOG.md or changes/, not one main had; once per head; not again once it boarded", async () => {
+test("main's head is urgent when the entry it adds since the newest release, in CHANGELOG.md or changes/, says so; once per head; not again once it built", async () => {
   const ctx = ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: counting, neutralDir: home });
-  ctx.glance = { at: new Date().toISOString(), stewardReleases: null, repos: { fake: { head: sh(f.origin, 'rev-parse', 'main'), prs: [urgentLog, urgentFragment, plain, code, draft].map((p) => prFromGraph(p.node)), releases: [] } }, errors: {} };
-  calls = [];
-  const found = await urgentReady(ctx, [e], new Set());
-  assert.deepEqual(found, [{ id: 'fake', number: 41, head: urgentLog.oid }, { id: 'fake', number: 42, head: urgentFragment.oid }]);
-  assert.equal(diffs(), 3, 'the three that touch a changelog read, the others not');
+  // An entry that isn't urgent (the urgent line under 0.4.0 was released long ago); then one that is, on top of it.
+  const plain = commit('plain', { 'src/pages.ts': 'export const pages = 1;\n', 'CHANGELOG.md': entry('Faster pages.') }, { from: 'main' });
+  const urgent = commit('urgent', { 'src/fix.ts': 'export const fix = 1;\n', 'CHANGELOG.md': entry('Urgent fix: updates no longer stop.', 'Faster pages.') }, { from: 'plain' });
+  // A fragment in changes/ marked urgent; and a commit that touches no changelog.
+  const fragment = commit('fragment', { 'src/frag.ts': 'export const frag = 1;\n', 'changes/claude-frag.md': '**Urgent fix: pages open again.**\n\n### What changed\n\n- Pages open again.\n' }, { from: 'main' });
+  const code = commit('code', { 'src/code.ts': 'export const code = 1;\n' }, { from: 'main' });
+  const at = (head: string, tags = ['v0.4.0']) => ({ fake: { head, tags } });
 
   calls = [];
-  assert.deepEqual(await urgentReady(ctx, [e], new Set([urgentKey(found[0])])), [found[1]], 'one that boarded at its head is left out');
-  assert.equal(diffs(), 0, 'nothing read again at the same heads');
+  assert.deepEqual(await urgentReady(ctx, [e], new Set(), at(plain)), [], 'a plain entry boards nothing');
+  assert.deepEqual(await urgentReady(ctx, [e], new Set(), at(code)), [], 'nor a commit with no entry');
+  assert.deepEqual(await urgentReady(ctx, [e], new Set(), at(urgent)), [{ id: 'fake', head: urgent }]);
+  assert.deepEqual(await urgentReady(ctx, [e], new Set(), at(fragment)), [{ id: 'fake', head: fragment }], 'an urgent fragment in changes/ too');
+  assert.equal(diffs(), 4, 'each head read once');
 
+  calls = [];
+  assert.deepEqual(await urgentReady(ctx, [e], new Set(), at(urgent)), [{ id: 'fake', head: urgent }]);
+  assert.equal(diffs(), 0, 'nothing read again at the same head');
+  assert.deepEqual(await urgentReady(ctx, [e], new Set([urgentKey({ id: 'fake', head: urgent })]), at(urgent)), [], 'a head that built already is left out');
+  assert.deepEqual(await urgentReady(ctx, [e], new Set(), at(urgent, [])), [], 'never released: its first release is no urgent fix');
+
+  // From the round's glance at GitHub: main's head and its releases.
+  ctx.glance = { at: new Date().toISOString(), stewardReleases: null, repos: { fake: { head: urgent, prs: [], releases: [{ tagName: 'v0.4.0', isDraft: false, publishedAt: null, commit: null }] } }, errors: {} };
+  assert.deepEqual(await urgentReady(ctx, [e], new Set()), [{ id: 'fake', head: urgent }]);
   // An employee GitHub's glance said nothing of: nothing read, nothing found.
+  calls = [];
   assert.deepEqual(await urgentReady(ctx, [{ ...e, id: 'other' }], new Set()), []);
+  assert.equal(calls.length, 0);
 });
 
-/** The world as GitHub would say it in a round's glance: the fake origin's main, and the PRs below. */
-let prs: any[] = [];
+/** The world as GitHub would say it in a round's glance: the fake origin's main, and v0.4.0 released. */
 const graph = () => ({
   data: {
     steward: { releases: { nodes: [{ tagName: 'kit-v1.0.0', isDraft: false }] } },
     e0: {
       ref: { target: { oid: sh(f.origin, 'rev-parse', 'main') } },
-      pullRequests: { nodes: prs },
-      releases: { nodes: [{ tagName: 'v0.4.0', isDraft: false, publishedAt: null, tagCommit: { oid: sh(f.origin, 'rev-parse', 'main') } }] },
+      pullRequests: { nodes: [] },
+      releases: { nodes: [{ tagName: 'v0.4.0', isDraft: false, publishedAt: null, tagCommit: { oid: sh(f.origin, 'rev-parse', 'v0.4.0') } }] },
     },
   },
 });
+// The release command notes each version it's asked to release, and fails: the urgent head's release doesn't come out.
+const attempts = path.join(home, 'attempts.txt');
+const releaseCmd = `node -e "const fs=require('fs');fs.appendFileSync(process.argv[1],JSON.parse(fs.readFileSync('package.json','utf8')).version+'\\n');process.exit(1)" ${attempts}`;
+const tried = () => (existsSync(attempts) ? readFileSync(attempts, 'utf8').split('\n').filter(Boolean) : []);
 const roundRun: Runner = async (cmd, args, opts) => {
-  if (cmd === 'gh') return args[0] === 'api' && args[1] === 'graphql' ? ok(graph()) : { code: 1, out: '', err: `no stand-in for gh ${args.join(' ')}` };
-  return realRun(cmd, args, opts);
+  if (cmd !== 'gh') return realRun(cmd, args, opts);
+  if (args[0] === 'api' && args[1] === 'graphql') return ok(graph());
+  if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
+  // A team member vouched for each head: the build doesn't test it again.
+  if (args[0] === 'api' && /^repos\/Jcollier0120\/Fake\/commits\/[0-9a-f]{40}\/statuses/.test(args[1])) return ok([{ context: VOUCH_CONTEXT, state: 'success', creator: { login: 'Jcollier0120' } }]);
+  return { code: 1, out: '', err: `no stand-in for gh ${args.join(' ')}` };
 };
 
-test('a round between builds: an urgent fix begins a build of its own, for its repository alone and without the kit; without one, it only looks', async () => {
+test('a round between builds: an urgent fix on main begins a build of its own, for its repository alone, once at its head; a plain one only waits', async () => {
   writeFileSync(
     path.join(home, 'settings.json'),
     JSON.stringify({
-      employees: [{ id: 'fake', name: 'Fake', repo: 'Jcollier0120/Fake', checkout: f.checkout, branch: 'main', usesKit: true, parts: ['node'], fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'node -e process.exit(0)', install: '', approve: '' }],
+      employees: [{ id: 'fake', name: 'Fake', repo: 'Jcollier0120/Fake', checkout: f.checkout, branch: 'main', usesKit: true, parts: ['node'], fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: releaseCmd, install: '', approve: '' }],
       team: ['Jcollier0120'],
       workRoot: path.join(home, 'work'),
       afterRelease: [],
@@ -118,28 +127,53 @@ test('a round between builds: an urgent fix begins a build of its own, for its r
       buildPipeline: { on: false, times: ['00:00', '06:00', '12:00', '18:00'], days: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'], kit: 'every', windowMinutes: 120 },
     }),
   );
-  const now = new Date(2026, 9, 13, 10, 0);
+  let now = new Date(2026, 9, 13, 10, 0);
   // The 06:00 build has been and gone.
   const six = new Date(2026, 9, 13, 6, 0).toISOString();
   savePipeline({ open: null, builds: [{ due: six, by: 'schedule', started: six, finished: new Date(2026, 9, 13, 6, 40).toISOString(), rounds: 2, merged: [], released: [], failed: [] }] });
-  const round = () => runStage('round', {}, { run: roundRun, now: () => now, pipeline: true, tell: async () => ({ ok: true, said: 'HTTP 200' }) });
+  const round = () => runStage('round', {}, { run: roundRun, now: () => now, pipeline: true, alarms: { manorUrl: 'http://127.0.0.1:9' }, tell: async () => ({ ok: true, said: 'HTTP 200' }) });
+  const bump = (v: string) => Object.fromEntries(['package.json', 'package-lock.json', 'src/app.ts'].map((file) => [file, readFileSync(path.join(f.checkout, file), 'utf8').replaceAll('0.4.0', v)]));
 
-  prs = [plain.node, code.node];
+  // Main moves on with a plain entry: the round only looks, and nothing builds before 12:00.
+  commit('main', { ...bump('0.4.1'), 'CHANGELOG.md': entry('Faster pages.') }, { push: true });
   const quiet = await round();
   assert.equal(quiet.error, undefined);
   assert.deepEqual(quiet.build, { between: true, next: new Date(2026, 9, 13, 12, 0).toISOString() });
-  assert.match(quiet.log.join('\n'), /between builds: ready PRs merge ahead of the next build, at 12:00, and are released at it/);
+  assert.match(quiet.log.join('\n'), /between builds: PRs are merged by whoever wrote them once vouched, and the next build, at 12:00,? releases each repository's main/);
+  assert.doesNotMatch(quiet.log.join('\n'), /urgent fix/);
   assert.equal(loadPipeline().open, null);
+  assert.deepEqual(tried(), [], 'nothing released between builds');
 
-  prs = [urgentLog.node, plain.node];
+  // An urgent fix lands on main: a build of its own, for its repository, at once.
+  const head = commit('main', { 'src/fix.ts': 'export const fix = 1;\n', 'CHANGELOG.md': entry('Urgent fix: updates no longer stop.', 'Faster pages.') }, { push: true });
+  now = new Date(2026, 9, 13, 10, 10);
   const urgent = await round();
   const log = urgent.log.join('\n');
-  assert.match(log, /an urgent fix is ready \(fake #41\): it builds at once, for its repository alone/);
-  assert.match(log, /the urgent fix's build \(fake #41\) begins for fake/);
+  assert.match(log, new RegExp(`an urgent fix is on main \\(fake at ${head.slice(0, 7)}\\): it builds at once, for its repository alone`));
+  assert.match(log, new RegExp(`the urgent fix's build \\(fake ${head.slice(0, 7)}\\) begins for fake`));
   assert.match(log, /the newest kit waits for the next build: this one is for an urgent fix/);
   assert.equal(urgent.build?.by, 'urgent');
-  const state = loadPipeline();
+  assert.deepEqual(tried(), ['0.4.1'], "main's head released (its release failing here)");
+  let state = loadPipeline();
   const run = state.open ?? state.builds.at(-1)!;
-  assert.deepEqual([run.by, run.employees, run.urgent], ['urgent', ['fake'], [urgentKey({ id: 'fake', number: 41, head: urgentLog.oid })]]);
-  assert.equal(boardedUrgent(state).has(urgentKey({ id: 'fake', number: 41, head: urgentLog.oid })), true, 'it boards once at that head');
+  assert.deepEqual([run.by, run.employees, run.urgent], ['urgent', ['fake'], [urgentKey({ id: 'fake', head })]]);
+  assert.equal(boardedUrgent(state).has(urgentKey({ id: 'fake', head })), true);
+  const builds = state.builds.length;
+
+  // Its release failed, and main is still at that head: no second build for it. It waits for a new commit or 12:00.
+  now = new Date(2026, 9, 13, 10, 20);
+  const again = await round();
+  assert.equal(again.build?.between, true);
+  assert.doesNotMatch(again.log.join('\n'), /urgent fix/);
+  state = loadPipeline();
+  assert.deepEqual([state.open, state.builds.length], [null, builds], 'built once at its head');
+  assert.deepEqual(tried(), ['0.4.1']);
+
+  // A new commit on main, the urgent entry still unreleased: that head builds once too.
+  const next = commit('main', { 'src/fix.ts': 'export const fix = 2;\n' }, { push: true });
+  now = new Date(2026, 9, 13, 10, 30);
+  const second = await round();
+  assert.equal(second.build?.by, 'urgent');
+  state = loadPipeline();
+  assert.deepEqual((state.open ?? state.builds.at(-1)!).urgent, [urgentKey({ id: 'fake', head: next })]);
 });

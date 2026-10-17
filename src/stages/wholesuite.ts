@@ -24,7 +24,7 @@ import type { Employee } from '../settings.ts';
  * suite runs at that commit, unless that very code passed whole on this PC already (whole.ts: a vouch or a PR test whose
  * change reached everything, a train). A test the selection missed then holds the kit's release, as a failed release does
  * (self-failed.json, an alarm at once, tried again once a new commit lands on main), instead of reaching every agent. A
- * failure is run once more first, as a PR's checks are (prtest.ts); one Windows ended isn't held, the next round runs it
+ * failure is run once more first, as main's are at a build (mainbuild.ts); one Windows ended isn't held, the next round runs it
  * again; nor are two runs whose failing tests each passed in the other (onlyFlaky).
  *
  * On the Steward's page (agent.ts: wholeSuitesBeside) it runs beside the rounds, never inside one (Steward 0.36.45): run
@@ -139,7 +139,7 @@ export function agoWords(iso: string, now = Date.now()): string {
 
 /** The hold of a kit whose whole suite runs beside the rounds now. */
 const runningHold = (job: WholeJob, now = Date.now()): WholeHold => ({
-  why: `its whole suite runs beside the rounds at ${job.commit.slice(0, 7)}, started ${agoWords(job.startedAt, now)} ago: the rounds go on merging meanwhile, and the first after it passes releases it`,
+  why: `its whole suite runs beside the rounds at ${job.commit.slice(0, 7)}, started ${agoWords(job.startedAt, now)} ago: the rounds go on meanwhile, and the first after it passes releases it`,
   retry: true,
   beside: true,
 });
@@ -465,14 +465,14 @@ async function besideHold(ctx: Ctx, repo: string, o: { tag: string; commit: stri
   // Never beside a kit trial or a rollout's checks running apart now: it waits for them to end, and the round that comes
   // when they do starts it. On 2026-10-16 one beside a trial ran into its 20-minute limit, then ran 14.5 minutes again.
   const busy = apartNow('kit trial', 'rollout');
-  if (busy) return { why: `its whole suite waits for the ${busy} running beside the rounds to end, so the two never test at once: the rounds go on merging meanwhile`, retry: true, beside: true };
+  if (busy) return { why: `its whole suite waits for the ${busy} running beside the rounds to end, so the two never test at once: the rounds go on meanwhile`, retry: true, beside: true };
   const dir = wholeDirOf(ctx);
   await removeWorktree(ctx.run, repo, dir);
   await freshWorktree(ctx.run, ctx.settings, repo, dir, o.commit, '--detach');
   if (kept?.state === 'ended' && keyOf(kept) === key) say(`${o.tag}: its whole suite at ${at} again (${kept.why})`);
   const job = startBeside(ctx, repo, dir, o);
   say(`${o.tag}: its whole suite started beside the rounds at ${at} in ${dir}: the rounds go on meanwhile`);
-  return { ...runningHold(job), why: `its whole suite started beside the rounds at ${at}: the rounds go on merging meanwhile, and the first after it passes releases it` };
+  return { ...runningHold(job), why: `its whole suite started beside the rounds at ${at}: the rounds go on meanwhile, and the first after it passes releases it` };
 }
 
 /**

@@ -678,7 +678,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   writeFileSync(logAt, fold ? replacingEntry(logText, entry, e.name) : withEntry(logText, entry, e.name));
   say(`${CHANGELOG}: the entry for ${next}${logText === null ? ' (a new changelog)' : fold ? `, for every kit since ${from}` : ''}`);
 
-  // A failure is tried once more, as a PR's checks are here (prtest.ts): a round bumps several employees at once, and a
+  // A failure is tried once more, as main's checks are at a build (mainbuild.ts): a round bumps several employees at once, and a
   // test that keeps time can fail under that load and pass alone. Failing twice is the bump's failure.
   const env: Record<string, string> = o.kitFrom ?{ STEWARD_KIT: path.resolve(o.kitFrom) } : {};
   // The kit's trial passed it from this very commit, with the kit as released and the same tools/kit.ts (trialpass.ts):

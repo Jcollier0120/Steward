@@ -7,8 +7,10 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // The whole suite before a kit's release (stages/wholesuite.ts), and the whole passes kept by tree (whole.ts): from a
-// fake Steward repository whose scripts only note what ran, its tests failing while a flag file is there. Nothing reaches
-// GitHub, the live ~/.steward or the real checkout.
+// fake Steward repository whose scripts only note what ran, its tests failing while a flag file is there. The kit is
+// tried on the agents at main first (stages/trial.ts: here, none), and the Steward's version is released on the team's
+// vouch on main's head (stages/mainbuild.ts: gh says the team vouched), as in self.test.ts. Nothing reaches GitHub, the
+// live ~/.steward or the real checkout.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-whole-'));
 process.env.STEWARD_HOME = home;
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
@@ -21,7 +23,8 @@ const { stewardEmployee } = await import('../src/stages/selfmerge.ts');
 const { apart } = await import('../src/stages/slots.ts');
 const { keepWhole, ranWhole, wholePassOf } = await import('../src/whole.ts');
 const { alive } = await import('../src/kit/apart.ts');
-const { ctxFor, runner, sh } = await import('./helpers.ts');
+const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
+const { ctxFor, ok, runner, sh } = await import('./helpers.ts');
 const { runChecks } = await import('../src/stages/bump.ts');
 const { resultFor } = await import('../src/kit/work-status.ts');
 const { workTasks } = await import('../src/kit/work-tasks.ts');
@@ -69,8 +72,11 @@ const commit = (file: string, text: string) => {
   sh(checkout, 'push', '--quiet', 'origin', 'main');
 };
 
-const r = runner();
-const ctx = ctxFor({ employees: [], workRoot: path.join(home, 'work'), run: r.run, neutralDir: home });
+/** A commit's statuses on GitHub: the team's vouch on each (stages/vouch.ts), so main's head isn't tested again before the Steward's release. */
+const statuses = (a: string[]) => a[0] === 'api' && /\/statuses\b/.test(a[1] ?? '');
+const VOUCHED = [{ context: VOUCH_CONTEXT, state: 'success', creator: { login: 'Jcollier0120' } }];
+const r = runner((a) => (statuses(a) ? ok(VOUCHED) : undefined));
+const ctx =ctxFor({ employees: [], workRoot: path.join(home, 'work'), run: r.run, neutralDir: home });
 const lines = () => (existsSync(ran) ? readFileSync(ran, 'utf8').trim().split('\n').map((l) => l.trim()) : []);
 const facts = (tags: string[]) => ({ checkout, main: { head: head(), kit: '1.1.0', version: '0.9.0' }, tags });
 const tree = () => sh(checkout, 'rev-parse', 'HEAD^{tree}');
@@ -95,7 +101,7 @@ test('a kit whose whole suite fails, twice, is held as a failed release, and the
   unlinkSync(failTests);
   assert.deepEqual(out.map((x) => x.outcome), ['failed', 'skipped']);
   assert.match(out[0].message, /^self: its whole suite failed at [0-9a-f]{7}, twice: npm test failed \(exit 1\).*, so kit-v1\.1\.0 wasn't released$/s);
-  assert.equal(out[1].message, "self: v0.9.0 waits for the kit's release, which failed");
+  assert.equal(out[1].message, "self: v0.9.0 waits for kit-v1.1.0's release");
   assert.deepEqual(lines().filter((l) => l === 'test').length, 2, 'run once more first');
   assert.ok(!lines().some((l) => l.startsWith('kit-release')), 'nothing published');
   assert.equal(loadSelfFailures()['kit-v1.1.0'].commit, head(), 'held until a new commit lands on main');
@@ -181,7 +187,7 @@ test('beside the rounds, a round starts the whole suite and goes on at once; lat
   fresh();
   const first = await releaseSelf(ctx, facts(['v0.8.0', 'kit-v1.0.0']));
   assert.deepEqual(first.map((x) => x.outcome), ['skipped'], first.map((x) => x.message).join('\n'));
-  assert.match(first[0].message, new RegExp(`^self: kit-v1\\.1\\.0 waits: its whole suite started beside the rounds at ${sha()}: the rounds go on merging meanwhile`));
+  assert.match(first[0].message, new RegExp(`^self: kit-v1\\.1\\.0 waits: its whole suite started beside the rounds at ${sha()}: the rounds go on meanwhile`));
   await until(() => pidsNow().length === 1, 60_000, 'its tests running');
   assert.equal(loadWholeJob()?.state, 'running');
   assert.equal(loadWholeJob()?.commit, head());
@@ -216,7 +222,7 @@ test('beside the rounds, the whole suite never runs beside a kit trial or a roll
     end();
     await other;
     assert.deepEqual(waits.map((x) => x.outcome), ['skipped'], waits.map((x) => x.message).join('\n'));
-    assert.equal(waits[0].message, `self: kit-v1.1.0 waits: its whole suite waits for the ${work} running beside the rounds to end, so the two never test at once: the rounds go on merging meanwhile`);
+    assert.equal(waits[0].message, `self: kit-v1.1.0 waits: its whole suite waits for the ${work} running beside the rounds to end, so the two never test at once: the rounds go on meanwhile`);
     assert.equal(testsRan(), 0, 'nothing run');
   }
   const starts = await releaseSelf(ctx, facts(['v0.8.0', 'kit-v1.0.0']));

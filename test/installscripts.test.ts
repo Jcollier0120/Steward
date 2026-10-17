@@ -5,8 +5,9 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // A rogue package's install script runs, unscanned, the moment npm installs it. The Steward's installs run none but the
-// ones Settings allow, hold the work for any other, and any PR whose lockfile brings one, or a package new to the
-// repository, waits for the owner.
+// ones Settings allow, and hold the work for any other; and a PR's lockfile that brings one, or a package new to the
+// repository, is said to be for the owner to look at (review.ts's lockfileHold). (The Steward held such a PR back from
+// merging until 0.36.124; whoever writes a PR merges it now.)
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-install-scripts-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
@@ -14,8 +15,6 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const scripts = await import('../src/installscripts.ts');
 const { DEFAULT_INSTALL_SCRIPTS, guardInstall, installHoldConditions, installLines, installPlan, keepHolds, loadInstallHolds, lockPackages, HOLD_SEEN_MS } = scripts;
 const { lockfileHold, lockfileNews } = await import('../src/review.ts');
-const { holdReason } = await import('../src/stages/merge.ts');
-const { canRide } = await import('../src/stages/train.ts');
 const { runChecks } = await import('../src/stages/bump.ts');
 const { normalizeSettings } = await import('../src/settings.ts');
 const { roundConditions } = await import('../src/alarms.ts');
@@ -142,7 +141,7 @@ test("a worktree whose lockfile holds: its checks install nothing, run nothing, 
   assert.ok(!existsSync(path.join(dir, 'node_modules')));
   const holds = loadInstallHolds();
   assert.equal(Object.values(holds)[0].doing, "#12's checks");
-  const conditions = roundConditions({ round: { stage: 'merge', results: [] } as any, held: [], failedReleases: {}, installHolds: holds, employees: [e], settings: ctx.settings });
+  const conditions = roundConditions({ round: { stage: 'round', results: [] } as any, failedReleases: {}, installHolds: holds, employees: [e], settings: ctx.settings });
   assert.ok(conditions.some((c) => c.id === 'install-script:Jcollier0120/Fake:left-padd@1.0.0'), conditions.map((c) => c.id).join(', '));
 });
 
@@ -162,7 +161,7 @@ test("a PR's lockfile: new names, and new install scripts not allowed, are news;
 
 const pr = (o: Partial<PrInfo> = {}): PrInfo => ({ number: 30, title: 'Fake 0.4.1: x', url: 'https://github.com/Jcollier0120/Fake/pull/30', head: 'claude/x', base: 'main', author: 'Jcollier0120', whose: 'team', headOid: '', after: null, afterError: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'none', labels: [], changed: 24, files: ['package-lock.json'], ...o });
 
-test('any PR, not only the Wright\'s, whose package-lock.json brings new packages waits for the owner until owner-done (real git)', async () => {
+test('any PR, not only the Wright\'s, whose package-lock.json brings new packages is for the owner to look at until owner-done (real git)', async () => {
   const f = fakeEmployee(path.join(home, 'lock-pr'));
   const e = employee(f.checkout, { repo: 'Jcollier0120/Fake' });
   const ctx = ctxFor({ employees: [e], workRoot: path.join(home, 'work-pr'), run: runner().run, neutralDir: home });
@@ -180,11 +179,8 @@ test('any PR, not only the Wright\'s, whose package-lock.json brings new package
   const rogue = push(31, lock(ROGUE));
   const why = await lockfileHold(ctx, e, pr({ number: 31, headOid: rogue }));
   assert.match(why!, /^its package-lock\.json brings a package with an install script not on "Install scripts allowed" \(left-padd@1\.0\.0\), and a package new to the repository \(left-padd@1\.0\.0\): look at them, and what their scripts run, then merge it yourself or label it owner-done$/);
-  // It waits, whoever wrote it, and rides in no train.
-  const held = pr({ number: 31, headOid: rogue, lockHold: why! });
-  assert.equal(holdReason(held, 'main'), why);
-  assert.equal(canRide(held, 'main'), false);
-  assert.equal(holdReason(pr({ whose: 'steward', lockHold: why! }), 'main'), why);
+  // Whoever wrote it.
+  assert.equal(await lockfileHold(ctx, e, pr({ number: 31, headOid: rogue, whose: 'steward' })), why);
   // The owner looked: owner-done lets it go.
   assert.equal(await lockfileHold(ctx, e, pr({ number: 31, headOid: rogue, labels: ['owner-done'] })), null);
   // Only the version raised, no package new: nothing to hold. No lockfile changed: not even looked at.

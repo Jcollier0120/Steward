@@ -1,9 +1,9 @@
 {
   "name": "steward",
-  "version": "0.36.122",
+  "version": "0.36.124",
   "private": true,
   "license": "UNLICENSED",
-  "description": "Looks after your repositories: claims versions, merges your ready pull requests and releases, where you say yes",
+  "description": "Looks after your repositories: claims versions, and builds and releases what you merge, where you say yes",
   "type": "module",
   "bin": {
     "steward": "src/cli.ts"

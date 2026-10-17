@@ -8,8 +8,8 @@ import { allowedInstallScripts, allowedToRun, lockPackages, named, runsOnInstall
 /**
  * The Steward's look at the Wright's drafts, in code (no model): the Wright opens every pull request as a draft, so
  * nothing it wrote merges unlooked at. A draft the Wright opened (labelled `wright`, by the team) that passes every
- * check below is marked ready, and then merged as any team PR is, tested here at its head first. One that fails a
- * check stays a draft for the person, and says why (after a day, the Steward's alarm says so too).
+ * check below may be merged. Since Steward 0.36.124 the Steward merges no PRs and marks none ready: these checks are
+ * kept for whoever does (the Bailiff, or a person).
  *
  * The checks: not labelled wright:needs-you (the Wright's own word that a person reviews it); no changed file a person
  * reviews (Settings: the same patterns as the Wright's, checked here again rather than trusted; and, whatever Settings
@@ -20,11 +20,12 @@ import { allowedInstallScripts, allowedToRun, lockPackages, named, runsOnInstall
  * Where the Bailiff is installed (settings.ts's bailiffInstalled), one more: the Bailiff, which reads each draft with
  * Claude Code, has approved its current head commit. It labels the PR bailiff:approved and ends its review comment
  * with a marker naming the commit it reviewed; both must agree with the head the Steward is about to mark ready.
- * Without the Bailiff, none is marked ready (stages/merge.ts's NO_BAILIFF): a person reviews it and marks it ready.
+ * Without the Bailiff, none is marked ready: a person reviews it and marks it ready. (The Steward merges no PRs since
+ * 0.36.124, so it no longer marks the Wright's drafts ready either: whoever reviews one merges it.)
  */
 
 export const WRIGHT_LABEL = 'wright';
-/** How a draft of the Wright's held only for the Bailiff's review starts its hold (stages/merge.ts's holdReason). */
+/** How a draft of the Wright's held only for the Bailiff's review started its hold, before Steward 0.36.124. */
 export const BAILIFF_WAIT = 'a draft from the Wright, with the Bailiff: ';
 export const NEEDS_YOU_LABEL = 'wright:needs-you';
 export const BAILIFF_LABELS = { approved: 'bailiff:approved', changes: 'bailiff:changes', waiting: 'bailiff:waiting' } as const;
@@ -86,7 +87,7 @@ export const ALWAYS_REVIEWED = ['.claude/**', '**/CLAUDE.md', '**/AGENTS.md', '*
  * otherwise pass the very look it changed. By employee id.
  */
 export const GUARDS: Record<string, string[]> = {
-  steward: ['src/review.ts', 'src/settings.ts', 'src/stages/merge.ts', 'src/stages/trial.ts', 'src/safeinstall.ts', 'src/installscripts.ts', 'src/stages/modules.ts'],
+  steward: ['src/review.ts', 'src/settings.ts', 'src/stages/mainbuild.ts', 'src/stages/vouch.ts', 'src/stages/trial.ts', 'src/safeinstall.ts', 'src/installscripts.ts', 'src/stages/modules.ts'],
   wright: ['src/worker.ts', 'src/workers.ts', 'src/settings.ts'],
   bailiff: ['src/review.ts', 'src/worker.ts', 'src/settings.ts'],
 };
@@ -184,7 +185,7 @@ export async function dependencyHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise
 const lockLooks = new Map<string, string | null>();
 
 /**
- * Why any PR, whoever wrote it, waits for the owner for its lockfile (merge.ts's holdReason): its package-lock.json
+ * Why any PR, whoever wrote it, waits for the owner for its lockfile: its package-lock.json
  * brings a package with an install script Settings don't allow, or a package whose name is new to the repository. A
  * rogue package gets in through exactly such a change, and every install of it would run its script; the Steward's own
  * installs refuse it too (installscripts.ts), but a person decides whether it belongs. The owner looks, then merges it

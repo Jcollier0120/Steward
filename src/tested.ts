@@ -6,14 +6,13 @@ import type { Settings } from './settings.ts';
  * and wants to know what passed here, and when (GET /api/tested). Kept in tested.json, the newest first, the last
  * KEEP_TESTED of each employee's. The stages that run an employee's checks record what passed:
  * - bump: the commit on steward/kit-<version> its checks passed at, before it is pushed (stages/bump.ts);
- * - catch-up: a kit PR of the Steward's, at its new head once its checks passed there (stages/catchup.ts);
- * - merge: a team PR's head, tested here before it is merged (stages/prtest.ts);
+ * - build: main's head, tested here before a build released it (stages/mainbuild.ts), where no vouch covered it;
  * - release: the commit of the branch a release was built from and published (stages/release.ts), whose release
- *   command ran there; the Steward runs no tests of its own for a release, so this is the commit its checks passed at
- *   on the way in, as merged.
+ *   command ran there.
+ * Records kept from before Steward 0.36.124 may say catch-up or merge: a PR's head, tested before the Steward merged it.
  */
 
-export type TestedStage = 'bump' | 'catch-up' | 'merge' | 'release';
+export type TestedStage = 'bump' | 'catch-up' | 'merge' | 'build' | 'release';
 
 export interface TestedCommit {
   /** The whole commit. */

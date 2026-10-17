@@ -11,9 +11,8 @@ import { loadPipeline, savePipeline, type BuildRun } from './pipeline.ts';
  * the kit's rollout (`rollout`), the releases, signing included (`releases`), and Manor told (`manor`). Some run beside
  * the rounds, so phases overlap: each one's minutes count its own spans once, however many ran at the same time.
  *
- * Work done between builds for the next one (stages/prepare.ts) is kept under the next build's time, marked `ahead`:
- * the build itself then only checks that nothing moved and merges. The Steward's own PRs tested the same way beside a
- * build's rounds (stages/selftests.ts) are that build's own time, not marked.
+ * Before Steward 0.36.124, work done between builds for the next one was kept under the next build's time, marked
+ * `ahead`; such records still read. A build now only tests and releases each main.
  */
 
 export type PhaseName = 'tests' | 'trial' | 'merges' | 'whole suite' | 'rollout' | 'releases' | 'manor';
@@ -27,19 +26,19 @@ export interface BuildPhase {
   of?: string;
   started: string;
   finished: string;
-  /** Done between builds, for this build (stages/prepare.ts). */
+  /** Done between builds, for this build: only in records from before Steward 0.36.124. */
   ahead?: boolean;
 }
 
-/** The build a stage works for: the one under way (ctx.build), or the next one it prepares for (ctx.prepare, `ahead`). */
+/** The build a stage works for: the one under way (ctx.build). */
 export interface PhaseOf {
   due: string;
   ahead?: boolean;
 }
 
 /**
- * The build a stage's work counts for: the build under way, else the one it merges ahead of (ctx.build `ahead`) or
- * prepares for, else none. A prepare inside the build (`inBuild`: the Steward's own PRs tested beside its rounds) is the build's own time.
+ * The build a stage's work counts for: the build under way, else none. (`ahead` and `prepare` are read for callers
+ * that still pass them; nothing sets them since Steward 0.36.124.)
  */
 export const phaseOf = (ctx: { build?: { due: string; ahead?: boolean } | null; prepare?: { due: string; inBuild?: boolean } | null }): PhaseOf | null =>
   ctx.build ? { due: ctx.build.due, ...(ctx.build.ahead ? { ahead: true } : {}) } : ctx.prepare ? { due: ctx.prepare.due, ...(ctx.prepare.inBuild ? {} : { ahead: true }) } : null;

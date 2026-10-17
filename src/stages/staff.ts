@@ -136,8 +136,8 @@ function checkState(c: any): Checks {
 export const VOUCH_CONTEXT = 'steward/tested';
 
 /**
- * The commit status a build sets on each PR it took (stages/build.ts): it left in that build, waits for the next, or was
- * dropped from it. It says what the build did, and isn't a check either: checksOf leaves it out too.
+ * The commit status a build set on each PR it took, before Steward 0.36.124 (builds no longer take PRs). It said what the
+ * build did, and isn't a check either: checksOf leaves it out too.
  */
 export const BUILD_CONTEXT = 'steward/build';
 

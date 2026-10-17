@@ -1,5 +1,4 @@
 import type { AlarmState } from '../alarms.ts';
-import type { ConflictLook } from '../conflicts.ts';
 import type { FoundRepo, FoundState } from '../found.ts';
 import type { TendState } from '../tend.ts';
 import type { TurnsView } from '../lease.ts';
@@ -7,14 +6,13 @@ import type { Host } from '../scm.ts';
 import type { StageResult } from '../stages/common.ts';
 import type { PrInfo, Staff, StaffRow } from '../stages/staff.ts';
 import type { WholeJob } from '../stages/wholesuite.ts';
-import type { HeldQueue } from '../version-queue.ts';
 
 /**
  * What the Steward's page shows, as /api/page's `body` (agent.ts's viewData()). Types only: the browser's bundle
  * imports nothing of the server's code.
  */
 
-/** Its rounds, as the page says them: merging and releasing by itself, or only when asked. */
+/** Its rounds, as the page says them: building and releasing by itself, or only when asked. */
 export interface RoundView {
   on: boolean;
   minutes: number;
@@ -71,8 +69,6 @@ export interface StewardView {
   /** A look at them is under way. */
   finding?: boolean;
   staff: StaffView | null;
-  /** The PRs that conflict with their branch the rounds looked at in the last two weeks, and what each did (conflicts.ts). */
-  conflicts?: ConflictLook[];
   last: StageResult | null;
   /** The first of `runs`, or null: for a page from before stages ran side by side. */
   running: { stage: string; since: string } | null;
@@ -90,8 +86,6 @@ export interface StewardView {
   alarms?: AlarmState;
   /** The staff's pages as the last round left them (tending.json); undefined when Settings switch it off. */
   tending?: TendState;
-  /** What holds each version queue the Steward merges, and since when (version-queue.ts's queueHold). */
-  queueHolds?: HeldQueue[];
   /** The whole suite before a kit's release, beside the rounds (stages/wholesuite.ts): the last one, or null. */
   wholeSuite?: WholeJob | null;
 }

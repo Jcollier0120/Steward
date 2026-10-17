@@ -7,10 +7,12 @@ import { until } from '../kit/test/until.ts';
 import type { RolloutRun } from '../src/stages/rollout.ts';
 
 // Steward 0.36.60: a kit's rollout runs beside the rounds on the Steward's page (stages/rollout.ts: rolloutsBeside), never
-// inside one. Inside the round, its bumps' checks held every merge until it ended: rounds that rolled a kit out took 20
-// to 56 minutes on 2026-10-12 to 15, against 15 to 20 for those that didn't. Whole rounds here, on a data folder of their
-// own, two fake employees' git and gh standing in: Fake's bump to the new kit waits on its checks, which wait for the test
-// to let them go, while the next round merges and releases Other's ready PR.
+// inside one. Inside the round, its bumps' checks held every round until it ended: rounds that rolled a kit out took 20
+// to 56 minutes on 2026-10-12 to 15, against 15 to 20 for those that didn't. Since Steward 0.36.124 the rollout merges
+// the kit PR it opens itself, at once (push.ts's `merge`, mainbuild.ts's mergeOwn), and no one's ready PR is merged by
+// the Steward: whoever wrote one merges it, and a round releases main. Whole rounds here, on a data folder of their own,
+// two fake employees' git and gh standing in: Fake's bump to the new kit waits on its checks, which wait for the test to
+// let them go, while rounds for Other go on, leave its ready PR open, and release its main once its writer merged it.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-rollout-beside-'));
 process.env.STEWARD_HOME = home;
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
@@ -57,6 +59,8 @@ const prs: Record<string, any[]> = { 'Jcollier0120/Fake': [], 'Jcollier0120/Othe
 /** #7 is Other's, opened by hand below: those the Steward opens come after it. */
 let prNumber = 7;
 const created: string[] = [];
+/** Each PR merged through gh (the Steward's own merges): "<repo>#<n>". */
+const merged: string[] = [];
 const repoOf = (args: string[]) => args[args.indexOf('--repo') + 1];
 const pr = (repo: string, n: number, head: string, title: string) => ({
   number: n,
@@ -95,14 +99,22 @@ const run = async (cmd: string, args: string[], opts?: any) => {
   }
   if (args[0] === 'pr' && args[1] === 'merge') {
     const repo = repoOf(args);
-    const p = prs[repo].find((x) => String(x.number) === args[2])!;
-    sh(repos[repo].origin, 'update-ref', 'refs/heads/main', p.headRefOid);
-    prs[repo] = prs[repo].filter((x) => x !== p);
+    const p = prs[repo].find((x) => String(x.number) === args[2]);
+    if (!p) return { code: 1, out: '', err: `no open PR #${args[2]}` };
+    const head = args.includes('--match-head-commit') ? args[args.indexOf('--match-head-commit') + 1] : null;
+    if (head && head !== p.headRefOid) return { code: 1, out: '', err: 'Head branch was modified. Review and try the merge again.' };
+    mergeOnGitHub(repo, p);
+    merged.push(`${repo}#${p.number}`);
     return ok('');
   }
   return { code: 1, out: '', err: `no stand-in for gh ${args.join(' ')}` };
 };
-const round = () => runStage('round', {}, { run, ownKit: '9.9.9' });
+/** A PR merged on GitHub: its head becomes main, and it is no longer open. */
+function mergeOnGitHub(repo: string, p: { headRefOid: string }): void {
+  sh(repos[repo].origin, 'update-ref', 'refs/heads/main', p.headRefOid);
+  prs[repo] = prs[repo].filter((x) => x !== p);
+}
+const round = (employees?: string[]) => runStage('round', employees ? { employees } : {}, { run, ownKit: '9.9.9' });
 const done = (out: { results: { outcome: string; message: string }[] }) => out.results.filter((r) => r.outcome !== 'skipped').map((r) => r.message.replace(/\b[0-9a-f]{7}\b/g, '…'));
 
 /** Other's ready PR #7: a fix that raises its version to 0.4.1, on a branch of its own. */
@@ -116,7 +128,7 @@ function openOthersPr(): void {
   prs['Jcollier0120/Other'].push(pr('Jcollier0120/Other', 7, 'fix/thing', 'Other 0.4.1: a fix'));
 }
 
-test("a ready PR merges while a kit's rollout runs beside the rounds; the rollout's own PR merges in the round after it ends", async (t) => {
+test("rounds go on while a kit's rollout runs beside them, and merge no one's ready PR; the rollout merges its own kit PR at once, and the round after it ends releases it", async (t) => {
   const ended: RolloutRun[] = [];
   const lines: string[] = [];
   rolloutsBeside({ ended: (r) => ended.push(r), log: (l) => lines.push(l) });
@@ -130,40 +142,52 @@ test("a ready PR merges while a kit's rollout runs beside the rounds; the rollou
   // Kit 1.0.1 is out; Fake pins 1.0.0, Other 1.0.1 already. The round starts Fake's bump beside it and ends.
   const first = await round();
   assert.equal(first.error, undefined, first.log.join('\n'));
-  assert.match(first.log.join('\n'), /rollout: kit 1\.0\.1 for Fake, beside the rounds: the rounds go on merging meanwhile/);
+  assert.match(first.log.join('\n'), /rollout: kit 1\.0\.1 for Fake, beside the rounds: the rounds go on/);
   assert.deepEqual(done(first), [], "nothing of the rollout's yet: it goes on beside");
   await until(() => existsSync(started), 60_000, "Fake's bump to start its checks");
 
-  // Other's PR is ready now. While Fake's checks still run, the next round merges and releases it, and leaves Fake alone.
+  // Other's PR is ready now. While Fake's checks still run, a round for Other goes on: it leaves the ready PR to whoever
+  // wrote it, and the rollout to itself.
   openOthersPr();
-  const second = await round();
+  const second = await round(['other']);
   assert.equal(second.error, undefined, second.log.join('\n'));
-  assert.deepEqual(done(second), ['merged #7 (checks passed here at …)', 'release: released v0.4.1 from origin/main (…), with kit 1.0.1']);
-  assert.deepEqual(released('other'), ['0.4.0', '0.4.1']);
-  const log = second.log.join('\n');
-  assert.match(log, /Fake: the kit's rollout beside the rounds is bumping it now, so it is looked at next round/);
-  assert.match(log, /rollout: kit 1\.0\.1's rollout to Fake goes on beside the rounds \(started .* ago\): the rounds go on merging meanwhile/);
-  assert.deepEqual([ended.length, created.length], [0, 0], 'the rollout is still running, its PR not yet opened');
+  assert.deepEqual(done(second), [], 'nothing merged, nothing new on main to release');
+  assert.match(second.log.join('\n'), /rollout: kit 1\.0\.1's rollout to Fake goes on beside the rounds \(started .* ago\)/);
+  assert.deepEqual(prs['Jcollier0120/Other'].map((p) => p.number), [7], 'the ready PR left open');
+  assert.deepEqual(released('other'), ['0.4.0']);
 
-  // Its checks pass: the rollout pushes Fake's kit PR and ends. The round after it reports that, merges the PR and releases.
+  // Its writer merges it: the next round releases Other's main, Fake's checks still running beside it.
+  mergeOnGitHub('Jcollier0120/Other', prs['Jcollier0120/Other'][0]);
+  const third = await round(['other']);
+  assert.equal(third.error, undefined, third.log.join('\n'));
+  assert.deepEqual(done(third), ['release: released v0.4.1 from origin/main (…), with kit 1.0.1']);
+  assert.deepEqual(released('other'), ['0.4.0', '0.4.1']);
+  assert.deepEqual([ended.length, created.length, merged.length], [0, 0, 0], 'the rollout is still running, its PR not yet opened; nothing merged by the Steward');
+
+  // Its checks pass: the rollout pushes Fake's kit PR, merges it itself at once, and ends. The round after it reports
+  // that and releases Fake's main.
   writeFileSync(letGo, '');
   await until(() => ended.length === 1, 60_000, 'the rollout to end');
   await rolloutDone();
   assert.deepEqual(created, ['Jcollier0120/Fake#8']);
-  assert.match(ended[0].results.map((r) => r.message).join('\n'), /^rollout: kit 1\.0\.1: 0\.4\.1 on steward\/kit-1\.0\.1 \(.{7}\): kit 1\.0\.0 → 1\.0\.1, checks passed; opened "Fake 0\.4\.1: the Steward's kit 1\.0\.1"$/);
+  assert.deepEqual(merged, ['Jcollier0120/Fake#8'], 'merged by the rollout, before any round');
+  assert.deepEqual(prs['Jcollier0120/Fake'], []);
+  assert.match(ended[0].results.map((r) => r.message).join('\n'), /^rollout: kit 1\.0\.1: 0\.4\.1 on steward\/kit-1\.0\.1 \(.{7}\): kit 1\.0\.0 → 1\.0\.1, checks passed; opened "Fake 0\.4\.1: the Steward's kit 1\.0\.1"; merged it$/);
   assert.match(lines.join('\n'), /rollout: kit 1\.0\.1's rollout ended beside the rounds after .*: 1 PR opened or updated/);
-  const third = await round();
-  assert.equal(third.error, undefined, third.log.join('\n'));
-  const did = done(third);
-  assert.ok(did.includes('merged #8'), did.join('\n'));
-  assert.ok(did.some((m) => /^rollout: kit 1\.0\.1: 0\.4\.1 on steward\/kit-1\.0\.1/.test(m)), `the rollout reported by this round: ${did.join('\n')}`);
+  assert.match(sh(fake.origin, 'show', 'main:kit.json'), /"kit": "1\.0\.1"/, "Fake's main on the kit now");
+  const fourth = await round();
+  assert.equal(fourth.error, undefined, fourth.log.join('\n'));
+  const did = done(fourth);
+  assert.ok(did.some((m) => /^rollout: kit 1\.0\.1: 0\.4\.1 on steward\/kit-1\.0\.1 .*; merged it$/.test(m)), `the rollout reported by this round: ${did.join('\n')}`);
   assert.ok(did.includes('release: released v0.4.1 from origin/main (…), with kit 1.0.1'), did.join('\n'));
+  assert.ok(!did.some((m) => /^merged #/.test(m)), `the round merges nothing itself: ${did.join('\n')}`);
   assert.deepEqual(released('fake'), ['0.4.0', '0.4.1']);
+  assert.deepEqual(merged, ['Jcollier0120/Fake#8']);
 
   // On the kit now: the next round starts no rollout, and reports nothing again.
-  const fourth = await round();
-  assert.doesNotMatch(fourth.log.join('\n'), /rollout: kit/);
-  assert.deepEqual(done(fourth), []);
+  const fifth = await round();
+  assert.doesNotMatch(fifth.log.join('\n'), /rollout: kit/);
+  assert.deepEqual(done(fifth), []);
 });
 
 test('a rollout another process runs (a round in a terminal) holds the kit: a round leaves it to it, and bumps nothing', async () => {

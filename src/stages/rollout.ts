@@ -14,6 +14,7 @@ import { apart, STAGE_STALE_MS, withRepo } from './slots.ts';
 import { kitReach, type KitReach } from './kitreach.ts';
 import { releasedTool, releasedTree, stewardClone } from './trialpass.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
+import { mergeOwn } from './mainbuild.ts';
 
 /**
  * The rollout, in a round: a new kit reaches every employee without anyone running `steward bump` and `steward push`.
@@ -22,8 +23,10 @@ import { phaseOf, timed } from '../buildtimes.ts';
  * kit already (an agent's own work, which brings the kit with it: a kit-only PR beside it took the same version, and
  * was closed or conflicted, 0.27.13), and no bump to that kit that failed at its branch's head, the round bumps it (a
  * worktree of its branch, the new pin and a version claimed for it (claims.ts), its checks run, committed) and pushes
- * the PR, a few employees at a time (Settings' parallel). Later rounds merge the PR and release it, as any PR of the
- * Steward's.
+ * the PR, a few employees at a time (Settings' parallel), and merges it at once (push.ts, Steward 0.36.124): its checks
+ * passed in the bump, and no one else merges the Steward's PRs. The build releases it. A kit PR of the Steward's left
+ * open (one GitHub wouldn't merge at once, or one from before 0.36.124) is merged by the next rollout that finds it at
+ * the kit rolled out.
  *
  * A kit PR of the Steward's still open for an older kit (waiting its turn behind the employee's other PRs, which its
  * version is above) gets the newer kit instead of a second kit PR beside it: the fold. Its branch is bumped again, at
@@ -52,11 +55,11 @@ import { phaseOf, timed } from '../buildtimes.ts';
  * Inside the round, a rollout to some thirty agents, each bump running its checks at the checks pace, held every merge
  * until it ended: the rounds that rolled a kit out took 20 to 56 minutes from 2026-10-12 to 15, against 15 to 20 for
  * those that didn't, and a ready PR waited all that time. Now the round decides (the kit, and which employees are behind
- * it: a fetch and a read for each) and starts the bumps as a job of its own, then goes on at once. Later rounds merge, and
- * merge each kit PR as it opens, beside it; one that reaches an employee the rollout is bumping right now waits for that
- * one bump, as two stages do for a repository (stages/slots.ts). While it runs no round starts another (`going`); one
- * another process runs (a round in a terminal) holds locks\rollout, and leaves this PC's rounds nothing to roll out. When
- * it ends, `ended` is told (a round comes at once, to merge what it opened), and that round reports what it did
+ * it: a fetch and a read for each) and starts the bumps as a job of its own, then goes on at once; one that reaches an
+ * employee the rollout is bumping right now waits for that one bump, as two stages do for a repository (stages/slots.ts).
+ * While it runs no round starts another (`going`); one another process runs (a round in a terminal) holds
+ * locks\rollout, and leaves this PC's rounds nothing to roll out. When it ends, `ended` is told (a round comes at once,
+ * so a build releases what it merged), and that round reports what it did
  * (takeRolloutResults), so stages.log, the round's look at what failed and the alarms see it as before. In a terminal
  * round, and under node --test unless a test says otherwise, it runs inside the round as before.
  */
@@ -202,8 +205,8 @@ async function settledKit(ctx: Ctx, newest: string | null, changelog: (kit: stri
 }
 
 /**
- * A bump or push that failed in a round: for which kit, at which head of the employee's branch, and what it said. Or a
- * kit PR a build left out (stage 'build': stages/build.ts): its head then, which doesn't board again until it moves.
+ * A bump or push that failed in a round: for which kit, at which head of the employee's branch, and what it said. Or,
+ * kept from before Steward 0.36.124, a kit PR a build left out (stage 'build'): its head then.
  */
 export interface RolloutHold {
   kit: string;
@@ -241,6 +244,8 @@ export interface RolloutFacts {
   kitPrs: string[];
   /** The one of them that pins an older kit than the one rolled out, which takes the new kit (the fold). */
   fold?: KitFold;
+  /** The one of them that pins the kit rolled out already, at its head: merged by the rollout (Steward 0.36.124). */
+  own?: { number: number; head: string };
   /** Its other open PRs that pin the kit rolled out already, or a newer one (#20 (claude/developer-options, kit 2.39.0)). */
   pinPrs?: string[];
 }
@@ -256,6 +261,8 @@ export interface RolloutPlan {
   settling?: string;
   /** Bumped and pushed now, each with its branch's head; `fold`, onto its kit PR open for an older kit. */
   bump: { employee: Employee; head: string; fold?: KitFold }[];
+  /** Its kit PR open at the kit rolled out, merged now (RolloutFacts' `own`). */
+  merge?: { employee: Employee; number: number; head: string }[];
   /** Not now, and why; `held` for one whose bump failed at this head. */
   skip: { employee: Employee; why: string; held?: boolean }[];
 }
@@ -286,7 +293,8 @@ export function planRollout(o: { on: boolean; kit: string | null; ownKit: string
     else if (!f.head) skip(`no ${e.branch} on origin`);
     else if (!f.pin) skip(`no kit.json on origin/${e.branch}`);
     else if (compareVersions(f.pin, kit) >= 0) skip(`on kit ${f.pin} already`);
-    else if (f.kitPrs.length && !f.fold) skip(`its kit PR ${f.kitPrs.join(', ')} is open: the rounds merge it once it is ready`);
+    else if (f.kitPrs.length && f.own) (plan.merge ??= []).push({ employee: e, ...f.own });
+    else if (f.kitPrs.length && !f.fold) skip(`its kit PR ${f.kitPrs.join(', ')} is open: close it, and the next build rolls the kit out afresh`);
     else if (f.pinPrs?.length) skip(`its open PR ${f.pinPrs.join(', ')} already brings kit ${kit}, so it gets no kit PR of its own beside it`);
     else {
       const h = o.failed[e.id];
@@ -319,6 +327,7 @@ export async function rolloutFacts(ctx: Ctx, e: Employee, kit: string): Promise<
     const at = await fetchBranch(ctx.run, repo, p.head)
       .then(async () => readPin(await showFile(ctx.run, repo, `origin/${p.head}`, 'kit.json'))?.kit ?? null)
       .catch(() => null);
+    if (at && KIT_VERSION.test(at) && compareVersions(at, kit) >= 0 && p.headOid) return { checkout: true, head, pin, kitPrs, own: { number: p.number, head: p.headOid } };
     return { checkout: true, head, pin, kitPrs, ...(at && KIT_VERSION.test(at) && compareVersions(at, kit) < 0 ? { fold: { number: p.number, head: p.head, kit: at } } : {}) };
   }
   // Its other open PRs that change kit.json (or say nothing of their files): one that pins this kit, or a newer one, at
@@ -351,7 +360,7 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   // Still bumping beside the rounds: this round leaves the kit to it, and decides nothing.
   if (going) {
     const who = going.names.length === 1 ? going.names[0] : `${going.names.length} employees`;
-    const why = `kit ${going.kit}'s rollout to ${who} goes on beside the rounds (started ${ago(Date.now() - going.started)} ago): the rounds go on merging meanwhile`;
+    const why = `kit ${going.kit}'s rollout to ${who} goes on beside the rounds (started ${ago(Date.now() - going.started)} ago): the rounds go on meanwhile`;
     ctx.log(`rollout: ${why}`);
     return { results: [], plan: { kit: going.kit, why, waitsForSteward: false, bump: [], skip: [] }, beside: true };
   }
@@ -409,12 +418,17 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   for (const s of plan.skip) if (!s.held && s.employee.id in failed) delete failed[s.employee.id];
   for (const s of plan.skip.filter((x) => x.held)) results.push(result(s.employee, 'skipped', `rollout: ${s.why}`));
   if (JSON.stringify(failed) !== before) saveRolloutChanges(JSON.parse(before), failed);
+  // The kit PRs left open at this kit, merged now: no one else merges the Steward's PRs.
+  for (const m of plan.merge ?? []) {
+    const why = await withRepo(ctx.log, m.employee.id, () => mergeOwn(ctx, m.employee, m)).catch((err: Error) => err.message);
+    results.push(why ? result(m.employee, 'failed', `rollout: its kit PR #${m.number} at kit ${kit} is open still (${why}): the next build tries again`) : result(m.employee, 'done', `rollout: merged its kit PR #${m.number} (kit ${kit})`));
+  }
   if (!plan.bump.length) return { results, plan };
   const names = plan.bump.map((b) => b.employee.name).join(', ');
   // One at a time on this PC: a rollout another process runs (a round in a terminal) has the kit.
   const bumps = (c: Ctx) => withLock(rolloutLock(), () => timed(phaseOf(c), 'rollout', `kit ${kit}`, () => bumpAndPush(c, plan, { kit, changelog: o.changelog, ...(tool ? { tool } : {}) })), { waitMs: 0, staleMs: STAGE_STALE_MS });
   if (beside) {
-    ctx.log(`rollout: kit ${kit} for ${names}, beside the rounds: the rounds go on merging meanwhile`);
+    ctx.log(`rollout: kit ${kit} for ${names}, beside the rounds: the rounds go on meanwhile`);
     startBeside(ctx, kit, plan.bump.map((b) => b.employee.name), bumps);
     return { results, plan, beside: true };
   }
@@ -464,7 +478,7 @@ async function bumpAndPush(ctx: Ctx, plan: RolloutPlan, o: { kit: string; change
   }
   for (const r of bumped.filter((x) => x.outcome === 'skipped')) results.push({ ...r, message: `rollout: ${r.message}` });
   if (ready.length) {
-    const pushed = await push(ctx, plan.bump.map((b) => b.employee).filter((e) => ready.some((r) => r.id === e.id)), { kit, changelog, folds });
+    const pushed = await push(ctx, plan.bump.map((b) => b.employee).filter((e) => ready.some((r) => r.id === e.id)), { kit, changelog, folds, merge: true });
     for (const p of pushed) {
       const b = ready.find((r) => r.id === p.id)!;
       if (p.outcome === 'done') {
