@@ -915,8 +915,11 @@ export function sidesOff32(size: { width: number; height: number }): { width: nu
   return to.width === size.width && to.height === size.height ? null : to;
 }
 
-/** Redraws the picture `from` at `size` as a PNG at `to`: System.Drawing's high-quality bicubic, its edges not faded. */
-export async function redrawPicture(from: string, to: string, size: { width: number; height: number }): Promise<void> {
+/**
+ * Redraws the picture `from` at `size` as a PNG at `to`: System.Drawing's high-quality bicubic, its edges not faded.
+ * PowerShell gets 30 s, or `o.timeoutMs` (a test on a busy PC, under a kit trial's load).
+ */
+export async function redrawPicture(from: string, to: string, size: { width: number; height: number }, o: { timeoutMs?: number } = {}): Promise<void> {
   const w = Math.round(size.width);
   const h = Math.round(size.height);
   await powershell(
@@ -936,7 +939,7 @@ try {
     $bmp.Save(${psQuote(to)}, [System.Drawing.Imaging.ImageFormat]::Png)
   } finally { $bmp.Dispose() }
 } finally { $src.Dispose() }`,
-    { timeoutMs: 30_000 },
+    { timeoutMs: o.timeoutMs ?? 30_000 },
   );
 }
 

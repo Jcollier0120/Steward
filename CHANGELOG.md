@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.76
+## 0.36.81
 
 **The Steward hands out kit 2.78.10: on a PC set up before, the graphics card's embedding server now takes about 0.6 GB less of its memory, with the same vectors.**
 
@@ -12,9 +12,53 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - On an AMD Radeon 860M, Qwen3-Embedding-0.6B took 1,874 MB of the graphics' memory before and 1,274 MB after.
 - It applies to every card route that runs llama.cpp's embedding server: AMD Radeon, Intel graphics and the Snapdragon's Adreno. An embedding server whose command was changed by hand is left as it is.
 
+## 0.36.80
+
+**The Steward hands out kit 2.78.9: setup and the NPU check keep a report of how this PC's NPU did, for its owner to send if they choose, and nothing is sent by itself.**
+
+### What changed
+
+- **Kit 2.78.9** (kit/CHANGELOG.md): `npu-report.ts` writes `npu-report.json` beside the accelerators' config after a setup or an NPU check on this PC's NPU, with the steps, the speeds and a random id made for these reports alone. `npu-reports.ts` turns the reports the Exchequer collects into a generation's measured speed for the website.
+
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+
+## 0.36.79
+
+**Every Snapdragon X2 now runs Qwen3-VL-2B on its NPU, whatever its memory, and on a PC with the Smith the keeper's own refreshes run at last.**
+
+### What's new
+
+- **Qwen3-VL-2B on every Snapdragon X2.** This Steward hands out kit 2.78.8. With it, a PC with a Snapdragon X2 runs Qwen3-VL-2B on its NPU for chat and pictures, with the pictures read on its Adreno graphics, however much memory it has. Until now only an X2 with less than 20 GB did, and a bigger one ran Qwen3-VL-4B. In the benchmark on a 48 GB X2 Elite the 2B was as accurate as the 4B and read pictures better (4 of 4 against 3), wrote about 75 tokens a second against 41, did the test jobs in about half the time and held 4.3 GB against 6.1. A first-generation Snapdragon X keeps Qwen3-VL-4B.
+
+### What changed
+
+- **The keeper's look now does its PC chores under the Smith.** Once a day the look should update the PC's record of its hardware, and once for each new kit it should bring the NPU's command and the graphics cards' picture settings up to what that kit's setup writes. On a PC where the Smith runs, none of the three ever ran, so a change a kit made to them reached only PCs where Set up local AI was pressed again. Now they run there too.
+- **The local AI's own folder is found where its servers really are.** On a PC set up in Manor's folder for the local AI, a Reeve folder that holds only logs made the kit look there for the AI's servers and models, so the NPU's refresh couldn't find them. The kit now looks in the folder the PC's own settings run the servers from. A PC whose servers are in Reeve's folder keeps it.
+
+### Before you update
+
+- A Snapdragon X2 that is set up and already has Qwen3-VL-2B switches to it at the keeper's next look, once nobody has used the NPU for two minutes.
+- Any other Snapdragon X2 switches when you press Set up local AI in Manor, which downloads 1.9 GB.
+- Qwen3-VL-4B (4.4 GB) stays on the PC until you remove it: `geniex remove qualcomm/Qwen3-VL-4B-Instruct`.
+- On a PC with the Smith, the first look after the update may also change the graphics cards' picture settings, as earlier kits meant to. Each change is written in the keeper's log, and a setting you changed yourself is kept.
+
+## 0.36.78
+
+**The 85% limit now holds for everything the manor runs at once, not for each part on its own. And the NPU check and the NPU benchmark measure the local AI's server as the agents get it.**
+
+### What changed
+
+- The agents, the checks they run and the AI model servers were each held to 85% of the processor, but separately, so all three busy at once could still take the whole PC. Now they share one 85% limit, so Windows and you always keep at least 15%, however busy the manor is. Manor's own page stays outside it, so it stays quick. On an 18-thread laptop with all three busy at once, the PC went from 100% busy to 89%.
+- The NPU check and the NPU benchmark start the NPU's AI server themselves, to measure it. They used to start it with no limit at all. Now they start it the way the agents' own servers start: with every other AI model server, held together to 85% of the processor. So a benchmark's numbers are the speeds the agents get. On an AMD PC, FastFlowLM ran just as fast within the limit as without it.
+- This Steward hands out kit 2.78.7, which brings this to every agent.
+
+### Before you update
+
+- On a busy hour, with agents, checks and AI servers all working at once, the manor's work may take a little longer than before: it now gets 85% of the processor together, where it could take all of it. Each agent joins the shared limit when it next starts.
+- Nothing: it updates itself as usual. A benchmark run after the update is measured within the limit, so on a PC whose AI server leans on the processor, it may score a little lower than the same PC did before.
 
 ## 0.36.73
 

@@ -6,6 +6,23 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 **On a PC set up before, a card's embedding server is brought down to setup's smaller context: about 0.6 GB less of the graphics' memory, with the same vectors, from its next start.**
 
+## 2.78.9
+
+**Setup keeps a report of how this PC's NPU did, for its owner to send if they choose (spec/NPU-REPORTS.md). It measures every NPU it sets up now, verified or not: three short requests and a 1,000-token read, a few seconds in the NPU's turn. Only an unverified generation is calibrated from them, as before; a verified one is used whatever they say. The report holds hardware ids, versions and times, and never a file, a path, a name or the licence. Nothing in the kit sends it: the app shows it to its owner and sends it only on their word. `npu-reports.ts` turns the Exchequer's count of the reports into the patch for npu-vendors.json that they support.**
+
+### What's new
+
+- **npu-report.ts:** the report, `castellan-npu-report/1` (spec/npu-report.schema.json):
+  - **`npuReportFromSetup` and `npuReportFromCheck`:** the report of a setup, or of an NPU check on this PC's NPU. A failure is a step's code (`test-timeout`, `driver`, `cap`…), never setup's words, which can hold a path.
+  - **`rememberNpuReport` and `readNpuReport`:** `npu-report.json` beside `npu-note.json`, written whole and read back only when it matches its schema.
+  - **`reporterId`:** a random id kept in `npu-reporter.json`, made for these reports alone, so one PC counts once.
+  - **`npuReportKey`:** what makes two reports the same, for an app that offers each once.
+  - **`checkNpuReport`:** the schema, which the Exchequer checks too.
+- **npu-reports.ts:** `node <agent>\src\kit\npu-reports.ts <summary.json>`, or `--fetch` with the publisher's key. It reads the Exchequer's `castellan-npu-summary/1` against this kit's npu-vendors.json and prints, per generation, what the reports say and the merge patch they support. A generation is verified by 3 PCs passing with under 1 in 5 failing. Timeouts come from the slow end, by calibrate's formulas and bounds, and are never lowered. `measured` is for the site. A PCI id nobody has listed gets a line once 2 PCs report it. It changes nothing.
+- **json-schema.ts:** the small part of JSON Schema npu-bench.ts used, now shared with npu-report.ts, with `$ref` to a schema's own `$defs`.
+- **spec/NPU-REPORTS.md** and **spec/npu-report.schema.json.**
+- **NpuGeneration's `measured`:** a generation's speed from its owners' reports, for the website: `{ pcs, server, model, tokensPerSecond, coldStartS, at }`.
+
 ### What changed
 
 - **setup.ts:**
@@ -13,6 +30,85 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - **`refreshCardVision`** now runs it after `withEncoderOnProcessor`, so the keeper's look at the cards' commands, once for each kit version (keeper.ts), changes both. Its log line names the cards whose embedding server changed and what it saves.
   - Measured on an AMD Radeon 860M with Qwen3-Embedding-0.6B: 1,874 MB of the graphics' memory before, 1,274 MB after.
 - **What an agent must do:** nothing. The change reaches config.json once the keeper runs this kit, and the server takes it at its next start.
+
+  - **`setupCommand`:** keeps the NPU's report (`npuReportFile`, the accelerators folder's `npu-report.json` by default; none with a given detection unless a file is given). It writes one whenever it set the NPU up or left it out, and none when it left a configured NPU alone. `app` names the app in it ("manor 0.16.200").
+  - **`setUpNpu`:** measures every NPU after its test request. Its result has `failed`, the step's code, and `speeds`. `measureNpu` also reads a prompt of about 1,000 tokens (`readTokens`, `readMs`). `fillerPrompt` moved here from npu-check.ts, which exports it still.
+  - **Code that fakes `NpuIo.measure`:** it is now called for a verified generation too. A fake that returns null there leaves the NPU on the route's values, as before.
+- **npu-check.ts:** a run on this PC's NPU (not a rehearsal) keeps the same report from its own steps (`npuReportFile`, `app`).
+
+### What an agent must do
+
+For NPU reports, nothing: setup and npu-check keep the report by themselves, and nothing is sent. An app that offers it reads `npu-report.json` (`npuReportFile`) and passes its name and version as `app`. A PC under 20 GB that runs its generation's `smallPc` models reports those models. `npu-reports.ts` lists them on their own and doesn't count them toward the route's model.
+
+## 2.78.8
+
+**Qwen3-VL-2B is every Snapdragon X2's NPU model, whatever its memory, and a first-generation X keeps Qwen3-VL-4B. And under the Smith, the keeper's look now runs the PC's refreshes (the NPU's command, the cards' vision, hardware.json), which until now never ran there. The tools home is now the folder config.json's commands are in, so a PC set up in the accelerators' folder no longer looks for its servers in a ~\.reeve that holds only logs.**
+
+### What's new
+
+- **A generation's own models** (npu-vendors.ts, npu-vendors.json): `NpuGeneration.models` are the models a generation runs in the route's place on every PC of it, whatever its memory. `routeFor` puts them there, and a small PC's `smallPc` still goes over them. The Snapdragon X2 has Qwen3-VL-2B (`unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`, 1.9 GB, its pictures' encoder on the Adreno with `--vit-compute GPUOpenCL`) as its `models`. Kit 2.78.0 gave it as `smallPc`, so only an X2 under 20 GB ran it. No generation has `smallPc` now; the mechanism stays. The route's own `models` stays Qwen3-VL-4B, which the first-generation X (Hexagon v73) runs, as does a Snapdragon setup doesn't know.
+
+### What changed
+
+- **Setup, the NPU check and the NPU's refresh** plan, check and refresh the 2B on an X2 of any memory, through `routeFor`. An X2 set up with the 4B is `needs-setup` until setup has pulled the 2B. Once the 2B is there, the refresh puts it in the 4B's place and adds `--compute npu` and `--vit-compute GPUOpenCL`.
+- **`routeFor` keeps a caller's own models.** The X2's 2B, and a small PC's models, go only in place of the route's own, as npu-vendors.json has them. A route handed in with other models, such as the Smith's try of a newer model, keeps them, so the try pulls and tests the model it names.
+- **npu-bench** measures what setup runs on the PC. `--model` takes the generation's models or the route's own, so `--model qualcomm/Qwen3-VL-4B-Instruct:W4A16` measures the 4B on an X2. A `--candidate` is pulled and served as the route's own model is (AI Hub's build on a Snapdragon), whatever the generation runs.
+- **`keeperLook`** (keeper.ts) brings hardware.json, the cards' vision commands and the NPU's command up to date whenever its reaper is the PC's own (`pcReaper`'s; `asksPc` says so), whether or not it's handed config.json. Until now a handed config.json meant a test. The Smith always hands the one it read for its round, and Reeve leaves its looks to the Smith, so on every PC with the Smith none of the three ever ran: no npu-refresh.json or card-refresh.json was written, and hardware.json changed only when setup ran. A test's reaper asks no PC.
+- **`toolsHome()`** (accelerator-config.ts) is the folder most of config.json's `startCommand`s are in, ~\.reeve or ~\.manor\accelerators, once %NAME% is expanded (`commandsHome`). A command in neither (GenieX's, FastFlowLM's flm, a program on the PATH) doesn't count. With none, or as many in each, ~\.reeve counts only when it holds a server build or a model, not just logs\ and downloads\. Before, any ~\.reeve\servers made ~\.reeve the tools home. So on a PC set up in the accelerators' folder, where something later made a ~\.reeve\servers with only logs in it (an Intel PC and an AMD PC were seen), the NPU's refresh and setup looked for the servers and models in the wrong folder: the refresh missed the embedding server and recorded `needs-setup`. On those PCs they now find the real servers and models. A PC whose commands are in ~\.reeve keeps it: the X2 Elite, whose config.json is in the accelerators' folder and whose card's embedding server runs from ~\.reeve\servers, still gets ~\.reeve.
+- **`redrawPicture`** (accelerators.ts) takes an optional `timeoutMs`. The picture-redraw test gives PowerShell three minutes on a busy PC, where 30 s timed out under a kit trial's load; agents still use 30 s.
+- **Measured** on the 47.6 GB X2 Elite (2026-10-16) with this kit, beside the card's own embedding llama-server on the Adreno under a steady load. The NPU check passed every step: 74.7 tokens a second, 1,812 tokens read in 0.7 s, both cap sizes answered, 3.95 GB held. A quick npu-bench gave 22 of 24 quality items, pictures 4 of 4, 75.4 tokens a second and jobs in 3.3 s, with 4.30 GB working set. The card's server answered all 52 of its requests with the same vectors throughout, at a median of 432 ms, its working set 3.54 GB before and 3.73 GB after.
+
+### Before you update
+
+- Nothing for an agent to change: it takes this kit as usual.
+- A Snapdragon X2 that is set up and already has Qwen3-VL-2B switches to it at the keeper's next look, once nobody has used the NPU for two minutes.
+- Any other Snapdragon X2 switches when Set up local AI is pressed, which pulls 1.9 GB.
+- Qwen3-VL-4B (4.4 GB) stays on the PC until it's removed: `geniex remove qualcomm/Qwen3-VL-4B-Instruct`.
+- Under the Smith, the first look with this kit may also change the cards' vision commands in config.json, as earlier kits' looks meant to (`refreshCardVision`: each flag only where it's missing). Each change goes in the keeper's log.
+
+## 2.78.7
+
+**Everything the manor runs now stays within 85% of the PC together. The agents, their check runs and the model servers each had a cap of 85%, so all three busy at once could take the whole processor; now they share one. And the NPU check's and the NPU benchmark's server starts apart, as an agent's does, so they measure the server an agent gets. And if kit 2.78.0 to 2.78.3 weren't released on their own, this release brings them too: their entries follow.**
+
+### What's new
+
+- **The manor's ceiling, one job above every family's** (`Local\kit-manor-ceiling`). It is hard-capped at `CEILING_CAP` (85%), and the agents' own jobs, the check runs' job and the servers' job nest inside it, so their 85% caps no longer add up.
+  - **pace.ts:** `ceilingCap()` gives its cap, and `CEILING_ENV` (`KIT_CEILING`) is the variable the launchers read it from. Under node --test there is none unless `KIT_CEILING_CAP` sets one, and then only in `KIT_CEILING_JOB_NAME`'s ceiling, never the PC's.
+  - **checks-pace.cs:** a check run or a server started apart joins the ceiling before its family's job (`Local\kit-checks-pace`, `Local\kit-apart-pace`), which then nests inside it. `pacedCommand()` and `startApart()` pass the cap.
+  - **named.cs:** with a ceiling, the agent's launcher starts the page out of the jobs that let it leave (Task Scheduler's, which Manor runs in), puts it in the ceiling, then in `Local\Castellan-<id>`. Where Windows refuses, the page starts in the launcher's jobs, as before. `open()` passes the cap, and 0 for Manor's own page.
+  - **gentle.cs, gentle.ts:** an agent in no job (one run from a terminal) joins the ceiling before its own job is made. `KitGentle.Set` takes the ceiling's cap as a fourth argument, and `gentleScript()` as a sixth. `keepResponsive()` keeps Manor's page out.
+  - **The ceiling is only ever made for a program in no job**, so it is never inside another program's job tree (a Claude session's, a terminal's, Task Scheduler's), whose end could end what joined it later. A program that couldn't leave such a job can't join it, and keeps its family's cap alone, as before.
+  - It ends nothing and limits nothing else. Each program in it holds a handle to it, so it lasts while any runs.
+  - **Measured on an 18-thread Snapdragon X2 Elite**, with a check run, a server started apart and an agent's page at full each keeping every processor busy at once, all read over the same 8 s:
+
+    | | The three together, by their jobs' own accounting | The whole PC, by Windows' % Processor Utility |
+    |---|---|---|
+    | Each family at its own 85%, no ceiling | 98.3% | 100% |
+    | In the manor's ceiling | 86.6% | 88.8% (the PC's other work took about 7% just before and after) |
+
+    Windows' accounting read the ceiling a point or two above its 85% hard cap in each of five runs (86.5% to 87.7%). The check run, at its low priority, got almost nothing while the other two were busy, in both rounds.
+  - **Under test**, with a ceiling of 10%: a check run and a server started apart, each keeping every processor busy at its family's cap of 10%, took under 14% together. With no ceiling the same two took 23.8%, a cap each.
+- **checks-pace.cs:** `KIT_CHECKS_JOB_NAME` names the check runs' job, so a test's runs share a job of their own. Before, a test's launcher set the PC's real job's limits to the test's.
+
+### What changed
+
+- **npu-server.ts: `startServer`** starts the route's server through `startApart()` (apart.ts), as the keeper does.
+  - It leaves the job of whatever ran the tool (a check run's, a terminal's) and joins `Local\kit-apart-pace`, hard-capped at `CEILING_CAP` (85%).
+  - Where it can't start apart (not Windows, no launcher, node --test without `KIT_APART=1`), it starts a plain detached child, as before.
+  - Its `pid` is the server's own, as before, so `stop()` still ends its whole tree, and `processMemory()` reads the server.
+  - Its output still goes to the tool's log.
+  - The timing of the cold start begins after `startServer` returns, so a first start that builds the launcher isn't counted.
+- **Found by the AMD Dev Manager.** On an AMD PC, kit 2.78.3's `startApart` with FastFlowLM 1.0.7 (qwen3.5:2b) showed no measurable cost from the cap: writing at 22.71 tokens/s capped against 22.72 uncapped. But npu-check and npu-bench weren't starting their server that way.
+- **Checked on an 18-thread Snapdragon X2 Elite.**
+  - Outside node --test, `startServer`'s server was in `Local\kit-apart-pace`, whose rate control read flags 5 (enabled, hard cap) and cap 8500.
+  - Under test, at a cap of 10% (`KIT_APART_CAP=1000`), a server keeping every processor busy took no more than that. Started the old way, the same server took 62.5%.
+
+### Before you update
+
+- With the agents, their checks and the servers all busy, together they now get 85% of the processor where they could take all of it, so a heavy hour may run a little longer.
+- The checks launcher, the agents' launchers and the pace helper changed, so each PC builds them once more. An agent joins the ceiling at its next start through its launcher.
+- A page that leaves Task Scheduler's job is no longer ended when Manor's task is ended in Task Scheduler. It already outlived Manor's own process.
+- It updates itself as usual. An NPU benchmark run after it is measured at the manor's ceiling. A route whose server leans on the processor (a llama.cpp one, the processor's own) may score a little lower than before. One that runs on the NPU, like FastFlowLM's, scores the same.
 
 ## 2.78.3
 

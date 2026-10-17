@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { checksPaceLauncher } from './checks-pace.ts';
-import { CEILING_CAP } from './pace.ts';
+import { CEILING_CAP, CEILING_ENV, ceilingCap } from './pace.ts';
 
 /**
  * Starting a program apart from the agent's job (kit 2.73.0): for the model servers every agent shares
@@ -13,7 +13,8 @@ import { CEILING_CAP } from './pace.ts';
  * Apart is not uncapped (kit 2.78.3): every server started apart joins one job for the PC (`Local\kit-apart-pace`,
  * `checks-pace.exe apart:<cap>`) with a hard cap at the manor's ceiling (pace.ts's CEILING_CAP, 85% of the processor),
  * whatever the asker's pace, so the servers together never take the whole PC. A server already running keeps what it
- * was started with until it next starts.
+ * was started with until it next starts. From kit 2.78.7 that job nests in the manor's ceiling (pace.ts ceilingCap()),
+ * which the agents and their check runs are in too, so the servers share the 85% with them rather than adding to it.
  *
  * `startApart(cmd, args, o)` starts it detached, its output to `o.out` (a file descriptor) or nowhere, in `o.cwd` with
  * `o.env`, and answers its process id; null where it can't (not Windows, no launcher, it didn't start), and the caller
@@ -27,7 +28,8 @@ export async function startApart(cmd: string, args: string[], o: { cwd?: string;
   const out = o.out ?? 'ignore';
   return new Promise((resolve) => {
     try {
-      const child = spawn(exe, [`apart:${apartCap()}`, cmd, ...args], { stdio: ['ignore', out, out], windowsHide: true, cwd: o.cwd, env: o.env });
+      const env = { ...(o.env ?? process.env), [CEILING_ENV]: String(ceilingCap()) };
+      const child = spawn(exe, [`apart:${apartCap()}`, cmd, ...args], { stdio: ['ignore', out, out], windowsHide: true, cwd: o.cwd, env });
       child.on('error', () => resolve(null));
       child.on('exit', (code) => resolve(code && code > 0 ? code : null));
     } catch {

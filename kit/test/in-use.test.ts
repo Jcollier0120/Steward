@@ -87,4 +87,5 @@ test("the worker that sets a pace with a cap joins the agent's job, gentle or fu
   assert.match(gentleScript(42, true, 1111, 'C:/k/gentle.dll', null), /\[KitGentle\]::Set\(42, \$true, 1111\) \+ ' ' \+ \[KitGentle\]::Join\(42\)$/);
   assert.match(gentleScript(42, false, 8500, 'C:/k/gentle.dll', null), /\[KitGentle\]::Set\(42, \$false, 8500\) \+ ' ' \+ \[KitGentle\]::Join\(42\)$/);
   assert.match(gentleScript(42, false, 0, 'C:/k/gentle.dll', null), /\[KitGentle\]::Set\(42, \$false, 0\)$/);
+  assert.match(gentleScript(42, false, 8500, 'C:/k/gentle.dll', null, 8500), /\[KitGentle\]::Set\(42, \$false, 8500, 8500\) \+ ' ' \+ \[KitGentle\]::Join\(42\)$/, "with the manor's ceiling, for an agent in no job (kit 2.78.7)");
 });

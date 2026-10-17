@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { locksDir } from './lock.ts';
-import { CEILING_CAP, pace, setPriorityFor, type Pace } from './pace.ts';
+import { CEILING_CAP, ceilingCap, pace, setPriorityFor, type Pace } from './pace.ts';
 import { powershell, psQuote } from './ps.ts';
 
 /**
@@ -20,7 +20,10 @@ import { powershell, psQuote } from './ps.ts';
  * At a full pace (kit 2.78.3) the process keeps normal priority, no efficiency mode and its usual disk priority, but
  * stays in its job, the worker too, with the manor's ceiling as its cap: 85% of the processor (pace.ts's CEILING_CAP),
  * so even at full speed the agent and what it starts leave Windows and the person the rest. Before kit 2.78.3 full
- * lifted the cap altogether.
+ * lifted the cap altogether. From kit 2.78.7 that job sits in the manor's ceiling (pace.ts ceilingCap()), with the check
+ * runs' and the model servers': its launcher (named.cs) puts the agent there as it starts, and an agent in no job that
+ * the launcher didn't start (one run from a terminal) joins it here, as its own job is made. One started in another
+ * job without the launcher (Manor's first start of it, before the launcher is built) stays out until its next start.
  *
  * The pace is the owner's setting alone (kit 2.73.0): Manor's Settings, gentle or full. Nothing else lifts it, not a
  * round someone asked for (Run now) nor a page being looked at, so what a page shows is what the agent costs in the
@@ -46,9 +49,10 @@ const gentleSource = () => readFileSync(new URL('./gentle.cs', import.meta.url),
  * The script that sets process `pid` gentle or not, its job capped at `cap` hundredths of a percent (0: no cap, no job
  * made). It compiles the helper first when no agent has yet: to a name of its own, then moved into place, so two agents
  * compiling at once never load a half-written DLL. With a cap, the worker running it then joins the agent's job (it was
- * started before the job was made, so isn't in it yet).
+ * started before the job was made, so isn't in it yet). With a `ceiling`, a process in no job joins the manor's ceiling
+ * at that cap first (kit 2.78.7; gentle.cs).
  */
-export function gentleScript(pid: number, gentle: boolean, cap: number, dll: string, source: string | null): string {
+export function gentleScript(pid: number, gentle: boolean, cap: number, dll: string, source: string | null, ceiling = 0): string {
   const compile = source === null
     ? ''
     : `if (-not (Test-Path -LiteralPath ${psQuote(dll)})) {
@@ -57,7 +61,7 @@ export function gentleScript(pid: number, gentle: boolean, cap: number, dll: str
   try { Move-Item -LiteralPath $tmp -Destination ${psQuote(dll)} } catch { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
 }
 `;
-  const set = `[KitGentle]::Set(${pid}, $${gentle}, ${cap})`;
+  const set = `[KitGentle]::Set(${pid}, $${gentle}, ${cap}${ceiling > 0 ? `, ${ceiling}` : ''})`;
   return `${compile}Add-Type -LiteralPath ${psQuote(dll)}
 ${cap > 0 ? `${set} + ' ' + [KitGentle]::Join(${pid})` : set}`;
 }
@@ -66,15 +70,19 @@ ${cap > 0 ? `${set} + ' ' + [KitGentle]::Join(${pid})` : set}`;
 let applied: string = 'normal';
 let pending: Promise<void> = Promise.resolve();
 let responsive = false;
+/** Kept out of the manor's ceiling (keepResponsive(): Manor's own page, which every Open goes through). */
+let outsideCeiling = false;
 
 /**
  * For a process people wait on (Manor, whose page every Open and every agent's card goes through; kit 2.57.1): its
  * rounds never set it gentle, so it keeps normal priority, no efficiency mode and only the manor's ceiling on the
  * processor (a full pace's, kit 2.78.3: 85% of it, which a page never comes near), whatever the pace. At a gentle pace
  * its page sat ready to run for up to half a minute at a time while Windows gave it no processor, and the programs it
- * starts were held to its cap with it. Undoes a gentle pace already set; the agents' own processes keep theirs.
+ * starts were held to its cap with it. Undoes a gentle pace already set; the agents' own processes keep theirs. It
+ * stays out of the manor's ceiling (kit 2.78.7), so the agents' work never slows the page that shows it.
  */
 export function keepResponsive(): Promise<void> {
+  outsideCeiling = true;
   const back = paceProcess('full');
   responsive = true;
   return back;
@@ -142,7 +150,7 @@ function applyPace(): Promise<void> {
         mkdirSync(path.dirname(dll), { recursive: true });
         first = source;
       }
-      const took = (await powershell(gentleScript(process.pid, gentle, cap, dll, first), { timeoutMs: 120_000 })).trim();
+      const took = (await powershell(gentleScript(process.pid, gentle, cap, dll, first, outsideCeiling ? 0 : ceilingCap()), { timeoutMs: 120_000 })).trim();
       if (took !== (cap ? 'eco io cap worker' : 'eco io cap')) console.log(`${new Date().toISOString()} the ${p} pace took only in part (${took}): what didn't take stays as it was`);
     } catch (e) {
       console.log(`${new Date().toISOString()} the ${p} pace couldn't be set beyond priority: ${(e as Error).message.slice(0, 300)}`);
