@@ -40,6 +40,10 @@ export interface StoodIn {
   assayed?: Assayed;
   /** The line said in the round's log. */
   line?: string;
+  /** The PC the Seneschal's run passed on, when that was another PC on the licence (Seneschal 0.2.0). */
+  pc?: string;
+  /** The failure here a pass on another PC stood in for: this PC's failure, not the change's. */
+  flaky?: string;
 }
 
 /** A time in a few words: its hour and minute today, else its day too. */
