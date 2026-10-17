@@ -156,7 +156,7 @@ export function stoodInDescription(e: Employee, s: StoodIn, head: string): strin
   const a = s.assayed;
   if (a?.check.full) return `${(a.check.commands ?? []).join(', ')} passed in the Assayer at ${head.slice(0, 7)}`.slice(0, 140);
   if (a) return vouchDescription({ ...e, fill: '' }, { base: `origin/${e.branch}`, chose: a.chose }, head);
-  return vouchDescription(e, undefined, head, s.by === 'pc' && s.where ? ` ${s.where}` : '');
+  return vouchDescription(e, undefined, head, s.by === 'pc' && s.where ? ` ${s.where}` : s.pc ? ` on ${s.pc}` : '');
 }
 
 /** The vouch's description: the checks that ran and passed, and at which commit (GitHub keeps 140 characters). */

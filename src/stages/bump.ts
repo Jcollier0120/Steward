@@ -187,18 +187,27 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOpt
             },
           });
     h.running();
+    const seen: FailedChecks = o.failed ?? {};
     if (answer && 'reused' in answer) {
       const r = answer.reused;
-      const where = r.by === APP.id ? 'here' : `here, in the ${r.by.charAt(0).toUpperCase()}${r.by.slice(1)}'s run`;
-      const line = `a pass of exactly these checks on this code, ${where} (the Seneschal's ${answer.id}): not run again`;
+      // Another PC's run (Seneschal 0.2.0) is said as that PC's.
+      const where = r.pc ? `on ${r.pc.name}` : r.by === APP.id ? 'here' : `here, in the ${r.by.charAt(0).toUpperCase()}${r.by.slice(1)}'s run`;
+      const line = `a pass of exactly these checks on this code, ${where} (the Seneschal's ${answer.id}${r.flaky ? `, after failing on ${r.flaky.on}` : ''}): not run again`;
       o.say(line);
-      if (o.stoodIn) Object.assign(o.stoodIn, { by: 'seneschal', where, at: r.at, line } satisfies StoodIn);
+      if (o.stoodIn) Object.assign(o.stoodIn, { by: 'seneschal', where, at: r.at, line, ...(r.pc ? { pc: r.pc.name } : {}) } satisfies StoodIn);
       return null;
+    }
+    // Failed on two PCs while this waited for its turn (Seneschal 0.2.0): the change's failure, not run a third time here.
+    if (answer && 'failed' in answer) {
+      const r = answer.failed;
+      const where = `${r.pc ? `on ${r.pc.name}` : 'here'}, and on ${r.confirmed?.on ?? 'another PC'} before it`;
+      o.say(`these checks failed on this code ${where} (the Seneschal's ${answer.id}): the change's failure, not run again here`);
+      seen.confirmed = where;
+      return `${r.note ?? 'its checks failed'} (${where})`;
     }
     const turn = answer && 'turn' in answer ? answer.turn : null;
     if (turn) o.say(`its turn from the Seneschal (${turn.id}${turn.waitedMs >= 1000 ? `, after ${duration(turn.waitedMs)}` : ''})`);
     // A run that couldn't finish (a time limit, packages held, a locked clone) is the Seneschal's to try again, not a failure.
-    const seen: FailedChecks = o.failed ?? {};
     const failed = await whileAwake(
       `${e.name}'s checks`,
       () =>
@@ -212,11 +221,29 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOpt
     );
     const after = trial || !commit ? null : await codeAt(dir);
     if (after?.clean && after.commit === commit) recordResult({ kind: ranWhole(o.affected?.chose) ? 'checks' : 'affected checks', repo: e.repo, tree: tree ?? null, commit, ok: !failed, what, commands: e.test, ...toolchainHere(), ...(failed ? { note: failed.slice(0, 500) } : {}) });
+    // A failure here the Seneschal tries once more on another PC (Seneschal 0.2.0), where the caller waits for that: a
+    // pass there stands in, said as this PC's failure; a failure there too is the change's (`failed.confirmed`).
+    if (failed && turn && o.elsewhere) {
+      const other = await turn.elsewhere();
+      if (other?.ok) {
+        const where = `on ${other.pc?.name ?? 'another PC'}`;
+        const line = `they failed here and passed ${where} (the Seneschal's ${turn.id}): this PC's failure, not the change's (${failed})`;
+        o.say(line);
+        if (o.stoodIn) Object.assign(o.stoodIn, { by: 'seneschal', where, at: other.at, line, ...(other.pc ? { pc: other.pc.name } : {}), flaky: failed.slice(0, 300) } satisfies StoodIn);
+        return null;
+      }
+      if (other) {
+        const where = `here, and on ${other.pc?.name ?? 'another PC'}`;
+        o.say(`they failed ${where} (the Seneschal's ${turn.id}): the change's failure`);
+        seen.confirmed = where;
+        return `${failed} (${where})`;
+      }
+    }
     return failed;
   });
 }
 
-type ChecksOptions = {
+export type ChecksOptions = {
   env?: Record<string, string>;
   say: (line: string) => void;
   affected?: AffectedScope;
@@ -229,13 +256,18 @@ type ChecksOptions = {
   stoodIn?: StoodIn;
   /** What the run is to the Seneschal (stages/seneschal.ts): its kind, lane, PR and branch. False: it isn't asked. */
   task?: CheckTask | false;
+  /**
+   * After a failure here, wait for the Seneschal's try on another PC on the licence (prtest's): a pass there stands in
+   * (`stoodIn.flaky`), a failure there too fills `failed.confirmed`. Left out, the try still runs there, unwaited for.
+   */
+  elsewhere?: boolean;
 };
 
 /** How a run whose packages Settings held begins its answer. */
-const PACKAGES_HELD = "its packages weren't installed";
+export const PACKAGES_HELD = "its packages weren't installed";
 
 /** `held`: the run has its turn already (the Seneschal's lease), so its commands take none of the checks pace's. */
-async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions, held = false): Promise<string | null> {
+export async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions, held = false): Promise<string | null> {
   const started = Date.now();
   const picks = !!o.affected && e.test.some((s) => s.trim() === 'npm test');
   let limit: (TimeLimit & { at: number }) | null = null;
@@ -302,6 +334,8 @@ export interface FailedChecks {
   step?: string;
   tests?: string[];
   timedOut?: boolean;
+  /** Where they failed, when that was on two PCs (the Seneschal's, 0.2.0): "here, and on LAPTOP". The change's failure, then. */
+  confirmed?: string;
 }
 
 /**

@@ -2,6 +2,33 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.92
+
+**The Steward runs your other PCs' checks: with the Seneschal 0.2.0 on each PC, a PR check or whole suite waiting for room on one runs on another of your PCs that has room, and a PR's failure is tried once more on another PC before it counts.**
+
+### What's new
+
+- **It works for the Seneschal beside its rounds** (stages/others.ts). Every few seconds it asks the Seneschal on this PC for a PR check or whole suite, of a repository it looks after, waiting for room here or on another PC on your licence. It runs it as its own PR test would, and the result goes back to the PC that asked.
+  - **The code:** only the task's commit, fetched from the repository's own origin, and only when it's on one of the repository's own branches (the PR's branch, or main). A fork's commit, or one on no branch, isn't run. The task never names a command: the checks are this PC's Settings for that agent.
+  - **Where:** a worktree of its own (`<agent>-others` in the work folder), removed after.
+  - **When:** one at a time, never for a repository a stage holds right then (a round holds an agent's repository while it waits for its own turn), and stopped after 90 minutes.
+  - **A task it can't take now** (its clone busy) goes back to the Seneschal unstarted. A run that couldn't finish (stopped, packages held, Windows ended it) is reported as such, and the Seneschal tries it elsewhere.
+- **A pass on another PC stands in.** When the PC that asked has the same checks in Settings, it takes the pass as its own, says "passed on LAPTOP", and vouches for the PR with that.
+- **A PR's failure is tried once more on another PC** (stages/prtest.ts). The PR test waits for that run:
+  - **A pass there** means the failure was this PC's. The PR passes, and its note says so.
+  - **A failure there too** is the change's. The PR fails at once, without a third run here.
+  - **With no other PC**, or none taking it in time, it's tried again here as before.
+- **A failure confirmed on two PCs** while a run waited for its turn isn't run here again: it's the change's.
+
+### What changed
+
+- **A check running on another PC doesn't time out here.** While its task runs elsewhere, the Steward's 20-minute wait for a turn isn't counted, for up to two hours. Before, a long check on another PC would have been run here again after 20 minutes.
+- It hands out kit 2.78.16.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Work moves between PCs only where each PC has the Seneschal 0.2.0 with sharing on, and Manor's Other PCs on; elsewhere nothing changes.
+
 ## 0.36.87
 
 **A PR whose kit.json pins a kit that will never be released is told so at once, and a draft is too. Before, it waited quietly ("no open Steward PR brings it: release that kit, or pin a released one"), its alarm came a day later, and a draft wasn't looked at at all.**

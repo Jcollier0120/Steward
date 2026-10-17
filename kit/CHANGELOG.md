@@ -2,6 +2,30 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.16
+
+**seneschal.ts knows the Seneschal's other PCs (Seneschal 0.2.0): a task running on another PC isn't timed out, results name the PC they ran on and say flaky or confirmed, a failure's try on another PC can be waited for, and `seneschalWork` is the worker's side.**
+
+### What's new
+
+- **`SeneschalResult` gains `pc`, `flaky` and `confirmed`.**
+  - `pc`: the PC a run was on, when that was another PC on the licence. `by` is then "steward on LAPTOP".
+  - `flaky: { on, note? }`: a pass after a failure on another PC.
+  - `confirmed: { on }`: a failure after a failure on another PC.
+- **`seneschalTurn` can answer `{ failed, id }`**: a failure of exactly these commands confirmed on two PCs while it waited for its turn. That's the change's failure, so don't run it again. A failure the Seneschal held already when it was asked is still asked for again, as before.
+- **`turn.elsewhere()`**: after a failure `hold` reported, the Seneschal may try the task once more on another PC. This waits for that run and gives back its result (`flaky` or `confirmed`), or null when it isn't tried elsewhere or the first failure stands.
+- **`turn.giveBack(note)`** hands a task back unstarted: it spends no try.
+- **`seneschalWork({ worker, kinds, repos, slot? })`** is a worker's ask: any task of those kinds and repositories, this PC's or another PC's (`from`), at its turn. It answers `{ job }` (run it under `job.turn.hold`), `{ idle, retryMs }`, or null with no Seneschal. A task it can't read is given back. `jobOf` checks a task again: an owner/name repository, full commit ids, and a branch git takes as one.
+- `SENESCHAL_RUN_MS` (2 hours) and `SENESCHAL_IDLE_MS` (30 s).
+
+### What changed
+
+- **The 20-minute wait for a turn (`SENESCHAL_WAIT_MS`) doesn't count the time its task runs elsewhere** (`state: 'leased'`: another worker's run, another PC's). That time is limited by `SENESCHAL_RUN_MS` instead.
+
+### Before you update
+
+- Nothing for an agent to do: `seneschalTurn` answers as before where no other PC runs its tasks. An agent that switches on its answer should handle `{ failed }`.
+
 ## 2.78.12
 
 **npu-reports.ts counts a report against the model its generation runs (`routeFor`), so an X2's reports on its 2B count, and its reports on the route's 4B are stale. tools/kit.ts warns when a pin is a kit that has no release. Also brings 2.78.10, which wasn't released on its own.**
