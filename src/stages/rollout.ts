@@ -94,6 +94,9 @@ let unreported: EmployeeResult[] = [];
 /** Settles once the rollout running beside the rounds has ended (at once when none runs). */
 export const rolloutDone = (): Promise<void> => going?.done ?? Promise.resolve();
 
+/** The kit and the employees (by name) of the rollout running beside the rounds in this process, or null when none runs. */
+export const rolloutGoingOn = (): { kit: string; names: string[] } | null => (going ? { kit: going.kit, names: going.names } : null);
+
 /** What the rollouts beside the rounds did since a round last took it: that round's results now. */
 export function takeRolloutResults(): EmployeeResult[] {
   const out = unreported;
