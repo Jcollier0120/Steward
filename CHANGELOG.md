@@ -12,6 +12,14 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - A round no longer asks GitHub for the Steward's own open PRs unless the staff's table shows the Steward's row, which is the only place they appear. That is one GitHub point less a round on such a PC.
 - Settings for the Wright's drafts stay hidden, and your values are kept.
 
+## 0.36.131
+
+**The Steward hands out kit 2.82.2: agents keep the decode speed of each chat answer, by boot, so Manor can say when the NPU has started slow and that a restart usually fixes it.**
+
+### What changed
+
+- Kit 2.82.2 keeps the speed FastFlowLM reports for each chat answer (`speed\<agent>.json` in the accelerators folder: speeds only, never what was asked or answered), and judges this boot against earlier ones. On an AMD Ryzen AI 7 350, a boot that went into Modern Standby in its first two minutes decoded at about 77% of its usual speed until the next restart. At 85% or less, this boot counts as slow.
+
 ### Before you update
 
 - Nothing: it updates itself as usual.

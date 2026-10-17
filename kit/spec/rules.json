@@ -56,5 +56,12 @@
     "quirkRoomChars": 40,
     "imageTokens": 400,
     "minPieceChars": 200
+  },
+  "speed": {
+    "keptPerBoot": 30,
+    "keptBoots": 10,
+    "samplesNeeded": 8,
+    "slowPercent": 85,
+    "bootSlackMs": 120000
   }
 }

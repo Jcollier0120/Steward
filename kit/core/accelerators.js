@@ -1018,3 +1018,189 @@ export function pieces(rules, text, budgetTokens) {
   if (cur) out.push(cur);
   return out;
 }
+
+// ---------------------------------------------------------------- speed
+
+/**
+ * The answer sizes speeds are kept by, each its least tokens: a size runs up to the next one's, and the last has no end. A
+ * server's decode speed counts its first token's wait too, so a short answer reads slower than a long one on the same boot,
+ * and each size is compared only with itself. An answer under the first isn't kept: too few tokens to say.
+ */
+export const SPEED_SIZES = Object.freeze([16, 32, 64]);
+
+/**
+ * @typedef {object} SpeedRow One accelerator's speeds on one model, for answers of one size, in one boot.
+ * @property {string} acc The accelerator's id.
+ * @property {string} model
+ * @property {number} size The answers' size, its least tokens (SPEED_SIZES).
+ * @property {number[]} tps Tokens a second as the server reported them, oldest first: the latest keptPerBoot.
+ */
+
+/**
+ * @typedef {object} SpeedBoot
+ * @property {string} boot When the PC started (an ISO time).
+ * @property {SpeedRow[]} rows
+ */
+
+/**
+ * @typedef {object} Speeds One program's speeds (`speed\<program>.json`): the latest keptBoots boots, oldest first.
+ * @property {string} agent
+ * @property {SpeedBoot[]} boots
+ */
+
+/**
+ * @typedef {object} Speed One answer's speed, as its server reported it.
+ * @property {string} acc The accelerator's id.
+ * @property {string} model
+ * @property {number} answerTokens
+ * @property {number} tokensPerSecond
+ */
+
+/**
+ * @typedef {object} BootSpeed How this boot's speed on an accelerator compares with earlier boots'.
+ * @property {string} acc
+ * @property {string} model
+ * @property {number} size The answer size compared (SPEED_SIZES).
+ * @property {string} since When this boot started (an ISO time).
+ * @property {number} now This boot's median, in tokens a second, to a tenth.
+ * @property {number} samples How many answers that's from.
+ * @property {number} usual The fastest earlier boot's median, to a tenth.
+ * @property {number} boots How many earlier boots had enough answers to count.
+ * @property {number} percent `now` as a percentage of `usual`, rounded.
+ * @property {boolean} slow `percent` is slowPercent or less.
+ */
+
+/**
+ * An answer's size (SPEED_SIZES), or null when it's too short to keep.
+ * @param {number} answerTokens
+ * @returns {number | null}
+ */
+export function speedSize(answerTokens) {
+  /** @type {number | null} */
+  let size = null;
+  for (const s of SPEED_SIZES) if (answerTokens >= s) size = s;
+  return size;
+}
+
+/**
+ * @param {number[]} xs
+ * @returns {number}
+ */
+function median(xs) {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/** @param {number} x */
+const tenths = (x) => Math.round(x * 10) / 10;
+
+/**
+ * A speeds file's contents, or null when it's absent or unreadable (which count the same). A boot or row that can't be
+ * read is left out, and so is a speed that isn't one.
+ * @param {string | null} text
+ * @returns {Speeds | null}
+ */
+export function speedsOf(text) {
+  if (typeof text !== 'string') return null;
+  /** @type {any} */
+  let f;
+  try {
+    f = JSON.parse(text.replace(/^﻿/, ''));
+  } catch {
+    return null;
+  }
+  if (!f || typeof f !== 'object' || typeof f.agent !== 'string' || !Array.isArray(f.boots)) return null;
+  /** @type {SpeedBoot[]} */
+  const boots = [];
+  for (const b of f.boots) {
+    if (!b || typeof b.boot !== 'string' || !Number.isFinite(parseIsoMs(b.boot)) || !Array.isArray(b.rows)) continue;
+    /** @type {SpeedRow[]} */
+    const rows = [];
+    for (const r of b.rows) {
+      if (!r || typeof r.acc !== 'string' || typeof r.model !== 'string' || !SPEED_SIZES.includes(r.size) || !Array.isArray(r.tps)) continue;
+      rows.push({ acc: r.acc, model: r.model, size: r.size, tps: r.tps.filter((/** @type {unknown} */ x) => typeof x === 'number' && Number.isFinite(x) && x > 0) });
+    }
+    boots.push({ boot: b.boot, rows });
+  }
+  return { agent: f.agent, boots };
+}
+
+/**
+ * A program's speeds with one more answer's: in this boot's row for its accelerator, model and size, which keeps the
+ * latest keptPerBoot, and the latest keptBoots boots. An answer too short to keep, or a speed that isn't one, leaves them
+ * as they were. A boot within bootSlackMs of one already there is that boot.
+ * @param {Rules} rules
+ * @param {Speeds | null} file
+ * @param {string} agent
+ * @param {number} bootMs When this PC started, in milliseconds since the epoch.
+ * @param {Speed} s
+ * @returns {Speeds}
+ */
+export function addSpeed(rules, file, agent, bootMs, s) {
+  const boots = (file?.boots ?? []).map((b) => ({ boot: b.boot, rows: b.rows.map((r) => ({ ...r, tps: [...r.tps] })) }));
+  const size = speedSize(s.answerTokens);
+  if (size === null || !Number.isFinite(s.tokensPerSecond) || s.tokensPerSecond <= 0 || !Number.isFinite(bootMs)) return { agent, boots };
+  let boot = boots.find((b) => Math.abs(parseIsoMs(b.boot) - bootMs) <= rules.speed.bootSlackMs);
+  if (!boot) {
+    boot = { boot: isoTime(bootMs), rows: [] };
+    boots.push(boot);
+    boots.sort((a, b) => parseIsoMs(a.boot) - parseIsoMs(b.boot));
+  }
+  let row = boot.rows.find((r) => r.acc === s.acc && r.model === s.model && r.size === size);
+  if (!row) {
+    row = { acc: s.acc, model: s.model, size, tps: [] };
+    boot.rows.push(row);
+  }
+  row.tps.push(Math.round(s.tokensPerSecond * 100) / 100);
+  row.tps.splice(0, Math.max(0, row.tps.length - rules.speed.keptPerBoot));
+  return { agent, boots: boots.slice(Math.max(0, boots.length - rules.speed.keptBoots)) };
+}
+
+/**
+ * How this boot's speed on an accelerator compares with earlier boots', from every program's speeds together: for the
+ * model and answer size with the most answers this boot, among those with samplesNeeded this boot and in at least one
+ * earlier boot. The usual is the fastest earlier boot's median, so an earlier slow boot doesn't lower it. Null until
+ * there's enough of both. A boot after this one (a clock set back) isn't an earlier one.
+ * @param {Rules} rules
+ * @param {(Speeds | null)[]} files
+ * @param {number} bootMs When this PC started, in milliseconds since the epoch.
+ * @param {string} acc The accelerator's id.
+ * @returns {BootSpeed | null}
+ */
+export function bootSpeed(rules, files, bootMs, acc) {
+  const { bootSlackMs: slack, samplesNeeded: needed } = rules.speed;
+  /** @type {Map<string, { model: string, size: number, now: number[], earlier: Map<number, number[]> }>} */
+  const kinds = new Map();
+  /** @type {number[]} */
+  const starts = [];
+  for (const f of files) {
+    for (const b of f?.boots ?? []) {
+      const at = parseIsoMs(b.boot);
+      const isNow = Math.abs(at - bootMs) <= slack;
+      if (!Number.isFinite(at) || (!isNow && at > bootMs)) continue;
+      let start = starts.find((t) => Math.abs(t - at) <= slack);
+      if (!isNow && start === undefined) starts.push((start = at));
+      for (const r of b.rows) {
+        if (r.acc !== acc) continue;
+        const key = `${r.model}\n${r.size}`;
+        let k = kinds.get(key);
+        if (!k) kinds.set(key, (k = { model: r.model, size: r.size, now: [], earlier: new Map() }));
+        if (isNow) k.now.push(...r.tps);
+        else if (start !== undefined) k.earlier.set(start, [...(k.earlier.get(start) ?? []), ...r.tps]);
+      }
+    }
+  }
+  /** @type {BootSpeed | null} */
+  let best = null;
+  for (const k of kinds.values()) {
+    if (k.now.length < needed || (best && best.samples >= k.now.length)) continue;
+    const earlier = [...k.earlier.values()].filter((t) => t.length >= needed).map(median);
+    if (!earlier.length) continue;
+    const now = median(k.now);
+    const usual = Math.max(...earlier);
+    const percent = Math.round((100 * now) / usual);
+    best = { acc, model: k.model, size: k.size, since: isoTime(bootMs), now: tenths(now), samples: k.now.length, usual: tenths(usual), boots: earlier.length, percent, slow: percent <= rules.speed.slowPercent };
+  }
+  return best;
+}
