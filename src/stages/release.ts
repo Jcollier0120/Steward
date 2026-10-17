@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { commitOf, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchBranch, removeWorktree, showFile } from '../git.ts';
 import { readLsRemote } from '../scm.ts';
 import { stayAwake } from '../kit/awake.ts';
 import { combinedEntry } from '../kit/notes.ts';
@@ -18,13 +18,14 @@ import { recordTested } from '../tested.ts';
 import { guardPackages, installPackages } from './modules.ts';
 import { readPin } from './staff.ts';
 import { noteReleased } from '../strangers.ts';
-import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, freshWorktree, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, passingFailure, releasedOf, releaseDirOf, result, freshWorktree, type Ctx, type EmployeeResult } from './common.ts';
 import { hostFor } from '../hosts/index.ts';
 import { runWhenReleased } from './gitevents.ts';
 import { withRepo } from './slots.ts';
 import { linkSharedModules } from './modules.ts';
 import { kitOnlyRelease, noteKitOnlyRelease, type KitOnly } from './kitonly.ts';
 import { rolloutDone, rolloutGoingOn } from './rollout.ts';
+import { clearPending, dueAgain, exchequerCommand, finishFailed, loadExchequerPending, missedExchequer, notePending } from './exchequer.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -106,11 +107,20 @@ export function releaseDecision(c: ReleaseCandidate, kit: string | null): { rele
  *
  * The PC is kept awake while a release is made (the kit's awake.ts, Steward 0.36.45), from when it is decided on until
  * it is done; not while it is only looked at.
+ *
+ * A person's Release (not a round's, nor a hire) first finishes a release of the employee's that reached GitHub but not
+ * the Exchequer (exchequer.ts), whatever kept it out: the Release an alarm asks for once the person has fixed that.
  */
 export async function releaseOne(ctx: Ctx, e: Employee, o: ReleaseOptions): Promise<EmployeeResult> {
   let letGo = () => {};
   try {
-    return await releaseIn(ctx, e, o, (what) => (letGo = stayAwake(what, ctx.log)));
+    const finished = o.kitOnly || o.hire ? null : await finishExchequer(ctx, e, { person: true });
+    const r = await releaseIn(ctx, e, o, (what) => (letGo = stayAwake(what, ctx.log)));
+    if (!finished) return r;
+    // Its branch's version is the one just finished: nothing more to say.
+    if (r.outcome === 'skipped' && r.released && r.version === finished.version) return finished;
+    const outcome = [finished.outcome, r.outcome].includes('failed') ? 'failed' : [finished.outcome, r.outcome].includes('done') ? 'done' : r.outcome;
+    return { ...r, outcome, message: `${finished.message}; then ${r.message}` };
   } finally {
     letGo();
   }
@@ -212,23 +222,8 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   await freshWorktree(run, ctx.settings, repo, dir, commit, '--detach');
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);
   try {
-    // Its packages linked from the set installed once for its lockfile (modules.ts), as a bump's are; installed only where
-    // that can't be done (0.35.68). The release only reads them, and never packs node_modules (the kit's release.ts).
-    if (releaseNeedsPackages(dir, e.release)) {
-      // No package's install script runs unless Settings allow it; one that isn't holds the release (installscripts.ts).
-      const g = await guardPackages(ctx, e, dir, `the release of v${version}`);
-      if (g.held) {
-        ctx.log(`[${e.id}] packages held: ${g.held}`);
-        return result(e, 'failed', `${g.held}, so its release wasn't built`, { version, commit: commit.slice(0, 7) });
-      }
-      const say = (line: string) => ctx.log(`[${e.id}] ${line}`);
-      const ci = (await linkSharedModules(ctx, dir, say, g.plan)) ? null : await installPackages(ctx, dir, g.plan, say);
-      if (ci) {
-        for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
-        keepFailure(dir, ci.line, ci.code, `${ci.out}\n${ci.err}`);
-        return result(e, 'failed', `${ci.line.startsWith('npm ci') ? 'npm ci' : ci.line} failed (exit ${ci.code}), so its release wasn't built${networkNote(`${ci.out}\n${ci.err}`)}`, { version, commit: commit.slice(0, 7) });
-      }
-    }
+    const held = await packagesFor(ctx, e, dir, e.release, `the release of v${version}`);
+    if (held) return result(e, 'failed', `${held.why}, so its release wasn't built${held.network}`, { version, commit: commit.slice(0, 7) });
     // The kit's release publishes to the releases repository only on the PC that releases Castellan (MANOR_RELEASES_REPO).
     const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: true });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
@@ -239,6 +234,22 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
       const down = signingDown(`${r.out}\n${r.err}`);
       if (down && signs) noteSigningDown(signs, down);
       if (down) return result(e, 'skipped', `v${version} waits until this PC can sign: ${down}`, { version, commit: commit.slice(0, 7), again: true, signing: down });
+      // On GitHub, and not at the Exchequer (exchequer.ts): released, by this Steward, which finishes it there later. Only
+      // once GitHub shows it: the kit says so whether or not GitHub took it.
+      const missed = releasedHere(e) ? null : missedExchequer(`${r.out}\n${r.err}`);
+      if (missed) forgetGlance(ctx, e);
+      if (missed && (await releasedOf(ctx, e).catch(() => null))?.some((x) => x.version === version)) {
+        recordTested(e.id, { commit, stage: 'release', branch: e.branch, version });
+        noteReleased(e, version);
+        daily();
+        const at = new Date().toISOString();
+        notePending(e.id, { version, commit, why: missed.why, passing: missed.passing, since: at, last: at, tries: 0 });
+        const released = `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${noted}${kitWords}`;
+        const url = hostFor(ctx, e).releaseUrl(e.repo, `v${version}`);
+        if (missed.passing) return result(e, 'done', `${released}; on GitHub only for now: the Exchequer couldn't be reached (${missed.why}), so the rounds publish it there`, { version, commit: commit.slice(0, 7), url });
+        // No commit: a round holds nothing against it (round.ts), and the alarm is what reaches the person (alarms.ts).
+        return result(e, 'failed', `${released}; on GitHub only: the Exchequer refused it (${missed.why}), so no one is offered it: fix that, then press Release for ${e.name}, which publishes it there from GitHub's files`, { version, url, released: true });
+      }
       return result(e, 'failed', `${e.release} failed (exit ${r.code})${networkNote(`${r.out}\n${r.err}`)}`, { version, commit: commit.slice(0, 7) });
     }
     // Its releases have changed: the glance no longer says how they are.
@@ -268,6 +279,8 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
     noteReleased(e, version);
     // Released on GitHub; when it didn't reach the Exchequer too, the kit's line says why, as a note (never an alarm).
     const exchequer = exchequerNote(`${r.out}\n${r.err}`);
+    // One before it that reached GitHub alone (exchequer.ts) is behind this one now, which went on to the Exchequer.
+    if (!exchequer) clearPending(e.id);
     const urgent = exchequer ? '' : await urgentNote(ctx, e, { repo, commit, version, since });
     const after = byGit ? await afterReleaseNote(ctx, e, { repo, commit, version, since }) : '';
     daily();
@@ -295,6 +308,97 @@ export async function urgentNote(ctx: Ctx, e: Employee, o: { repo: string; commi
   const out = await letOut(e.id, o.version, ctx.exchequer);
   ctx.log(`[${e.id}] an urgent fix: ${out.line}`);
   return `; an urgent fix: ${out.line}`;
+}
+
+/**
+ * A release worktree's packages, before its command runs: linked from the set installed once for its lockfile
+ * (modules.ts), as a bump's are; installed only where that can't be done (0.35.68). The release only reads them, and
+ * never packs node_modules (the kit's release.ts). Null once they're there, or when the command needs none; else why
+ * not, and the network's line when it was the network.
+ */
+async function packagesFor(ctx: Ctx, e: Employee, dir: string, line: string, what: string): Promise<{ why: string; network: string } | null> {
+  if (!releaseNeedsPackages(dir, line)) return null;
+  // No package's install script runs unless Settings allow it; one that isn't holds the release (installscripts.ts).
+  const g = await guardPackages(ctx, e, dir, what);
+  if (g.held) {
+    ctx.log(`[${e.id}] packages held: ${g.held}`);
+    return { why: g.held, network: '' };
+  }
+  const say = (l: string) => ctx.log(`[${e.id}] ${l}`);
+  const ci = (await linkSharedModules(ctx, dir, say, g.plan)) ? null : await installPackages(ctx, dir, g.plan, say);
+  if (!ci) return null;
+  for (const l of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${l}`);
+  keepFailure(dir, ci.line, ci.code, `${ci.out}\n${ci.err}`);
+  return { why: `${ci.line.startsWith('npm ci') ? 'npm ci' : ci.line} failed (exit ${ci.code})`, network: networkNote(`${ci.out}\n${ci.err}`) };
+}
+
+/**
+ * A release of the employee's that reached GitHub but not the Exchequer (exchequer.ts), finished there: its release
+ * command with --exchequer (the kit's release.ts exchequerOnly), in a worktree of the commit released, which publishes
+ * GitHub's own files of it to the Exchequer, as `npm run release -- --exchequer` by hand would. A round's try (`person`
+ * false) only once it's due (dueAgain); a person's Release tries at once, whatever kept it out. Null when nothing is
+ * tried.
+ */
+export async function finishExchequer(ctx: Ctx, e: Employee, o: { person: boolean; now?: Date }): Promise<EmployeeResult | null> {
+  const p = loadExchequerPending()[e.id];
+  const now = o.now ?? new Date();
+  if (!p || (!o.person && !dueAgain(p, now))) return null;
+  const line = e.release ? exchequerCommand(e.release) : null;
+  const repo = checkoutOf(e);
+  if (!line || !existsSync(repo)) return null;
+  const more = { version: p.version, commit: p.commit.slice(0, 7) };
+  const tried = (why: string, passing: boolean) => notePending(e.id, { ...p, why, passing, last: now.toISOString(), tries: p.tries + 1 });
+  const dir = releaseDirOf(ctx.settings, e);
+  const letGo = stayAwake(`${e.name} v${p.version}'s publish to the Exchequer`, ctx.log);
+  try {
+    await removeWorktree(ctx.run, repo, dir);
+    if (!(await commitOf(ctx.run, repo, p.commit))) await fetchBranch(ctx.run, repo, e.branch);
+    await freshWorktree(ctx.run, ctx.settings, repo, dir, p.commit, '--detach');
+    ctx.log(`[${e.id}] publishing v${p.version} to the Exchequer from its release on GitHub (${p.commit.slice(0, 7)}), which didn't reach it: ${p.why}`);
+    const held = await packagesFor(ctx, e, dir, line, `the publish of v${p.version} to the Exchequer`);
+    const r = held ? null : await runLine(ctx.run, line, { cwd: dir, timeoutMs: 15 * 60_000, env: releasesRepoEnv(ctx.settings), paced: true });
+    if (r) for (const l of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${l}`);
+    if (r?.code === 0) {
+      clearPending(e.id);
+      return result(e, 'done', `published v${p.version} to the Exchequer from its release on GitHub, which hadn't reached it (${p.why})`, { ...more, released: true });
+    }
+    const failed = held ? { why: held.why, passing: !!held.network } : finishFailed(`${r!.out}\n${r!.err}`);
+    tried(failed.why, failed.passing);
+    if (failed.passing) return result(e, 'skipped', `v${p.version} is on GitHub only still: the Exchequer couldn't be reached again (${failed.why}), so the rounds try again`, { ...more, again: true });
+    // No commit, as above: the alarm is what reaches the person.
+    return result(e, 'failed', `v${p.version} is on GitHub only still: the Exchequer refused it (${failed.why}), so no one is offered it: fix that, then press Release for ${e.name}`, { version: p.version });
+  } catch (err) {
+    // The Steward's own trouble (its worktree): tried again as it was.
+    const why = (err as Error).message;
+    ctx.log(`[${e.id}] couldn't publish v${p.version} to the Exchequer: ${why}`);
+    tried(p.why, p.passing || passingFailure(why));
+    return result(e, 'skipped', `v${p.version} is on GitHub only still: ${why}`, { ...more, again: true });
+  } finally {
+    try {
+      await removeWorktree(ctx.run, repo, dir);
+    } catch (err) {
+      ctx.log(`[${e.id}] couldn't remove ${dir}: ${(err as Error).message}`);
+    }
+    letGo();
+  }
+}
+
+/**
+ * The round's tries at the Exchequer: each release that reached GitHub alone and is due again (exchequer.ts), one at a
+ * time. In every round, not only a build's release: no one is offered it until it's there.
+ */
+export async function finishPending(ctx: Ctx, employees: Employee[], now = new Date()): Promise<EmployeeResult[]> {
+  const pending = loadExchequerPending();
+  const due = employees.filter((e) => pending[e.id] && dueAgain(pending[e.id], now));
+  const out = await mapLimit(due, 1, async (e) => {
+    try {
+      return await withRepo(ctx.log, e.id, () => finishExchequer(ctx, e, { person: false, now }));
+    } catch (err) {
+      ctx.log(`[${e.id}] ${(err as Error).message}`);
+      return null;
+    }
+  });
+  return out.filter((r): r is EmployeeResult => r !== null);
 }
 
 /** Why a repository isn't released: Settings name no way to. */

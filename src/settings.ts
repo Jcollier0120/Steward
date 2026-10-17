@@ -636,7 +636,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     fields: [
       { key: 'on', kind: 'switch', label: 'Raise alarms' },
       { key: 'toast', kind: 'switch', label: 'A Windows notification for each', help: 'Clicking it opens this page.' },
-      { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'Something waiting for', help: "A new kit waiting for the Steward to carry it; work filed for the Wright that hasn't landed." },
+      { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'Something waiting for', help: "A new kit waiting for the Steward to carry it; work filed for the Wright that hasn't landed; a release the Exchequer couldn't be reached for." },
       { key: 'blockingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR holding others up for', help: 'No longer used: there are no version queues (0.36.124).', hidden: true },
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
       { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Aletaster's tasting holds for" },

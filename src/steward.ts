@@ -22,7 +22,7 @@ import { pruneClaims, shareClaims } from './claims.ts';
 import { push } from './stages/push.ts';
 import { loadRefreshFailures, loadRefreshPending, refreshAfterReleases, refreshPendingFile, refreshStep, releasedWords } from './stages/refresh.ts';
 import { loadInstallHolds } from './installscripts.ts';
-import { release } from './stages/release.ts';
+import { finishPending, release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
 import { clearRolloutHolds, loadRolloutFailures, rollout, takeRolloutResults } from './stages/rollout.ts';
@@ -35,6 +35,7 @@ import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
 import { loadSigningWaits } from './signing.ts';
+import { loadExchequerPending } from './stages/exchequer.ts';
 import { loadTending, tend, type OpenAgent, type StartManor } from './tend.ts';
 import { loadUnstick, manorDryRun, unstick, type DryRun, type ManorUpdates, type AllowAgain, type PressUpdate, type RolledBack } from './unstick.ts';
 import { githubTurnRefs, joinGuards, loadTurns, remoteFor, takeTurns, type TurnsDeps } from './lease.ts';
@@ -678,6 +679,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           const kitWaits = selfReleases.find((r) => r.kitWaits)?.kitWaits ?? null;
           // What a rollout beside the rounds did since the last round reported it (stages/rollout.ts): this round's to tell.
           out.results.push(...takeRolloutResults());
+          // Releases that reached GitHub but not the Exchequer (stages/exchequer.ts), tried there again once due: in every
+          // round, not only at a build's release, as no one is offered them until then.
+          if (ctx.settings.releasesCastellan) out.results.push(...(await finishPending(ctx, free(employees))).map((r) => ({ ...r, message: `exchequer: ${r.message}` })));
           const releaseNow = async (who: Employee[]) => {
             const released = await releaseUnreleased(ctx, who);
             out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
@@ -859,7 +863,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Every agent's port (ports.ts): two agents on one is an alarm before either is installed. Not in a test,
           // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
           const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
-          await watchAlarms({ settings: ctx.settings, round: out, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, heldKit: heldKit(readJson<Record<string, KitTrial>>(kitTrialsFile(), {}), ctx.kit.released), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, heldKit: heldKit(readJson<Record<string, KitTrial>>(kitTrialsFile(), {}), ctx.kit.released), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), exchequerPending: loadExchequerPending(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }

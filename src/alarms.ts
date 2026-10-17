@@ -10,6 +10,7 @@ import { allowedInstallScripts, installHoldConditions, type InstallHold } from '
 import { agentPages, reeveInstalled, seneschalInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { SigningWait } from './signing.ts';
+import type { ExchequerPending } from './stages/exchequer.ts';
 import type { Migration } from './migrate.ts';
 import { bumpDirOf, releaseDirOf, type StageResult } from './stages/common.ts';
 import { refreshDirOf } from './stages/refresh.ts';
@@ -170,6 +171,41 @@ export interface FailedSelf {
 }
 
 /**
+ * Releases on GitHub that didn't reach the Exchequer (stages/exchequer.ts): no one is offered them until they're there.
+ * One the Exchequer refused is raised at once, as only a person can fix that; one the network kept out only once it has
+ * waited Settings' waiting hours, as the rounds try it again meanwhile.
+ */
+export function exchequerConditions(pending: Record<string, ExchequerPending>, employees: Employee[], settings: Settings): Condition[] {
+  return Object.entries(pending).flatMap(([id, p]): Condition[] => {
+    const e = employees.find((x) => x.id === id);
+    if (!e) return [];
+    const offered = `Manor installs ${e.name} from the Exchequer alone, so no one is offered v${p.version} until it's there.`;
+    if (p.passing) {
+      return [
+        {
+          id: `exchequer:${id}:${p.version}:waits`,
+          who: id,
+          title: `${e.name} v${p.version} is released on GitHub, but the Exchequer couldn't be reached to publish it for ${hours(settings.alarms.waitingHours)} or more`,
+          detail: [`Last try: ${p.why}`, offered, `The rounds keep trying (${p.tries} so far), and this clears by itself once it's there. Release ${e.name} on the Steward's page to try at once.`],
+          since: p.since,
+          afterMs: settings.alarms.waitingHours * HOUR,
+        },
+      ];
+    }
+    return [
+      {
+        id: `exchequer:${id}:${p.version}:refused`,
+        who: id,
+        title: `${e.name} v${p.version} is released on GitHub, but the Exchequer refused it`,
+        detail: [p.why, offered, `Once that's fixed, release ${e.name} on the Steward's page: it publishes v${p.version} to the Exchequer from GitHub's own files, without building it again.`],
+        since: p.since,
+        afterMs: 0,
+      },
+    ];
+  });
+}
+
+/**
  * From the round: main's kit held by its trial, releases the rounds gave up on, releases that wait until this PC can sign, a round
  * that couldn't run; and, while the rounds
  * roll kits out, a bump or push they gave up on, and a new kit waiting a while for the Steward itself to carry it; and,
@@ -187,6 +223,8 @@ export function roundConditions(o: {
   tastingHolds?: Record<string, TastingHold>;
   /** Releases that wait until this PC can sign (signing.ts's signing-waits.json), by employee. */
   signingWaits?: Record<string, SigningWait>;
+  /** Releases on GitHub that didn't reach the Exchequer (stages/exchequer.ts's exchequer-pending.json), by employee. */
+  exchequerPending?: Record<string, ExchequerPending>;
   /** Versions of the Steward its install rolled back (safeinstall.ts's unsafe-updates.json), by version. */
   unsafe?: Record<string, { version: string; from: string | null; why: string; at: string; kept: string | null }>;
   /** What the settings migration couldn't fill in (migrate.ts), until it finds it or Settings are saved. */
@@ -258,6 +296,7 @@ export function roundConditions(o: {
       afterMs: 0,
     });
   }
+  out.push(...exchequerConditions(o.exchequerPending ?? {}, o.employees, o.settings));
   if (o.settings.rollout) {
     for (const [id, f] of Object.entries(o.failedRollouts ?? {})) {
       const e = o.employees.find((x) => x.id === id);
