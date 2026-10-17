@@ -39,10 +39,13 @@ export interface BuildPipeline {
   /**
    * A build's rounds go on at most this long (15 to 60 minutes; 30 unless Settings say otherwise), waiting for a new kit's
    * trial and rollout; then the build releases each repository's main as it is, and ends, and the kit waits for the next.
-   * (Before Steward 0.36.121 it also had bisectRuns, for the merges it no longer makes: a settings.json that keeps it
-   * loads all the same, and normalizePipeline leaves it out.)
    */
   windowMinutes: number;
+  /**
+   * No longer used (Steward 0.36.121): how many test runs a build had to find the PR that broke it, among the PRs it
+   * merged. Builds merge no PRs now; a value kept from before is kept, as Settings' other unused ones are.
+   */
+  bisectRuns?: number;
 }
 
 export const DEFAULT_PIPELINE: BuildPipeline = { times: ['00:00', '06:00', '12:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 30 };
@@ -75,12 +78,14 @@ export function normalizePipeline(raw: unknown): BuildPipeline {
   const days = Array.isArray(r.days) ? DAYS.filter((x) => (r.days as unknown[]).includes(x)) : d.days;
   const whole = (x: unknown) => (typeof x === 'number' ? x : typeof x === 'string' && x.trim() ? Number(x) : Number.NaN);
   const w = whole(r.windowMinutes);
+  const b = whole(r.bisectRuns);
   const oldDefault = times.length === OLD_DEFAULT_TIMES.length && times.every((t, i) => t === OLD_DEFAULT_TIMES[i]);
   return {
     times: times.length && !oldDefault ? times : d.times,
     days,
     kit: r.kit === 'first' || r.kit === 'every' ? r.kit : d.kit,
     windowMinutes: Number.isInteger(w) && w !== OLD_DEFAULT_WINDOW ? Math.min(MAX_WINDOW_MINUTES, Math.max(15, w)) : d.windowMinutes,
+    ...(Number.isInteger(b) ? { bisectRuns: Math.min(6, Math.max(0, b)) } : {}),
   };
 }
 

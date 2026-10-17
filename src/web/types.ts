@@ -12,7 +12,7 @@ import type { WholeJob } from '../stages/wholesuite.ts';
  * imports nothing of the server's code.
  */
 
-/** Its rounds, as the page says them: merging and releasing by itself, or only when asked. */
+/** Its rounds, as the page says them: building and releasing by itself, or only when asked. */
 export interface RoundView {
   on: boolean;
   minutes: number;

@@ -854,7 +854,7 @@ export function WholeSuiteCard({ w, now }: { w: WholeJob | null | undefined; now
     <Card className="row">
       <Badge tone="info" label="Whole suite" />{' '}
       <span>
-        Before {w.tag}'s release, the Steward's whole suite runs at {w.commit.slice(0, 7)}, beside the rounds, since {ago(w.startedAt, now)}. The rounds go on merging meanwhile; the first after it passes releases the kit.
+        Before {w.tag}'s release, the Steward's whole suite runs at {w.commit.slice(0, 7)}, beside the rounds, since {ago(w.startedAt, now)}. The rounds go on meanwhile; the first after it passes releases the kit.
       </span>
     </Card>
   );

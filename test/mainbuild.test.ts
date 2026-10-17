@@ -207,6 +207,24 @@ test("checks Windows ended (the PC shutting down) fail this build's release, but
   assert.equal(g.checks.length, 3);
 });
 
+test("a repository Settings give no checks is released untested, as before builds tested main; one worked with plain git is tested here, and gh never run", async () => {
+  const g = gateOf('no-checks');
+  const head = commit(g.checkout, 'no-checks.txt');
+  assert.equal(await mainGate(g.ctx, { ...g.e, test: [] }, head, '0.4.0'), null);
+  assert.deepEqual(g.checks, [], 'nothing run');
+  assert.ok(g.ctx.lines.includes(`[fake] Settings give ${g.e.name} no checks, so ${head.slice(0, 7)} is released untested`), g.ctx.lines.join('\n'));
+  assert.equal(g.kept(head), undefined, 'nothing kept: checks Settings give it later test it');
+
+  const p = gateOf('plain-git');
+  const ctx = { ...p.ctx, host: () => 'git' as const };
+  const at = commit(p.checkout, 'plain-git.txt');
+  assert.equal(await coveredBy(ctx, p.e, at), null);
+  assert.equal(await mainGate(ctx, p.e, at, '0.4.0'), null);
+  assert.equal(p.checks.length, 1, 'tested here');
+  assert.equal(p.kept(at)?.ok, true);
+  assert.deepEqual(p.r.gh, [], 'no status read or set');
+});
+
 test('a PR the Steward opened itself is merged by it at its head, its branch deleted; a refusal is asked again after each wait, a head that moved gives up at once', async () => {
   const e = employee(tmp);
   const head = 'a'.repeat(40);

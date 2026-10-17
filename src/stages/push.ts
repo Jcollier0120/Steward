@@ -74,7 +74,7 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
   const merged = async (n: number | null): Promise<string> => {
     if (!o.merge || !n) return '';
     const why = await mergeOwn(ctx, e, { number: n, head: localSha });
-    if (why) return `; it is open still (${why}): the next build tries again, or merge it yourself`;
+    if (why) return `; it is open still (${why}): the next build tries again`;
     // Its branch has moved: read afresh from here on, not from the glance. And the bump's worktree and branch are done with.
     forgetGlance(ctx, e);
     try {

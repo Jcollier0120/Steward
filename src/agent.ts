@@ -236,7 +236,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   };
   if (staleTable()) void refresh();
   /**
-   * Whether the rounds are keeping the table current: scheduled, merging and releasing by itself with repositories to
+   * Whether the rounds are keeping the table current: scheduled, building and releasing by itself with repositories to
    * look at (a round that only keeps the staff's pages up asks GitHub nothing), on duty, and the last one not long ago.
    */
   const roundsKeepIt = () => {
@@ -324,7 +324,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       else startRound();
     },
   });
-  // On duty, every few minutes while Settings say it merges and releases by itself, or keeps the staff's pages up; the
+  // On duty, every few minutes while Settings say it builds and releases by itself, or keeps the staff's pages up; the
   // kit's every() pauses off duty. Saving Settings starts, stops or re-times it. The first comes within a minute of the
   // start, not the kit's 2 to 15 minutes at a gentle pace: the Steward starts again whenever Manor updates it, often
   // halfway through a release and its rollout, which shouldn't stand still meanwhile (0.35.29). Outside the kit's work
@@ -484,7 +484,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         const a = loadAlarms().open.find((x) => x.id === id);
         return { json: { error: a ? 'that alarm has nothing to do but be dismissed' : 'no such alarm open' }, status: 404 };
       },
-      // Look after repositories Reeve found (found.ts): added to Settings, merging and releasing only as ticked. One
+      // Look after repositories Reeve found (found.ts): added to Settings, releasing only as ticked. One
       // ({ repo, merges, release }), or several at once ({ repos: [{ repo, merges, release }, …] }).
       '/api/repos/look-after': ({ body }) => {
         const many = Array.isArray(body?.repos);

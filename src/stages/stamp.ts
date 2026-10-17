@@ -223,6 +223,8 @@ export async function stampMain(ctx: Ctx, e: Employee, o: { released: string[]; 
   const tree = await gitMaybe(run, repo, 'ls-tree', '-r', '--name-only', head, `${CHANGES_DIR}/`, `${KIT_CHANGES_DIR}/`);
   if (!tree || !stampsAny(tree.split('\n').map((l) => l.trim()).filter(Boolean))) return null;
   const sha = head.slice(0, 7);
+  // Worked with plain git: there is no PR to stamp through, and the Steward never pushes to the branch itself.
+  if (hostIs(ctx, e) === 'git') return { done: false, skipped: true, note: `its changes/ entries on ${e.branch} at ${sha} aren't stamped: it is worked with plain git, where the Steward opens no PRs and never pushes to ${e.branch}. Put them into one version and changelog entry on a branch, and land it` };
   const branch = stampBranch(head);
   // A stamp of its own an earlier build left open (GitHub wouldn't merge it then): merged now while main is where it was
   // stamped from, never stamped twice; else closed, main having moved on, and main stamped again below.
@@ -230,7 +232,7 @@ export async function stampMain(ctx: Ctx, e: Employee, o: { released: string[]; 
   const same = own.find((p) => p.headRefName === branch);
   if (same) {
     const why = await mergeOwn(ctx, e, { number: same.number, head: same.headRefOid });
-    const note = why ? `its stamp #${same.number} of ${sha} is open still (${why}): merge it yourself, and the next build releases it` : `merged its stamp #${same.number} of ${sha}, left open by an earlier build`;
+    const note = why ? `its stamp #${same.number} of ${sha} is open still (${why}): the next build tries again, and then releases it` : `merged its stamp #${same.number} of ${sha}, left open by an earlier build`;
     ctx.log(`[${e.id}] ${note}`);
     return { done: !why, note, url: same.url };
   }
@@ -267,7 +269,7 @@ export async function stampMain(ctx: Ctx, e: Employee, o: { released: string[]; 
     const url = must(await hostFor(ctx, e).createPr(e.repo, { base: e.branch, head: branch, title, body })).trim().split('\n').pop() ?? '';
     const n = prNumberOf(url);
     const why = n ? await mergeOwn(ctx, e, { number: n, head: stamped }) : `no PR number in ${url}`;
-    const note = `stamped ${s.did.join('; ')}${why ? `, but its PR is open still (${why}): merge it yourself, and the next build releases it` : ', and merged it'}`;
+    const note = `stamped ${s.did.join('; ')}${why ? `, but its PR is open still (${why}): the next build merges it, and then releases it` : ', and merged it'}`;
     ctx.log(`[${e.id}] ${note}`);
     return { done: !why, note, version: s.version, url };
   } finally {

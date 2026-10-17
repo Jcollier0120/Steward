@@ -4,15 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// The Steward's round, start to finish, on a data folder of its own: a fake employee's git, gh standing in.
-// What a team member's PR asks for is done; a quiet round leaves no trace; a version pushed straight to the
-// branch is released; and a release that fails isn't tried again at the same commit.
+// The Steward's round, start to finish, on a data folder of its own: a fake employee's git, gh standing in. It merges no
+// one's PRs (Steward 0.36.121): what their authors merge, main's head, is tested once unless a vouch covers it, and
+// released; a quiet round leaves no trace; and a release that fails isn't tried again at the same commit.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-round-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { runStage, lastStageFile } = await import('../src/steward.ts');
 const { roundFailuresFile } = await import('../src/stages/round.ts');
+const { mainTestedFile } = await import('../src/stages/mainbuild.ts');
 const { fakeEmployee, mergesOf, ok, runner, sh } = await import('./helpers.ts');
 
 const f = fakeEmployee(path.join(home, 'fake'), { version: '0.4.0' });
@@ -36,40 +37,46 @@ writeFileSync(
   }),
 );
 
-// The team's PR #7 raises the version and asks for a release.
+// The team's PR #7 raises the version. Vouched for (`steward vouch`), its author merges it: a merge commit on main whose
+// tree is the PR head's.
 sh(f.checkout, 'switch', '--quiet', '-c', 'fix/thing');
 const prSha = raise('fix/thing', '0.4.0', '0.4.1');
-sh(f.checkout, 'push', '--quiet', 'origin', `${prSha}:refs/pull/7/head`);
 sh(f.checkout, 'switch', '--quiet', 'main');
+sh(f.checkout, 'merge', '--quiet', '--no-ff', '-m', 'Merge pull request #7 from Jcollier0120/fix/thing', 'fix/thing');
+const mergeSha = sh(f.checkout, 'rev-parse', 'HEAD');
+sh(f.checkout, 'push', '--quiet', 'origin', 'main');
 
-let open = true;
+/** The commits a team account vouched for (steward/tested): the PR's head, and each the Steward vouches for once it passes here. */
+const vouched = new Set([prSha]);
 const released = () => (existsSync(attempts) ? readFileSync(attempts, 'utf8').split('\n').filter((v) => v && v !== '0.4.3') : []);
+const tested = () => (existsSync(mainTestedFile()) ? JSON.parse(readFileSync(mainTestedFile(), 'utf8')) : {}) as Record<string, { ok: boolean; note: string }>;
 const r = runner((args) => {
-  if (args[0] === 'pr' && args[1] === 'list') {
-    if (!args.includes('Jcollier0120/Fake') || !open) return ok([]);
-    return ok([{ number: 7, title: 'Fake 0.4.1: a fix', url: 'https://github.com/Jcollier0120/Fake/pull/7', headRefName: 'fix/thing', headRefOid: prSha, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [], body: 'A fix.\n\n```steward\n{"after": ["release"]}\n```\n' }]);
-  }
-  if (args[0] === 'pr' && args[1] === 'merge') {
-    sh(f.checkout, 'push', '--quiet', 'origin', `${prSha}:refs/heads/main`);
-    open = false;
-    return ok('');
+  if (args[0] === 'pr' && args[1] === 'list') return ok([]);
+  // A commit's statuses (vouch.ts's vouchOn), and the Steward's own vouch set on one (setVouch).
+  const on = args[0] === 'api' ? /^repos\/Jcollier0120\/Fake\/(?:commits\/([0-9a-f]{40})\/statuses|statuses\/([0-9a-f]{40}))/.exec(args.find((a) => a.startsWith('repos/')) ?? '') : null;
+  if (on?.[1]) return ok(vouched.has(on[1]) ? [{ context: 'steward/tested', state: 'success', creator: { login: 'Jcollier0120' } }] : []);
+  if (on?.[2]) {
+    vouched.add(on[2]);
+    return ok({});
   }
   if (args[0] === 'release' && args[1] === 'list') return ok([...released().map((v) => ({ tagName: `v${v}`, isDraft: false })), { tagName: 'v0.4.0', isDraft: false }]);
-  if (args[0] === 'release' && args[1] === 'view') return ok({ targetCommitish: prSha });
+  if (args[0] === 'release' && args[1] === 'view') return ok({ targetCommitish: mergeSha });
 });
 // Manor's page, which doesn't answer here (settings.ts's agentPages would read this PC's Manor for it).
 const round = () => runStage('round', {}, { run: r.run, alarms: { manorUrl: 'http://127.0.0.1:9' } });
 const last = () => JSON.parse(readFileSync(lastStageFile(), 'utf8'));
+/** How many times main's checks were run here in a round's log (mainbuild.ts's testAt). */
+const testsIn = (log: string[]) => log.filter((l) => /^\[fake\] testing main at /.test(l)).length;
 
-test("a round merges the team's ready PR and does what it asks: its release", async () => {
+test("a round releases what the PR's author merged, once: a team member's vouch covers it, so it isn't tested again; the Steward merges nothing", async () => {
   const out = await round();
   assert.equal(out.error, undefined);
-  assert.deepEqual(mergesOf(r.gh), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge']]);
-  assert.deepEqual(out.results.map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [
-    ['done', `merged #7 (checks passed here at ${prSha.slice(0, 7)})`],
-    ['done', 'release: released v0.4.1 from origin/main (…), with kit 1.0.0'],
-  ]);
-  assert.deepEqual(released(), ['0.4.1'], 'released once: the round adds no second release of what the PR asked for');
+  assert.deepEqual(mergesOf(r.gh), [], "no one's PR merged by the Steward");
+  assert.deepEqual(out.results.map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [['done', 'release: released v0.4.1 from origin/main (…), with kit 1.0.0']]);
+  assert.ok(out.log.includes(`[fake] Jcollier0120 vouched for ${prSha.slice(0, 7)}, which ${mergeSha.slice(0, 7)} merged unchanged: not tested again before its release`), out.log.join('\n'));
+  assert.equal(testsIn(out.log), 0);
+  assert.equal(tested()[`fake@${mergeSha}`], undefined, 'not tested here, so nothing kept');
+  assert.deepEqual(released(), ['0.4.1'], 'released once');
   assert.equal(last().stage, 'round');
 });
 
@@ -80,12 +87,16 @@ test('a round with nothing to do leaves no trace: the last stage stays what last
   assert.equal(readFileSync(lastStageFile(), 'utf8'), before);
 });
 
-test('a version on the branch with no release, pushed with no PR, is released by the next round', async () => {
+test('a version pushed straight to main, with no PR and no vouch, is tested here once and released by the next round; its pass is vouched for', async () => {
   sh(f.checkout, 'pull', '--quiet', '--ff-only', 'origin', 'main');
-  sh(f.checkout, 'push', '--quiet', 'origin', `${raise('main', '0.4.1', '0.4.2')}:refs/heads/main`);
+  const sha = raise('main', '0.4.1', '0.4.2');
+  sh(f.checkout, 'push', '--quiet', 'origin', `${sha}:refs/heads/main`);
   const out = await round();
   assert.deepEqual(out.results.filter((x) => x.outcome !== 'skipped').map((x) => x.message.replace(/\(.{7}\)/, '(…)')), ['release: released v0.4.2 from origin/main (…), with kit 1.0.0']);
   assert.deepEqual(released(), ['0.4.1', '0.4.2']);
+  assert.equal(testsIn(out.log), 1, out.log.join('\n'));
+  assert.equal(tested()[`fake@${sha}`]?.ok, true, "main's head tested here before its release, and kept by commit");
+  assert.ok(vouched.has(sha), 'its pass vouched for on that commit, so nothing tests it again');
 });
 
 test("a release that fails is tried once at its commit; later rounds leave it to a person, and say so quietly", async () => {
@@ -93,6 +104,7 @@ test("a release that fails is tried once at its commit; later rounds leave it to
   sh(f.checkout, 'push', '--quiet', 'origin', `${sha}:refs/heads/main`);
   const failed = await round();
   assert.match(failed.results.find((x) => x.outcome === 'failed')!.message, /^release: .* failed \(exit 1\)/);
+  assert.equal(testsIn(failed.log), 1, 'its checks passed here first');
   assert.equal(last().results.some((x: any) => x.outcome === 'failed'), true, 'the failure is recorded');
   assert.deepEqual(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')), { fake: sha.slice(0, 7) });
   const before = readFileSync(lastStageFile(), 'utf8');
@@ -106,11 +118,12 @@ test("a release that fails is tried once at its commit; later rounds leave it to
   assert.ok('manor:down' in alarms.watching && !alarms.open.some((a: any) => a.id === 'manor:down'), 'watched, not yet an hour');
 
   // A fresh start (the page started again, or the PC woke): it may have failed only because the PC was going down, so
-  // it's tried once more; failing again, it stands as before.
+  // it's tried once more, its checks not run again (their pass is kept by commit); failing again, it stands as before.
   const { noteFreshStart } = await import('../src/fresh-start.ts');
   noteFreshStart();
-  await round();
+  const retried = await round();
   assert.equal(readFileSync(attempts, 'utf8').split('\n').filter((v) => v === '0.4.3').length, 2, 'tried again after the fresh start');
+  assert.equal(testsIn(retried.log), 0, 'tested once per commit');
   assert.deepEqual(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')), { fake: sha.slice(0, 7) }, 'failed again: held as before');
   await round();
   assert.equal(readFileSync(attempts, 'utf8').split('\n').filter((v) => v === '0.4.3').length, 2, 'once per fresh start');
@@ -146,22 +159,6 @@ test("a release that fails while this PC is offline isn't held against its commi
   await round();
   assert.equal(tries(), before + 2, 'tried again, online');
   assert.equal(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')).fake, sha.slice(0, 7), 'online, a failure is held as before');
-});
-
-test('a round that leaves a PR waiting only on its checks running asks for the next round sooner; one that leaves none waiting so, not', async () => {
-  const running = [{ __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: null }];
-  const listing = (checks: unknown[]) =>
-    runner((args) => {
-      if (args[0] === 'pr' && args[1] === 'list') return ok(args.includes('Jcollier0120/Fake') ? [{ number: 8, title: 'Fake 0.4.9: more', url: 'https://github.com/Jcollier0120/Fake/pull/8', headRefName: 'fix/more', headRefOid: prSha, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: checks, body: '' }] : []);
-      if (args[0] === 'release' && args[1] === 'list') return ok([...released().map((v) => ({ tagName: `v${v}`, isDraft: false })), { tagName: 'v0.4.0', isDraft: false }]);
-      if (args[0] === 'release' && args[1] === 'view') return ok({ targetCommitish: prSha });
-    });
-  const lines: string[] = [];
-  const soon = await runStage('round', { full: true }, { run: listing(running).run, log: (l) => lines.push(l) });
-  assert.equal(soon.soon, true);
-  assert.match(lines.join('\n'), /the next round comes sooner: Fake #8 waits only on checks running/);
-  const failing = await runStage('round', { full: true }, { run: listing([{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }]).run });
-  assert.equal(failing.soon, undefined, 'failing checks wait for a person, not a few minutes');
 });
 
 test('the next round comes sooner at most a few times in a row, and never later than Settings say', async () => {

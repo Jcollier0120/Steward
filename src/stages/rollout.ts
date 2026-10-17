@@ -294,7 +294,7 @@ export function planRollout(o: { on: boolean; kit: string | null; ownKit: string
     else if (!f.pin) skip(`no kit.json on origin/${e.branch}`);
     else if (compareVersions(f.pin, kit) >= 0) skip(`on kit ${f.pin} already`);
     else if (f.kitPrs.length && f.own) (plan.merge ??= []).push({ employee: e, ...f.own });
-    else if (f.kitPrs.length && !f.fold) skip(`its kit PR ${f.kitPrs.join(', ')} is open: merge it yourself, or close it, and the next build rolls the kit out`);
+    else if (f.kitPrs.length && !f.fold) skip(`its kit PR ${f.kitPrs.join(', ')} is open: close it, and the next build rolls the kit out afresh`);
     else if (f.pinPrs?.length) skip(`its open PR ${f.pinPrs.join(', ')} already brings kit ${kit}, so it gets no kit PR of its own beside it`);
     else {
       const h = o.failed[e.id];
@@ -360,7 +360,7 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   // Still bumping beside the rounds: this round leaves the kit to it, and decides nothing.
   if (going) {
     const who = going.names.length === 1 ? going.names[0] : `${going.names.length} employees`;
-    const why = `kit ${going.kit}'s rollout to ${who} goes on beside the rounds (started ${ago(Date.now() - going.started)} ago): the rounds go on merging meanwhile`;
+    const why = `kit ${going.kit}'s rollout to ${who} goes on beside the rounds (started ${ago(Date.now() - going.started)} ago): the rounds go on meanwhile`;
     ctx.log(`rollout: ${why}`);
     return { results: [], plan: { kit: going.kit, why, waitsForSteward: false, bump: [], skip: [] }, beside: true };
   }
@@ -421,14 +421,14 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   // The kit PRs left open at this kit, merged now: no one else merges the Steward's PRs.
   for (const m of plan.merge ?? []) {
     const why = await withRepo(ctx.log, m.employee.id, () => mergeOwn(ctx, m.employee, m)).catch((err: Error) => err.message);
-    results.push(why ? result(m.employee, 'failed', `rollout: its kit PR #${m.number} at kit ${kit} is open still (${why}): merge it yourself, or close it`) : result(m.employee, 'done', `rollout: merged its kit PR #${m.number} (kit ${kit})`));
+    results.push(why ? result(m.employee, 'failed', `rollout: its kit PR #${m.number} at kit ${kit} is open still (${why}): the next build tries again`) : result(m.employee, 'done', `rollout: merged its kit PR #${m.number} (kit ${kit})`));
   }
   if (!plan.bump.length) return { results, plan };
   const names = plan.bump.map((b) => b.employee.name).join(', ');
   // One at a time on this PC: a rollout another process runs (a round in a terminal) has the kit.
   const bumps = (c: Ctx) => withLock(rolloutLock(), () => timed(phaseOf(c), 'rollout', `kit ${kit}`, () => bumpAndPush(c, plan, { kit, changelog: o.changelog, ...(tool ? { tool } : {}) })), { waitMs: 0, staleMs: STAGE_STALE_MS });
   if (beside) {
-    ctx.log(`rollout: kit ${kit} for ${names}, beside the rounds: the rounds go on merging meanwhile`);
+    ctx.log(`rollout: kit ${kit} for ${names}, beside the rounds: the rounds go on meanwhile`);
     startBeside(ctx, kit, plan.bump.map((b) => b.employee.name), bumps);
     return { results, plan, beside: true };
   }

@@ -648,9 +648,16 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           const employees = turns.acting;
           out.results = [...turns.elsewhere];
           const self = withSelf && turns.selfActs ? selfEmployee(ctx, o) : null;
+          // Those a rollout beside the rounds is bumping now (stages/rollout.ts) are left to it, rather than this round
+          // waiting for that bump's checks: a round comes once it ends (agent.ts), and releases them; or the next build.
+          const free = (who: Employee[]) => {
+            const bumping = who.filter((e) => heldBy(e.id) === 'rollout');
+            if (bumping.length) log(`${bumping.map((e) => e.name).join(', ')}: the kit's rollout beside the rounds is bumping ${bumping.length === 1 ? 'it' : 'them'} now, so this round leaves ${bumping.length === 1 ? 'it' : 'them'} to it`);
+            return who.filter((e) => !bumping.includes(e));
+          };
           // Main's unstamped entries first (stages/stamp.ts), each repository's and the Steward's own, so what is released
           // carries its version and changelog: a PR of the Steward's, opened and merged by it.
-          const stamped = await timed(phaseOf(ctx), 'merges', null, () => stampAll(ctx, [...(self ? [self] : []), ...employees]), (r) => r.results.length > 0);
+          const stamped = await timed(phaseOf(ctx), 'merges', null, () => stampAll(ctx, [...(self ? [self] : []), ...free(employees)]), (r) => r.results.length > 0);
           out.results.push(...stamped.results);
           mergedHere.push(...stamped.merged);
           // The Steward's own new versions (stages/self.ts): its kit, once tried on every agent, then its own.
@@ -705,7 +712,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             if (buildCloses) {
               // The build's one release is every repository of the build's: their turns taken.
               const all = await takeTurnsFor(ctx, o, picked.employees, null, true);
-              await timed(phaseOf(ctx), 'releases', null, () => releaseNow(all.acting));
+              await timed(phaseOf(ctx), 'releases', null, () => releaseNow(free(all.acting)));
             } else {
               // A kit still being tried: the next round comes sooner. A rollout beside the rounds: a round comes once it ends.
               if (rolled.waits) out.soon = true;
@@ -713,7 +720,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             }
           } else {
             await rollOut();
-            await releaseNow(employees);
+            await releaseNow(free(employees));
           }
           // Then each employee's jobs whose installed script is the merged one, approved, so an update never leaves them waiting.
           // Not one a rollout beside the rounds is bumping now: the next round approves its jobs, rather than this one waiting.

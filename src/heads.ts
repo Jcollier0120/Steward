@@ -19,7 +19,7 @@ import { loadSettings, selfRepoOf, type Settings } from './settings.ts';
  * did; and HEADS_AFTER_MERGE_MS after each merge it makes, the merged repository's. Only the heads: one GraphQL query
  * for all of them (about a point of GitHub's 5,000 an hour), no PRs, no releases, nothing of the round's.
  *
- * Only while the Steward merges and releases by itself (Settings), on duty: a Steward that only keeps the staff's pages
+ * Only while the Steward builds and releases by itself (Settings), on duty: a Steward that only keeps the staff's pages
  * up asks GitHub nothing, and neither does this. Never into the budget's spare tenth (budget.ts).
  */
 

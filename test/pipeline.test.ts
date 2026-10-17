@@ -42,12 +42,14 @@ test("the pipeline's settings: no switch, four builds a day to start with, each 
   // stored when the pipeline was turned on, was never chosen, and reads as today's.
   assert.equal(DEFAULT_PIPELINE.windowMinutes, 30);
   assert.deepEqual([45, 60, 90, 120, 360].map((windowMinutes) => normalizePipeline({ windowMinutes }).windowMinutes), [45, 60, 60, 30, 60]);
-  // Finding the PR that broke a build went with the merges: a settings.json that keeps bisectRuns loads, and it is left out.
+  // Finding the PR that broke a build went with the merges: a settings.json that keeps bisectRuns keeps it, unused,
+  // within its old limits (Settings' other unused values are kept too).
   assert.equal('bisectRuns' in DEFAULT_PIPELINE, false);
-  assert.deepEqual(normalizePipeline({ bisectRuns: 5 }), DEFAULT_PIPELINE);
+  assert.deepEqual(normalizePipeline({ bisectRuns: 5 }), { ...DEFAULT_PIPELINE, bisectRuns: 5 });
+  assert.deepEqual([-1, 0, 6, 9, 'x'].map((bisectRuns) => normalizePipeline({ bisectRuns }).bisectRuns), [0, 0, 6, 6, undefined]);
 });
 
-test("Settings: no switch shown; Manor's save of the group with its old switch, off, and its old bisectRuns, is taken, both left out", async () => {
+test("Settings: no switch shown; Manor's save of the group with its old switch, off, and its old bisectRuns, is taken: the switch left out, bisectRuns kept unused", async () => {
   const { SETTINGS_SPEC, loadSettings } = await import('../src/settings.ts');
   const { saveSettingsReply, schemaFor } = await import('../src/kit/settings-kit.ts');
   const group = SETTINGS_SPEC.schema.find((f) => f.key === 'buildPipeline');
@@ -62,7 +64,7 @@ test("Settings: no switch shown; Manor's save of the group with its old switch, 
   assert.equal((r.json as { ok?: boolean }).ok, true, JSON.stringify(r.json));
   const stored = JSON.parse(readFileSync(SETTINGS_SPEC.file(), 'utf8'));
   assert.equal('on' in stored.buildPipeline, false);
-  assert.deepEqual(loadSettings().buildPipeline, { times: ['07:00', '19:00'], days: ['mon', 'tue', 'wed', 'thu', 'fri'], kit: 'every', windowMinutes: 45 });
+  assert.deepEqual(loadSettings().buildPipeline, { times: ['07:00', '19:00'], days: ['mon', 'tue', 'wed', 'thu', 'fri'], kit: 'every', windowMinutes: 45, bisectRuns: 3 });
   rmSync(SETTINGS_SPEC.file(), { force: true });
 });
 
@@ -72,14 +74,14 @@ test("the old default times, stored when the switch was turned on, were never ch
   const saved = { on: true, times: ['08:00', '13:00', '18:00'], days: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'], kit: 'every', windowMinutes: 120, bisectRuns: 3 };
   mkdirSync(path.dirname(SETTINGS_SPEC.file()), { recursive: true });
   writeFileSync(SETTINGS_SPEC.file(), JSON.stringify({ buildPipeline: saved }));
-  assert.deepEqual(loadSettings().buildPipeline, DEFAULT_PIPELINE);
+  assert.deepEqual(loadSettings().buildPipeline, { ...DEFAULT_PIPELINE, bisectRuns: 3 });
   rmSync(SETTINGS_SPEC.file(), { force: true });
   assert.deepEqual(normalizePipeline({ times: ['18:00', '8:00', '13:00'] }).times, DEFAULT_PIPELINE.times, 'the same three, written another way');
   // Any other list is the owner's.
   for (const times of [['08:00', '13:00'], ['08:00', '13:00', '18:00', '21:00'], ['08:00', '12:00', '18:00'], ['07:30']]) {
     assert.deepEqual(normalizePipeline({ ...saved, times }).times, times);
   }
-  assert.deepEqual(normalizePipeline({ ...saved, kit: 'first', windowMinutes: 45 }), { ...DEFAULT_PIPELINE, kit: 'first', windowMinutes: 45 }, 'the rest of the group stays');
+  assert.deepEqual(normalizePipeline({ ...saved, kit: 'first', windowMinutes: 45 }), { ...DEFAULT_PIPELINE, kit: 'first', windowMinutes: 45, bisectRuns: 3 }, 'the rest of the group stays');
 });
 
 test('the build times: the last one come and the next, on the days builds run', () => {

@@ -4,7 +4,7 @@ import { fetchFor, gitMaybe, removeWorktree } from '../git.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { checksLogOf, runChecks, type AffectedScope, type FailedChecks } from './bump.ts';
-import { checkoutOf, freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, freshWorktree, hostIs, interrupted, workRootOf, type Ctx } from './common.ts';
 import { setVouch, stoodInDescription, vouchDescription, vouchOn } from './vouch.ts';
 import type { StoodIn } from './standin.ts';
 import { recordTested } from '../tested.ts';
@@ -44,9 +44,11 @@ const keyOf = (e: Employee, commit: string) => `${e.id}@${commit}`;
 
 /**
  * Who vouched for `commit` of the employee's repository, in words, or null: a team account's steward/tested status on
- * it, or on a parent of a merge commit whose tree is the merge's own (one level). Never throws.
+ * it, or on a parent of a merge commit whose tree is the merge's own (one level). None over plain git, which has no
+ * statuses to ask (and GitHub is never asked for it). Never throws.
  */
 export async function coveredBy(ctx: Ctx, e: Employee, commit: string): Promise<string | null> {
+  if (hostIs(ctx, e) === 'git') return null;
   const team = ctx.settings.team;
   const sha = commit.slice(0, 7);
   const direct = await vouchOn(ctx, e.repo, commit, team).catch(() => null);
@@ -99,7 +101,8 @@ async function testAt(ctx: Ctx, e: Employee, commit: string, since: string | nul
     const task = { branch: e.branch };
     const doing = `${e.branch}'s checks at ${sha}`;
     const passed = async (note: string, description: string): Promise<MainTested> => {
-      const refused = await setVouch(ctx, e, e.repo, commit, description);
+      // Over plain git there's no status to set: the pass is kept here (main-tested.json) alone.
+      const refused = hostIs(ctx, e) === 'git' ? null : await setVouch(ctx, e, e.repo, commit, description);
       if (refused) say(refused);
       return { ok: true, note, at: now() };
     };
@@ -137,6 +140,11 @@ export async function mainGate(ctx: Ctx, e: Employee, commit: string, since: str
   const whole = wholePassOf(await treeOf(ctx.run, checkoutOf(e), commit).catch(() => null));
   if (whole) {
     ctx.log(`[${e.id}] its whole suite passed here at ${whole.commit.slice(0, 7)}, the same code as ${sha}: not tested again before its release`);
+    return null;
+  }
+  // No checks to run (Settings give it none): released as it was before builds tested main, untested.
+  if (!e.test.length) {
+    ctx.log(`[${e.id}] Settings give ${e.name} no checks, so ${sha} is released untested`);
     return null;
   }
   const tested = await testAt(ctx, e, commit, since);

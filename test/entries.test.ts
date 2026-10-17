@@ -192,7 +192,9 @@ test('main with no entry has nothing to stamp; an empty entry, or one naming ano
   assert.equal(s?.note, `its entries on main at ${bad.main.slice(0, 7)} weren't stamped: changes/0.4.2.md says nothing, or its heading names another version: that needs its author`);
   assert.equal(sh(bad.origin, 'for-each-ref', 'refs/heads/steward/'), '', 'nothing pushed');
   assert.equal(sh(bad.origin, 'rev-parse', 'refs/heads/main'), bad.main);
-  assert.deepEqual(b.gh.filter((g) => g[0] === 'pr'), [], 'no PR');
+  // GitHub asked only for its open PRs, for a stamp of its own an earlier build left open (none): no PR opened or merged.
+  assert.deepEqual(b.gh.filter((g) => g[0] === 'pr').map((g) => g.slice(0, 2)), [['pr', 'list']], 'no PR');
+  assert.ok(b.gh.find((g) => g[0] === 'pr')!.includes('number,headRefName,headRefOid,url'), b.gh.map((g) => g.join(' ')).join('\n'));
   assert.equal(existsSync(stampDirOf(x.ctx.settings, x.e)), false, 'its worktree removed');
 });
 

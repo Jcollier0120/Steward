@@ -55,7 +55,7 @@ test('an employee named with nothing more is a Node agent on the kit, with no re
   assert.deepEqual([off.usesKit, off.branch], [false, 'master']);
 });
 
-test("Settings from before the Steward stopped merging PRs (0.36.121) still load and save: their fields hidden, each saying it's no longer used; the build pipeline's bisectRuns gone", async () => {
+test("Settings from before the Steward stopped merging PRs (0.36.121) still load and save: their fields hidden, each saying it's no longer used, their values kept", async () => {
   const field = (key: string, fields = SETTINGS_SPEC.schema) => fields.find((x) => x.key === key);
   const fieldsOf = (key: string) => {
     const g = field(key);
@@ -76,16 +76,16 @@ test("Settings from before the Steward stopped merging PRs (0.36.121) still load
   assert.match(field('byItself')?.help ?? '', /at each build time it releases what is new on each repository's branch. Whoever writes a PR merges it once vouched/);
   assert.doesNotMatch(field('team')?.help ?? '', /ready PRs are merged/);
   assert.equal('bisectRuns' in DEFAULT_SETTINGS.buildPipeline, false);
-  // Still read from an older settings.json, as they were, so nothing it kept is lost; the pipeline's bisectRuns left out.
+  // Still read from an older settings.json, as they were, so nothing it kept is lost; the pipeline's bisectRuns too.
   const old = normalizeSettings({ releaseAfterMerge: true, catchUp: false, mergeTrain: false, mergeSelf: false, mergeMinAgeMinutes: 25, buildPipeline: { times: ['08:00'], bisectRuns: 3 } }).settings;
   assert.deepEqual([old.releaseAfterMerge, old.catchUp, old.mergeTrain, old.mergeSelf, old.mergeMinAgeMinutes], [true, false, false, false, 25]);
   assert.deepEqual([{}, { mergeMinAgeMinutes: -3 }, { mergeMinAgeMinutes: 'soon' }].map((r) => normalizeSettings(r).settings.mergeMinAgeMinutes), [10, 0, 10]);
-  assert.equal('bisectRuns' in old.buildPipeline, false);
+  assert.equal(old.buildPipeline.bisectRuns, 3);
   // An older Manor sends the whole form, its hidden fields too: saved all the same.
   const r = await save({ releaseAfterMerge: true, mergeMinAgeMinutes: 5, buildPipeline: { ...DEFAULT_SETTINGS.buildPipeline, bisectRuns: 2 } });
   assert.equal(r.json.ok, true, JSON.stringify(r.json));
   assert.equal(loadSettings().mergeMinAgeMinutes, 5);
-  assert.equal('bisectRuns' in loadSettings().buildPipeline, false);
+  assert.equal(loadSettings().buildPipeline.bisectRuns, 2);
   rmSync(settingsFile());
 });
 

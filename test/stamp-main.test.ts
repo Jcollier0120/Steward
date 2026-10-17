@@ -242,7 +242,7 @@ test("a stamp GitHub won't merge is left open, and said so; an entry that says n
   const refuse = 'GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)';
   const p = onMain('stamp-refused', { [fragmentFor('claude/feature')]: ENTRY('A feature.') }, { refuse });
   const s = await stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] });
-  assert.deepEqual(s, { done: false, note: `stamped v0.4.1, but its PR is open still (GitHub wouldn't merge #41: ${refuse}): merge it yourself, and the next build releases it`, version: '0.4.1', url: PR_URL });
+  assert.deepEqual(s, { done: false, note: `stamped v0.4.1, but its PR is open still (GitHub wouldn't merge #41: ${refuse}): the next build merges it, and then releases it`, version: '0.4.1', url: PR_URL });
   assert.equal(p.main(), p.head, 'main as it was');
   assert.equal(p.stampRefs(), `refs/heads/steward/stamp-${p.head.slice(0, 7)}`);
 
@@ -285,6 +285,17 @@ test("a stamp an earlier build left open is merged by the next while main hasn't
   assert.ok(q.r.gh.find((a) => a[1] === 'close')!.includes(`main has moved on to ${moved.slice(0, 7)}: the Steward stamps it again from there.`));
   assert.equal(sh(q.origin, 'rev-parse', 'refs/heads/main^'), moved, "main's new head, stamped");
   assert.equal(q.stampRefs(), '', 'both stamp branches gone');
+});
+
+test("over plain git, main's entries aren't stamped: no PR to stamp through, nothing pushed, and gh never run", async () => {
+  const p = onMain('stamp-plain-git', { [fragmentFor('claude/feature')]: ENTRY('A feature.') });
+  const ctx = { ...p.ctx, host: () => 'git' as const };
+  const s = await stampMain(ctx, p.e, { released: ['0.4.0'], taken: [] });
+  assert.equal(s?.skipped, true);
+  assert.match(s?.note ?? '', /worked with plain git, where the Steward opens no PRs and never pushes to main/);
+  assert.deepEqual(p.r.gh, []);
+  assert.equal(p.stampRefs(), '');
+  assert.equal(p.main(), p.head);
 });
 
 test("a build's stamps: each repository against its releases and the versions claimed on it; the stamp PRs merged are named", async () => {

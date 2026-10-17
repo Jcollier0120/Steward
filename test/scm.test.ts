@@ -152,7 +152,7 @@ test('a round over plain git: its version released and tagged on origin, no PRs,
     path.join(home, 'settings.json'),
     JSON.stringify({
       employees: [
-        { id: 'game', name: 'Game', repo: 'nas/game', checkout: f.checkout, branch: 'main', merges: true, usesKit: false, parts: [], fill: '', test: [], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: releaseCmd, install: '', approve: '' },
+        { id: 'game', name: 'Game', repo: 'nas/game', checkout: f.checkout, branch: 'main', usesKit: false, parts: [], fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: releaseCmd, install: '', approve: '' },
       ],
       workRoot: path.join(home, 'work'),
       releasesCastellan: false,
@@ -181,7 +181,8 @@ test('a round over plain git: its version released and tagged on origin, no PRs,
   assert.match(r.message, /^release: released v0\.4\.0 from origin\/main \(.{7}\), tagged v0\.4\.0 on its origin$/);
   assert.equal(r.url, undefined, 'no GitHub page for it');
   assert.equal(sh(f.origin, 'rev-parse', 'v0.4.0^{commit}'), sh(f.origin, 'rev-parse', 'main'));
-  assert.match(first.results.find((x) => x.id === 'game' && !x.message.startsWith('release: '))!.message, /worked with plain git/);
+  // Its head tested here first: there's no vouch to read over plain git.
+  assert.ok(first.log.some((l) => /^\[game\] testing main at .{7} before its release/.test(l)), first.log.join('\n'));
 
   // Nothing new: not released again.
   const second = await round();

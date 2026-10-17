@@ -6,8 +6,7 @@ import { after, test } from 'node:test';
 
 // A repository refreshed after releases (stages/refresh.ts): a site whose `npm run sync` lists every release's notes.
 // It runs only after a round that released something; it pushes only what changed, and only once its tests pass; a
-// failure is an alarm, never a push. A repository whose merging is off (the Exchequer's) is never merged, and its row
-// says why.
+// failure is an alarm, never a push. A round merges no one's PRs (Steward 0.36.121): the Exchequer's stays open.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-refresh-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
@@ -15,6 +14,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const { runStage } = await import('../src/steward.ts');
 const { refreshFailedFile, refreshStep, releasedWords, REFRESH_WAIT_MS } = await import('../src/stages/refresh.ts');
 const { staffRow } = await import('../src/stages/staff.ts');
+const { NO_RELEASE } = await import('../src/stages/release.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 
 const fake = fakeEmployee(path.join(home, 'fake'), { version: '0.4.0' });
@@ -186,13 +186,14 @@ test("a refresh whose tests fail pushes nothing, and is an alarm until a later o
   assert.ok(!alarms().some((id) => id.startsWith('refresh:')), 'cleared');
 });
 
-test("the Exchequer, its merging off, is never merged, whatever its PRs: only listed", async () => {
-  assert.deepEqual(r.gh.filter((a) => a[0] === 'pr' && a[1] === 'merge'), []);
+test("a round merges no one's PRs: the Exchequer's ready PR, open the whole time, is left to whoever wrote it", async () => {
   const out = await round();
+  assert.equal(out.error, undefined);
+  assert.deepEqual(r.gh.filter((a) => a[0] === 'pr' && a[1] === 'merge'), [], 'not by this round, nor by any before it');
+  // It has no Release it: the round only looks at its release, and leaves it.
   const row = out.results.find((x) => x.id === 'exchequer');
   assert.equal(row?.outcome, 'skipped');
-  assert.match(row!.message, /^1 open PR \(#4\)/);
-  assert.deepEqual(r.gh.filter((a) => a[0] === 'pr' && a[1] === 'merge'), []);
+  assert.equal(row!.message, `release: ${NO_RELEASE}`);
 });
 
 test("a repository's note leads its row on the page, and its VERSION constant is read as its version", async () => {

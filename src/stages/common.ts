@@ -120,9 +120,6 @@ export interface Ctx {
 /** How a repository is worked with in this stage (scm.ts). */
 export const hostIs = (ctx: Pick<Ctx, 'host'>, e: Employee): Host => ctx.host?.(e) ?? 'github';
 
-/** Said where a repository worked with plain git meets what only GitHub has: pull requests. */
-export const NO_PRS = 'worked with plain git (Source control, in Settings): there are no pull requests to merge, and what lands on its branch is released';
-
 /**
  * Whether a failure is only the network's: its words say so, or this PC is offline now (the kit's net.ts). Such a
  * failure is no fault of the commit: nothing is held against it (round-failed.json, self-failed.json,

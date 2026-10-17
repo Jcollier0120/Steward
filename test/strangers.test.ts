@@ -74,7 +74,7 @@ test('2026-10-07 replayed: Porter#65 opened by this round at 18:59:20, merged by
 test("this Steward's own merges and releases are never counted, nor asked about", async () => {
   let a = await S.judge({ acted: S.loadActed(), glance: glance('2026-10-07T18:51:00Z', { porter: { head: 'a', prs: [kitPr(porter.repo, 65, H65)], releases: rel('v0.5.12') } }), employees: [porter], merged: probe([]).fn, now: t('18:51:05') });
   writeFileSync(S.actedFile(), JSON.stringify(a));
-  // The round merges it and releases the version (stages/merge.ts and stages/release.ts note them).
+  // The round merges its own PR and releases the version (mainbuild.ts's mergeOwn and stages/release.ts note them).
   S.noteMerged(porter, 65, t('18:52:00'));
   S.noteReleased(porter, '0.5.13', t('18:53:00'));
   const p = probe([H65]);
@@ -167,7 +167,8 @@ test('the git probe: a PR head in the branch is merged; one that never reached i
   assert.equal(await p({ ...e, checkout: path.join(home, 'no-such-checkout') }, merged), null, 'no checkout: not told');
 });
 
-// Whole rounds: a fake Porter on kit 1.0.0, rolled out to new kits by this Steward, its PRs merged by it, or by someone else.
+// Whole rounds: a fake Porter on kit 1.0.0, rolled out to new kits by this Steward, its kit PRs merged by it at once
+// (Steward 0.36.121), or, one GitHub wouldn't merge for it, by someone else.
 test('whole rounds: no alarm for what the rounds merged and released; one when someone else merged and released', async () => {
   const f = fakeEmployee(path.join(home, 'porter'), { version: '0.5.12', kit: '1.0.0' });
   const attempts = path.join(home, 'released.txt');
@@ -211,11 +212,17 @@ test('whole rounds: no alarm for what the rounds merged and released; one when s
       return ok(`https://github.com/Jcollier0120/Porter/pull/${n}\n`);
     }
     if (args[0] === 'pr' && args[1] === 'merge') {
+      if (refuse) return { code: 1, out: '', err: 'GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)' };
       mergeBy(prs.find((p) => String(p.number) === args[2])!);
       return ok('');
     }
+    // A commit's statuses (vouch.ts): no vouch on main's head, so a round tests it; and the Steward's own once it passes.
+    if (args[0] === 'api' && args.some((a) => /^repos\/Jcollier0120\/Porter\/commits\/[0-9a-f]{40}\/statuses/.test(a))) return ok([]);
+    if (args[0] === 'api' && args.some((a) => /^repos\/Jcollier0120\/Porter\/statuses\/[0-9a-f]{40}$/.test(a))) return ok({});
     return { code: 1, out: '', err: `no stand-in for gh ${args.join(' ')}` };
   };
+  /** GitHub refuses the Steward's merges (the head moved, it says): its PR stays open, for someone else to merge. */
+  let refuse = false;
   /** A PR merged on GitHub, its branch deleted, as a Steward's merge does: this one's, or another's. */
   function mergeBy(pr: any) {
     sh(f.origin, 'update-ref', 'refs/heads/main', pr.headRefOid);
@@ -226,21 +233,28 @@ test('whole rounds: no alarm for what the rounds merged and released; one when s
   const alarms = () => JSON.parse(readFileSync(path.join(home, 'alarms.json'), 'utf8')).open as { id: string; title: string; detail: string[] }[];
 
   await round();
-  // A new kit: this round opens Porter's kit PR; the next merges and releases it; the one after sees only its own work.
+  // A new kit: this round opens Porter's kit PR and merges it itself, then tests main and releases it; the next round
+  // sees only its own work.
   kits = ['1.0.1', '1.0.0'];
-  const opened = await round();
-  assert.match(opened.results.find((x) => x.message.startsWith('rollout: '))?.message ?? '', /opened "Porter 0\.5\.13: the Steward's kit 1\.0\.1"$/, opened.log.join('\n'));
-  const merged = await round();
-  assert.deepEqual(merged.results.filter((x) => x.outcome === 'done').map((x) => x.message.replace(/\(.{7}\)/, '(…)')), ['merged #65', 'release: released v0.5.13 from origin/main (…), with kit 1.0.1']);
+  const rolled = await round();
+  assert.deepEqual(
+    rolled.results.filter((x) => x.outcome === 'done').map((x) => x.message.replace(/\([0-9a-f]{7}\)/g, '(…)')),
+    ['rollout: kit 1.0.1: 0.5.13 on steward/kit-1.0.1 (…): kit 1.0.0 → 1.0.1, checks passed; opened "Porter 0.5.13: the Steward\'s kit 1.0.1"; merged it', 'release: released v0.5.13 from origin/main (…), with kit 1.0.1'],
+    rolled.log.join('\n'),
+  );
+  assert.equal(prs.length, 0, '#65 merged by the round that opened it');
   await round();
   assert.deepEqual(alarms().filter((a) => a.id.startsWith('strangers:')), [], 'its own merge and release raise nothing');
   assert.deepEqual(S.loadActed().strangers, []);
 
-  // The next kit's PR is opened here, then merged and released by someone else before the next round.
+  // The next kit's PR is opened here, but GitHub won't merge it for the Steward; someone else merges and releases it
+  // before the next round.
   kits = ['1.0.2', ...kits];
-  await round();
+  refuse = true;
+  const left = await round();
+  assert.match(left.results.find((x) => x.message.startsWith('rollout: '))?.message ?? '', /opened "Porter 0\.5\.14: the Steward's kit 1\.0\.2"; it is open still \(GitHub wouldn't merge #66: .*Head branch was modified/, left.log.join('\n'));
   const pr = prs.find((p) => p.number === 66);
-  assert.ok(pr, 'Porter #66 opened');
+  assert.ok(pr, 'Porter #66 open still');
   mergeBy(pr);
   theirs.push('0.5.14');
   const seen = await round();

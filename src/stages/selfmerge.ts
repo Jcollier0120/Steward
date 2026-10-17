@@ -13,9 +13,9 @@ export const stewardEmployee = (s: Settings, checkout = s.stewardCheckout): Empl
   repo: s.stewardRepo,
   checkout,
   branch: 'main',
-  // Its own repository: the team's ready PRs to it are merged while Settings say it merges its own (mergeSelf).
+  // Its own repository: the Steward merges only the kit and stamp PRs it opens there itself (Steward 0.36.121).
   merges: true,
-  // Not "on the kit": a rollout passes it over, and the merge stage reads only its team's PRs.
+  // Not "on the kit": a rollout passes it over.
   usesKit: false,
   // Its kit and the kit tests' fixture, from its own kit\ (npm run kit), then the checks a person runs before a PR.
   fill: 'npm run kit',

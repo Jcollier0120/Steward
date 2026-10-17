@@ -20,7 +20,8 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - A version merged below one already released isn't released. claim-version hands out versions above main's, so take a new one if yours was passed.
 - The Steward still merges the PRs it opens itself: the kit rollout's PRs to each agent, and the PRs that put changes/ entries together.
 - Settings that only applied to merging are no longer used and are hidden: Merges PRs, a PR's minimum age, catching PRs up, merging ready PRs together, and finding the PR that breaks a build. Your values are kept.
-- On a repository worked with plain git, "When a branch is ready" is no longer run: land your branch yourself.
+- On a repository worked with plain git, "When a branch is ready" is no longer run: land your branch yourself. Its changes/ entries aren't put together by the Steward either, since there's no PR to do it through: put them into one version on a branch, and land it.
+- A repository whose Settings give it no checks is released without a test, as before.
 
 ### Before you update
 

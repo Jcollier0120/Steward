@@ -43,7 +43,7 @@ test('a new kit release: each employee behind it is bumped; not one already on i
   assert.deepEqual(plan.bump.map((b) => [b.employee.id, b.head]), [['porter', H1]]);
   assert.deepEqual(plan.skip.map((s) => [s.employee.id, s.why]), [
     ['clerk', 'on kit 2.9.1 already'],
-    ['miller', 'its kit PR #12 (steward/kit-2.9.0) is open: merge it yourself, or close it, and the next build rolls the kit out'],
+    ['miller', 'its kit PR #12 (steward/kit-2.9.0) is open: close it, and the next build rolls the kit out afresh'],
     ['manor', 'not using the kit yet'],
   ]);
   // A pin ahead of the newest release (a trial) is left alone, and so is one with no checkout, no kit.json or no branch.
@@ -103,7 +103,7 @@ test('a kit PR open for an older kit takes the new kit (the fold), instead of wa
   const fold = { number: 12, head: 'steward/kit-2.9.0', kit: '2.9.0' };
   const plan = planRollout({ on: true, kit: '2.9.1', ownKit: null, employees: [porter, miller], facts: { porter: facts('2.8.3', { kitPrs: ['#12 (steward/kit-2.9.0)'], fold }), miller: facts('2.8.3', { kitPrs: ['#13 (steward/kit-2.9.1)'] }) }, failed: {} });
   assert.deepEqual(plan.bump.map((b) => [b.employee.id, b.fold]), [['porter', fold]]);
-  assert.deepEqual(plan.skip.map((s) => s.why), ['its kit PR #13 (steward/kit-2.9.1) is open: merge it yourself, or close it, and the next build rolls the kit out']);
+  assert.deepEqual(plan.skip.map((s) => s.why), ['its kit PR #13 (steward/kit-2.9.1) is open: close it, and the next build rolls the kit out afresh']);
   // A fold that failed at that head is held like any bump.
   const failed = { porter: { kit: '2.9.1', head: H1, stage: 'bump' as const, message: 'npm test failed (exit 1)', at: '' } };
   assert.deepEqual(planRollout({ on: true, kit: '2.9.1', ownKit: null, employees: [porter], facts: { porter: facts('2.8.3', { kitPrs: ['#12 (steward/kit-2.9.0)'], fold }) }, failed }).bump, []);
@@ -186,7 +186,7 @@ test("a rollout merges the Steward's kit PR left open at the kit it rolls out, a
   merges = false;
   const refused = await rollout(ctx, [e], { kit: '1.0.1', ownKit: null, changelog: async () => null });
   assert.deepEqual(refused.results.map((x) => x.outcome), ['failed']);
-  assert.match(refused.results[0].message, /^rollout: its kit PR #30 at kit 1\.0\.1 is open still \(.* wouldn't merge #30: GraphQL: Pull Request is not mergeable \(mergePullRequest\)\): merge it yourself, or close it$/);
+  assert.match(refused.results[0].message, /^rollout: its kit PR #30 at kit 1\.0\.1 is open still \(.* wouldn't merge #30: GraphQL: Pull Request is not mergeable \(mergePullRequest\)\): the next build tries again$/);
   assert.equal(r.gh.filter((a) => a[1] === 'merge').length, 1 + 4, 'asked again after each wait');
 });
 

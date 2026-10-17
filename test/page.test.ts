@@ -102,16 +102,15 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const rows = [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', parts: ['node'], usesKit: true, branch: 'main', checkout: { path: home, exists: true, branch: 'main', changes: 0 }, main: null, release: null, releaseNeeded: false, prs: [], prepared: null, notes: [] }];
   const withOne = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true } });
   assert.match(withOne, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
-  for (const stage of ['bump', 'push', 'merge', 'release']) assert.match(withOne, new RegExp(`data-post="/api/stage/${stage}"[^>]*>`));
-  // Merge the team's PRs only once Settings name a team: the account gh is signed in as alone is none.
-  assert.doesNotMatch(withOne, /data-post="\/api\/stage\/merge-team"/);
-  assert.doesNotMatch((await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true }, team: ['me'], teamNote: 'Team is empty in Settings: the account gh is signed in as (me).' }), /merge-team/);
+  for (const stage of ['bump', 'push', 'release']) assert.match(withOne, new RegExp(`data-post="/api/stage/${stage}"[^>]*>`));
+  // The Steward merges no one's PRs (Steward 0.36.121): no Merge stage, nor Merge the team's PRs, even once Settings
+  // name a team.
   const withTeam = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true }, team: ['someone'], teamNote: null });
-  assert.match(withTeam, /data-post="\/api\/stage\/merge-team"[^>]*>/);
-  assert.match(withTeam, />Merge the team(&#x27;|')s PRs</);
-  // By itself (Settings' default): it builds at set times, its rounds only looking between builds but for an urgent fix;
-  // and Run now, in the title bar.
-  assert.match(withOne, /It builds at set times \(00:00, 06:00, 12:00, 18:00; Settings: Build pipeline\): a build merges every PR of its own and the team(&#x27;|')s that is ready/);
+  for (const h of [withOne, withTeam]) assert.doesNotMatch(h, /data-post="\/api\/stage\/merge|>Merge the team/);
+  assert.match(withOne, /The Steward merges no one(&#x27;|')s PRs but its own kit PRs/);
+  // By itself (Settings' default): it builds at set times, a build releasing each repository's main, its rounds only
+  // looking between builds but for an urgent fix; and Run now, in the title bar.
+  assert.match(withOne, /It builds at set times \(00:00, 06:00, 12:00, 18:00; Settings: Build pipeline\): a build releases each employee whose branch carries something new \(everyone merges their own PRs\)/);
   assert.match(withOne, /Between builds, a round every 10 minutes only looks, except for an urgent fix/);
   assert.match((await renderStewardBody('RunNow'))(body), /data-post="\/api\/run"[^>]*>Run now</);
   // No turn taken yet: nothing said of release PCs.
@@ -147,7 +146,7 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.match(withSelf, /href="https:\/\/github\.com\/octocat\/steward"/);
   assert.doesNotMatch(withSelf, /Releasing for Steward/, 'said in its row, not under the table');
   assert.match(withSelf, /name="employees"[^>]*value="fake"/);
-  assert.doesNotMatch(withSelf, /name="employees"[^>]*value="steward"/, 'its rounds merge and release it');
+  assert.doesNotMatch(withSelf, /name="employees"[^>]*value="steward"/, 'its builds release it');
   // One box ticks every repository, or none: the Steward's own row isn't counted.
   assert.match(withSelf, /<label class="pick pick-all"><input type="checkbox"[^>]*aria-label="Tick every repository"[^>]*\/> All \(1 of 1\)<\/label>/);
   // Open PRs are a small table under their row's first three columns, not a column; Notes only once a row has one.
@@ -156,65 +155,46 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const withPr = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: ["couldn't list its releases: offline"] }] }, round: { ...body.round, repos: true } });
   assert.match(withPr, /<th>Notes<\/th>/);
   assert.match(withPr, /<tr class="prs-row"><td colSpan="3"><div class="pr-head">Pull requests<\/div><table class="pr-table">.*#7.*Fix the thing.*claude\/fix, octocat(&#x27;|')s/);
-  // Merge conflicts: none looked at yet, and then each with what the Steward did, its badge on the PR's line too.
-  assert.match(withPr, /Merge conflicts[\s\S]*No PR the rounds looked at has conflicted with its branch/);
-  const t = new Date().toISOString();
-  const looks = [
-    { id: 'fake', name: 'Fake', repo: 'octocat/fake', number: 7, url: pr.url, title: 'Fix the thing', head: 'claude/fix', author: 'octocat', headOid: 'abc', outcome: 'sent-back', note: 'it conflicts with main in LICENSE: back with the Claude Code session that opened it, in a comment on it', files: ['LICENSE', 'package.json'], needs: ['LICENSE'], firstAt: t, at: t, lookedAt: t },
-    { id: 'fake', name: 'Fake', repo: 'octocat/fake', number: 5, url: 'https://github.com/octocat/fake/pull/5', title: 'Old', head: 'claude/old', author: 'octocat', headOid: 'def', outcome: 'caught-up', note: 'merged main into it, its version lines resolved', files: ['package.json'], needs: [], firstAt: t, at: t, lookedAt: t },
-  ];
-  const withLooks = (await renderStewardBody())({ ...body, conflicts: looks, staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: [] }] }, round: { ...body.round, repos: true } });
-  assert.match(withLooks, /<table class="pr-table">.*title="it conflicts with main in LICENSE[^"]*"[^>]*>.*sent back/, "the PR's line says what was done");
-  assert.match(withLooks, /<table class="conflicts">.*#7.*sent back.*back with the Claude Code session.*Conflicted in LICENSE, package\.json; LICENSE needed a person/);
-  assert.match(withLooks, /#5.*caught up.*merged main into it.*no longer open/, 'one since merged or closed says so');
-  // Read now and then, in About: the kit, and merge conflicts once none it lists is open. A PR it lists that is still
-  // open keeps them on the page. The last stage is on the page, above the staff. About carries no tour names: the tour
-  // shows the page.
-  for (const [h, open] of [[withPr, false], [withLooks, true], [withOne, false]] as const) {
+  assert.match(withPr, /title="Opened by octocat: whoever opened it merges it once it is vouched"/, 'a team PR is merged by whoever opened it');
+  // No Merge conflicts card any more: the Steward catches no PR up (Steward 0.36.121).
+  assert.doesNotMatch(withPr, /Merge conflicts|<table class="conflicts">/);
+  // Read now and then, in About: the kit. The last stage is on the page, above the staff. About carries no tour names:
+  // the tour shows the page.
+  for (const h of [withPr, withOne]) {
     const { page, about } = split(h);
     assert.ok(about.includes('The kit the Steward hands out') && !page.includes('The kit the Steward hands out'));
     assert.ok(!about.includes('Last stage') && page.includes('Last stage'));
     assert.ok(page.indexOf('Last stage') < page.indexOf('Staff') || !page.includes('Staff'), 'the last stage comes before the staff');
-    assert.equal(page.includes('<table class="conflicts">') || page.includes('No PR the rounds looked at'), open);
     assert.doesNotMatch(about, /data-tour/);
   }
-  const settled = split((await renderStewardBody())({ ...body, conflicts: [looks[1]], staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: [] }] }, round: { ...body.round, repos: true } }));
-  assert.ok(settled.about.includes('<table class="conflicts">') && !settled.page.includes('Merge conflicts'), 'only a settled one: in About');
-  const ping =await (await fetch(`${base()}/api/ping`)).json();
+  const ping = await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');
 });
 
 test('a stage needs the token, from its own origin or none: without it nothing starts', async () => {
   const token = readFileSync(path.join(home, 'server.json'), 'utf8').match(/"token": "([0-9a-f]+)"/)![1];
-  assert.equal((await post('/api/stage/merge', {})).status, 403);
+  assert.equal((await post('/api/stage/release', {})).status, 403);
   assert.equal((await post('/api/stage/bump', { 'x-token': 'nope' })).status, 403);
   assert.equal((await post('/api/stage/release', { 'x-token': token, origin: 'http://evil.example' })).status, 403);
   assert.throws(() => readFileSync(path.join(home, 'last-stage.json')), /ENOENT/, 'no stage ran');
-  const ok = await post('/api/stage/merge', { 'x-token': token, origin: `http://steward.localhost:${port}` });
+  const page = { 'x-token': token, origin: `http://steward.localhost:${port}` };
+  const ok = await post('/api/stage/release', page);
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { started: true });
   await served.idle();
   const last = JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8'));
-  assert.equal(last.stage, 'merge');
-  assert.equal(last.asked.yes, true, "the page's button asked first: that is merge --yes");
-  assert.equal(last.asked.team, undefined, "Merge is the Steward's PRs only");
+  assert.equal(last.stage, 'release');
+  assert.deepEqual(last.asked, { employees: [], kit: '1.0.0' }, 'the ticked employees (none) and the kit, as the page posts them');
   assert.deepEqual(last.results, []);
-  // Merge the team's PRs is merge --yes --team, with the same token.
-  assert.equal((await post('/api/stage/merge-team', {})).status, 403);
-  const team = await post('/api/stage/merge-team', { 'x-token': token, origin: `http://steward.localhost:${port}` });
-  assert.deepEqual(await team.json(), { started: true });
-  await served.idle();
-  const merged = JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8'));
-  assert.equal(merged.stage, 'merge');
-  assert.equal(merged.asked.yes, true);
-  assert.equal(merged.asked.team, true);
+  // Merge and Merge the team's PRs are gone (Steward 0.36.121: whoever wrote a PR merges it), even with the token.
+  for (const gone of ['/api/stage/merge', '/api/stage/merge-team']) assert.equal((await post(gone, page)).status, 404, gone);
   // Run now: a round, with the same token. With no employees it does nothing, and leaves no trace.
   assert.equal((await post('/api/run', {})).status, 403);
-  const round = await post('/api/run', { 'x-token': token, origin: `http://steward.localhost:${port}` });
+  const round = await post('/api/run', page);
   assert.deepEqual(await round.json(), { started: true });
   await served.idle();
-  assert.equal(JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8')).stage, 'merge', 'a round with nothing done is not recorded');
+  assert.equal(JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8')).stage, 'release', 'a round with nothing done is not recorded');
 });
 
 test("Manor's ask after an install: the jobs approved now, with the token as the CLI sends it; while every slot is taken, once one is free", async () => {
@@ -246,23 +226,24 @@ test("Manor's ask after an install: the jobs approved now, with the token as the
   assert.equal(ping.busy, false);
 });
 
-test("a vouch's ask for a round: one now while it merges by itself; while a round runs, once it can; none when it doesn't merge by itself", async () => {
+test("an older vouch's ask for a round: the Steward merges no PRs; while it builds by itself, a round now that looks for an urgent fix; while a round runs, once it can; none when it doesn't build by itself", async () => {
   const html = await (await fetch(`${base()}/`)).text();
   const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];
   await served.idle();
   assert.equal((await post('/api/round/soon', {}, {})).status, 403, 'the token, as ever');
   const settingsFile = path.join(home, 'settings.json');
   const was = readFileSync(settingsFile, 'utf8');
+  const merge = 'The Steward merges no PRs: merge it yourself once vouched, and the next build releases main';
   writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), byItself: false }));
   const no = await (await post('/api/round/soon', { 'x-token': token }, {})).json();
-  assert.deepEqual([no.started, no.message], [false, "The Steward doesn't merge by itself (Settings), so nothing merges until you press Run now."]);
+  assert.deepEqual([no.started, no.queued, no.message], [false, undefined, `${merge}.`]);
 
   writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), byItself: true, employees: [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', checkout: home }] }));
   // A round looks at GitHub first: its glance (asked again when the stand-in has no answer).
   const glances = () => r.gh.filter((a) => a[0] === 'api' && a[1] === 'graphql').length;
   const before = glances();
   const now = await (await post('/api/round/soon', { 'x-token': token }, {})).json();
-  assert.deepEqual([now.started, now.message], [true, "The Steward's round has started: it merges the PR now if its turn has come."]);
+  assert.deepEqual([now.started, now.message], [true, `${merge}: a round looks for an urgent fix now.`]);
   await served.idle();
   const each = glances() - before;
   assert.ok(each > 0, 'a round ran');
@@ -272,7 +253,7 @@ test("a vouch's ask for a round: one now while it merges by itself; while a roun
   hold = new Promise((done) => (letGo = done));
   assert.deepEqual(await (await post('/api/run', { 'x-token': token, origin: `http://steward.localhost:${port}` })).json(), { started: true });
   const queued = await (await post('/api/round/soon', { 'x-token': token }, {})).json();
-  assert.deepEqual([queued.started, queued.queued, queued.message], [false, true, "The Steward's round is running: a round comes as soon as it can."]);
+  assert.deepEqual([queued.started, queued.queued, queued.message], [false, true, `${merge}: a round looks for an urgent fix as soon as it can.`]);
   letGo();
   hold = Promise.resolve();
   await served.idle();
