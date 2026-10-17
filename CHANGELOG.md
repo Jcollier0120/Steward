@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.117
+## 0.36.120
 
 **The Steward hands out kit 2.80.2: pictures fit the Snapdragon X2's Qwen3-VL-2B. A 4K screen is read instead of refused, and the small text on a screen reads right.**
 
@@ -15,6 +15,21 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. An agent still on an older kit sends pictures to the X2 as before until it takes kit 2.80.2.
+
+## 0.36.118
+
+**The Steward hands out kit 2.80.1: FastFlowLM's working set is handed back to Windows once its model has loaded. That's about 3.6 GB of RAM for qwen3.5:2b and 6.4 GB for Gemma 4 E2B, decoding as fast as before.**
+
+### What changed
+
+- **Kit 2.80.1** (kit/CHANGELOG.md): a FastFlowLM server the kit starts has its working set emptied once its model has loaded (`working-set.ts`). Windows keeps those pages compressed, or in the pagefile, and reads back the few the server touches again. `KIT_SERVER_TRIM=0` turns it off.
+- **Tests that passed only on some PCs, so a vouch from the maker's other PCs failed:**
+  - `claims.test.ts`: the two tests of claims kept here now run as the maker's laptop (`makersPcForTests`), whatever PC runs them. On the maker's other PCs they were refused as one of Castellan's own repositories.
+  - `signing.test.ts`: its releases find a Windows SDK signtool of the test's own. On a PC without the SDK, the hung-signtool test was told "signtool isn't installed" instead.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.36.116
 
