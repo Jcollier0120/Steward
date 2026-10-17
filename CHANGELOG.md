@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.91
+
+**A vouched PR whose kit.json pins a kit with no release waits for it, as any PR does. Before, a vouch let it skip that hold, so it could merge pinned to a kit that will never be released.**
+
+### What changed
+
+- **A vouched PR's kit.json is looked at too** (stages/merge.ts `mergeOne`). A vouch is for a PR's checks, which its author's clone may have run with a kit filled from a Steward tree, not for the kit it pins. Before, a vouched PR skipped `kitReleaseHold`.
+  - Now every team PR the Steward would test itself has its pin read before its vouch: one whose kit has no release waits for it, and one whose kit will never be released is told on the PR and raises the `deadkit:` alarm, as 0.36.87 does for the others.
+  - Once its kit is released, the vouch still spares its checks here, as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.89
 
 **The Last stage card says what the stage was asked in words, and a pull request made a draft again just before its merge waits instead of failing.**
