@@ -155,11 +155,120 @@ test("an NPU 3720 set up before its embeddings took the graphics' turn: moved in
   for (const cards of [[IGPU], undefined]) assert.equal((await refreshNpu(fakePc(setUpEntry({ cards: [IGPU] }), { cards }).deps)).did, 'current', String(cards));
 });
 
-test('a PC whose embeddings were left off the NPU keeps them off', async () => {
-  const pc = fakePc(olderEntry({ noEmbed: true }));
-  assert.equal((await refreshNpu(pc.deps)).did, 'refreshed');
+const INTEL_EMBED = V.NPU_CATALOG.routes.intel.embedServer!;
+const INTEL_OWN = `${INTEL_EMBED.server} ${INTEL_EMBED.version}`;
+const offerWords = (e: Record<string, any>) => `embeddings: on the NPU's own server (${INTEL_OWN}, ${e.embed.model})`;
+
+test("an NPU that makes no embeddings, their server and model here: offered, tested after the chat in the same turn, and written with the chat's new command", async () => {
+  const old: Record<string, any> = olderEntry({ noEmbed: true });
+  const pc = fakePc(old);
+  const r = await refreshNpu(pc.deps);
+  const fresh = setUpEntry();
+  assert.equal(r.did, 'refreshed');
+  assert.deepEqual(r.changes, [`--max_prompt_len ${capOf(fresh)} added`, '--max_prompt_len 4096 removed', offerWords(fresh)]);
+  assert.deepEqual(pc.did, ['detect', 'turn', `stop ovms.exe ${old.chat.baseUrl}`, `test chat ${capOf(fresh)}`, `test embed ${INTEL_EMBED.model.dims}`, 'turn over']);
+  assert.deepEqual(pc.npu().chat, fresh.chat);
+  assert.deepEqual(pc.npu().embed, fresh.embed);
+  assert.deepEqual(pc.npu().timeouts, MEASURED);
+  assert.match(pc.log[0], /now start with this kit's command \(2\.75\.0\): .*embeddings: on the NPU's own server \(OpenVINO Model Server/);
+  assert.equal(readNpuRefresh(pc.configFile)?.embedOffer, undefined);
+  // Its chat already this kit's: the embeddings alone.
+  const chatCurrent = fakePc(setUpEntry({ noEmbed: true }));
+  assert.deepEqual(await refreshNpu(chatCurrent.deps), { did: 'refreshed', changes: [offerWords(fresh)] });
+  assert.deepEqual(chatCurrent.npu().embed, fresh.embed);
+});
+
+test('embeddings not offered: their model not here (left for setup, the chat refreshed without them), or no room for them beside the chat', async () => {
+  const noModel = fakePc(olderEntry({ noEmbed: true }), { exists: (p) => !/Qwen3-Embedding/i.test(p) });
+  const r = await refreshNpu(noModel.deps);
+  assert.equal(r.did, 'refreshed');
+  assert.ok(!r.changes!.some((c) => c.startsWith('embeddings')), r.changes!.join('; '));
+  assert.equal(noModel.npu().embed, undefined);
+  assert.ok(!noModel.did.some((d) => d.startsWith('test embed')));
+  // 12 GB: room for the chat's model, not for both (npuMemoryFit, as setup decides).
+  const ramBytes = 12 * 1024 ** 3;
+  const fit = V.npuMemoryFit(V.routeFor(V.NPU_CATALOG.routes.intel, support.generation), ramBytes);
+  assert.ok(fit.chat && !fit.embed, JSON.stringify(fit));
+  const small = fakePc(setUpEntry({ noEmbed: true }));
+  small.deps.detect = async () => (small.did.push('detect'), { npu: support, ramBytes } as any);
+  assert.deepEqual(await refreshNpu(small.deps), { did: 'current' });
+  assert.deepEqual(small.did, ['detect'], 'nothing stopped');
+});
+
+test("embeddings refused: the chat's new command written without them, and the record says so; offered again by three kits in all, then not until the route's embedding server is another", async () => {
+  const old: Record<string, any> = olderEntry({ noEmbed: true });
+  const pc = fakePc(old, { embeds: ['the vectors are all zero'] });
+  const r = await refreshNpu(pc.deps);
+  const fresh = setUpEntry();
+  assert.deepEqual(r, { did: 'refreshed', changes: [`--max_prompt_len ${capOf(fresh)} added`, '--max_prompt_len 4096 removed'] });
+  assert.deepEqual(pc.npu().chat, fresh.chat, "the chat's command, which answered");
   assert.equal(pc.npu().embed, undefined);
-  assert.ok(!pc.did.some((d) => d.startsWith('test embed')));
+  // The refused embedding server stopped; the chat that answered left running.
+  assert.deepEqual(pc.did.slice(-2), [`stop ovms.exe ${fresh.embed.baseUrl}`, 'turn over']);
+  assert.match(pc.log[0], /^the NPU's own embeddings \(OpenVINO Model Server .*\) weren't taken up, their test failed: the vectors are all zero; they go where they went before, and a later kit offers them again \(1 of 3\)/);
+  const offer = () => readNpuRefresh(pc.configFile)!.embedOffer!;
+  assert.deepEqual({ ...offer(), at: '' }, { server: INTEL_OWN, tries: 1, at: '', problems: ['the vectors are all zero'] });
+  // The same kit: looked at already.
+  assert.deepEqual(await refreshNpu(pc.deps), { did: 'looked' });
+  // Each later kit offers them again, its chat current: refused, nothing written, the chat left running.
+  for (const [kit, tries] of [['2.75.1', 2], ['2.75.2', 3]] as const) {
+    pc.did.length = 0;
+    pc.deps.kit = kit;
+    const before = readFileSync(pc.configFile, 'utf8');
+    assert.deepEqual(await refreshNpu(pc.deps), { did: 'current', problems: ['the vectors are all zero'] }, kit);
+    assert.equal(readFileSync(pc.configFile, 'utf8'), before, kit);
+    assert.ok(pc.did.includes(`test embed ${INTEL_EMBED.model.dims}`), kit);
+    assert.equal(offer().tries, tries, kit);
+  }
+  assert.match(pc.log.at(-1)!, /not offered again until the route's embedding server is another \(3 of 3\)/);
+  // A fourth kit: not offered, nothing stopped; the record still says why.
+  pc.did.length = 0;
+  pc.deps.kit = '2.75.3';
+  assert.deepEqual(await refreshNpu(pc.deps), { did: 'current' });
+  assert.deepEqual(pc.did, ['detect']);
+  assert.equal(offer().tries, 3);
+  // The route's embedding server another (a later build): offered afresh, and taken up when it answers.
+  pc.did.length = 0;
+  pc.deps.kit = '2.75.4';
+  pc.deps.catalog = { ...V.NPU_CATALOG, routes: { ...V.NPU_CATALOG.routes, intel: { ...V.NPU_CATALOG.routes.intel, embedServer: { ...INTEL_EMBED, version: '2026.9.0' } } } };
+  pc.deps.testEmbed = async (_e, dims) => (pc.did.push(`test embed ${dims}`), []);
+  const taken = await refreshNpu(pc.deps);
+  assert.equal(taken.did, 'refreshed');
+  assert.deepEqual(taken.changes, [`embeddings: on the NPU's own server (${INTEL_EMBED.server} 2026.9.0, ${fresh.embed.model})`]);
+  assert.deepEqual(pc.npu().embed, fresh.embed);
+  assert.equal(readNpuRefresh(pc.configFile)!.embedOffer, undefined, 'taken up: the refusal forgotten');
+});
+
+test("a Snapdragon's embeddings offered: GenieX's files copied over its embedding server's in the NPU's turn, before their test; a copy that fails refuses them untested", async () => {
+  const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
+  const x2 = parseNpus(X2, 'arm64')[0];
+  const ramBytes = 47.6 * 1024 ** 3;
+  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, small: false })!;
+  const withEmbed = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model } }), timeouts: { ...MEASURED } } as Record<string, any>;
+  const { embed: _e, ...chatOnly } = withEmbed;
+  const es = V.NPU_CATALOG.routes.qualcomm.embedServer!;
+  const on = (overlay: (from: string, into: string, files: string[]) => number) => {
+    const pc = fakePc(structuredClone(chatOnly));
+    pc.deps.detect = async () => (pc.did.push('detect'), { npu: x2, ramBytes } as any);
+    pc.deps.overlay = (from, into, files) => (pc.did.push(`overlay ${from} -> ${into} (${files.length})`), overlay(from, into, files));
+    return pc;
+  };
+  const pc = on(() => 13);
+  const r = await refreshNpu(pc.deps);
+  assert.deepEqual(r, { did: 'refreshed', changes: [`embeddings: on the NPU's own server (${es.server} ${es.version}, ${withEmbed.embed.model})`] });
+  const at = pc.did.findIndex((d) => d.startsWith('overlay'));
+  assert.ok(at > pc.did.indexOf('turn') && at < pc.did.indexOf(`test embed ${es.model.dims}`), pc.did.join(', '));
+  assert.equal(pc.did[at], `overlay ${V.expandRoute(es.overlay!.from, { tools })} -> ${plan.embed!.folder} (${es.overlay!.files.length})`);
+  assert.deepEqual(pc.npu().embed, withEmbed.embed);
+  assert.deepEqual(pc.npu().embed.env, withEmbed.embed.env, 'FastRPC finds the HTP library by its env');
+
+  const failing = on(() => {
+    throw new Error('C:\\Users\\me\\AppData\\Local\\GenieX CLI\\llama_cpp\\ggml.dll isn\'t there');
+  });
+  assert.deepEqual(await refreshNpu(failing.deps), { did: 'current', problems: [`${es.server} ${es.version}'s files couldn't be copied from ${es.overlay!.from}: C:\\Users\\me\\AppData\\Local\\GenieX CLI\\llama_cpp\\ggml.dll isn't there`] });
+  assert.ok(!failing.did.some((d) => d.startsWith('test embed')), failing.did.join(', '));
+  assert.equal(failing.npu().embed, undefined);
+  assert.equal(readNpuRefresh(failing.configFile)!.embedOffer!.tries, 1);
 });
 
 test("a new command that doesn't answer: the old one stays, its servers stopped, and this kit doesn't try again", async () => {

@@ -1465,6 +1465,20 @@ export interface NpuRefreshRecord {
   tries?: number;
   /** A `failed` look whose test failed for its server (npu-refresh.ts' serverFailed): a look from then on tests again. Without it, this kit doesn't. */
   retryAt?: string;
+  /** The NPU's own embeddings, offered by a look and refused (kit 2.86.0): kept in every later record until they're taken up. */
+  embedOffer?: NpuEmbedOffer;
+}
+
+/**
+ * Embeddings a look offered to an NPU entry that made none, and their test refused: their server as the route names it
+ * (`llama.cpp b11125`), how many kits' looks they failed, the last one's time and problems. At NPU_REFRESH_TRIES they
+ * aren't offered again until the route's embedding server is another.
+ */
+export interface NpuEmbedOffer {
+  server: string;
+  tries: number;
+  at: string;
+  problems: string[];
 }
 
 export const npuRefreshFile = (configFile: string) => path.join(path.dirname(configFile), 'npu-refresh.json');

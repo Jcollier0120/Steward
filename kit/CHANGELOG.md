@@ -2,6 +2,27 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.86.0
+
+**The keeper's refresh now offers the NPU its own embeddings where its entry makes none, when their server and model are already on the PC: tested in the NPU's turn, taken up only when they answer.**
+
+The owner, 2026-10-18: search indexing and embeddings belong on the NPU. The Snapdragon X2 Elite set up before kit 2.63.0 had its chat on the Hexagon and its embeddings on the Adreno, because the refresh kept an entry's embeddings "on or off as before". With Manor's `gpuWithNpu` off, Reeve's search fell back to npu-embed's nomic-embed-text v1.5 (inputs cut to 128 tokens) and Chamberlain's and Clerk's embeddings used the card. The Hexagon's llama-server b11125 and Qwen3-Embedding-0.6B were already on the PC.
+
+### What changed
+
+- **npu-refresh.ts:** `refreshNpu` offers the route's embedding server to an NPU entry without one. All of these must hold:
+  - the route has an embedding server (Qualcomm's, Intel's; AMD's has none);
+  - `npuMemoryFit` finds room for it beside the chat, as setup decides;
+  - its server and model are already on the PC (`planNpu`'s `downloadBytes` is 0 with them). Otherwise the look goes on without them, as before, and setup brings them.
+  In the same turn, after the chat's test, it copies the route's server's files over the embedding server's (Qualcomm's `overlay`, through the new optional dep `overlay`, setup's `overlayFiles` by default), then asks a test embedding. Taken up, the entry is written with them, and the log names `embeddings: on the NPU's own server (<server> <version>, <model>)`.
+- **Refused** (the copy or the test failed): the chat's new command, if any, is written without them, their server is stopped (not the chat's), the outcome is `current` or `refreshed` with the problems, and the record keeps `embedOffer` (`{ server, tries, at, problems }`, setup.ts' `NpuEmbedOffer`), carried in every later record until they're taken up. A later kit offers them again, `NPU_REFRESH_TRIES` (3) kits in all, then not until the route's embedding server (its name and version) changes.
+- **setup.ts:** `NpuRefreshRecord.embedOffer` and the `NpuEmbedOffer` type.
+- spec/ACCELERATORS.md (the keeper) and spec/NPU-VENDORS.md (A later kit's command) say so.
+
+### What an agent must do
+
+- Nothing: the keeper (the Smith, else Reeve) does it on the PC once it runs this kit. Reeve's indexes are named by their embedding model, so on a PC whose Reeve searched with npu-embed, it settles in once with Qwen3-Embedding. Chamberlain's and Clerk's indexes carry over: the Hexagon's vectors match the card's (cosine 0.999 and more).
+
 ## 2.85.0
 
 **The NPU can now run at full speed when an agent has work for it: model work left after a round's calls runs back to back on the NPU while the PC is plugged in, cool and quiet, and has the NPU to itself. The work status says how busy each accelerator was today.**
