@@ -19,7 +19,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseDetection, parseNpus, hardwareOf } = await import('./fixture/src/kit/detect.ts');
-const { planSetup, describePlan, runSetup, setUpNpu, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand, printReport, reportFrom } = await import('./fixture/src/kit/setup.ts');
+const { planSetup, describePlan, runSetup, setUpNpu, installerSaid, installerLogFile, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand, printReport, reportFrom } = await import('./fixture/src/kit/setup.ts');
 const { orderAccelerators, readAccelerators, validateAccelerators, validateKeeperConfig } = await import('./fixture/src/kit/accelerator-config.ts');
 const core = await import('./fixture/src/kit/core/index.js');
 const { serverEnv } = await import('./fixture/src/kit/accelerators.ts');
@@ -594,7 +594,7 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
   const hexagon = path.join(tools, 'servers', 'llama.cpp', 'b11125-hexagon');
   assert.deepEqual(qr.did, [
     'download geniex-cli-setup-windows-arm64-v0.8.0.exe',
-    'run geniex-cli-setup-windows-arm64-v0.8.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER',
+    `run geniex-cli-setup-windows-arm64-v0.8.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER /LOG=${path.join(tools, 'npu-installer.log')}`,
     'run geniex.exe pull qualcomm/Qwen3-VL-4B-Instruct:W4A16 --model-type vlm --skip-update',
     // Its embedding server: llama.cpp's b11125 with GenieX's own libraries over it, and its model.
     'download llama-b11125-bin-win-opencl-adreno-arm64.zip',
@@ -696,6 +696,68 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
     assert.match(r.problems[0], re, what);
     assert.match(r.problems[0], /config\.json gets no NPU entry; its work goes to the graphics card or the processor$/, what);
   }
+});
+
+// GenieX 0.9.1's installer as the Smith's try ran it on 2026-10-18: it first runs the installed version's uninstaller
+// (InitializeSetup), and quits when that fails. Inno Setup's own wording (Setup.MainFunc.pas).
+const INNO_UNINSTALL_FAILED = [
+  '﻿2026-10-18 09:26:42.505   Log opened. (Time zone: UTC-04:00)',
+  '2026-10-18 09:26:42.505   Setup version: Inno Setup version 6.7.1',
+  '2026-10-18 09:26:42.510   Install mode root key: HKEY_CURRENT_USER',
+  '2026-10-18 09:26:42.521   Defaulting to Yes for suppressed message box (Yes/No):',
+  '                          Existing version detected.',
+  '                          Please uninstall the existing version first.',
+  '                          ',
+  '                          Uninstall now?',
+  '2026-10-18 09:26:42.530   Defaulting to OK for suppressed message box (OK):',
+  '                          Uninstall failed (ErrCode: 2).',
+  '2026-10-18 09:26:42.531   InitializeSetup returned False; aborting.',
+  '2026-10-18 09:26:42.531   Caught EAbort exception.',
+  '2026-10-18 09:26:42.532   Deinitializing Setup.',
+  '2026-10-18 09:26:42.533   Log closed.',
+].join('\r\n');
+
+test("an Inno Setup installer's failure says why, from its own log (it prints nothing); the log is kept only then", async () => {
+  assert.equal(installerSaid(INNO_UNINSTALL_FAILED), 'Uninstall failed (ErrCode: 2). / InitializeSetup returned False; aborting.');
+  // Nothing telling: its last lines. No log (it stopped before writing one): nothing.
+  assert.equal(installerSaid('2026-10-18 09:42:30.505   Log opened.\r\n2026-10-18 09:42:31.280   Starting the installation process.\r\n2026-10-18 09:42:31.284   -- File entry --\r\n2026-10-18 09:42:38.205   Log closed.'), 'Starting the installation process. / -- File entry --');
+  assert.equal(installerSaid(''), '');
+
+  const tools = path.join(home, 'npu-installer-log');
+  const log = installerLogFile(tools);
+  const installing = (code: number, written: string | null) => {
+    const w = fakeNpuIo();
+    const runs: string[][] = [];
+    const io = {
+      ...w.io,
+      run: async (exe: string, args: string[]) => {
+        if (args[0] !== '/VERYSILENT') return w.io.run(exe, args);
+        runs.push(args);
+        const to = args.find((a) => a.startsWith('/LOG='))!.slice(5);
+        if (written !== null) writeFileSync(to, written);
+        return code === 0 ? w.io.run(exe, args) : { code, out: '' };
+      },
+    };
+    return { io, runs };
+  };
+  // A log from an earlier failure is never read as this one's.
+  mkdirSync(tools, { recursive: true });
+  writeFileSync(log, INNO_UNINSTALL_FAILED);
+  const quiet = installing(1, null);
+  const silent = await setUpNpu(planFor(NPU.x1, 'arm64', tools), tools, quiet.io);
+  assert.equal(silent.failed, 'install');
+  assert.match(silent.problems[0], /^npu: GenieX's installer ended with 1 \(its log: .*npu-installer\.log\)\. config\.json gets no NPU entry/);
+  assert.equal(quiet.runs[0].at(-1), `/LOG=${log}`, 'its log goes to the tools home, which a try keeps');
+
+  const failing = installing(1, INNO_UNINSTALL_FAILED);
+  const failed = await setUpNpu(planFor(NPU.x1, 'arm64', tools), tools, failing.io);
+  assert.equal(failed.entry, undefined);
+  assert.match(failed.problems[0], /^npu: GenieX's installer ended with 1: Uninstall failed \(ErrCode: 2\)\. \/ InitializeSetup returned False; aborting\. \(its log: .*npu-installer\.log\)\. config\.json gets no NPU entry/);
+  assert.ok(existsSync(log), 'kept, to read later');
+
+  const working = installing(0, '2026-10-18 09:42:38.172   Installation process succeeded.');
+  assert.deepEqual((await setUpNpu(planFor(NPU.x1, 'arm64', tools), tools, working.io)).problems, []);
+  assert.ok(!existsSync(log), 'gone once it worked');
 });
 
 test("AMD's xrt-smi that can't start (an older driver's DLLs beside it): the NPU used all the same, at its default power mode, and the note says why", async () => {

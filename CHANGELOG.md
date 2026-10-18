@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.140
+
+**The kit 2.83.1: when your NPU's model server can't be installed, the reason now says why.**
+
+### What changed
+
+- **The kit 2.83.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): when GenieX's installer fails during setup or a Smith try, the message now gives the installer's own reason, such as "Uninstall failed (ErrCode: 2).", and where its full log is. Before, it said only "GenieX's installer ended with 1".
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.139
 
 **The Steward's own release now gets the same care as its staff's: if it reaches GitHub but not the Exchequer, the Steward publishes it there itself. And a new Publish it now button tries at once.**
