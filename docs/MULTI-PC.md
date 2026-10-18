@@ -1,13 +1,14 @@
 # Several PCs
 
 The owner works on a desktop or a laptop, depending on the job, and each may run a Steward signed in to the same
-GitHub account. Without taking turns, two of them merge and release the same pull requests. Most of the staff act only
-on their own PC and need nothing: Porter, Heiward, the Lamplighter, the Smith, the local AI. The Steward publishes to
-shared remotes, so it takes turns.
+GitHub account. Without taking turns, two of them release the same versions, and stamp and roll the kit out to the
+same repositories. The Steward merges no one's pull requests (0.36.124): whoever writes one merges it once vouched, and
+the builds release what is on the branch. Most of the staff act only on their own PC and need nothing: Porter, Heiward,
+the Lamplighter, the Smith, the local AI. The Steward publishes to shared remotes, so it takes turns.
 
 The PCs work this out among themselves, through each repository's own remote, with plain git. No licence, no
-Exchequer and nothing particular to GitHub is involved, so it works for anyone, Freehold included. (Merging itself still
-uses `gh`; that is separate.)
+Exchequer and nothing particular to GitHub is involved, so it works for anyone, Freehold included. (The Steward's
+merges of its own kit and stamp PRs still use `gh`; that is separate.)
 
 ## One release PC per repository
 
@@ -38,8 +39,7 @@ The rules (`src/lease.ts`):
 - **Only where it looks.** A round reads the turns of the repositories its plan looks at (something new on GitHub, or
   the hourly full look), and of the ones it refreshes after releases. It publishes nothing to the others, so it
   leaves their turns alone.
-- **Who has it.** Another PC's turn is left alone, and the page says so ("Merging and releasing for Clerk: done by
-  DESKTOP-ABC").
+- **Who has it.** Another PC's turn is left alone, and the page says so ("Releasing for Clerk: done by DESKTOP-ABC").
 - **Do it here** writes the turn to this PC at once.
 - **Keep it on this PC** pins it there. A pinned turn is never taken while its PC renews it.
   - A pin silent for more than 24 hours may be taken, and the page says that PC has gone quiet.
@@ -53,11 +53,12 @@ The rules (`src/lease.ts`):
 
 Only publishing to the shared remote waits for the turn:
 
-- merging;
 - releasing, including the Release button;
+- a build's stamp, and the merge of the stamp PR it opens;
 - the push after a refresh;
-- a kit rollout's push (the round's, and the Push button);
-- a catch-up's push.
+- a kit rollout's push (the round's, and the Push button), and the round's merge of the kit PR it opens.
+
+Merging other pull requests waits for nothing: since 0.36.124 whoever writes one merges it.
 
 Nothing local ever waits, with or without a remote or a turn:
 
@@ -86,9 +87,9 @@ Nothing local ever waits, with or without a remote or a turn:
   gone three days with no PR naming it.
 - **Remote out of reach:** the claim is made in the local store, as before.
   - The next round that reaches the remote shares it.
-  - If another PC claimed the same version meanwhile, this PC's claim stays local and is marked, and the page says so.
-  - The merge stage then holds the PR that sets that version, and catch-up gives it a fresh one.
-- Each round copies every PC's claims into the local store, so the merge stage sees them. It also lets go of landed
+  - If another PC claimed the same version meanwhile, this PC's claim stays local and is marked, and the page says so:
+    claim a new version for that work (`claim-version`, which passes the marked claim by) before you merge it.
+- Each round copies every PC's claims into the local store, so a build's stamp sees them. It also lets go of landed
   and stale claims in the ref.
 
 ## Later

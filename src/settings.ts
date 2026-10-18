@@ -361,7 +361,7 @@ const SOURCE_CONTROL: Field = {
   key: 'sourceControl',
   kind: 'choice',
   label: 'Source control',
-  help: "GitHub: pull requests merged, GitHub releases (the GitHub CLI, signed in). Git: any host with plain git, a release a v<version> tag, and each repository says what to do with a ready branch. Automatic: chosen for each repository from what this PC has.",
+  help: "GitHub: pull requests listed and vouched for (you merge your own), GitHub releases (the GitHub CLI, signed in). Git: any host with plain git, a release a v<version> tag: what you land on the branch is released at the next build. Automatic: chosen for each repository from what this PC has.",
   options: [
     { value: 'auto', label: 'Automatic' },
     { value: 'github', label: 'GitHub, for every repository' },
@@ -409,7 +409,7 @@ export const SETTINGS_SCHEMA: Field[] = [
         chipOff: 'not released',
         ...command,
       },
-      { key: 'test', kind: 'list', label: 'Test it', help: "Each must pass on the branch's newest commit before a build releases it, unless a vouch covers that commit. None: only a vouched commit is released.", item: { label: 'Command', ...command }, maxItems: 10, matchCase: true, chipOff: 'no tests', hidden: true },
+      { key: 'test', kind: 'list', label: 'Test it', help: "Each must pass on the branch's newest commit before a build releases it, unless a vouch covers that commit. None: it is released untested, as before builds tested main.", item: { label: 'Command', ...command }, maxItems: 10, matchCase: true, chipOff: 'no tests', hidden: true },
       {
         key: 'whenReady',
         kind: 'text',
@@ -604,7 +604,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     path: { is: 'folder', missing: 'made', env: true },
     hidden: true,
   },
-  { key: 'parallel', kind: 'whole', advanced: true, tab: 'How it works', min: 1, max: 10, unit: 'repositories', label: 'Checked at once', help: 'How many repositories a bump tests at the same time.' },
+  { key: 'parallel', kind: 'whole', advanced: true, tab: 'How it works', min: 1, max: 10, unit: 'repositories', label: 'Checked at once', help: "How many repositories a bump, a release, a refresh or a kit's trial works on at the same time. A build's releases and a trial take more where this PC's processors allow." },
   {
     key: 'stagesAtOnce',
     kind: 'whole',

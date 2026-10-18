@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { claimsOn, employeeFor, pushesHere } from '../claims.ts';
 import { identityOf } from '../employ.ts';
-import { gitMaybe } from '../git.ts';
+import { CHANGES_README } from '../entries.ts';
+import { gitMaybe, showFile } from '../git.ts';
 import { originRepo } from '../kit/manor.ts';
 import { makersPc, makersRepo } from '../maker.ts';
 import { employeeFromClone } from '../migrate.ts';
@@ -224,19 +225,21 @@ export function passingTrouble(text: string): boolean {
 
 /**
  * A branch with no PR, vouched for as it is pushed: a version must be claimed for it (claims.ts), since its PR's title
- * and its place in the version queue come from that, and origin's head of it must be the clone's HEAD.
+ * comes from that, and origin's head of it must be the clone's HEAD. Not where the branch writes its entries in
+ * changes/ (entries.ts): there claim-version claims nothing, and the build's stamp gives the work its version.
  */
 async function vouchBranch(ctx: Ctx, e: Employee, o: { dir: string; repo: string; branch: string; head: string; say: (line: string) => void; overMs?: number }): Promise<Vouched> {
-  const claim = claimsOn(e.repo).find((c) => c.branch === o.branch);
-  if (!claim) return { ok: false, message: `${o.branch} has no PR, and no version is claimed for it: claim one (claim-version ${e.id} --branch ${o.branch} --for "<what the work is>"), push, open its PR, and vouch again` };
+  const changes = (await showFile(ctx.run, o.dir, o.head, CHANGES_README)) !== null;
+  const claim = changes ? null : claimsOn(e.repo).find((c) => c.branch === o.branch);
+  if (!changes && !claim) return { ok: false, message: `${o.branch} has no PR, and no version is claimed for it: claim one (claim-version ${e.id} --branch ${o.branch} --for "<what the work is>"), push, open its PR, and vouch again` };
   if (o.branch.startsWith('wright/') || o.branch.startsWith('steward/')) return { ok: false, message: `${o.branch} is ${o.branch.startsWith('wright/') ? "the Wright's" : "the Steward's"}: it opens its own PRs` };
   const out = await gitMaybe(ctx.run, o.dir, 'ls-remote', '--heads', 'origin', `refs/heads/${o.branch}`);
   if (out === null) return { ok: false, message: `git couldn't ask origin for ${o.branch}` };
   const pushed = out.trim().split(/\s+/)[0] ?? '';
   if (!pushed) return { ok: false, message: `${o.branch} isn't on origin: push it, and vouch again` };
   if (pushed !== o.head) return { ok: false, message: `origin's ${o.branch} is at ${pushed.slice(0, 7)}, this clone's HEAD ${o.head.slice(0, 7)}: push, or check out its head, and vouch again` };
-  o.say(`${e.name} ${o.branch} (v${claim.version}, no PR yet) at ${o.head.slice(0, 7)}: its checks, in ${o.dir}`);
+  o.say(`${e.name} ${o.branch} (${claim ? `v${claim.version}, ` : ''}no PR yet) at ${o.head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, o);
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `${o.branch}'s checks failed at ${o.head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  return { ok: true, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): open its PR (v${claim.version}) from that commit, and ${MERGE_IT_YOURSELF(null, o.repo)}` };
+  return { ok: true, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): open its PR${claim ? ` (v${claim.version})` : ''} from that commit, and ${MERGE_IT_YOURSELF(null, o.repo)}` };
 }

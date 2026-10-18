@@ -153,6 +153,30 @@ test('steward vouch: the checks run at the PR\'s head, and only once they pass i
   assert.ok(!dirty.r.gh.some((a) => a[0] === 'pr' || a[0] === 'api'));
 });
 
+test('steward vouch: a branch with no PR that writes its entry in changes/ is vouched for with no version claimed, as claim-version claims none there', async () => {
+  const f = fakeEmployee(path.join(tmp, 'changes-clone'), { version: '0.4.0' });
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/entry');
+  mkdirSync(path.join(f.checkout, 'changes'), { recursive: true });
+  writeFileSync(path.join(f.checkout, 'changes', 'README.md'), 'Each piece of work writes its entry here.\n');
+  writeFileSync(path.join(f.checkout, 'changes', 'claude-entry.md'), '**A fix.**\n');
+  sh(f.checkout, 'add', '-A');
+  sh(f.checkout, 'commit', '--quiet', '-m', 'entry');
+  const head = sh(f.checkout, 'rev-parse', 'HEAD');
+  sh(f.checkout, 'remote', 'set-url', 'origin', 'https://github.com/Jcollier0120/Fake.git');
+  sh(f.checkout, 'config', `url.${f.origin.replace(/\\/g, '/')}.insteadOf`, 'https://github.com/Jcollier0120/Fake.git');
+  sh(f.checkout, 'push', '--quiet', 'origin', 'claude/entry');
+  rmSync(claimsFile(), { force: true });
+  const r = runner((a) => {
+    if (a[0] === 'pr' && a[1] === 'view') return { code: 1, out: '', err: 'no pull requests found for branch "claude/entry"' };
+    if (a[0] === 'api') return ok('{}');
+  });
+  const e = employee(f.checkout, { fill: '', test: ['node -e process.exit(0)'] });
+  const v = await vouch(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp }), { dir: f.checkout, say: () => {} });
+  assert.equal(v.ok, true, v.message);
+  assert.equal(v.message, `claude/entry's checks passed at ${head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): open its PR from that commit, and ${MERGE_IT_YOURSELF(null, 'Jcollier0120/Fake')}`);
+  assert.equal(r.gh.find((a) => a[0] === 'api')?.[3], `repos/Jcollier0120/Fake/statuses/${head}`);
+});
+
 test("on a maker's other PC, a clone of one of Castellan's own repositories gives its own checks, only where GitHub says this PC's account can push there", async () => {
   // The site: no manor-agent.json, no src/app.ts, no tools/kit.ts; named by its repository.
   const site = path.join(tmp, 'CastellanSite');
