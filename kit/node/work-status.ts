@@ -355,6 +355,14 @@ const holdersOf = (holders: ({ pid: number; since: number } | null)[]): WorkPlac
 const waitersOf = (waiting: { pid: number; lane: Lane; since: number; who?: string; doing?: string }[]): WorkPlace[] =>
   waiting.map((w) => ({ who: w.who ?? '', ...(w.doing ? { what: w.doing } : {}), pid: w.pid, since: iso(w.since), lane: w.lane }));
 
+/** The accelerators' day (busyToday: every agent's count files read), kept 15 s: a Work page asks every few seconds. */
+const DAY_KEPT_MS = 15_000;
+let dayKept: { at: number; day: ReturnType<typeof busyToday> } | null = null;
+const dayNow = () => {
+  if (!dayKept || Date.now() - dayKept.at > DAY_KEPT_MS) dayKept = { at: Date.now(), day: busyToday() };
+  return dayKept.day;
+};
+
 /**
  * The PC's lines now: the checks pace's turns (checks-pace.ts's runs), the work line and the first-round line (pace.ts),
  * and each accelerator's (accelerators.ts), as every agent on the PC shares them. Read only. `runs`: the check runs
@@ -384,7 +392,7 @@ export async function pcLines(o: { runs?: ChecksRun[] } = {}): Promise<WorkQueue
   try {
     const { loadAccelerators, lockDirsOf, turnsWithoutEntry } = await import('./accelerators.ts');
     const cfg = loadAccelerators();
-    const day = busyToday();
+    const day = dayNow();
     const todayOf = (id: string): Pick<WorkQueue, 'today'> => {
       const a = day.accelerators.find((x) => x.id === id);
       return a ? { today: { day: day.day, busyMs: a.busyMs, requests: a.requests, promptTokens: a.promptTokens, answerTokens: a.answerTokens } } : {};
