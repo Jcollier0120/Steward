@@ -452,6 +452,43 @@ export async function currentGames(accs: Accelerator[], opts: { now?: number; pr
   return pendingGames;
 }
 
+/**
+ * The program a game check found using a graphics card ("Cyberpunk2077.exe"; "a game" when it didn't say which), or
+ * null when no card is in use by one, or there was no check. Kit 2.87.0: the Scribe's and the Marshal's (their
+ * game.ts), for work that waits while a game is played.
+ */
+export function gameIn(g: Games | null): string | null {
+  const busy = g ? Object.values(g.cards).find((u) => u.busy) : undefined;
+  return busy ? (busy.by[0] ?? 'a game') : null;
+}
+
+/**
+ * The accelerators a game check looks at: the config's, while one of them is an enabled graphics card (as currentGames
+ * always has); else (no local AI set up, or one on the NPU or the processor only) the graphics cards hardware.json
+ * says this PC has, added beside them, so a PC that runs no model on its card still sees a game on it. Each added
+ * card is for the check only: its id is the one acceleratorId gives its name, and it serves nothing. No hardware.json
+ * (detection never ran here), nothing is added, and there's no check, as before. Nothing is detected here.
+ */
+export function gameWatchCards(accs: Accelerator[], hw: Hardware | null): Accelerator[] {
+  if (!hw || accs.some((a) => a.kind === 'gpu' && a.enabled !== false)) return accs;
+  return [...accs, ...hw.cards.map((c): Accelerator => ({ id: acceleratorId('gpu', c.name), kind: 'gpu', name: c.name, memoryGb: c.memoryGb, slots: 1, maxContextTokens: 0, quirks: [] }))];
+}
+
+/**
+ * The game using a graphics card now (gameIn), from games.json while it's under 15 s old, else checked again and
+ * written for everyone (currentGames); null when none is, or it can't be told. The cards are the config's, or with no
+ * graphics card in it, this PC's (gameWatchCards). Never throws. `file`, `hw`, `now` and `probe` are for tests.
+ */
+export async function gameNow(o: { file?: string; hw?: Hardware | null; now?: number; probe?: () => Promise<string> } = {}): Promise<string | null> {
+  try {
+    const hw = o.hw === undefined ? readHardware() : o.hw;
+    const cfg = loadAccelerators(o.file ?? readableConfigFile(), hw);
+    return gameIn(await currentGames(gameWatchCards('error' in cfg ? [] : cfg.accelerators, hw), { now: o.now, probe: o.probe }));
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------- choosing
 
 /** A background request doesn't join a line with this many already waiting. */

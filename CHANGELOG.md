@@ -18,6 +18,65 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. No agent changes until it takes up the kit's FFmpeg.
 
+## 0.36.156
+
+**The Steward now hands out kit 2.87.0, which holds code that several of your staff each kept their own copy of: reading text in pictures, search, the network, game captures, the game check, watching folders, and the guard installers' helpers. Nothing changes for a staff member until its own update takes them up.**
+
+### What changed
+
+- **One copy instead of two.** Pairs of your staff had the same code, each its own copy, and the copies had started to drift apart. Kit 2.87.0 holds one of each, so a fix reaches every staff member that uses it:
+  - reading text in screenshots and PDFs with Windows' own OCR (the Clerk's and the Scribe's);
+  - finding which NPU this PC has, for speech (the Envoy's);
+  - search, ranking the best matches first (the Clerk's and the Chamberlain's);
+  - the router and the internet connection: whether the router answers, Wi-Fi or Ethernet, metered or not (the Weigher's and the Bridgeward's);
+  - where game clips and screenshots are saved, and which game each is of (the Chronicler's and the Scribe's);
+  - whether a game is being played, so heavy work waits (the Scribe's, the Marshal's and the Chronicler's). On a PC with no local AI on its graphics card, it now still sees a game there;
+  - watching folders for changes, so a round looks only at what changed (the Chamberlain's and the Cellarer's);
+  - the guard installers' shared steps (the Watchman's and the Lamplighter's), with every safety check they had.
+- A small fix along the way: on a PC set to Russian, a router's ping replies are now read instead of counted as lost.
+
+Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGELOG.md), 2.87.0.
+
+### Before you update
+
+- Nothing: it updates itself as usual. This merges after 0.36.150 (kit 2.86.1).
+
+## 0.36.155
+
+**The Steward no longer rolls kits out to agents Manor has retired, and no longer releases them: today the Aletaster, the Auditor and the game-saves Butler.**
+
+### What changed
+
+- **Retired agents are passed over.** Manor's staff list marks an agent retired once another one does its work: the Assayer now does the Aletaster's, and the Smith the Auditor's. Neither was offered to customers, but each still got every new kit, with a bump, its checks, a PR, a merge and a release. Since 1 October that was about 164 of the Aletaster's 265 commits and 171 of the Auditor's 237. Now the rounds pass a retired agent over:
+  - no new kit is rolled out to it;
+  - a new kit isn't tried on it before the kit is released, and a failure it had in an earlier trial no longer holds the kit back;
+  - its versions aren't released.
+- A bump, push or release of a retired agent that failed before is let go, so it no longer raises an alarm. Its row on the Staff page says it is retired.
+- Only agents marked retired are passed over. One Manor holds back until its first release (the Seneschal), or doesn't list yet (the Bailiff and the Wright), gets every kit as before.
+- A Bump, Push or Release you start yourself, naming a retired agent, still does it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Steward reads which agents are retired from the Manor installed on this PC, so the Aletaster and the Auditor are passed over once Manor's next release is installed. Without Manor on this PC, nothing is passed over.
+
+## 0.36.154
+
+**Releases are checked by the Assayer before they go out, instead of by the Aletaster, which is retiring.**
+
+### What changed
+
+- Before it publishes a release, the Steward asks the Assayer about the commit it would release from, as it asked the Aletaster:
+  - the versions agree and are the next step;
+  - every merged PR has its changelog line;
+  - an agent of the house would be released under its own name.
+- A failure holds the release with the reason and a link, as before. "Waits for the Assayer's release check" in Settings (on by default) switches it off.
+- Released without a check, and saying so, where the Assayer isn't installed, its Developer options are off, or it's older than 0.4.22. The Assayer's own releases are never held by it.
+- "Told after a release" no longer pokes the retired Aletaster's Run now. It's dropped from saved settings too.
+
+### Before you update
+
+- Update the Assayer to 0.4.22 for the check. Until then, releases go out without one, and say so.
+
 ## 0.36.153
 
 **`steward vouch` now refuses a PR whose version files disagree, and says which file to fix, so the mistake is caught before the PR merges instead of holding up the next kit.**

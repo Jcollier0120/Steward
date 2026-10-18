@@ -13,6 +13,7 @@ import { bumpBranch, checkoutOf, glanceOf, hostIs, mapLimit, NOT_ON_KIT, type Ct
 import { gitGlance } from '../scm.ts';
 import { hostFor, must, type SourceHost } from '../hosts/index.ts';
 import { repoBusy } from './slots.ts';
+import { RETIRED, retiredOf } from '../retired.ts';
 
 /**
  * The staff at a glance (`steward staff`, and the page's table): for each employee, its own checkout, its
@@ -87,7 +88,8 @@ export interface StaffRow {
   releaseNeeded: boolean;
   /**
    * What the next build releases: origin's branch since the commit its latest release was built from (nextBuildOf). Null
-   * when that can't be said (no release yet, or its commit isn't in the clone); absent in a row made before Steward 0.36.135.
+   * when that can't be said (no release yet, or its commit isn't in the clone), and for one Manor has retired, which the
+   * builds don't release (retired.ts); absent in a row made before Steward 0.36.135.
    */
   nextBuild?: NextBuild | null;
   /** Settings merge its ready PRs (Employee.merges), and name a way to release it. */
@@ -325,6 +327,9 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
   // Settings' own word on it first (why its PRs are left to you, say).
   if (e.note) notes.push(e.note);
   if (e.refresh) notes.push(`after each release: ${e.refresh}, pushed to ${e.branch} when it changes anything`);
+  // Retired (retired.ts): the rounds pass it over, so the next build releases nothing of it.
+  const retired = retiredOf(ctx).has(e.id);
+  if (retired) notes.push(RETIRED);
   if (!e.usesKit) notes.push(NOT_ON_KIT);
   const remote = `origin/${e.branch}`;
   const here = releasedHereRow(e, row);
@@ -419,7 +424,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     const built = here.version && here.commit && row.checkout.exists ? await commitOf(run, dir, here.commit) : null;
     from = built ? { tag: `v${here.version}`, commit: built } : null;
   }
-  if (from && row.main) {
+  if (from && row.main && !retired) {
     row.nextBuild = await nextBuildOf(run, dir, remote, from);
     // git couldn't say: made again next time.
     if (!row.nextBuild) shaky.add(row);
@@ -500,6 +505,6 @@ export function rowKey(ctx: Ctx, e: Employee, o: { kit: string | null; tool?: st
   }
   const tool = o.tool ? createHash('sha256').update(o.tool).digest('hex') : null;
   // `made`: what a row holds, raised when it holds more (2: nextBuild, Steward 0.36.135), so a row kept from before is made again.
-  const what = { made: 2, e, self: !!o.self, repo: repoSig(g), origin, prepared, installed, team: ctx.settings.team, kit: o.kit, tool };
+  const what = { made: 2, e, self: !!o.self, repo: repoSig(g), origin, prepared, installed, team: ctx.settings.team, kit: o.kit, tool, ...(retiredOf(ctx).has(e.id) ? { retired: true } : {}) };
   return createHash('sha256').update(JSON.stringify(what)).digest('hex').slice(0, 32);
 }

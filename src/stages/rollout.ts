@@ -15,6 +15,7 @@ import { kitReach, type KitReach } from './kitreach.ts';
 import { releasedTool, releasedTree, stewardClone } from './trialpass.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
 import { mergeOwn } from './mainbuild.ts';
+import { RETIRED, retiredOf } from '../retired.ts';
 
 /**
  * The rollout, in a round: a new kit reaches every employee without anyone running `steward bump` and `steward push`.
@@ -27,6 +28,9 @@ import { mergeOwn } from './mainbuild.ts';
  * passed in the bump, and no one else merges the Steward's PRs. The build releases it. A kit PR of the Steward's left
  * open (one GitHub wouldn't merge at once, or one from before 0.36.124) is merged by the next rollout that finds it at
  * the kit rolled out.
+ *
+ * An agent Manor has retired (its staff.json: retired.ts) gets no kit: the rounds pass it over, and a bump of it that
+ * failed before is let go. A person's Bump or Push naming it still does it.
  *
  * A kit PR of the Steward's still open for an older kit (waiting its turn behind the employee's other PRs, which its
  * version is above) gets the newer kit instead of a second kit PR beside it: the fold. Its branch is bumped again, at
@@ -280,8 +284,8 @@ export function rolloutGate(o: { on: boolean; kit: string | null; ownKit: string
   return { kit: o.kit };
 }
 
-/** Which employees a round bumps to the newest kit, and why the others aren't. Pure. */
-export function planRollout(o: { on: boolean; kit: string | null; ownKit: string | null; settling?: string; employees: Employee[]; facts: Record<string, RolloutFacts>; failed: Record<string, RolloutHold> }): RolloutPlan {
+/** Which employees a round bumps to the newest kit, and why the others aren't: never one Manor has retired (`retired`). Pure. */
+export function planRollout(o: { on: boolean; kit: string | null; ownKit: string | null; settling?: string; employees: Employee[]; facts: Record<string, RolloutFacts>; failed: Record<string, RolloutHold>; retired?: ReadonlySet<string> }): RolloutPlan {
   const gate = rolloutGate(o);
   const settling = o.settling ? { settling: o.settling } : {};
   if ('why' in gate) return { kit: null, why: gate.why, waitsForSteward: gate.waitsForSteward, bump: [], skip: [], ...settling };
@@ -290,7 +294,8 @@ export function planRollout(o: { on: boolean; kit: string | null; ownKit: string
   for (const e of o.employees) {
     const f = o.facts[e.id];
     const skip = (why: string, held?: boolean) => void plan.skip.push({ employee: e, why, ...(held ? { held } : {}) });
-    if (!e.usesKit) skip(NOT_ON_KIT);
+    if (o.retired?.has(e.id)) skip(RETIRED);
+    else if (!e.usesKit) skip(NOT_ON_KIT);
     else if (!f) skip('not looked at');
     else if (!f.checkout) skip(`no checkout at ${checkoutOf(e)}`);
     else if (!f.head) skip(`no ${e.branch} on origin`);
@@ -396,8 +401,10 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   }
   const gate = rolloutGate({ on: ctx.settings.rollout, kit: target, ownKit, ...(settling ? { settling } : {}) });
   const facts: Record<string, RolloutFacts> = {};
+  // One Manor has retired gets no kit (retired.ts): its branch isn't even looked at.
+  const retired = retiredOf(ctx);
   if (!('why' in gate)) {
-    for (const e of employees.filter((x) => x.usesKit)) {
+    for (const e of employees.filter((x) => x.usesKit && !retired.has(x.id))) {
       try {
         facts[e.id] = await withRepo(ctx.log, e.id, () => rolloutFacts(ctx, e, gate.kit));
       } catch (err) {
@@ -405,7 +412,7 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
       }
     }
   }
-  const plan = planRollout({ on: ctx.settings.rollout, kit: target, ownKit, ...(settling ? { settling } : {}), employees, facts, failed });
+  const plan = planRollout({ on: ctx.settings.rollout, kit: target, ownKit, ...(settling ? { settling } : {}), employees, facts, failed, retired });
   // The newest kit went: the next one settles from here.
   if (plan.kit && plan.kit === o.kit && !settling && loadRolled() !== plan.kit) writeJson(rolloutSettleFile(), { kit: plan.kit, at: new Date().toISOString() } satisfies RolloutSettled);
   if (plan.why) {
