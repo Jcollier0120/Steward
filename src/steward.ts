@@ -261,18 +261,23 @@ function selfForStaff(ctx: Ctx): Employee | null {
 
 /**
  * After a quiet round: when GitHub says of every employee what it said when the staff's table was made, the table is
- * still right, and is only marked as checked; true then. False when it needs making again. The Steward's own row too,
- * when the glance reads its repository (glance.ts's stewardPrsAsked).
+ * still right, and is only marked as checked; true then. Else why it needs making again, for the round's log. The
+ * Steward's own row too, when the glance reads its repository (glance.ts's stewardPrsAsked).
  */
-export function markStaffChecked(glance: Glance, employees: Employee[], now = new Date()): boolean {
+export function markStaffChecked(glance: Glance, employees: Employee[], now = new Date()): true | string {
   const s = loadStaff();
-  if (!s?.seen || s.rows.filter((r) => !r.self).length !== employees.length) return false;
-  for (const e of employees) {
-    const g = glance.repos[e.id];
-    if (!g || !s.rows.some((r) => r.id === e.id) || s.seen[e.id] !== repoSig(g)) return false;
-  }
+  if (!s) return 'there is none yet';
+  if (!s.seen) return "it wasn't made from a glance";
+  const rows = s.rows.filter((r) => !r.self).length;
+  if (rows !== employees.length) return `it has ${rows} employees' rows, and Settings name ${employees.length}`;
+  const unseen = employees.filter((e) => !glance.repos[e.id]).map((e) => e.id);
+  if (unseen.length) return `the glance says nothing of ${unseen.join(', ')}`;
+  const rowless = employees.filter((e) => !s.rows.some((r) => r.id === e.id)).map((e) => e.id);
+  if (rowless.length) return `it has no row for ${rowless.join(', ')}`;
+  const moved = employees.filter((e) => s.seen![e.id] !== repoSig(glance.repos[e.id])).map((e) => e.id);
   const own = glance.repos[APP.id];
-  if (own && s.rows.some((r) => r.self) && s.seen[APP.id] !== repoSig(own)) return false;
+  if (own && s.rows.some((r) => r.self) && s.seen[APP.id] !== repoSig(own)) moved.push(APP.id);
+  if (moved.length) return `GitHub says something new of ${moved.join(', ')}`;
   writeJson(staffFile(), { ...s, checked: now.toISOString() });
   return true;
 }
@@ -525,6 +530,41 @@ async function kitAhead(ctx: Ctx, o: StageOptions): Promise<string | null> {
 }
 
 /** Runs a stage in one of the stages' slots (stages/slots.ts), records it, and refreshes the staff's table; a round only when it did something. */
+/** A round this long or longer says where its time went (lapped). */
+export const SLOW_ROUND_MS = 10_000;
+
+/**
+ * `fn` run with a lap(step) that marks where each of its steps ends; once it ends, a run of SLOW_ROUND_MS or more says
+ * in one line where its time went: each step of a second or more, slowest first (Steward 0.36.141). An idle round on
+ * the makers' PC took 28 s for 0.17 s of the processor, and nothing said where. With `say` null, nothing is said.
+ */
+export async function lapped<T>(say: ((line: string) => void) | null, fn: (lap: (step: string) => void) => Promise<T>, now: () => number = Date.now): Promise<T> {
+  const t0 = now();
+  let at = t0;
+  const laps = new Map<string, number>();
+  const lap = (step: string) => {
+    const t = now();
+    laps.set(step, (laps.get(step) ?? 0) + t - at);
+    at = t;
+  };
+  try {
+    return await fn(lap);
+  } finally {
+    const total = now() - t0;
+    if (say && total >= SLOW_ROUND_MS) {
+      lap('the rest');
+      say(lapsLine(total, laps));
+    }
+  }
+}
+
+/** "took 28.1 s: the staff's table 19.0 s, glance at GitHub 6.2 s": the steps of a second or more, slowest first. Pure. */
+export function lapsLine(total: number, laps: Map<string, number>): string {
+  const s = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+  const big = [...laps].filter(([, ms]) => ms >= 1000).sort((a, b) => b[1] - a[1]);
+  return `took ${s(total)}${big.length ? `: ${big.map(([step, ms]) => `${step} ${s(ms)}`).join(', ')}` : ''}`;
+}
+
 export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk, o: StageOptions = {}): Promise<StageResult> {
   const lines: string[] = [];
   const log = (line: string) => {
@@ -540,7 +580,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
   return withStageSlot(
     name,
     loadSettings().stagesAtOnce,
-    async () => {
+    () => lapped(name === 'round' ? log : null, async (lap) => {
       // With no repositories to look after here, or Settings saying it doesn't merge and release by itself, a round
       // asks GitHub nothing (no glance, no team): it keeps the staff's pages up, and the alarms look.
       const given = loadSettings();
@@ -554,6 +594,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       let budget = name === 'round' && !tendOnly && !offline ? roundWaits(given, ask, at()) : null;
       let quiet = offline || tendOnly || !!budget;
       const ctx = await context({ settings: given, run: o.run, log, glance: quiet ? false : undefined, offline: quiet, owner: o.owner, team: tendOnly ? false : undefined, scm: o.scm, now: o.now });
+      lap(quiet ? 'start' : 'glance at GitHub');
       // GitHub refused the glance itself: the round waits too, rather than asking of every repository on its own.
       if (name === 'round' && !quiet && !ctx.glance) {
         const g = gate(loadBudget(), 0, at());
@@ -577,6 +618,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       const planned: PipelineMode = pipeline ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { buildNow: ask.buildNow, employees: ask.employees, wokeAt: lastWoke() }) : { kind: 'outside' };
       // An urgent fix on main between builds (stages/urgent.ts): a build of its own for its repository, at once.
       const urgent = pipeline && planned.kind === 'between' ? await urgentBetween(ctx, o, ask, pipeline, log) : [];
+      lap('urgent fixes');
       const mode: PipelineMode = pipeline && urgent.length ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { urgent }) : planned;
       /** This round ends its build: it released each repository's main. */
       let buildCloses = false;
@@ -611,6 +653,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           log(mode.line);
           if (!only?.length) {
             const ahead = await kitAhead(ctx, o);
+            lap("the kit's trial");
             if (ahead) {
               log(`[${APP.id}] ${ahead}`);
               if (ahead.includes(TRIAL_GOING)) out.soon = true;
@@ -645,6 +688,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           }
           // Turns with this PC's others first (lease.ts): a repository another PC has its turn in is left to it.
           const turns = await takeTurnsFor(ctx, o, picked.employees, withSelf ? selfForTurns(ctx, o) : null);
+          lap('turns');
           turnsOn = turns.on;
           const employees = turns.acting;
           out.results = [...turns.elsewhere];
@@ -659,12 +703,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Main's unstamped entries first (stages/stamp.ts), each repository's and the Steward's own, so what is released
           // carries its version and changelog: a PR of the Steward's, opened and merged by it.
           const stamped = await timed(phaseOf(ctx), 'merges', null, () => stampAll(ctx, [...(self ? [self] : []), ...free(employees)]), (r) => r.results.length > 0);
+          lap('stamps');
           out.results.push(...stamped.results);
           mergedHere.push(...stamped.merged);
           // The Steward's own new versions (stages/self.ts): its kit, once tried on every agent, then its own.
           const selfReleases = self ? await timed(phaseOf(ctx), 'releases', APP.id, () => selfRound(ctx, o, stamped.merged.some((m) => m.startsWith(`${APP.id} `))), (r) => r.some((x) => x.outcome === 'done' || x.outcome === 'failed')) : [];
           // Its turn another PC's now (lease.ts): a whole suite beside the rounds here is that PC's to run, and is stopped.
           if (withSelf && !turns.selfActs) await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
+          lap("the Steward's own");
           if (selfReleases.some((r) => r.outcome === 'done' && /\bkit-v\d/.test(r.message))) {
             // A new kit: the kit's releases read again, for the rollout below.
             try {
@@ -682,6 +728,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Releases that reached GitHub but not the Exchequer (stages/exchequer.ts), the Steward's own among them, tried
           // there again once due: in every round, not only at a build's release, as no one is offered them until then.
           if (ctx.settings.releasesCastellan) out.results.push(...(await finishPending(ctx, [...(self ? [selfToFinish(self)] : []), ...free(employees)])).map((r) => ({ ...r, message: `exchequer: ${r.message}` })));
+          lap('the Exchequer');
           const releaseNow = async (who: Employee[]) => {
             const released = await releaseUnreleased(ctx, who);
             out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
@@ -726,6 +773,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             await rollOut();
             await releaseNow(free(employees));
           }
+          lap('rollout and releases');
           // Then each employee's jobs whose installed script is the merged one, approved, so an update never leaves them waiting.
           // Not one a rollout beside the rounds is bumping now: the next round approves its jobs, rather than this one waiting.
           for (const e of picked.employees.filter((x) => heldBy(x.id) !== 'rollout')) {
@@ -738,6 +786,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             }
             if (r) out.results.push({ ...r, message: `jobs: ${r.message}` });
           }
+          lap('jobs');
         } else if (name === 'release' && ask.hire) {
           // A hire: the agents named, installed here from their clones, whatever kit is being rolled out, on this PC's own
           // account (no turns with the licence's other PCs: an install is this PC's).
@@ -829,6 +878,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           log(`refresh: ${(e as Error).message}`);
         }
       }
+      lap('refresh after releases');
       // Every round, offline or not, with repositories or none: the agents on duty whose pages don't answer, opened again.
       if (name === 'round') {
         try {
@@ -836,12 +886,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         } catch (e) {
           log(`tend: ${(e as Error).message}`);
         }
+        lap('tending');
         // And the agent updates Manor gave up on, settled once their install would take them.
         try {
           out.results.push(...(await unstickRound(ctx.settings, o, ctx.run, log)));
         } catch (e) {
           log(`unstick: ${(e as Error).message}`);
         }
+        lap('unsticking');
       }
       out.finished = new Date().toISOString();
       // Claimed versions whose work landed, or went stale with no PR, are given back (claims.ts).
@@ -853,6 +905,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         } catch (e) {
           log(`claims: ${(e as Error).message}`);
         }
+        lap('claims');
       }
       // After every round, done or not: what needs the person (alarms.ts).
       if (name === 'round') {
@@ -860,18 +913,22 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
           // Merged or released by something that isn't this Steward (strangers.ts): looked for only in a round that asked GitHub.
           const strangers = await lookForStrangers({ ctx, glance: quiet || out.error ? null : ctx.glance, alarms: loadAlarms(), now: o.now?.() });
+          lap('strangers');
           // Every agent's port (ports.ts): two agents on one is an alarm before either is installed. Not in a test,
           // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
           const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
+          lap('ports');
           await watchAlarms({ settings: ctx.settings, round: out, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, heldKit: heldKit(readJson<Record<string, KitTrial>>(kitTrialsFile(), {}), ctx.kit.released), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), exchequerPending: loadExchequerPending(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }
+        lap('alarms');
       }
       // Something released: the pages that want to know are told (Manor installs it within minutes; the Aletaster tastes it).
       // In a build, once: when it ends, for everything it released (the Steward's own, released in its first rounds, too).
       const tellNow = mode.kind === 'build' ? !!out.build?.closed && mode.run.released.length + buildReleased.length > 0 : out.results.some(releasedSomething);
       if (tellNow) await timed(mode.kind === 'build' ? { due: mode.run.due } : null, 'manor', null, () => tellAfterRelease(ctx.settings.afterRelease, log, o.tell));
+      lap('telling Manor');
       // Where the build's time went so far (buildtimes.ts), in its record: the page's line once it ends.
       if (pipeline && mode.kind === 'build') keepPhases(mode.run.due);
       // A round with nothing done or failed leaves no trace: the last stage stays what last happened. The staff's table
@@ -879,10 +936,15 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (name === 'round' && !roundDidSomething(out.results, out.error)) {
         if (ctx.glance && !out.error) {
           try {
-            if (!markStaffChecked(ctx.glance, ctx.settings.employees)) await refreshStaff(ctx, { fetch: true });
+            const checked = markStaffChecked(ctx.glance, ctx.settings.employees);
+            if (checked !== true) {
+              log(`the staff's table is made again: ${checked}`);
+              await refreshStaff(ctx, { fetch: true });
+            }
           } catch (e) {
             log(`couldn't refresh the staff's table: ${(e as Error).message}`);
           }
+          lap("the staff's table");
         }
         return out;
       }
@@ -900,8 +962,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       } catch (e) {
         log(`couldn't refresh the staff's table: ${(e as Error).message}`);
       }
+      lap("the staff's table");
       return out;
-    },
+    }),
     // All the slots taken: a moment, then it says so (LockTimeout).
     { waitMs: 2000 },
   );

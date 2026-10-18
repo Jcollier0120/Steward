@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.83.2
+
+**A file an agent only reads is now parsed once while it is unchanged, not on every read. The Steward reads Manor's staff list (64 KB) and its own settings every two seconds, and now parses them only when they change.**
+
+On 2026-10-18 the Steward's efficiency audit found that each read of its settings parsed Manor's app\staff.json twice and agents.json once, and its own settings.json up to three times. With 40 repositories, a read took about 0.5 ms, and the Steward reads its settings several times a second while it works.
+
+### What changed
+
+- **file-cache.ts:** `readJsonShared(file, fallback, broken?)` keeps a file's parsed JSON with its text, so a file unchanged since the last read costs one stat and no parse. Every caller gets the same value, frozen all the way down, so no caller can change what the next one gets: a change throws. `broken`, when given, is what a file that is there but isn't JSON gives, apart from a missing one. `readJson` still parses afresh, for callers that change what they get.
+- **manor.ts:**
+  - `agentUrl`, `manorOwn` and `manorProjects` read Manor's files through it.
+  - `manorProjects` reads the manor's own (four more files) only when Manor lists projects.
+  - `originRepo` reads a clone's `.git` files through the file cache: a stat each while they are unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual. If your agent calls `readJsonShared`, don't change what it returns: it is frozen.
+
 ## 2.83.1
 
 **When the NPU's server installer fails, setup now says why, in the installer's own words, instead of only "GenieX's installer ended with 1".**

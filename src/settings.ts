@@ -789,11 +789,13 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
   // Read from the PC, never from the file: only the maker's laptop releases Castellan, whatever settings.json says.
   const makers = makersPc();
   // Off it, the maker's own repositories are kept in the file but never looked after (inEffect): said, so it's known why.
-  if (!makers)
+  if (!makers) {
+    const ids = makersIds();
     for (const e of employees) {
-      const why = makersOwn(e, { makers });
+      const why = makersOwn(e, { makers, ids });
       if (why) problems.push(why);
     }
+  }
   const parallel = Number(r.parallel);
   const stagesAtOnce = Number(r.stagesAtOnce);
   const roundMinutes = Number(r.roundMinutes);
@@ -903,7 +905,11 @@ export function manorTakesOver(own: Employee[], home = manorHome()): boolean {
 export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProject[] | null = null, o: { makers?: boolean; ids?: Set<string> } = {}): Settings {
   let out = s;
   const makers = o.makers ?? makersPc();
-  if (s.releasesCastellan && s.employees.some((e) => isSelf(s, e))) out = { ...out, employees: out.employees.filter((e) => !isSelf(s, e)) };
+  // The ids no repository here may take, worked out once rather than once an employee.
+  let ids = o.ids;
+  const idsHere = () => (ids ??= makersIds());
+  const self = s.releasesCastellan ? selfTest(s) : null;
+  if (self && s.employees.some(self)) out = { ...out, employees: out.employees.filter((e) => !self(e)) };
   if (!wright && (s.fileWork || s.wrightReview.on)) out = { ...out, fileWork: false, wrightReview: { ...out.wrightReview, on: false } };
   if (!makers) out = { ...out, releasesCastellan: false, makersPc: false };
   if (!out.releasesCastellan)
@@ -915,10 +921,10 @@ export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProje
       stewardRepo: '',
       stewardCheckout: '',
       releasesRepo: '',
-      employees: tracked ? employeesOfProjects(tracked, makers ? [] : [...(o.ids ?? makersIds())]) : out.employees.map((e) => (e.usesKit ? { ...e, usesKit: false } : e)),
+      employees: tracked ? employeesOfProjects(tracked, makers ? [] : [...idsHere()]) : out.employees.map((e) => (e.usesKit ? { ...e, usesKit: false } : e)),
     };
   if (!makers) {
-    const theirs = out.employees.filter((e) => !makersOwn(e, { makers, ids: o.ids }));
+    const theirs = out.employees.filter((e) => !makersOwn(e, { makers, ids: idsHere() }));
     if (theirs.length < out.employees.length) out = { ...out, employees: theirs };
   }
   return out;
@@ -934,9 +940,30 @@ export const settingsFile = () => dataFile('settings.json');
 
 /** Whether a repository is the Steward's own, as Settings name it: its repository, or its clone. */
 export function isSelf(s: Pick<Settings, 'stewardRepo' | 'stewardCheckout'>, e: { repo?: string; checkout?: string; path?: string }): boolean {
-  const dir = (p: string) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
-  const clone = e.checkout ?? e.path;
-  return (!!s.stewardRepo && !!e.repo && e.repo.toLowerCase() === s.stewardRepo.toLowerCase()) || (!!s.stewardCheckout && !!clone && dir(clone) === dir(s.stewardCheckout));
+  return selfTest(s)(e);
+}
+
+/** Each clone's path as isSelf compares it, worked out once a path: a full path's never changes (path.resolve costs a µs or two). */
+const dirKeys = new Map<string, string>();
+const dirKey = (p: string) => {
+  let k = dirKeys.get(p);
+  if (k === undefined) {
+    k = path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+    if (!/^(?:[a-z]:[\\/]|[\\/]{2}[^\\/])/i.test(p)) return k;
+    if (dirKeys.size >= 1000) dirKeys.clear();
+    dirKeys.set(p, k);
+  }
+  return k;
+};
+
+/** isSelf for many repositories: the Steward's own, worked out once (every read of the settings asks of each employee). */
+export function selfTest(s: Pick<Settings, 'stewardRepo' | 'stewardCheckout'>): (e: { repo?: string; checkout?: string; path?: string }) => boolean {
+  const repo = s.stewardRepo ? s.stewardRepo.toLowerCase() : '';
+  const own = s.stewardCheckout ? dirKey(s.stewardCheckout) : '';
+  return (e) => {
+    const clone = e.checkout ?? e.path;
+    return (!!repo && !!e.repo && e.repo.toLowerCase() === repo) || (!!own && !!clone && dirKey(clone) === own);
+  };
 }
 
 /** The Steward's own repository: Settings' when they name it, else the origin of the clone they name, else none. */

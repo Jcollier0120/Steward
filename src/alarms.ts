@@ -706,13 +706,16 @@ export async function watchAlarms(
   const now = deps.now ?? new Date();
   // The Wright's work and Reeve's alerts are read for the work filed (work.ts) as well as for the alarms.
   const wright = p.wright ? await get(new URL('/api/work', p.wright).href) : null;
-  const reeve = p.reeve && (deps.reeveInstalled ?? reeveInstalled)() ? await get(new URL('/api/alerts', p.reeve).href) : null;
+  // Reeve's only when something reads them: the work filed, or the manor-wide alarms while they are the Steward's (Steward
+  // 0.36.141). Where Manor keeps those and nothing is filed, Reeve was asked every round for nothing.
+  const askReeve = async () => (p.reeve && (deps.reeveInstalled ?? reeveInstalled)() ? await get(new URL('/api/alerts', p.reeve).href) : null);
+  let reeve = filing ? await askReeve() : undefined;
   // Failed bumps and releases, and Reeve's alerts that are code work, filed for the Wright: their alarms wait.
   let items: WorkItem[] = [];
   let states = new Map<string, WorkState>();
   if (filing) {
     try {
-      items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings });
+      items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== undefined && reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings });
       if (items.length) states = await fileWork({ items, work: wright, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), now, log: o.log });
       // And the issues whose failure is gone (a bump, a release, and a conflict or kit trial filed before 0.36.124), closed, so the Wright isn't sent to find nothing to do.
       await closeResolved({ items, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), log: o.log });
@@ -741,7 +744,8 @@ export async function watchAlarms(
   if (wright !== null) conditions.push(...wrightConditions(wright));
   if (p.bailiff) conditions.push(...bailiffConditions(await get(new URL('/api/reviews', p.bailiff).href)));
   let reeveJobs: Set<string> | null = null;
-  if (reeve !== null && manorWide) {
+  if (manorWide && reeve === undefined) reeve = await askReeve();
+  if (reeve !== undefined && reeve !== null && manorWide) {
     const r = reeveConditions(reeve);
     conditions.push(...r.conditions);
     reeveJobs = r.jobs;
