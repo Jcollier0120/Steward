@@ -300,7 +300,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [];
  */
 export const DEFAULT_AFTER_RELEASE = ['http://127.0.0.1:18585/api/updates/check'];
 /**
- * The retired Aletaster's Run now, a default here until 0.36.149: dropped from saved settings too, since its page is
+ * The retired Aletaster's Run now, a default here until 0.36.154: dropped from saved settings too, since its page is
  * gone and the Assayer checks a release before it goes out (tasting.ts).
  */
 const ALETASTER_RUN = /^http:\/\/(127\.0\.0\.1|localhost|aletaster\.localhost):19191\/api\/run$/;

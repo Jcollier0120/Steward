@@ -149,7 +149,7 @@ test("Developer options off leave the Assayer's role vacant, as Manor's staff.js
 
 test('(b) no gate when the Assayer predates /api/taste, or its page gives no answer at all', async () => {
   const old = assayerHttp({ post: { status: 404, body: { error: 'not found' } } });
-  assert.deepEqual(await ask(porter, deps(old.http)), { go: true, note: 'released without a release check: the Assayer here predates /api/taste (Assayer 0.4.19)' });
+  assert.deepEqual(await ask(porter, deps(old.http)), { go: true, note: 'released without a release check: the Assayer here predates /api/taste (Assayer 0.4.22)' });
   const down = assayerHttp({ page: { error: 'connect ECONNREFUSED 127.0.0.1:20909' }, post: { error: 'unused' } });
   assert.deepEqual(await ask(porter, deps(down.http)), { go: true, note: "released without a release check: the Assayer's page doesn't answer (connect ECONNREFUSED 127.0.0.1:20909)" });
   const gone = assayerHttp({ post: { error: 'socket hang up' } });

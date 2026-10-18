@@ -20,9 +20,15 @@
 // inside the tree of whatever started the launcher); a page that couldn't leave one only joins it where Windows lets it.
 // KIT_CEILING unset or 0 (Manor's own page): no ceiling, and the page starts in the launcher's jobs, as before.
 //
-// The page shares the launcher's console, the windowless one cmd's `start /b` gave it (service.ts's pageLaunch), so its
-// git and gh share that too (console.ts), and its standard handles (serve.log). Ctrl+C goes to the page, which the
-// launcher waits for. If the job can't be had, the page runs as it is: the name is never a reason not to start.
+// The page gets a windowless console of its own (kit 2.86.1), which its git, gh and PowerShell share (console.ts), and
+// the launcher's standard handles (serve.log). Not the launcher's console, the one cmd's `start /b` gave it (service.ts's
+// pageLaunch): that one's host stays in the jobs the page leaves, and ends with them. Manor's update ends Manor's task
+// (schtasks /End), and Task Scheduler ends every process in the task's job, which held each page's console host
+// (conhost.exe), cmd and this launcher. The pages ran on with a console that had gone, and every console program they
+// started to share it failed before it ran (0xC0000142): on 2026-10-17, 23 hours of failed rounds. A console made for
+// the page as it starts out of those jobs is outside them. The launcher then lets go of cmd's console, so its host ends
+// as cmd has: one console host for the agent, as before. If the job can't be had, the page runs as it is: the name is
+// never a reason not to start.
 using System;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -79,6 +85,7 @@ public static class KitNamed
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr GetStdHandle(int which);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetConsoleCtrlHandler(IntPtr handler, bool add);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool FreeConsole();
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetCommandLineW();
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr OpenJobObject(uint access, bool inherit, string name);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsProcessInJob(IntPtr p, IntPtr job, out bool result);
@@ -92,7 +99,7 @@ public static class KitNamed
     const int JobObjectExtendedLimitInformation = 9, JobObjectCpuRateControlInformation = 15;
     const uint JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x800;
     const uint JOB_OBJECT_ALL_ACCESS = 0x1F001F, CPU_RATE_ENABLE = 0x1, CPU_RATE_HARD_CAP = 0x4, DUPLICATE_SAME_ACCESS = 0x2;
-    const uint CREATE_SUSPENDED = 0x4, CREATE_BREAKAWAY_FROM_JOB = 0x01000000;
+    const uint CREATE_SUSPENDED = 0x4, CREATE_BREAKAWAY_FROM_JOB = 0x01000000, CREATE_NO_WINDOW = 0x08000000;
     const int STARTF_USESTDHANDLES = 0x100;
     const uint INFINITE = 0xFFFFFFFF;
 
@@ -107,21 +114,23 @@ public static class KitNamed
             Console.Error.WriteLine("usage: <agent>.exe <agent id> <command line>");
             return 2;
         }
-        // Ctrl+C goes to the page, which shares this console: the launcher waits for it to end.
+        // Ctrl+C or a closing console never ends the launcher before the page: it waits for the page to end.
         SetConsoleCtrlHandler(IntPtr.Zero, true);
         var si = new StartupInfo { cb = Marshal.SizeOf(typeof(StartupInfo)), dwFlags = STARTF_USESTDHANDLES, hStdInput = GetStdHandle(-10), hStdOutput = GetStdHandle(-11), hStdError = GetStdHandle(-12) };
         ProcessInformation pi;
         // With the manor's ceiling, out of the jobs that let it leave first (Task Scheduler's, which Manor and so every page
         // it starts runs in), so the page is in no job and can join the ceiling; where Windows refuses, in the jobs it is
-        // in, as before.
+        // in, as before. Either way with a windowless console of its own.
         bool ceiling = CeilingCap() > 0;
-        if (!(ceiling && CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, CREATE_SUSPENDED | CREATE_BREAKAWAY_FROM_JOB, IntPtr.Zero, null, ref si, out pi))
-            && !CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, CREATE_SUSPENDED, IntPtr.Zero, null, ref si, out pi))
+        if (!(ceiling && CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB, IntPtr.Zero, null, ref si, out pi))
+            && !CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, CREATE_SUSPENDED | CREATE_NO_WINDOW, IntPtr.Zero, null, ref si, out pi))
         {
             int err = Marshal.GetLastWin32Error();
             Console.Error.WriteLine("named: couldn't start " + line + " (Windows error " + err + ")");
             return err == 2 || err == 3 ? 127 : 126;
         }
+        // cmd's console is the page's no more: its host ends once cmd has.
+        FreeConsole();
         // The manor's ceiling first, while the page is still suspended, so its own job nests inside it.
         InCeiling(pi.hProcess);
         IntPtr job = Joined(CreateJobObject(IntPtr.Zero, JobName(args[0])), pi.hProcess);

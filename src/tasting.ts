@@ -12,7 +12,7 @@ import { pageToken, request, tokenHeaders, type HttpRequest } from './upkeep.ts'
  * would release from (POST /api/taste, with the page's token, as upkeep.ts's pokePage does), and waits for the verdict
  * (GET /api/taste?id=…). It publishes only when the check is done and lets the release through (`release: true`);
  * otherwise the release waits, with the check's reason, and the next round asks again. (The Aletaster made this check
- * until it retired; the Assayer, which holds its office, answers the same questions the same way, from Assayer 0.4.19.)
+ * until it retired; the Assayer, which holds its office, answers the same questions the same way, from Assayer 0.4.22.)
  *
  * So that the gate can never stall the manor, it stands aside, and the release says so, when:
  * - the Assayer isn't installed here (its home has no app folder), or is off duty for Developer options (Manor's
@@ -141,7 +141,7 @@ export async function tasteFirst(e: Employee, a: { commit: string; version: stri
   const posted = await http(new URL('/api/taste', base), { method: 'POST', headers: tokenHeaders(t.token), body, timeoutMs });
   if ('error' in posted) return down(posted.error);
   let answer = parse(posted.body);
-  if (posted.status === 404 && !(answer && typeof answer === 'object' && 'verdict' in answer)) return decided(without('the Assayer here predates /api/taste (Assayer 0.4.19)'));
+  if (posted.status === 404 && !(answer && typeof answer === 'object' && 'verdict' in answer)) return decided(without('the Assayer here predates /api/taste (Assayer 0.4.22)'));
   if (posted.status >= 400 || !answer || typeof answer !== 'object') {
     const said = answer && typeof answer === 'object' ? String(answer.reason ?? answer.error ?? '') : '';
     return decided(hold(said || `the Assayer answered HTTP ${posted.status}`));
