@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.158
+
+**For a .NET repository it finds on the PC, the Steward now takes the version a project sets for itself, ahead of the one in Directory.Build.props. `claim-version Heiward` now gives the next 1.9.x, not 4.1.x.**
+
+### What changed
+
+- **Which file holds a .NET repository's version.** The Steward reads it when you look after a repository, and for one that isn't in Settings it reads it again for `claim-version` and `vouch`. It used to take Directory.Build.props whenever that set a `<VersionPrefix>`, and then skipped the projects. Heiward's Directory.Build.props holds 4.1.x, its core library's base version, which its release tags override. The agent's own version, 1.9.x, is in `HEI.Agent/HEI.Agent.csproj`. So `claim-version Heiward` gave out 4.1.1.
+- Now each project one folder down that sets its own `<VersionPrefix>` comes first, since that version wins for the project. Directory.Build.props is used only when no project sets one.
+- **Repositories brought in from Manor's staff table** used the projects alone, so a repository with its version only in Directory.Build.props got none. Now both ways find versions the same way.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A .NET repository already in Settings keeps the version files listed there.
+
 ## 0.36.157
 
 **The Steward now hands out kit 2.88.0, which holds one copy of the FFmpeg code the Miller and the Chronicler each carried, ready for them to take up.**

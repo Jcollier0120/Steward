@@ -8,7 +8,7 @@ import { manorHome, manorOwn, manorProjects, originRepo, projectsFrom } from './
 import { originUrl, repoFromUrl } from './scm.ts';
 import { employeeFor } from './employ.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
-import { branchTree, dotnetTests, folderTree, type Tree } from './migrate.ts';
+import { branchTree, dotnetTests, dotnetVersionFiles, folderTree, type Tree } from './migrate.ts';
 import type { Runner } from './run.ts';
 import { gitExe } from './kit/git-exe.ts';
 import { employeesOfProjects, inEffect, isSelf, loadSettings, manorTakesOver, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
@@ -207,11 +207,7 @@ export function readClone(checkout: string, branch: string): { test: string[]; v
     if (t.has('Cargo.toml')) test.push('cargo test');
     if (t.has('go.mod')) test.push('go test ./...');
     test.push(...dotnetTests(t));
-    if (/<VersionPrefix>/.test(t.read('Directory.Build.props') ?? '')) versionFiles.push('Directory.Build.props');
-    else
-      for (const d of t.list('').filter((d) => t.isDir(d))) {
-        for (const f of t.list(d).filter((f) => f.endsWith('.csproj'))) if (/<VersionPrefix>/.test(t.read(`${d}/${f}`) ?? '')) versionFiles.push(`${d}/${f}`);
-      }
+    versionFiles.push(...dotnetVersionFiles(t));
   }
   return { test, versionFiles, releaseScript: typeof scripts.release === 'string' };
 }

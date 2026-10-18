@@ -361,6 +361,28 @@ test("a .NET clone's test command is found: the unit tests of the project the ot
   }
 });
 
+test("a .NET clone's version is its project's own <VersionPrefix> before Directory.Build.props's, as Heiward's", async () => {
+  const { dotnetVersionFiles } = await import('../src/migrate.ts');
+  const { readClone } = await import('../src/found.ts');
+  const hei = mkdtempSync(path.join(os.tmpdir(), 'steward-dotnet-'));
+  const write = (rel: string, text: string) => {
+    mkdirSync(path.dirname(path.join(hei, rel)), { recursive: true });
+    writeFileSync(path.join(hei, rel), text);
+  };
+  const prefix = (v: string) => `<Project><PropertyGroup><VersionPrefix>${v}</VersionPrefix></PropertyGroup></Project>`;
+  try {
+    assert.deepEqual(dotnetVersionFiles(hei), [], 'none in an empty folder');
+    write('Directory.Build.props', prefix('4.1.0'));
+    write('HEI.Core/HEI.Core.csproj', '<Project><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>');
+    assert.deepEqual(dotnetVersionFiles(hei), ['Directory.Build.props'], 'one version for every project');
+    write('HEI.Agent/HEI.Agent.csproj', prefix('1.9.59'));
+    assert.deepEqual(dotnetVersionFiles(hei), ['HEI.Agent/HEI.Agent.csproj'], "the agent's own, not the library's 4.1.0");
+    assert.deepEqual(readClone(hei, 'master').versionFiles, ['HEI.Agent/HEI.Agent.csproj'], 'what Look after and claim-version read');
+  } finally {
+    rmSync(hei, { recursive: true, force: true });
+  }
+});
+
 test('a settings.json with other keys but no employees keeps its keys, and gets the employees from the staff table', () => {
   writeFileSync(staffFile, JSON.stringify(staff));
   writeFileSync(settingsFile(), JSON.stringify({ parallel: 3, stewardRepo: 'octocat/my-steward' }));
