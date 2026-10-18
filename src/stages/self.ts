@@ -3,7 +3,7 @@ import path from 'node:path';
 import { APP } from '../app.ts';
 import { whileAwake } from '../kit/awake.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
-import { releasesRepoEnv } from '../settings.ts';
+import { releasesRepoEnv, type Employee } from '../settings.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import { commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts';
@@ -19,6 +19,7 @@ import { settleWholeSuite, wholeSuiteBefore } from './wholesuite.ts';
 import { kitTrialAtMain } from './trial.ts';
 import { stewardEmployee } from './selfmerge.ts';
 import { mainGate } from './mainbuild.ts';
+import { clearPending, missedExchequer, notePending } from './exchequer.ts';
 
 /**
  * The Steward's own releases, in a round. The Steward's repository isn't an employee's, so this is kept apart from
@@ -157,11 +158,19 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
       // Its release goes to the releases repository too, as Settings say (MANOR_RELEASES_REPO, the kit's release.ts).
       const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: true });
       for (const l of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${APP.id}]   ${l}`);
-      if (r.code !== 0) return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released${networkNote(`${r.out}\n${r.err}`)}`, { version: step.version, commit: at });
+      if (r.code !== 0) {
+        // On GitHub, and not at the Exchequer (exchequer.ts): released, and finished there later, as an employee's is.
+        // Before, it stood as failed until the next round saw the tag on GitHub and let it go, and no Manor was offered it.
+        const missed = step.what === 'steward' ? missedExchequer(`${r.out}\n${r.err}`) : null;
+        if (missed && (await hostFor(ctx).viewRelease(ctx.settings.stewardRepo, step.tag, 'tagName')).code === 0) return onGitHubOnly(ctx, step, missed);
+        return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released${networkNote(`${r.out}\n${r.err}`)}`, { version: step.version, commit: at });
+      }
       exchequer ||= exchequerNote(`${r.out}\n${r.err}`);
     }
     // Released from this commit of main: the Surveyor's GET /api/tested (tested.ts).
     recordTested(APP.id, { commit: step.commit, stage: 'release', branch: STEWARD_BRANCH, version: step.version });
+    // One before it that reached GitHub alone is behind this one now, which went on to the Exchequer.
+    if (step.what === 'steward' && !exchequer) clearPending(APP.id);
     return selfResult('done', `released ${step.tag} from origin/${STEWARD_BRANCH} (${at})${exchequer}`, { version: step.version, commit: at, url: `https://github.com/${ctx.settings.stewardRepo}/releases/tag/${step.tag}` });
   } finally {
     try {
@@ -171,6 +180,25 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
     }
   }
 }
+
+/**
+ * The Steward's version released on GitHub, which didn't reach the Exchequer (exchequer.ts): kept by its id, for the
+ * rounds to finish there (finishPending, with selfToFinish). Done when the network or the Exchequer's own failing kept it
+ * out; else failed, but released, so the rounds hold nothing against it and its alarm is what reaches the person.
+ */
+function onGitHubOnly(ctx: Ctx, step: SelfStep, missed: { why: string; passing: boolean }): EmployeeResult {
+  const at = step.commit.slice(0, 7);
+  recordTested(APP.id, { commit: step.commit, stage: 'release', branch: STEWARD_BRANCH, version: step.version });
+  const now = new Date().toISOString();
+  notePending(APP.id, { version: step.version, commit: step.commit, why: missed.why, passing: missed.passing, since: now, last: now, tries: 0 });
+  const released = `released ${step.tag} from origin/${STEWARD_BRANCH} (${at})`;
+  const url = `https://github.com/${ctx.settings.stewardRepo}/releases/tag/${step.tag}`;
+  if (missed.passing) return selfResult('done', `${released}; on GitHub only for now: the Exchequer couldn't be reached (${missed.why}), so the rounds publish it there`, { version: step.version, commit: at, url });
+  return selfResult('failed', `${released}; on GitHub only: the Exchequer refused it (${missed.why}), so no Manor is offered it: fix that, then press Publish it now on its alarm`, { version: step.version, url, released: true });
+}
+
+/** The Steward as finishExchequer (release.ts) runs its own release with --exchequer: with the release command it publishes with. */
+export const selfToFinish = (e: Employee): Employee => ({ ...e, release: SELF_COMMANDS.steward[0] });
 
 /**
  * The round's look at the Steward's own versions: planSelf on what GitHub said, then each release, kit first. A
@@ -247,8 +275,9 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
           r = selfResult('failed', `${step.tag}: ${(err as Error).message}`, { version: step.version, commit: step.commit.slice(0, 7) });
         }
         // One the network cut short (the kit's net.ts) is tried again next round, not left to a person.
-        if (r.outcome === 'failed' && !(await networkFailure(ctx, r.message))) failed[step.tag] = { commit: step.commit, message: r.message.replace(/^self: /, ''), at: new Date().toISOString() };
-        else if (r.outcome === 'done') delete failed[step.tag];
+        // One released on GitHub that the Exchequer refused isn't held: its own alarm says what to do (exchequer.ts).
+        if (r.outcome === 'failed' && !r.released && !(await networkFailure(ctx, r.message))) failed[step.tag] = { commit: step.commit, message: r.message.replace(/^self: /, ''), at: new Date().toISOString() };
+        else if (r.outcome === 'done' || r.released) delete failed[step.tag];
         results.push(r);
       }
     }

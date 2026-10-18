@@ -248,7 +248,7 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
         const url = hostFor(ctx, e).releaseUrl(e.repo, `v${version}`);
         if (missed.passing) return result(e, 'done', `${released}; on GitHub only for now: the Exchequer couldn't be reached (${missed.why}), so the rounds publish it there`, { version, commit: commit.slice(0, 7), url });
         // No commit: a round holds nothing against it (round.ts), and the alarm is what reaches the person (alarms.ts).
-        return result(e, 'failed', `${released}; on GitHub only: the Exchequer refused it (${missed.why}), so no one is offered it: fix that, then press Release for ${e.name}, which publishes it there from GitHub's files`, { version, url, released: true });
+        return result(e, 'failed', `${released}; on GitHub only: the Exchequer refused it (${missed.why}), so no one is offered it: fix that, then press Publish it now on its alarm (or Release ${e.name}), which publishes it there from GitHub's files`, { version, url, released: true });
       }
       return result(e, 'failed', `${e.release} failed (exit ${r.code})${networkNote(`${r.out}\n${r.err}`)}`, { version, commit: commit.slice(0, 7) });
     }
@@ -347,7 +347,9 @@ export async function finishExchequer(ctx: Ctx, e: Employee, o: { person: boolea
   const repo = checkoutOf(e);
   if (!line || !existsSync(repo)) return null;
   const more = { version: p.version, commit: p.commit.slice(0, 7) };
-  const tried = (why: string, passing: boolean) => notePending(e.id, { ...p, why, passing, last: now.toISOString(), tries: p.tries + 1 });
+  // Tried: a person's ask (askAgain) is answered.
+  const { asked: _asked, ...was } = p;
+  const tried = (why: string, passing: boolean) => notePending(e.id, { ...was, why, passing, last: now.toISOString(), tries: p.tries + 1 });
   const dir = releaseDirOf(ctx.settings, e);
   const letGo = stayAwake(`${e.name} v${p.version}'s publish to the Exchequer`, ctx.log);
   try {
@@ -366,7 +368,7 @@ export async function finishExchequer(ctx: Ctx, e: Employee, o: { person: boolea
     tried(failed.why, failed.passing);
     if (failed.passing) return result(e, 'skipped', `v${p.version} is on GitHub only still: the Exchequer couldn't be reached again (${failed.why}), so the rounds try again`, { ...more, again: true });
     // No commit, as above: the alarm is what reaches the person.
-    return result(e, 'failed', `v${p.version} is on GitHub only still: the Exchequer refused it (${failed.why}), so no one is offered it: fix that, then press Release for ${e.name}`, { version: p.version });
+    return result(e, 'failed', `v${p.version} is on GitHub only still: the Exchequer refused it (${failed.why}), so no one is offered it: fix that, then press Publish it now on its alarm`, { version: p.version });
   } catch (err) {
     // The Steward's own trouble (its worktree): tried again as it was.
     const why = (err as Error).message;

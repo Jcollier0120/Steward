@@ -123,7 +123,7 @@ test('a release the Exchequer refused reaches a person at once; the rounds leave
 
   const released = await releaseOne(ctx, e, { kit: '2.82.4' });
   assert.equal(released.outcome, 'failed', released.message);
-  assert.match(released.message, /^released v0\.3\.5 from origin\/main \(\w{7}\), with kit 2\.82\.4; on GitHub only: the Exchequer refused it \(the draft of clerk-v0\.3\.5 was refused: This key may not publish clerk\. \(403 forbidden\)\), so no one is offered it: fix that, then press Release for Clerk/);
+  assert.match(released.message, /^released v0\.3\.5 from origin\/main \(\w{7}\), with kit 2\.82\.4; on GitHub only: the Exchequer refused it \(the draft of clerk-v0\.3\.5 was refused: This key may not publish clerk\. \(403 forbidden\)\), so no one is offered it: fix that, then press Publish it now on its alarm \(or Release Clerk\)/);
   // Released, so no failed release stands for the rounds, and nothing is filed for the Wright: the alarm is the person's.
   assert.equal(released.released, true);
   assert.equal(released.commit, undefined);

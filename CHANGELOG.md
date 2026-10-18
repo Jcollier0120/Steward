@@ -2,6 +2,25 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.139
+
+**The Steward's own release now gets the same care as its staff's: if it reaches GitHub but not the Exchequer, the Steward publishes it there itself. And a new Publish it now button tries at once.**
+
+### What's new
+
+- **The Steward finishes its own publish to the Exchequer.** Before, a Steward release that reached GitHub but not the Exchequer stood failed until the next round found it on GitHub, and then nothing published it, so no Manor was offered it. Now it's treated like a staff release that missed the Exchequer:
+  - If the Exchequer couldn't be reached, the release counts as done and the rounds publish it from the release on GitHub, without building it again, 15 minutes later and then further apart, up to every three hours.
+  - If the Exchequer refused it, an alarm naming the Steward tells you at once. If it still can't be reached after the hours set under **Something waiting for**, an alarm tells you that too.
+- **A Publish it now button on these alarms**, on the Steward's page and in Manor's **Needs you**. It has a round try the Exchequer at once, for the Steward or any of its staff, instead of waiting for the next try. Press it once you've fixed whatever made the Exchequer refuse a release.
+
+### What changed
+
+- **A staff release the Exchequer refused now points to Publish it now.** Release for that agent on the Steward's page still works too.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.138
 
 **A release that reaches GitHub but can't reach the Exchequer is no longer left failed: the Steward publishes it to the Exchequer itself, as soon as it can.**

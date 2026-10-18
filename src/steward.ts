@@ -26,7 +26,7 @@ import { finishPending, release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
 import { clearRolloutHolds, loadRolloutFailures, rollout, takeRolloutResults } from './stages/rollout.ts';
-import { loadSelfFailures, releaseSelf, selfFactsAlone, trialAhead } from './stages/self.ts';
+import { loadSelfFailures, releaseSelf, selfFactsAlone, selfToFinish, trialAhead } from './stages/self.ts';
 import { heldKit, kitTrialsFile, TRIAL_GOING, type KitTrial } from './stages/trial.ts';
 import { stampAll } from './stages/stamp.ts';
 import { compareVersions } from './kitfiles.ts';
@@ -679,9 +679,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           const kitWaits = selfReleases.find((r) => r.kitWaits)?.kitWaits ?? null;
           // What a rollout beside the rounds did since the last round reported it (stages/rollout.ts): this round's to tell.
           out.results.push(...takeRolloutResults());
-          // Releases that reached GitHub but not the Exchequer (stages/exchequer.ts), tried there again once due: in every
-          // round, not only at a build's release, as no one is offered them until then.
-          if (ctx.settings.releasesCastellan) out.results.push(...(await finishPending(ctx, free(employees))).map((r) => ({ ...r, message: `exchequer: ${r.message}` })));
+          // Releases that reached GitHub but not the Exchequer (stages/exchequer.ts), the Steward's own among them, tried
+          // there again once due: in every round, not only at a build's release, as no one is offered them until then.
+          if (ctx.settings.releasesCastellan) out.results.push(...(await finishPending(ctx, [...(self ? [selfToFinish(self)] : []), ...free(employees)])).map((r) => ({ ...r, message: `exchequer: ${r.message}` })));
           const releaseNow = async (who: Employee[]) => {
             const released = await releaseUnreleased(ctx, who);
             out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
