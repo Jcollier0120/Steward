@@ -2,6 +2,80 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.88.0
+
+**FFmpeg and making a video smaller are now in the kit: finding FFmpeg, fetching the manor's build once for every agent, choosing the video encoder, and re-encoding one video with its checks. The Miller and the Chronicler each carried their own copy of this, pinned to different builds. Nothing changes for either until it takes the kit's up.**
+
+The owner's review, item 9 ("Move forked code into the kit"): the Miller and the Chronicler each carried about 1,000 lines of the same FFmpeg code (ffmpeg.ts, getffmpeg.ts, encoders.ts, media.ts, the video half of checks.ts, files.ts, and the encoder's choice and one video's re-encode in mill.ts and shrink.ts). The Chronicler copied it from the Miller on 2026-10-08, and the two have drifted apart since. They were pinned to different builds: the Miller to n8.1.3-4, the Chronicler to n8.1.3-5, which also reads capture cards (DirectShow). Each fetched its own copy (about 12 MB) into its data folder.
+
+Merge order: this kit comes after kit 2.86.1 (claude/console-outlives-job) and kit 2.87.0 (claude/kit-shared). Rebased on them, this file and VERSION conflict, as expected: keep every entry, newest first, and VERSION 2.88.0.
+
+### What changed
+
+- **ffmpeg.ts** (new): FFmpeg found, fetched and run.
+  - `BUILDS` pins one build for every agent: n8.1.3-5 for arm64 and x64, with the Chronicler's URLs and SHA-256 as they were.
+  - `getFfmpeg({ dataDir?, shared?, home?, arch?, deps?, now?, log?, agent? })` fetches it once for every agent on the PC, into Manor's folder: `%USERPROFILE%\.manor\ffmpeg\<version>` (MANOR_HOME's when set).
+    - The download is checked against its SHA-256, then unpacked beside the builds, then moved into place, as each agent's own fetch did. Nothing of a failed fetch is kept, and the next try waits 15 minutes.
+    - Two agents fetching at once take turns: a lock (`.fetching`) beside the builds. The second finds the first's and downloads nothing.
+    - An agent's own build, fetched into its data folder before this kit, is still found, and nothing is fetched.
+    - When Manor's folder can't be made, it fetches into the agent's data folder as before. `shared: false` always does; given to `findTools`, it doesn't look in Manor's folder either.
+    - The download's User-Agent and its lines name the agent (its APP.name).
+  - `findTools(setting, remembered?, passOver?, { start?, dataDir?, shared?, home?, also?, agent? })` and `toolDirs` look in this order: the FFmpeg setting, PATH, the one used last, the staff's shared build (`SHARED_SOURCE`), the agent's own, `also` (more folders), and Heiward's. `-version` is asked once per build while its two files are unchanged.
+  - Also: `run`, `encode`, `lastError`, `PASSED_OVER`, `HEIWARD_BIN`, `testEncode`, `pickEncoder(t, preset, words?)`, `probe`, `grindArgs` (with `format` and `cores`), `extractFrame`, `ownBin(base, arch?)` and `_resetFfmpegFetch`.
+- **video-encoders.ts** (new): which encoder, with what options.
+  - The `Preset` type and `PRESETS`.
+  - `RANKED`, `parseEncoders`, `candidatesIn`, `targetBitRate`, `videoArgs`, `audioArgs`, `chooseEncoder(listed, trials, words?)`.
+  - The gentle pace's `coreLimit`, `grindCores` and `threadArgs`.
+  - `EncoderWords` (`agent`, `meanwhile`, `ownNeed`): the only words that differed between the two agents' encoder lines.
+- **media-probe.ts** (new): `parseProbe`, `rate`, `isHdr` and `ProgressParser`, with the `MediaInfo`, `VideoStream` and `Progress` types.
+- **video-shrink.ts** (new): making one video smaller.
+  - Whether to make a copy, and whether to keep it: `planVideo`, `checkVideo`, `verdict`, `fmtBytes`, `MB`, `MAX_RATIO` (0.9) and `DURATION_SLACK`, with the `Check`, `Plan` and `VideoExpected` types.
+  - `EncoderState`, an agent's state.json `encoder`, and `decideEncoder(settings, encoderState, { force?, deps?, words? })`. This is the Miller's decideEncoder; the Chronicler's encoderFor was the same but for its save and `force`. It answers `{ t, encoder? }`, and the agent saves `encoder` when there is one. `realEncoderDeps({ find?, get?, words? })` makes its deps from findTools, getFfmpeg and pickEncoder with an agent's options.
+  - `shrinkVideo(file, { t, encoder, preset, inBytes, videoMinMB, temp, final, cores?, format?, onPhase?, onProgress?, onRunning?, stopping?, words?, deps? })` re-encodes one video, as the Miller's grindVideo and the Chronicler's shrinkOne did.
+    - It answers `{ status, reason, checks, outPath, outBytes, how, info }`, with a status of `kept`, `refused` or `skipped`. It answers null when the agent stopped it.
+    - `temp()` is asked once the plan says to make a copy, and `final()` once the copy passed its checks. So where a copy goes, and its name, stay the agent's.
+- **files.ts** (new): `setFileTimes` and `recycle`, as both agents had them.
+  - The agents' `writeJsonFirmly` is already store.ts' `writeJson` (kit 2.8.1), which since kit 2.73.3 also flushes the file first. Unlike `writeJsonFirmly`, it skips a file that already holds the same JSON; `always: true` writes it all the same.
+
+### Where the two copies differed, and what the kit took
+
+- **The build:** n8.1.3-5 (the Chronicler's) for both. The Miller gains DirectShow, which it doesn't use.
+- **Where it's fetched:** once, in Manor's folder, for both. Before, each agent fetched its own into its data folder.
+- **Starting FFmpeg:** the Miller's way, `windowsHide: !sharesConsole()` (kit 2.73.2). The Chronicler started a console host (conhost.exe) beside each FFmpeg.
+- **`-version`:** the Miller's way, asked once per build while its files are unchanged. The Chronicler asked every time it looked.
+- **`grindArgs`:** the Miller's, with `format` and `cores`. Without them it is the Chronicler's command exactly.
+- **The Chronicler's look at the Miller's FFmpeg** (`~\.miller`) is `also`. With the shared build it isn't needed. It also only ever found the Miller's build when both pinned the same version, which they didn't.
+- **The words are options.** They cover the agent's name, what waits while there's no encoder, the need while its own can't be fetched, whose size an early stop names ("the original's" or "the clip's") and the line for a file ffprobe can't read. Left out, each is the Miller's words with the agent's name, but `meanwhile`, which has none.
+- **Kept on each agent's side:**
+  - where a copy goes and what it's called: the temporary names and the final ones, the Miller's flour folder, the Chronicler's `library\<game>`;
+  - what an agent records of each video (its Item), and saving its encoder state;
+  - the Chronicler's look for a clip that has gone before it starts;
+  - the Miller's photos (checks.ts), and its `sampleHash` and `freeName`.
+- **Unchanged:** an agent keeps the FFmpeg it used last ahead of the manor's build, as both copies did. A Miller that used its own n8.1.3-4 keeps it while it works there. Clearing its state's `encoder.ffmpeg`, or that folder, moves it to n8.1.3-5.
+
+### What an agent must do
+
+- Nothing until it takes these up: no agent imports them yet, and nothing changes for one that doesn't.
+- **The Miller**, pinned to this kit:
+  - Delete getffmpeg.ts, ffmpeg.ts, encoders.ts and media.ts, and import from `./kit/ffmpeg.ts`, `./kit/video-encoders.ts` and `./kit/media-probe.ts`.
+  - checks.ts keeps its photo checks and takes the rest from `./kit/video-shrink.ts`. files.ts keeps `sampleHash`, and `writeJsonFirmly` becomes `writeJson` (with `always: true` to write as before). settings.ts re-exports `Preset` and `PRESETS` from the kit, and state.ts takes `EncoderState`.
+  - mill.ts calls `decideEncoder` with `words: { meanwhile: 'Videos wait in the hopper meanwhile.', ownNeed: OWN_NEED }`, and saves the `encoder` it answers.
+  - grindVideo calls `shrinkVideo`:
+    - `temp` and `final` in the flour folder, with its own names;
+    - `cores` from `grindCores`;
+    - `onPhase`, with `encoding` as its `grinding`;
+    - `onProgress`, `onRunning` and `stopping` for its `current` and `stopGrinding`;
+    - its Item's length, capture date and kind come from the answer's `info`.
+  - getffmpeg.test.ts, find-tools.test.ts and miller.test.ts' tests of the moved code are the kit's now (kit/test/ffmpeg.test.ts, video-encoders, media-probe, video-shrink and files).
+- **The Chronicler**, pinned to this kit:
+  - Delete getffmpeg.ts, ffmpeg.ts, encoders.ts, media.ts, checks.ts and files.ts.
+  - shrink.ts' `encoderFor` calls `decideEncoder` and saves the `encoder` it answers, with `words: { meanwhile: 'Clips wait their turn meanwhile.', ownNeed }`. Its own `ownNeed` has no "LGPL"; the default adds it.
+  - `shrinkOne` keeps its check for a clip that has gone, then calls `shrinkVideo`:
+    - `temp()` makes `library\<game>`, sweeps its temporary copies and names a new one; `final()` is `freeName(copyName(c))` there;
+    - `words: { original: "the clip's", unreadable: "it couldn't be read" }`;
+    - `skipped` is its `left`.
+  - agent.ts' `getFfmpeg` and `findTools` calls drop `dataDir` (it's the default). The look at `~\.miller` goes, or moves to `also`. getffmpeg.test.ts, and engine.test.ts but for its settings, are the kit's now.
+
 ## 2.86.0
 
 **The keeper's refresh now offers the NPU its own embeddings where its entry makes none, when their server and model are already on the PC: tested in the NPU's turn, taken up only when they answer.**

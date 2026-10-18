@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.151
+
+**The Steward now hands out kit 2.88.0, which holds one copy of the FFmpeg code the Miller and the Chronicler each carried, ready for them to take up.**
+
+### What changed
+
+- **FFmpeg in the kit.** The Miller and the Chronicler each had about 1,000 lines of the same code for finding FFmpeg, fetching it, choosing the PC's video encoder and making a video smaller, and the two copies had drifted apart. Kit 2.88.0 holds one copy of it. Once they take it up:
+  - FFmpeg (about 12 MB) is fetched once for every agent on the PC, not once for each.
+  - Both use the same build, the one that can also read capture cards.
+  - Neither changes until it does. See [kit/CHANGELOG.md](kit/CHANGELOG.md) for what each one takes up.
+- This comes after kit 2.86.1 and kit 2.87.0.
+
+### Before you update
+
+- Nothing: it updates itself as usual. No agent changes until it takes up the kit's FFmpeg.
+
 ## 0.36.147
 
 **The Steward now hands out kit 2.86.0, which moves your staff's search and matching work onto the NPU on PCs that were set up before the NPU could do it.**
