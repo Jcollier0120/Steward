@@ -86,6 +86,46 @@ Nothing until it adopts a module; then it deletes its own copy and imports the k
   3. **Add `guard-kit.ps1` to `GUARD_SCRIPTS` (guard.ts, tools/guard-manifest.ts) and to install-guard.ps1's `$script:Files`.** The guard's SYSTEM tasks run scripts from its bin\, and install-guard.ps1 copies every script there only after checking its SHA-256 against the release's manifest: a script it dot-sources that isn't in the list is never copied, and the guard's scripts in bin\ would fail. A guard set up before then has none in bin\; the page says the guard is behind until Update the guard.
   4. Rename the prefixed calls (`Write-WOut` → `Write-Out`, `Invoke-LDo` → `Invoke-Do`, …). Pass `$script:Files` to `Read-ScriptManifest` and `Test-ScriptHashes`, and the Lamplighter `-Except 'inbox'` to `Test-Trusted`. Tests that stand in for `Get-WOwnerSid` define `Get-OwnerSid` instead, and the Lamplighter's read `$script:GuardLines`.
 
+## 2.86.1
+
+**A page's console no longer ends when Manor updates, and a page whose console has gone runs its git, gh and PowerShell hidden instead of failing every one.**
+
+On WEASELDEV02 (Intel Core Ultra 5 225U), on 2026-10-17 at 18:21Z, Manor updated itself once the PC woke from Modern Standby. Its update ends Manor's task (`schtasks /End`), and Task Scheduler then ends every process in the task's job. That job held more than Manor:
+
+- Manor starts each page through the agent's `open`, detached. Node never asks for CREATE_BREAKAWAY_FROM_JOB, so that `open`, the cmd its `start /b` runs, cmd's console host (conhost.exe) and the named launcher all stay in the task's job.
+- Only the page leaves it (named.cs, under the manor's ceiling).
+
+So every page ran on with a console whose host had gone. From kit 2.72.2 (console.ts) and 2.74.4 (ps.ts), git, gh and powershell.exe share the page's console, and every one of them then failed before it ran, with exit 3221225794 (0xC0000142, STATUS_DLL_INIT_FAILED). For 23 hours:
+
+- The Smith, Pinder and the Warrener failed every round.
+- The Toller reported 39 projects and 0 lockfiles as a good round.
+- The Steward read no version of git or gh.
+
+`AttachConsole` on each of the ten pages Manor had started answered ERROR_PIPE_NOT_CONNECTED. A test page started the same way inside a job showed both sides:
+
+- Ending the job: its shared starts failed with 3221225794 from the next one on, while its hidden starts ran.
+- With this kit's launcher, the same page's shared starts ran on.
+
+### What changed
+
+- **named.cs:** the launcher starts the page with a windowless console of its own (CREATE_NO_WINDOW), on both paths:
+  - out of the jobs (the manor's ceiling), where its host is outside them and so outlives Manor's task;
+  - in them, as before, where it ends with them as the page does.
+  
+  The launcher then lets go of cmd's console (`FreeConsole`), whose host ends with cmd, so an agent still has one console host. The launcher is a new exe (a new source), built by each agent's page as usual.
+- **console.ts:**
+  - `sharesConsole()` looks again each time while the answer is yes: one open of `\\.\CONOUT$` (EPIPE once the host has gone), no process. Once the console has gone, the answer is no for good.
+  - New: `startFailed(code, windowsHide)`, which is true for a start that shared the console and exited `DLL_INIT_FAILED` (3221225794). It also makes `sharesConsole()` say no from then on.
+- **ps.ts:**
+  - A one-shot PowerShell that couldn't start on a console that had gone runs once more, hidden, within its time.
+  - The worker that couldn't start says so too. Its scripts already ran on their own, now hidden.
+
+### Before you update
+
+- Nothing for an agent that starts git or gh with `windowsHide: !sharesConsole()` per start (the Toller, the Steward, the Surveyor, the Developer Herald): its next start is hidden once the console has gone.
+- An agent that keeps `sharesConsole()`'s answer, or has its own copy (the Assayer's run.ts), should ask per start, or check `startFailed` and start again hidden.
+- A page running now with a console that has gone needs a restart; an update restarts it.
+
 ## 2.86.0
 
 **The keeper's refresh now offers the NPU its own embeddings where its entry makes none, when their server and model are already on the PC: tested in the NPU's turn, taken up only when they answer.**
