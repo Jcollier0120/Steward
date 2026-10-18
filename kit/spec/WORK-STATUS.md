@@ -12,7 +12,8 @@ The kit's server answers it for every agent (`node/server.ts`), built by `workSt
   "agent": { "id": "steward", "name": "Steward", "version": "0.36.46", "pid": 1234 },
   "at": "2026-10-15T11:00:00.000Z",
   "pc": { "name": "DESKTOP-1", "processors": 18, "memoryMb": 32000, "freeMemoryMb": 12000,
-          "busy": 0.42, "pace": "gentle", "checksCap": 3333 },
+          "busy": 0.42, "pace": "gentle", "checksCap": 3333,
+          "npu": { "pace": "full", "why": null, "lookedAt": "…" } },
   "slots": [ { "kind": "stage", "name": "Stages at once", "of": 2, "used": 1 } ],
   "running": [ { "id": "w3", "kind": "check", "what": "Reeve#212's checks", "repo": "me/reeve",
                  "commit": "…", "tree": "…", "pr": 212, "parent": "w1",
@@ -21,7 +22,9 @@ The kit's server answers it for every agent (`node/server.ts`), built by `workSt
                  "line": "checks", "inLineSince": "…", "ahead": 2 } ],
   "lines": [ { "id": "checks", "kind": "checks", "name": "The checks pace's turns", "slots": 3,
                "holders": [ { "who": "assayer", "what": "npm test", "pid": 99, "since": "…", "work": "w2" } ],
-               "waiting": [ { "who": "steward", "what": "node --test", "pid": 98, "since": "…", "work": "w4" } ] } ],
+               "waiting": [ { "who": "steward", "what": "node --test", "pid": 98, "since": "…", "work": "w4" } ] },
+             { "id": "accelerator:npu", "kind": "accelerator", "name": "npu", "slots": 1, "holders": [], "waiting": [],
+               "today": { "day": "2026-10-18", "busyMs": 206312, "requests": 191, "promptTokens": 78391, "answerTokens": 11782 } } ],
   "results": [ { "kind": "checks", "repo": "me/reeve", "tree": "…", "commit": "…", "ok": true, "at": "…" } ],
   "blocked": [ { "kind": "version-queue", "what": "Reeve's version queue", "by": "#233 (v0.18.2), a draft",
                  "since": "…", "repo": "me/reeve", "pr": 233, "url": "…", "waiting": ["#236"] } ]
@@ -30,7 +33,8 @@ The kit's server answers it for every agent (`node/server.ts`), built by `workSt
 
 - **`slots`**: the agent's own limits, each kind of work it runs at once (`of`, null for none) and how many it runs now. The kit has none of its own; the Steward gives its stages.
 - **`running`, `waiting`**: its **tasks**. A task has a kind (one word: `round`, `check`, `trial`, `whole-suite`…), what it is in words, and what it runs on when that's a repository's code: the repository, the commit, its tree, the PR. `parent` is the task it is part of. A running task has `runningSince`; a waiting one the `line` it waits in (a line's id), `inLineSince`, and `ahead`, how many in that line have waited longer.
-- **`lines`**: the lines work waits in, with who holds a place (`holders`) and who waits (`waiting`), since when. The PC's are the same from every agent on it: `checks` (the checks pace's turns, `slots` null when the pace is full), `work` (the kit pace's work line), `first-round`, and `accelerator:<id>` for each accelerator. An agent may add its own, `<agent>:<name>`, kind `agent`. A place names its agent (`who`) when the line says, else its process (`pid`); `work` is that agent's task.
+- **`lines`**: the lines work waits in, with who holds a place (`holders`) and who waits (`waiting`), since when. The PC's are the same from every agent on it: `checks` (the checks pace's turns, `slots` null when the pace is full), `work` (the kit pace's work line), `first-round`, and `accelerator:<id>` for each accelerator. An agent may add its own, `<agent>:<name>`, kind `agent`. A place names its agent (`who`) when the line says, else its process (`pid`); `work` is that agent's task. Since kit 2.85.0 an accelerator's line has its **`today`**, every agent's requests on it since midnight (the PC's own), added together: their time (`busyMs`; the NPU serves one at a time, so the time it was busy), how many, and their prompt and answer tokens; left out when nothing was counted (token-tally.ts' `busyToday`).
+- **`pc.npu`** (kit 2.85.0): the NPU's pace for the agents' backlogs ([ACCELERATORS.md](ACCELERATORS.md#the-npu-at-full-speed-kit-2850)), `full`, or `gentle` and `why`, as the last shared look at the PC's room found it (`lookedAt`, null before any): the status never looks itself. Left out where no NPU takes chat first.
 - **`results`**: what its work came to, **one per kind, repository and code tree** (git's tree id: the same code has the same tree, whatever the commit), the latest; the newest first, at most 50. A result with no tree known has `tree` null and its commit. Since kit 2.77.0 a result also says the `commands` it ran, the `node` (Node.js's version) and `platform` (the OS) it ran on, and, for a pass taken from another PC, `from` (`{ id, name }`: that PC).
 - **`blocked`**: what holds its work up, by what, since when: a version queue held by a PR that isn't ready, with what waits behind it.
 

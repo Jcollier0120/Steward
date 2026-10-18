@@ -83,3 +83,35 @@ test('the benchmark prints the mix with --mix, over 30 days unless a number foll
   assert.deepEqual(parseBenchArgs(['--mix', '7']), { mix: 7 });
   assert.deepEqual(parseBenchArgs(['--mix', '--yes']), { mix: 30, yes: true });
 });
+
+test("each accelerator's day: every agent's requests on it added together, by its id, embeddings too; the mix keeps to chat and vision", () => {
+  const dir = path.join(home, 'busy');
+  T.tallyRequest('porter', { ...req(300, 40), acc: 'npu', ms: 900 }, { dir, now: DAY });
+  T.tallyRequest('porter', { ...req(300, 40), acc: 'npu', ms: 800 }, { dir, now: DAY });
+  T.tallyRequest('reeve', { work: 'embed', lane: 'background', kind: 'npu', acc: 'npu', promptTokens: 1200, answerTokens: 0, ms: 300 }, { dir, now: DAY });
+  T.tallyRequest('clerk', { ...req(500, 20, { work: 'vision', kind: 'gpu' }), acc: 'gpu-adreno', ms: 2000 }, { dir, now: DAY });
+  T.tallyRequest('porter', { ...req(300, 40), acc: 'npu', ms: 5000 }, { dir, now: daysAgo(1) });
+  const day = T.busyToday({ dir, now: DAY });
+  assert.equal(day.day, T.tallyDay(DAY));
+  assert.deepEqual(day.accelerators, [
+    { id: 'gpu-adreno', kind: 'gpu', busyMs: 2000, requests: 1, promptTokens: 500, answerTokens: 20, agents: ['clerk'] },
+    { id: 'npu', kind: 'npu', busyMs: 2000, requests: 3, promptTokens: 1800, answerTokens: 80, agents: ['porter', 'reeve'] },
+  ]);
+  const file = JSON.parse(readFileSync(path.join(T.usageDir(dir), T.tallyDay(DAY), 'porter.json'), 'utf8'));
+  assert.equal(file.rows[0].acc, 'npu', 'the row names its accelerator');
+  const mix = T.readTally(1, { dir, now: DAY });
+  assert.deepEqual(mix.rows.map((r) => r.work).sort(), ['chat', 'vision'], 'embeddings are not in the mix');
+  assert.ok(mix.rows.every((r) => !('acc' in r)), 'the mix adds accelerators of a kind together');
+  // A row from before kit 2.85.0 names no accelerator: it counts as its kind's.
+  const old = path.join(T.usageDir(dir), T.tallyDay(daysAgo(3)));
+  mkdirSync(old, { recursive: true });
+  writeFileSync(path.join(old, 'herald.json'), JSON.stringify({ day: 'x', agent: 'herald', rows: [{ ...T.addToTally({ day: '', agent: '', rows: [] }, req(10, 1)).rows[0] }] }));
+  assert.deepEqual(T.busyToday({ dir, now: daysAgo(3) }).accelerators.map((a) => [a.id, a.requests]), [['npu', 1]]);
+  assert.deepEqual(T.busyToday({ dir: path.join(home, 'nothing'), now: DAY }).accelerators, [], 'nothing counted: nothing');
+});
+
+test("a day is the PC's own date, not UTC's", () => {
+  const d = new Date(2026, 9, 18, 23, 30);
+  assert.equal(T.tallyDay(d), '2026-10-18');
+  assert.equal(T.tallyDay(new Date(2026, 0, 2, 0, 5)), '2026-01-02');
+});

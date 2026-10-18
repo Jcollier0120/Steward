@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.146
+
+**The Steward now hands out kit 2.85.0, which lets the NPU run at full speed when your staff have work for it, and says how busy each accelerator was today.**
+
+### What's new
+
+- **The NPU at full speed.** Your staff kept their model work to a few calls a round, about 2 to 7 minutes of the NPU's time a day. Now, once each one takes up kit 2.85.0's backlog, the work left after a round runs straight through on the NPU. That only happens while the PC is plugged in, isn't running hot, has memory and processor to spare, and no other program (a video call's camera effects, say) is using the NPU. Your own requests still go first. The processor, graphics card, disk and network stay at the gentle pace.
+- **How busy each accelerator was today** (time, requests and tokens) is in the staff's work status, for Manor's Work page.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Nothing changes for a staff member until its own update takes up the backlog.
+
 ## 0.36.145
 
 **The Steward's own words no longer say it merges your pull requests. Since 0.36.124 you merge your own once vouched, and the builds at set times release what is on the branch. A branch with no PR in a repository that writes its entries in `changes/` (Manor's) can now be vouched for.**
