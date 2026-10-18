@@ -29,7 +29,7 @@ export interface EmployeeResult {
   commit?: string;
   /** The commit a bump started from (its branch on origin), so a kit's trial knows when the agent has moved on. */
   base?: string;
-  /** The next round looks at it again, whatever GitHub says (a release the Aletaster's tasting holds). */
+  /** The next round looks at it again, whatever GitHub says (a release the Assayer's release check holds). */
   again?: boolean;
   /** Its branch's version is released already (by this stage or another way): no failed release of it stands. */
   released?: boolean;
@@ -92,7 +92,7 @@ export interface Ctx {
    * or dropped once the Steward changed its repository (a merge), is asked for one by one, as before.
    */
   glance?: Glance | null;
-  /** Stands in for the Aletaster, its install and the clock, for the release gate (tasting.ts); tests only. */
+  /** Stands in for the Assayer, its install and the clock, for the release gate (tasting.ts); tests only. */
   tasting?: TastingDeps;
   /** Whether this PC is online (the kit's net.ts); tests stand in for it. Under node --test, online unless given. */
   online?: () => Promise<boolean>;
@@ -115,6 +115,8 @@ export interface Ctx {
    * without the pipeline.
    */
   build?: { due: string; name: string } | null;
+  /** The agents Manor has retired (retired.ts), whom the rounds pass over; tests stand in for them. Not given: Manor's staff.json. */
+  retired?: ReadonlySet<string>;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */

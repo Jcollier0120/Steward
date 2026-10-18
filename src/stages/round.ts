@@ -10,6 +10,7 @@ import { clearTastingHold } from '../tasting.ts';
 import { takeFreshStart } from '../fresh-start.ts';
 import { withRepo } from './slots.ts';
 import { mainGate } from './mainbuild.ts';
+import { RETIRED, retiredOf } from '../retired.ts';
 
 /**
  * The Steward's round (`steward round`, and on duty every few minutes when Settings say it releases by itself): at a
@@ -65,11 +66,13 @@ export async function buildReleases<R>(employees: Employee[], parallel: number, 
 
 /**
  * Each employee's unreleased version, released from its branch, that very commit tested first (mainbuild.ts's mainGate);
- * not a commit whose release failed in a round before.
+ * not a commit whose release failed in a round before, nor one of an agent Manor has retired (retired.ts), whose release
+ * that failed before is let go.
  */
 export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promise<EmployeeResult[]> {
   const failed = readJson<Record<string, string>>(roundFailuresFile(), {});
   if (!employees.length) return [];
+  const retired = retiredOf(ctx);
   // After a fresh start (fresh-start.ts), each release that failed before is tried once more: it may have failed only
   // because the PC was going to sleep, shutting down or offline. Failing again, it stands as before.
   const retry = takeFreshStart('releases') ? new Set(Object.keys(failed)) : new Set<string>();
@@ -78,6 +81,7 @@ export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promis
   for (const e of employees) if (failed[e.id] && keptSigningDown(releaseDirOf(ctx.settings, e))) delete failed[e.id];
   // A few employees at a time (Settings' parallel); what failed is kept once all are done.
   const one = async (e: Employee): Promise<EmployeeResult> => {
+    if (retired.has(e.id)) return result(e, 'skipped', RETIRED);
     try {
       return await withRepo(ctx.log, e.id, () =>
         releaseOne(ctx, e, {
@@ -95,7 +99,8 @@ export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promis
   const out = ctx.build ? await buildReleases(employees, ctx.settings.parallel, one, signsHere) : await mapLimit(employees, ctx.settings.parallel, one);
   for (const r of out) {
     // A release the network cut short (common.ts's networkFailure) isn't that commit's fault: the next round tries it again.
-    if (r.outcome === 'failed' && r.commit && !(await networkFailure(ctx, r.message))) failed[r.id] = r.commit;
+    if (retired.has(r.id)) delete failed[r.id];
+    else if (r.outcome === 'failed' && r.commit && !(await networkFailure(ctx, r.message))) failed[r.id] = r.commit;
     // Released, by this round or another way (a person, or a run that beat this one to it): nothing failed stands.
     else if (r.outcome === 'done' || r.released) delete failed[r.id];
     // Looked at, and not held by the tasting (released, or nothing to release): no hold to count hours for.
