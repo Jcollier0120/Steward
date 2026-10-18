@@ -50,7 +50,7 @@ export interface Migration {
 const GAPS: Record<string, { field: 'fill' | 'test' | 'versionFiles' | 'release'; looked: string }> = {
   'Fill its kit': { field: 'fill', looked: 'tools/kit.ts or tools/kit.ps1' },
   'Test it': { field: 'test', looked: 'an npm test script or a .NET test project' },
-  'Version files': { field: 'versionFiles', looked: "a package.json or a .csproj with <VersionPrefix>" },
+  'Version files': { field: 'versionFiles', looked: 'a package.json, or a .csproj or Directory.Build.props with <VersionPrefix>' },
   'Release it': { field: 'release', looked: 'a release script or release.ps1' },
 };
 
@@ -189,6 +189,24 @@ export function dotnetTests(checkout: string | Tree): string[] {
   return [`dotnet test ${scored[0].d}`];
 }
 
+/**
+ * A .NET clone's version files: each project a folder down that sets its own <VersionPrefix>, which wins over
+ * Directory.Build.props's for that project (Heiward's HEI.Agent/HEI.Agent.csproj is the agent's 1.9.x; its
+ * Directory.Build.props is the core library's 4.1.x, which its tags override). With none of its own,
+ * Directory.Build.props, where one version is set for every project. Neither: [].
+ */
+export function dotnetVersionFiles(checkout: string | Tree): string[] {
+  const t = typeof checkout === 'string' ? folderTree(checkout) : checkout;
+  const sets = (f: string) => /<VersionPrefix>/.test(t.read(f) ?? '');
+  const own = t
+    .list('')
+    .filter((d) => t.isDir(d))
+    .flatMap((d) => t.list(d).filter((f) => f.endsWith('.csproj')).map((f) => `${d}/${f}`))
+    .filter(sets);
+  if (own.length) return own;
+  return sets('Directory.Build.props') ? ['Directory.Build.props'] : [];
+}
+
 /** An employee rebuilt from its staff row and its clone, and what couldn't be filled in. An internal one is released here. */
 export function employeeFromClone(row: StaffRowLike, internal = false): { employee: Employee; missing: string[] } | null {
   const id = typeof row.id === 'string' && /^[a-z][a-z0-9-]*$/.test(row.id) ? row.id : null;
@@ -230,12 +248,7 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
       if (at) versionFiles.push(`src/${at}`);
     }
   } else {
-    // A .NET employee: the .csproj that sets <VersionPrefix>, a folder down.
-    for (const d of t.list('').filter((d) => t.isDir(d))) {
-      for (const f of t.list(d).filter((f) => f.endsWith('.csproj'))) {
-        if (/<VersionPrefix>/.test(t.read(`${d}/${f}`) ?? '')) versionFiles.push(`${d}/${f}`);
-      }
-    }
+    versionFiles.push(...dotnetVersionFiles(t));
   }
   // Manor's one version is package.json's (its src/app.ts reads it there; its lockfile's needn't agree).
   if (id === 'manor' && versionFiles.includes('package.json')) versionFiles.splice(0, versionFiles.length, 'package.json');
