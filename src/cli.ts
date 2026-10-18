@@ -94,6 +94,8 @@ const USAGE = `${APP.id}: ${APP.role}
                    on that commit on GitHub (status steward/tested). Then merge the PR yourself, once GitHub
                    says it merges cleanly: the next build releases main without testing that code again.
                    Without a number: the PR for this branch.
+                   First, HEAD's version files must agree (as a kit's trial needs): if they don't, it says
+                   what to set where, and runs and records nothing.
                    The checks run at the checks pace, a share of the processor (Manor's Settings change it).
                    When the Assayer already passed every check on exactly HEAD's tree (same
                    dependencies and kit, within a day), nothing runs again: its pass is taken.
