@@ -313,7 +313,7 @@ export interface StageOptions {
    * node --test they're made only when this is given, so a test never touches the real checkout.
    */
   self?: { checkout: string };
-  /** Stands in for the Aletaster for the release gate (tasting.ts); tests only. */
+  /** Stands in for the Assayer for the release gate (tasting.ts); tests only. */
   tasting?: TastingDeps;
   /**
    * Whether this PC is online (the kit's net.ts): a round while it's offline waits, and the alarms leave out what's only
@@ -924,7 +924,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         }
         lap('alarms');
       }
-      // Something released: the pages that want to know are told (Manor installs it within minutes; the Aletaster tastes it).
+      // Something released: the pages that want to know are told (Manor installs it within minutes).
       // In a build, once: when it ends, for everything it released (the Steward's own, released in its first rounds, too).
       const tellNow = mode.kind === 'build' ? !!out.build?.closed && mode.run.released.length + buildReleased.length > 0 : out.results.some(releasedSomething);
       if (tellNow) await timed(mode.kind === 'build' ? { due: mode.run.due } : null, 'manor', null, () => tellAfterRelease(ctx.settings.afterRelease, log, o.tell));

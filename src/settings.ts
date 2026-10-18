@@ -118,7 +118,7 @@ export interface Settings {
   mergeTrain: boolean;
   /** The build pipeline (pipeline.ts): each repository's main tested and released at set build times. */
   buildPipeline: BuildPipeline;
-  /** Local pages POSTed after a stage releases something (upkeep.ts): Manor's update check, the Aletaster's Run now. */
+  /** Local pages POSTed after a stage releases something (upkeep.ts): Manor's update check. */
   afterRelease: string[];
   /** In its rounds, each employee behind the newest kit release is bumped and its PR pushed (stages/rollout.ts). */
   rollout: boolean;
@@ -132,7 +132,7 @@ export interface Settings {
   mergeSelf: boolean;
   /** The Steward's own checkout, which those releases are made from (a worktree of it at origin/main). */
   stewardCheckout: string;
-  /** Before it publishes an employee's release, a passing tasting from the Aletaster of that very commit (tasting.ts). */
+  /** Before it publishes an employee's release, a passing release check from the Assayer of that very commit (tasting.ts). */
   tasteBeforeRelease: boolean;
   /**
    * A failed bump or release, and a Reeve alert that is code work, filed as an issue in the Wright's queue, its alarm
@@ -197,7 +197,7 @@ export interface AlarmSettings {
   blockingHours: number;
   /** A problem the Surveyor has reported this long is an alarm. */
   problemHours: number;
-  /** A release the Aletaster's tasting has held this long is an alarm. */
+  /** A release the Assayer's release check has held this long is an alarm. */
   tastingHours: number;
 }
 
@@ -296,9 +296,14 @@ export const DEFAULT_EMPLOYEES: Employee[] = [];
 
 /**
  * Told after a release: Manor's update check (so it installs the release within minutes, not at its next look hours
- * away), and the Aletaster's Run now (so it tastes it). Each is its page's own button, POSTed with its page's token.
+ * away). Each is its page's own button, POSTed with its page's token.
  */
-export const DEFAULT_AFTER_RELEASE = ['http://127.0.0.1:18585/api/updates/check', 'http://127.0.0.1:19191/api/run'];
+export const DEFAULT_AFTER_RELEASE = ['http://127.0.0.1:18585/api/updates/check'];
+/**
+ * The retired Aletaster's Run now, a default here until 0.36.149: dropped from saved settings too, since its page is
+ * gone and the Assayer checks a release before it goes out (tasting.ts).
+ */
+const ALETASTER_RUN = /^http:\/\/(127\.0\.0\.1|localhost|aletaster\.localhost):19191\/api\/run$/;
 
 /**
  * The team: none named, which means the GitHub account gh is signed in as on this PC (team.ts): you, and Claude Code,
@@ -563,9 +568,9 @@ export const SETTINGS_SCHEMA: Field[] = [
   {
     key: 'tasteBeforeRelease',
     kind: 'switch',
-    label: "Waits for the Aletaster's tasting",
+    label: "Waits for the Assayer's release check",
     tab: 'How it works',
-    help: "A release is published once the Aletaster's tasting of its commit lets it through. Released without one where the Aletaster isn't there to ask.",
+    help: "A release is published once the Assayer's check of its commit lets it through: its versions agree and are the next step, and every merged PR has its changelog line. Released without one where the Assayer isn't there to ask.",
   },
   {
     key: 'fileWork',
@@ -639,7 +644,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'Something waiting for', help: "A new kit waiting for the Steward to carry it; work filed for the Wright that hasn't landed; a release the Exchequer couldn't be reached for." },
       { key: 'blockingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR holding others up for', help: 'No longer used: there are no version queues (0.36.124).', hidden: true },
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
-      { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Aletaster's tasting holds for" },
+      { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Assayer's release check holds for" },
     ],
   },
   {
@@ -823,7 +828,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       catchUp: typeof r.catchUp === 'boolean' ? r.catchUp : d.catchUp,
       mergeTrain: typeof r.mergeTrain === 'boolean' ? r.mergeTrain : d.mergeTrain,
       buildPipeline: normalizePipeline(r.buildPipeline),
-      afterRelease: Array.isArray(r.afterRelease) ? strings(r.afterRelease, []).filter((u) => LOCAL_ACTION.test(u)) : d.afterRelease,
+      afterRelease: Array.isArray(r.afterRelease) ? strings(r.afterRelease, []).filter((u) => LOCAL_ACTION.test(u) && !ALETASTER_RUN.test(u)) : d.afterRelease,
       rollout: typeof r.rollout === 'boolean' ? r.rollout : d.rollout,
       rolloutQuietHours: Number.isInteger(quietHours) ? Math.min(48, Math.max(0, quietHours)) : d.rolloutQuietHours,
       rolloutMaxWaitHours: Number.isInteger(maxWaitHours) ? Math.min(168, Math.max(1, maxWaitHours)) : d.rolloutMaxWaitHours,

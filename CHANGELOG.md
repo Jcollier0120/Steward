@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.149
+
+**Releases are checked by the Assayer before they go out, instead of by the Aletaster, which is retiring.**
+
+### What changed
+
+- Before it publishes a release, the Steward asks the Assayer about the commit it would release from, as it asked the Aletaster:
+  - the versions agree and are the next step;
+  - every merged PR has its changelog line;
+  - an agent of the house would be released under its own name.
+- A failure holds the release with the reason and a link, as before. "Waits for the Assayer's release check" in Settings (on by default) switches it off.
+- Released without a check, and saying so, where the Assayer isn't installed, its Developer options are off, or it's older than 0.4.19. The Assayer's own releases are never held by it.
+- "Told after a release" no longer pokes the retired Aletaster's Run now. It's dropped from saved settings too.
+
+### Before you update
+
+- Update the Assayer to 0.4.19 for the check. Until then, releases go out without one, and say so.
+
 ## 0.36.147
 
 **The Steward now hands out kit 2.86.0, which moves your staff's search and matching work onto the NPU on PCs that were set up before the NPU could do it.**
