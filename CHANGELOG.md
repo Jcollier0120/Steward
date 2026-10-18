@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.150
+
+**The Steward now hands out kit 2.86.1: your staff keep working after Castellan updates itself. Before, an update could leave some of them failing every round until the PC restarted.**
+
+### What changed
+
+- **The kit 2.86.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)):
+  - When Castellan updated itself, Windows also closed a small helper window that each member of the staff kept, out of sight. After that, every tool they started (git, PowerShell) failed at once. On one PC, after an update that waited for the PC to wake, the Smith, Pinder, the Warrener and the Toller did no work for 23 hours.
+  - Each member of the staff now keeps a helper of its own, which an update doesn't close.
+  - If that helper does go, they notice and start their tools another way, so their rounds go on.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Staff that are failing now start working again once they update.
+
 ## 0.36.147
 
 **The Steward now hands out kit 2.86.0, which moves your staff's search and matching work onto the NPU on PCs that were set up before the NPU could do it.**

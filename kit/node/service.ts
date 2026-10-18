@@ -69,8 +69,9 @@ export async function start(cliFile: string): Promise<number> {
  * Elsewhere, and on Windows when a path holds a `%` or a `"` (which cmd would read), detached, with no console, as before.
  *
  * With `o.named`, the agent's launcher (named.ts) and the id its job is named for, `start` runs the launcher and the
- * launcher the page, in a job of the agent's own: Task Manager shows the page under the agent's name, its console and
- * output as they were.
+ * launcher the page, in a job of the agent's own: Task Manager shows the page under the agent's name, its output as it
+ * was. The page gets a windowless console of its own there (kit 2.86.1, named.cs), whose host doesn't end with the jobs
+ * the page leaves, as cmd's does (Manor's update ends Manor's task); its git and gh share that one.
  *
  * `o.args` are the page's arguments after its entry, `serve` unless said (an agent with a command of its own for its
  * page: Reeve's `dashboard --port <n>`).
