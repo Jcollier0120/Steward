@@ -95,8 +95,14 @@ export function manorUses(home = manorHome()): PortUse[] {
   ];
 }
 
-/** Each clone's port as last read, by its folder and branch: the commit origin's branch was at then, and the port. */
-const portAt = new Map<string, { head: string; port: number | null }>();
+/**
+ * Each clone's port as last read, by its folder and branch: the commit origin's branch was at then, and the port. Kept
+ * between the Steward's restarts (Manor updates it often), which read every clone again, one git each (Steward 0.36.142).
+ * Not under node --test unless the test gives a data folder of its own.
+ */
+export const clonePortsFile = () => dataFile('clone-ports.json');
+let portAt: Map<string, { head: string; port: number | null }> | null = null;
+const keepsPorts = () => !process.env.NODE_TEST_CONTEXT || !!process.env.STEWARD_HOME;
 
 /**
  * What each employee's clone says on its branch (as origin had it at the last fetch): src/app.ts, else manor-agent.json.
@@ -105,6 +111,9 @@ const portAt = new Map<string, { head: string; port: number | null }>();
  */
 export async function cloneUses(run: Runner, employees: Employee[]): Promise<PortUse[]> {
   const out: PortUse[] = [];
+  portAt ??= new Map(keepsPorts() ? Object.entries(readJson<Record<string, { head: string; port: number | null }>>(clonePortsFile(), {})) : []);
+  const at = portAt;
+  let read = false;
   for (const e of employees) {
     if (!e.checkout) continue;
     try {
@@ -112,7 +121,7 @@ export async function cloneUses(run: Runner, employees: Employee[]): Promise<Por
       const ref = `origin/${e.branch}`;
       const head = refOnDisk(repo, `refs/remotes/${ref}`);
       const k = `${repo.toLowerCase()}|${e.branch}`;
-      const kept = head ? portAt.get(k) : undefined;
+      const kept = head ? at.get(k) : undefined;
       let port: number | null;
       if (kept?.head === head) port = kept.port;
       else {
@@ -122,11 +131,21 @@ export async function cloneUses(run: Runner, employees: Employee[]): Promise<Por
         if (port === null) {
           port = announce ? portOfUrl((JSON.parse(announce.replace(/^﻿/, '')) as { agent?: { home?: unknown } })?.agent?.home) : null;
         }
-        if (head) portAt.set(k, { head, port });
+        if (head) {
+          at.set(k, { head, port });
+          read = true;
+        }
       }
       if (port !== null) out.push({ port, id: e.id, source: 'clone' });
     } catch {
       // A clone that can't be read says nothing; Manor's lists still do.
+    }
+  }
+  if (read && keepsPorts()) {
+    try {
+      writeJson(clonePortsFile(), Object.fromEntries(at));
+    } catch {
+      // Kept in memory still: read again after the next restart.
     }
   }
   return out;

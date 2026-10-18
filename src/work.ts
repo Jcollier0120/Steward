@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { APP } from './app.ts';
 import type { Condition, FailedRollout } from './alarms.ts';
+import type { Glance, RepoGlance } from './glance.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { redact, trimmed } from './redact.ts';
 import type { Runner } from './run.ts';
@@ -449,8 +450,10 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
  * this round's failures still name (`items`). And each release issue whose commit round-failed.json no longer names
  * (closeRelease), each conflict issue whose PR no longer needs it (closeConflict), and each kit trial's whose kit no
  * longer waits for the agent (closeKitTrial). Forgotten in work-filed.json once closed, or found closed already.
+ * What the round's glance at GitHub (`glance`) says already isn't asked again: a PR still open and in conflict, a kit
+ * PR still open, an employee's releases (Steward 0.36.142: a gh process for each open issue, every round, before).
  */
-export async function closeResolved(o: { items: WorkItem[]; employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }): Promise<void> {
+export async function closeResolved(o: { items: WorkItem[]; employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void; glance?: Glance | null }): Promise<void> {
   const filed = readJson<Record<string, FiledWork>>(workFiledFile(), {});
   const current = new Set(o.items.map((i) => i.id));
   let changed = false;
@@ -502,6 +505,15 @@ export async function closeResolved(o: { items: WorkItem[]; employees: Employee[
   if (changed) writeJson(workFiledFile(), filed);
 }
 
+/** What the round's glance says of `repo` (an employee's), or null when it says nothing of it. */
+function glanceFor(o: { employees: Employee[]; glance?: Glance | null }, repo: string): RepoGlance | null {
+  const e = o.employees.find((x) => x.repo.toLowerCase() === repo.toLowerCase());
+  return (e && o.glance?.repos[e.id]) || null;
+}
+
+/** PR #`n` of `repo` as the round's glance has it open, or null: not open, or the glance can't say. */
+const openInGlance = (o: { employees: Employee[]; glance?: Glance | null }, repo: string, n: number): any | null => glanceFor(o, repo)?.prs.find((p) => Number(p?.number) === n) ?? null;
+
 /** round-failed.json as the rounds keep it (each employee's failed release, by its commit), or null when it can't be read: missing, or not such a record. */
 export function readFailedReleases(file = roundFailuresFile()): Record<string, string> | null {
   try {
@@ -514,8 +526,10 @@ export function readFailedReleases(file = roundFailuresFile()): Record<string, s
 }
 
 /** An employee's newest release, as its host lists it, or its installed copy's when it is released only on this PC (as releasedOf counts them); null when there's none, or they can't be listed. */
-async function newestRelease(o: { run: Runner; cwd: string }, e: Employee): Promise<ReleaseInfo | null> {
-  const r = await hostFor({ run: o.run, neutralDir: o.cwd }).listReleases(e.repo, 'tagName,isDraft,publishedAt');
+async function newestRelease(o: { run: Runner; cwd: string; glance?: Glance | null }, e: Employee): Promise<ReleaseInfo | null> {
+  // The round's glance has its releases already; else its host is asked.
+  const g = o.glance?.repos[e.id];
+  const r = g ? { code: 0, out: JSON.stringify(g.releases), err: '' } : await hostFor({ run: o.run, neutralDir: o.cwd }).listReleases(e.repo, 'tagName,isDraft,publishedAt');
   let listed: ReleaseInfo[] = [];
   try {
     if (r.code === 0) listed = appReleasesIn(r.out);
@@ -534,7 +548,7 @@ async function newestRelease(o: { run: Runner; cwd: string }, e: Employee): Prom
  * unreadable, the employee gone from Settings, or no release since to name (its releases not listed, or one that waits
  * for the signing key not made yet). True once it is closed, or found closed already.
  */
-async function closeRelease(o: { employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }, f: FiledWork, x: { failed: Record<string, string> | null; filed: Record<string, FiledWork>; agent: string; commit: string }): Promise<boolean> {
+async function closeRelease(o: { employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void; glance?: Glance | null }, f: FiledWork, x: { failed: Record<string, string> | null; filed: Record<string, FiledWork>; agent: string; commit: string }): Promise<boolean> {
   if (!x.failed) return false;
   const now = x.failed[x.agent];
   if (now && now.toLowerCase() === x.commit.toLowerCase()) return false;
@@ -566,10 +580,12 @@ async function closeRelease(o: { employees: Employee[]; run: Runner; cwd: string
  * A kit trial's issue (filed before Steward 0.36.124, for a kit PR's trial) whose kit PR no longer waits: it merged or
  * was closed. True once it is closed, or found closed already.
  */
-async function closeKitTrial(o: { employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }, f: FiledWork, agent: string, kit: string): Promise<boolean> {
+async function closeKitTrial(o: { employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void; glance?: Glance | null }, f: FiledWork, agent: string, kit: string): Promise<boolean> {
   const c = /^waiting:([^#]+)#(\d+)$/.exec(f.condition ?? '');
   if (!c) return false;
   const n = Number(c[2]);
+  // Still open, as the round's glance says: nothing asked.
+  if (openInGlance(o, c[1], n)) return false;
   const name = o.employees.find((e) => e.id === agent)?.name ?? agent;
   const host = hostFor({ run: o.run, neutralDir: o.cwd });
   const v = await host.viewPr(c[1], n, 'state');
@@ -597,7 +613,10 @@ async function closeKitTrial(o: { employees: Employee[]; run: Runner; cwd: strin
  * resolved it), as its host says now. True once it is closed, or found closed already; false while the PR still
  * conflicts (the Wright's draft is still to land, say), or its host couldn't be asked.
  */
-async function closeConflict(o: { run: Runner; cwd: string; log: (line: string) => void }, f: FiledWork, repo: string, n: number): Promise<boolean> {
+async function closeConflict(o: { employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void; glance?: Glance | null }, f: FiledWork, repo: string, n: number): Promise<boolean> {
+  // Open and still not merging cleanly, as the round's glance says: nothing asked.
+  const seen = openInGlance(o, repo, n);
+  if (seen && seen.mergeable !== 'MERGEABLE') return false;
   const host = hostFor({ run: o.run, neutralDir: o.cwd });
   const v = await host.viewPr(repo, n, 'state,mergeable');
   if (v.code !== 0) return false;

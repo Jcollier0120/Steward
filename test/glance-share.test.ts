@@ -47,7 +47,8 @@ test('a query GitHub gives up on (502 after its 10 seconds) is asked again in ha
   });
   assert.ok(g, lines.join('\n'));
   assert.equal(sizes[0], PER_QUERY);
-  assert.deepEqual(sizes.slice(1, 3), [Math.ceil(PER_QUERY / 2), Math.floor(PER_QUERY / 2)], 'then its halves');
+  // The next query (the last repository) is asked beside it (GLANCE_AT_ONCE); the one GitHub gave up on, in halves after.
+  assert.deepEqual(sizes.slice(1), [1, Math.ceil(PER_QUERY / 2), Math.floor(PER_QUERY / 2)], 'then its halves');
   assert.equal(sizes.filter((n) => n <= 3).reduce((a, b) => a + b, 0), many.length, 'every repository answered once');
   assert.equal(Object.keys(g.repos).length, many.length);
   assert.deepEqual(lines, []);

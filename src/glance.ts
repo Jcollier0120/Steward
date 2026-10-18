@@ -75,6 +75,13 @@ export interface Glance {
  */
 export const PER_QUERY = 5;
 
+/**
+ * How many of a glance's queries are asked at once. GitHub takes 1–4 seconds over each whatever else is asked: 8 of them
+ * one after another were 20 of an idle round's 30 seconds on the makers' PC; 4 at once took 7, 8 at once 4 (39
+ * repositories, 2026-10-18). Kept well under GitHub's 100 requests at once, as it asks.
+ */
+export const GLANCE_AT_ONCE = 4;
+
 /** GitHub giving up on a query that took too long: 502 or 504 from the API, gh's "HTTP 502", or GraphQL's own words. */
 export const queryTimedOut = (e: unknown) => [502, 504].includes((e as GitHubApiError)?.status) || /\b(?:HTTP |graphql: )50[24]\b|may be the result of a timeout/i.test(String((e as Error)?.message ?? e));
 
@@ -332,7 +339,23 @@ export async function takeGlance(
       await asked(chunk.slice(half), null);
     }
   };
-  for (let i = 0; i === 0 || i < all.length; i += PER_QUERY) await asked(all.slice(i, i + PER_QUERY), i === 0 ? settings.stewardRepo : null);
+  // GLANCE_AT_ONCE at a time, the Steward's own releases in the first; once one fails, no more are asked.
+  const chunks: [Employee[], string | null][] = [];
+  for (let i = 0; i === 0 || i < all.length; i += PER_QUERY) chunks.push([all.slice(i, i + PER_QUERY), i === 0 ? settings.stewardRepo : null]);
+  let next = 0;
+  let failed = false;
+  const asker = async () => {
+    while (!failed && next < chunks.length) {
+      const [chunk, stewardRepo] = chunks[next++];
+      try {
+        await asked(chunk, stewardRepo);
+      } catch (e) {
+        failed = true;
+        throw e;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(GLANCE_AT_ONCE, chunks.length) }, asker));
   await moreHeads(ask, glance, more, now);
   return glance;
 }

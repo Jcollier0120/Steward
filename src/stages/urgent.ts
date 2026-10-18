@@ -1,10 +1,11 @@
 import { CHANGES_DIR } from '../entries.ts';
-import { fetchBranch, git, gitMaybe } from '../git.ts';
+import { commitOf, fetchBranch, git, gitMaybe } from '../git.ts';
 import { isUrgent } from '../kit/exchequer.ts';
 import { CHANGELOG } from '../kit/notes.ts';
+import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import { urgentKey, type UrgentPr } from '../pipeline.ts';
 import type { Employee } from '../settings.ts';
-import { checkoutOf, glanceOf, type Ctx } from './common.ts';
+import { checkoutOf, glanceOf, mapLimit, type Ctx } from './common.ts';
 import { appReleasesIn } from './staff.ts';
 
 /**
@@ -31,52 +32,74 @@ export const addedLines = (diff: string): string[] =>
 /** Whether the lines main adds to its changelog mark it urgent. Pure. */
 export const marksUrgent = (diff: string): boolean => addedLines(diff).some((l) => isUrgent(l));
 
-/** Each head read once: "<repo>@<head>" → urgent. */
-const looked = new Map<string, boolean>();
+/**
+ * What each head said, kept between the Steward's restarts (Manor updates it often), which read every repository again,
+ * fetching each (Steward 0.36.142): "<repo>@<head>..<tag>" → urgent. Not under node --test unless the test gives a data
+ * folder of its own.
+ */
+export const urgentLookedFile = () => dataFile('urgent-looked.json');
+const keepsLooked = () => !process.env.NODE_TEST_CONTEXT || !!process.env.STEWARD_HOME;
+/** Each head read once: "<repo>@<head>..<tag>" → urgent; read from urgentLookedFile at first. */
+let looked: Map<string, boolean> | null = null;
 /** How many it keeps before it forgets them all and reads again. */
 const LOOKED_MAX = 1000;
 
-/** Whether main at `head` adds an urgent entry since the release `tag`: the lines it adds to CHANGELOG.md or changes/. */
-async function readUrgent(ctx: Ctx, e: Employee, head: string, tag: string): Promise<boolean> {
+/**
+ * Whether main at `head` adds an urgent entry since the release `tag` (its commit `tagged`, when the glance says): the
+ * lines it adds to CHANGELOG.md or changes/. Only what the clone lacks is fetched: main's head, the release's commit.
+ */
+async function readUrgent(ctx: Ctx, e: Employee, head: string, tag: string, tagged: string | null): Promise<boolean> {
   const repo = checkoutOf(e);
-  await fetchBranch(ctx.run, repo, e.branch);
+  if (!(await commitOf(ctx.run, repo, head))) await fetchBranch(ctx.run, repo, e.branch);
   const ref = `refs/tags/${tag}`;
-  if ((await gitMaybe(ctx.run, repo, 'fetch', '--quiet', 'origin', `+${ref}:${ref}`)) === null) return false;
-  const diff = await git(ctx.run, repo, 'diff', '--no-color', '--no-ext-diff', '--unified=0', `${ref}..${head}`, '--', CHANGELOG, `${CHANGES_DIR}/`);
+  let from = tagged && (await commitOf(ctx.run, repo, tagged)) ? tagged : (await commitOf(ctx.run, repo, ref)) ? ref : null;
+  if (!from) {
+    if ((await gitMaybe(ctx.run, repo, 'fetch', '--quiet', 'origin', `+${ref}:${ref}`)) === null) return false;
+    from = ref;
+  }
+  const diff = await git(ctx.run, repo, 'diff', '--no-color', '--no-ext-diff', '--unified=0', `${from}..${head}`, '--', CHANGELOG, `${CHANGES_DIR}/`);
   return marksUrgent(diff);
 }
 
-/**
- * The employees whose main carries an urgent fix not yet released, from the round's glance (`heads` stands in for the
- * Steward's own, which the glance keeps apart), leaving out the heads that built already (`boarded`, pipeline.ts'
- * boardedUrgent). One that couldn't be read is left for the next round, said in the log. Never throws.
- */
 export async function urgentReady(ctx: Ctx, employees: Employee[], boarded: Set<string>, heads: Record<string, { head: string | null; tags: string[] }> = {}): Promise<UrgentPr[]> {
-  const out: UrgentPr[] = [];
-  for (const e of employees) {
-    const g = heads[e.id] ?? (() => {
-      const glance = glanceOf(ctx, e);
-      return glance ? { head: glance.head, tags: appReleasesIn(JSON.stringify(glance.releases)).map((r) => r.tag) } : null;
-    })();
-    if (!g?.head) continue;
+  looked ??= new Map(keepsLooked() ? Object.entries(readJson<Record<string, boolean>>(urgentLookedFile(), {})) : []);
+  const seen = looked;
+  let learnt = false;
+  // A few at once: after a restart with nothing kept, each repository may have its head to fetch.
+  const found = await mapLimit(employees, 4, async (e): Promise<UrgentPr | null> => {
+    // The Steward's own from `heads`; an employee's from the glance, with the commit its newest release tags.
+    const glance = heads[e.id] ? null : glanceOf(ctx, e);
+    const g = heads[e.id] ?? (glance ? { head: glance.head, tags: appReleasesIn(JSON.stringify(glance.releases)).map((r) => r.tag) } : null);
+    const tagged = glance?.releases.find((r) => r.tagName === g?.tags[0])?.commit ?? null;
+    if (!g?.head) return null;
     const u: UrgentPr = { id: e.id, head: g.head };
-    if (boarded.has(urgentKey(u))) continue;
+    if (boarded.has(urgentKey(u))) return null;
     // Never released: its first release isn't an urgent fix's.
     const tag = g.tags[0];
-    if (!tag) continue;
-    const memo = `${e.repo}@${g.head}`;
-    let urgent = looked.get(memo);
+    if (!tag) return null;
+    // Main is its newest release: nothing on it since.
+    if (tagged === g.head) return null;
+    const memo = `${e.repo}@${g.head}..${tag}`;
+    let urgent = seen.get(memo);
     if (urgent === undefined) {
       try {
-        urgent = await readUrgent(ctx, e, g.head, tag);
+        urgent = await readUrgent(ctx, e, g.head, tag, tagged);
       } catch (err) {
         ctx.log(`[${e.id}] couldn't read ${e.branch}'s changelog for an urgent fix: ${(err as Error).message}`);
-        continue;
+        return null;
       }
-      if (looked.size >= LOOKED_MAX) looked.clear();
-      looked.set(memo, urgent);
+      if (seen.size >= LOOKED_MAX) seen.clear();
+      seen.set(memo, urgent);
+      learnt = true;
     }
-    if (urgent) out.push(u);
+    return urgent ? u : null;
+  });
+  if (learnt && keepsLooked()) {
+    try {
+      writeJson(urgentLookedFile(), Object.fromEntries(seen));
+    } catch {
+      // Kept in memory still: read again after the next restart.
+    }
   }
-  return out;
+  return found.filter((u): u is UrgentPr => u !== null);
 }

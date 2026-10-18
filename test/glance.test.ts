@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { APP } from '../src/app.ts';
 import { GithubLimited } from '../src/budget.ts';
-import { glanceQuery, headsFromGraph, PER_QUERY, PR_PAGE, prFromGraph, queryTimedOut, readGlance, repoSig, stewardPrsAsked, takeGlance, type Glance } from '../src/glance.ts';
+import { GLANCE_AT_ONCE, glanceQuery, headsFromGraph, PER_QUERY, PR_PAGE, prFromGraph, queryTimedOut, readGlance, repoSig, stewardPrsAsked, takeGlance, type Glance } from '../src/glance.ts';
 import type { Runner } from '../src/run.ts';
 import { appReleasesIn, parsePrs } from '../src/stages/staff.ts';
 import { employee, ok } from './helpers.ts';
@@ -125,6 +125,30 @@ test("on a PC that shows the Steward's own repository in the staff's table, the 
   const notAsked = empty();
   readGlance([], JSON.stringify({ data: { steward: own } }), 'Jcollier0120/Steward', notAsked);
   assert.ok(!(APP.id in notAsked.repos), 'not asked: not filed');
+});
+
+test(`the queries are asked ${GLANCE_AT_ONCE} at once, every one; once one fails, no more are asked`, async () => {
+  const many = Array.from({ length: PER_QUERY * (GLANCE_AT_ONCE + 2) }, (_, i) => employee('C:\\nowhere', { id: `e${i}x`, repo: `Jcollier0120/E${i}` }));
+  let open = 0;
+  let most = 0;
+  let asked = 0;
+  const ask = (fail: boolean) => async (q: string) => {
+    const first = ++asked === 1;
+    most = Math.max(most, ++open);
+    await new Promise((r) => setTimeout(r, first && fail ? 1 : 20));
+    open--;
+    if (first && fail) throw new Error('GitHub POST graphql: 401 Bad credentials');
+    const n = (q.match(/ e\d+: repository/g) ?? []).length;
+    return JSON.stringify({ data: Object.fromEntries(Array.from({ length: n }, (_, i) => [`e${i}`, graphRepo()])) });
+  };
+  const g = await takeGlance(async () => assert.fail('no gh'), '.', { employees: many, stewardRepo: '' }, undefined, undefined, ask(false));
+  assert.equal(asked, GLANCE_AT_ONCE + 2);
+  assert.equal(most, GLANCE_AT_ONCE, `no more than ${GLANCE_AT_ONCE} at once`);
+  assert.equal(Object.keys(g.repos).length, many.length, 'every employee read');
+  asked = 0;
+  most = 0;
+  await assert.rejects(takeGlance(async () => assert.fail('no gh'), '.', { employees: many, stewardRepo: '' }, undefined, undefined, ask(true)), /401/);
+  assert.equal(asked, GLANCE_AT_ONCE, 'those already asked come back; none after the failure');
 });
 
 test("each query's rateLimit is kept: what the glance cost, summed, and what GitHub said is left", async () => {
