@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.155
+
+**The Steward no longer rolls kits out to agents Manor has retired, and no longer releases them: today the Aletaster, the Auditor and the game-saves Butler.**
+
+### What changed
+
+- **Retired agents are passed over.** Manor's staff list marks an agent retired once another one does its work: the Assayer now does the Aletaster's, and the Smith the Auditor's. Neither was offered to customers, but each still got every new kit, with a bump, its checks, a PR, a merge and a release. Since 1 October that was about 164 of the Aletaster's 265 commits and 171 of the Auditor's 237. Now the rounds pass a retired agent over:
+  - no new kit is rolled out to it;
+  - a new kit isn't tried on it before the kit is released, and a failure it had in an earlier trial no longer holds the kit back;
+  - its versions aren't released.
+- A bump, push or release of a retired agent that failed before is let go, so it no longer raises an alarm. Its row on the Staff page says it is retired.
+- Only agents marked retired are passed over. One Manor holds back until its first release (the Seneschal), or doesn't list yet (the Bailiff and the Wright), gets every kit as before.
+- A Bump, Push or Release you start yourself, naming a retired agent, still does it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Steward reads which agents are retired from the Manor installed on this PC, so the Aletaster and the Auditor are passed over once Manor's next release is installed. Without Manor on this PC, nothing is passed over.
+
 ## 0.36.154
 
 **Releases are checked by the Assayer before they go out, instead of by the Aletaster, which is retiring.**

@@ -115,6 +115,8 @@ export interface Ctx {
    * without the pipeline.
    */
   build?: { due: string; name: string } | null;
+  /** The agents Manor has retired (retired.ts), whom the rounds pass over; tests stand in for them. Not given: Manor's staff.json. */
+  retired?: ReadonlySet<string>;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */

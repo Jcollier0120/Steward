@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { chooseKit, kitReleasesIn } from '../src/kitsource.ts';
 import { releaseDecision } from '../src/stages/release.ts';
 import { appReleasesIn, checksOf, parseLog, parsePrs, prOfCommit, readPin, staffRow } from '../src/stages/staff.ts';
+import { RETIRED } from '../src/retired.ts';
 import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
 
 // The staff's table from gh's JSON (a stand-in runner) and a fake employee's git; which employees release. (Which PRs
@@ -119,6 +120,11 @@ test("an employee's row: its checkout, its branch's version and kit, its PRs, it
   // An employee that doesn't take the kit says so.
   const off = await staffRow(ctx, { ...e, usesKit: false }, { fetch: false, kit: '1.0.0' });
   assert.deepEqual(off.notes, ['not using the kit yet']);
+  // One Manor has retired says so, and the next build brings nothing of it (retired.ts).
+  assert.notEqual(row.nextBuild, null);
+  const retired = await staffRow({ ...ctx, retired: new Set([e.id]) }, e, { fetch: false, kit: '1.0.0' });
+  assert.deepEqual(retired.notes, [RETIRED]);
+  assert.equal(retired.nextBuild, null);
 });
 
 test("a commit on the branch names the PR it merged, in each host's words; one pushed without a PR is its subject", () => {
