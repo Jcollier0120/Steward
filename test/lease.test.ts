@@ -365,7 +365,7 @@ test('the claims ref out of reach: claimed here as before; shared on the next re
   const rows = [{ repo: 'Jcollier0120/Fake', name: 'Fake', main: { version: '0.4.10' }, release: { version: '0.4.10' }, prs: [] }];
   await C.shareClaims(realRun, rows, [{ repo: 'Jcollier0120/Fake', remote: s.remoteRepo, sha: await shaOf(s.remoteRepo, C.CLAIMS_REF) }]);
   assert.deepEqual((await sharedClaims(s.remoteRepo)).map((c) => [c.version, c.branch]), [['0.4.13', 'claude/desk'], ['0.4.12', 'claude/offline']], "this PC's free one went up");
-  assert.deepEqual(C.claimClashes(), ["Jcollier0120/Fake 0.4.13 was claimed on another PC too (for the desktop's fix) while this PC couldn't reach the remote: claude/second gets a new version when it merges"]);
+  assert.deepEqual(C.claimClashes(), ["Jcollier0120/Fake 0.4.13 was claimed on another PC too (for the desktop's fix) while this PC couldn't reach the remote: claim a new version for claude/second (claim-version) before you merge it"]);
   // The desktop's claim is kept here too, beside this PC's own.
   assert.ok(C.claimsOn('Jcollier0120/Fake').some((c) => c.version === '0.4.13' && c.branch === 'claude/desk'));
 });

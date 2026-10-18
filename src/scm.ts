@@ -15,7 +15,8 @@ import type { Employee, Settings } from './settings.ts';
  *
  * Each repository is worked with one of three ways:
  * - **GitHub**: its repository is on GitHub (owner/name) and the GitHub CLI is installed and signed in. Everything as
- *   before: one GraphQL glance, pull requests merged, GitHub releases, issues filed for the Wright.
+ *   before: one GraphQL glance, pull requests listed and vouched for (their authors merge them), GitHub releases,
+ *   issues filed for the Wright.
  * - **GitLab**: its repository is on a GitLab (gitlab.com/group/app, or a host whose name says gitlab) and the GitLab
  *   CLI (glab) is installed and signed in. As GitHub's way, merge requests standing for pull requests, with no glance:
  *   each repository is asked on its own.
@@ -29,8 +30,8 @@ import type { Employee, Settings } from './settings.ts';
  * - **Git**: any other, on any host (Bitbucket Data Center, a server or shared folder of your own), or one of the above
  *   where its CLI or token isn't there. Plain git against its own origin: its branch and its tags are read
  *   with `git ls-remote`, a release is a `v<version>` tag on origin (annotated, its message the version's CHANGELOG.md
- *   entry), pushed by the Steward once the release command has run, and there are no pull requests to merge: what
- *   lands on the branch is released.
+ *   entry), pushed by the Steward once the release command has run, and there are no pull requests: what lands on
+ *   the branch is released at the next build.
  *
  * Other source control (Mercurial, Subversion, Perforce, Plastic SCM) is found and named, but not worked with yet.
  * Castellan's own release machinery (releasesCastellan) is GitHub's, whatever is chosen.

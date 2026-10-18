@@ -230,7 +230,7 @@ async function claimShared(run: Runner, remote: RemoteRepo, a: Ask): Promise<{ c
     const there = read.kind === 'found' ? parseClaims(read.text) : [];
     const sharedLive = there.filter((c) => same(c.repo, a.key) && stillHeld(c, a.facts));
     const mineOnly = loadClaims().filter((c) => same(c.repo, a.key) && c.source !== 'shared' && !c.clash && stillHeld(c, a.facts));
-    // One of this PC's own whose version another PC has meanwhile stays here; its work gets a new one at merge.
+    // One of this PC's own whose version another PC has meanwhile stays here, marked: its work claims a new one.
     const going = mineOnly.filter((c) => !sharedLive.some((s) => s.version === c.version));
     const r = choose([...sharedLive, ...going], a);
     const list = [...there.filter((c) => !same(c.repo, a.key)), ...sharedLive, ...going, ...(r.again ? [] : [r.claim])];
@@ -268,7 +268,7 @@ async function keepCopies(repo: string, shared: Claim[], readAt: number, clashes
       const clash = clashes.find((x) => same(x.repo, c.repo) && x.version === c.version && x.branch === c.branch);
       if (!clash) return c;
       const what = c.repo.endsWith('#kit') ? `The kit ${c.version}` : `${c.repo} ${c.version}`;
-      return { ...c, clash: `${what} was claimed on another PC too (for ${clash.clash}) while this PC couldn't reach the remote: ${c.branch ?? 'this work'} gets a new version when it merges` };
+      return { ...c, clash: `${what} was claimed on another PC too (for ${clash.clash}) while this PC couldn't reach the remote: claim a new version for ${c.branch ?? 'this work'} (claim-version) before you merge it` };
     });
     writeJson(claimsFile(), [...marked, ...mine.map((c) => ({ ...c, source: 'shared' as const, copied }))]);
   });
@@ -332,8 +332,9 @@ const claimsSeenFile = () => dataFile('claims-seen.json');
 /**
  * Each round that took turns: each repository's claims ref, where it moved since the last look or this PC holds claims
  * of its own there (made while it couldn't reach the remote). Its live claims are copied here; this PC's own go up,
- * but one whose version another PC claimed meanwhile stays here, marked, and its work gets a new version when it
- * merges (the merge stage holds a PR that sets a version another branch claimed, and catch-up gives it a free one).
+ * but one whose version another PC claimed meanwhile stays here, marked, and the page says to claim a new version for
+ * its work before it is merged (claim-version, through the claims ref, passes a marked claim by). Since Steward
+ * 0.36.124 no merge stage holds its PR for it.
  * Landed and stale claims are let go there too. A repository out of reach is left for the next round.
  */
 export async function shareClaims(run: Runner, rows: Row[], repos: { repo: string; remote: RemoteRepo; sha: string | null }[], now = Date.now()): Promise<void> {

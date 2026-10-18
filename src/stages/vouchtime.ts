@@ -4,8 +4,9 @@ import { duration, type CheckKind, type TimeLimit } from './bump.ts';
 /**
  * A vouch's time limit (Steward 0.36.28): its checks are stopped once they have taken five minutes more than its runs
  * took on average, so a stuck run (a test waiting forever, a run held to the checks pace behind others) ends minutes
- * past its usual time, not at the 80 minutes a paced step may otherwise take. Stopped, the vouch sets nothing, and the
- * Steward tests the PR itself before it merges, as for any PR not vouched for.
+ * past its usual time, not at the 80 minutes a paced step may otherwise take. Stopped, the vouch sets nothing: vouch
+ * again, or once the PR is merged the build tests main's head itself before it releases it (mainbuild.ts), as for any
+ * commit no vouch covers.
  *
  * Kept in vouch-times.json, per employee: the time each of its last KEEP vouches took to pass its checks, on the clock
  * (at the checks pace, as they run), whole-suite runs apart from runs of only the tests a change reaches, which take a

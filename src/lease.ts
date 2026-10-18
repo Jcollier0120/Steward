@@ -14,15 +14,16 @@ import { checkoutOf, mapLimit, result, workRootOf, type EmployeeResult } from '.
 
 /**
  * One release PC per repository, elected by the PCs themselves (docs/MULTI-PC.md). Every PC may run a Steward signed in
- * to the same GitHub account; without turns, two of them merge and release the same PRs.
+ * to the same GitHub account; without turns, two of them release the same versions, and stamp and roll the kit out to
+ * the same repositories. (Since Steward 0.36.124 no Steward merges anyone else's PRs.)
  *
  * The meeting place is a ref in the repository's own remote, on any host: `refs/manor/release-pc`, a tiny orphan commit
  * holding release-pc.json, `{ pc, name, until, since, pinned, checkout }`, read and written with plain git
  * (remote-ref.ts), by compare-and-swap. No licence, no Exchequer, nothing of GitHub's: it works for anyone.
  *
- * - Before a stage publishes (merges, releases, refresh, kit rollout and catch-up pushes, the Release button), it reads
- *   the ref of each repository it would publish to: a round, only of those its plan looks at (stages/changes.ts), as
- *   it publishes nothing to the rest. Free, or run out: it takes it, for three rounds; for half a day while no other
+ * - Before a stage publishes (releases, the Release button, a stamp, refresh and kit rollout pushes, and the merges
+ *   of its own stamp and kit PRs), it reads the ref of each repository it would publish to: a round, only of those
+ *   its plan looks at (stages/changes.ts), as it publishes nothing to the rest. Free, or run out: it takes it, for three rounds; for half a day while no other
  *   PC has been seen in a turn record for a month (LONG_TTL_S), as a PC alone has no one to hand it over to. Its own:
  *   renewed once half of that is gone. Another PC's: left alone, and the page says so, with Do it here.
  * - On GitHub, the refs are read from the Steward's own process through GitHub's API (githubTurnRefs), not git

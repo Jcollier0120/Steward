@@ -2,6 +2,26 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.145
+
+**The Steward's own words no longer say it merges your pull requests. Since 0.36.124 you merge your own once vouched, and the builds at set times release what is on the branch. A branch with no PR in a repository that writes its entries in `changes/` (Manor's) can now be vouched for.**
+
+### What changed
+
+- **`steward vouch` on a branch with no PR, in a repository that writes its entries in `changes/`,** asked for a version claim first. `claim-version` claims none there: the work writes `changes/<branch>.md`, and the build's stamp gives it its version. So there was no way through. Now it vouches for such a branch with no claim, and says to open its PR from that commit.
+- **Do it here and Keep it on this PC** ask "Release Clerk from this PC…?", not "Merge and release…".
+- **The line about urgent fixes** calls one a commit on main whose changelog entry starts "**Urgent fix:", not a ready PR.
+- **When another PC claimed the same version**, the page says to claim a new version for that work before you merge it. It used to say the work would get a new version when it merged, which no stage does any more.
+- **Settings' help:**
+  - **Source control:** pull requests are listed and vouched for, and you merge your own. Over plain git, what you land on the branch is released at the next build.
+  - **Test it:** a repository with no checks is released untested, as before builds tested main. The help and the README said only a vouched commit was released; the builds have always released it untested.
+  - **Checked at once:** it sets how many repositories a bump, a release, a refresh or a kit's trial works on at once, not only a bump.
+- **docs/MULTI-PC.md** lists what waits for a PC's turn as the code has it: releasing, a build's stamp, a refresh's push, and a kit rollout's push and the merge of its own kit PR. Merging was on the list, and a catch-up's push, which is gone.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.143
 
 **When a screen saver keeps putting the PC to sleep, the Steward's page now says so and names the setting that stops it. On ASUS OLED laptops, since a Windows update in October, the OLED Care screen saver puts the PC to sleep about 30 seconds after it comes on, and the staff stop until someone comes back.**

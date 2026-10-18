@@ -442,7 +442,7 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
         ? `It releases only when asked, until you say yes: "Builds and releases by itself" is off in Settings. A round every ${r.minutes} minutes while on duty only ${tend}.${after} Run now does a whole round.`
         : 'It releases only when asked, until you say yes: "Builds and releases by itself" is off in Settings. Run now does one round.'
       : r.build
-        ? `It builds at set times (${r.build.times.join(', ')}; Settings: Build pipeline): a build ${what}, each repository released once. ${r.build.building ? 'A build is under way now.' : r.build.next ? `The next build is at ${buildAt(r.build.next, now)}.` : 'No build time is set to come.'}${r.build.late ? ` ${r.build.late.charAt(0).toUpperCase()}${r.build.late.slice(1)}.` : ''}${r.build.wakes ? ' Plugged in, the PC is woken a few minutes before each build, and kept up until it closes.' : ''} Between builds, a round every ${r.minutes} minutes only looks, except for an urgent fix (a ready PR whose changelog entry starts "**Urgent fix:"): that builds at once, for its repository alone.${after}`
+        ? `It builds at set times (${r.build.times.join(', ')}; Settings: Build pipeline): a build ${what}, each repository released once. ${r.build.building ? 'A build is under way now.' : r.build.next ? `The next build is at ${buildAt(r.build.next, now)}.` : 'No build time is set to come.'}${r.build.late ? ` ${r.build.late.charAt(0).toUpperCase()}${r.build.late.slice(1)}.` : ''}${r.build.wakes ? ' Plugged in, the PC is woken a few minutes before each build, and kept up until it closes.' : ''} Between builds, a round every ${r.minutes} minutes only looks, except for an urgent fix (a commit on main whose changelog entry starts "**Urgent fix:"): that builds at once, for its repository alone.${after}`
         : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${after}`;
   // Where the last build's time went (buildtimes.ts), and that what is merged between builds is released at the next.
   const took = r.on && !noRepos && r.build?.took ? ` ${r.build.took} Between builds, whoever wrote a PR merges it once vouched, and the next build releases it.` : '';
@@ -586,14 +586,14 @@ function TurnButtons({ x }: { x: TurnRow }) {
           variant="secondary"
           path="/api/turns/take"
           body={{ repo: x.repo }}
-          confirm={`Merge and release ${x.name} on this PC from now on? ${x.holder} leaves it alone from its next look.`}
+          confirm={`Release ${x.name} from this PC from now on? ${x.holder} leaves it alone from its next look.`}
         />
         <PostButton
           title="Keep it on this PC"
           variant="secondary"
           path="/api/turns/take"
           body={{ repo: x.repo, pin: true }}
-          confirm={`Merge and release ${x.name} on this PC, and keep it here? Other PCs leave it alone while this PC is around.`}
+          confirm={`Release ${x.name} from this PC, and keep it here? Other PCs leave it alone while this PC is around.`}
         />
       </span>
     );
