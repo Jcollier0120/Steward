@@ -215,6 +215,24 @@ export type SpeedRules = {
      */
     bootSlackMs: number;
 };
+export type NpuPaceRules = {
+    /**
+     * A look at the PC's room (its power, heat and who else uses the NPU) stands this long for every agent.
+     */
+    roomFreshMs: number;
+    /**
+     * A look that takes longer than this is given up: the room is unknown, and the NPU stays gentle.
+     */
+    lookWaitMs: number;
+    /**
+     * One stretch of an agent's backlog runs at most this long; the rest waits for its next round.
+     */
+    stretchMs: number;
+    /**
+     * Another program using the NPU this much (percent of a second) or more keeps it gentle.
+     */
+    otherUsePercent: number;
+};
 export type Rules = {
     queue: QueueRules;
     lock: LockRules;
@@ -223,6 +241,7 @@ export type Rules = {
     keeper: KeeperRules;
     tokens: TokenRules;
     speed: SpeedRules;
+    npuPace: NpuPaceRules;
 };
 /**
  * spec/rules.json's contents as the core takes them: every timing and limit present, a whole number of

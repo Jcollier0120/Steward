@@ -86,6 +86,15 @@
  */
 
 /**
+ * @typedef {object} NpuPaceRules The NPU at full speed (ACCELERATORS.md, "The NPU at full speed", kit 2.85.0): model work
+ *   an agent has left after a round runs back to back on the NPU while the PC has room for it.
+ * @property {number} roomFreshMs A look at the PC's room (its power, heat and who else uses the NPU) stands this long for every agent.
+ * @property {number} lookWaitMs A look that takes longer than this is given up: the room is unknown, and the NPU stays gentle.
+ * @property {number} stretchMs One stretch of an agent's backlog runs at most this long; the rest waits for its next round.
+ * @property {number} otherUsePercent Another program using the NPU this much (percent of a second) or more keeps it gentle.
+ */
+
+/**
  * @typedef {object} Rules
  * @property {QueueRules} queue
  * @property {LockRules} lock
@@ -94,6 +103,7 @@
  * @property {KeeperRules} keeper
  * @property {TokenRules} tokens
  * @property {SpeedRules} speed
+ * @property {NpuPaceRules} npuPace
  */
 
 /** @type {Record<keyof Rules, string[]>} */
@@ -105,6 +115,7 @@ const SHAPE = {
   keeper: ['lookEveryMs', 'npuIdleStopMinutes', 'gpuIdleStopMinutes', 'gameGraceMs', 'unansweredMs', 'recycleBytes', 'turnWaitMs', 'turnMaxAhead', 'otherSlotsWaitMs', 'orphanGraceMs'],
   tokens: ['charsPerToken', 'messageChars', 'quirkRoomChars', 'imageTokens', 'minPieceChars'],
   speed: ['keptPerBoot', 'keptBoots', 'samplesNeeded', 'slowPercent', 'bootSlackMs'],
+  npuPace: ['roomFreshMs', 'lookWaitMs', 'stretchMs', 'otherUsePercent'],
 };
 
 /**

@@ -406,6 +406,8 @@ export class Npu {
       if (vectors.length !== texts.length || vectors.some((v) => !Array.isArray(v))) throw new Error(core.say.tooFewVectors());
       return { vectors, model: ep.model, ms };
     });
+    // Counted for the accelerator's day (token-tally.ts' busyToday, kit 2.85.0): the texts' tokens, by the kit's estimate.
+    tallyRequest(APP.id, { work: 'embed', lane: opts.lane ?? 'background', kind: r.acc.kind, acc: r.acc.id, promptTokens: texts.reduce((n, t) => n + estimateTokens(t), 0), answerTokens: 0, ms: r.value.ms });
     return { ...r.value, accelerator: refOf(r.acc), ...(r.fellBackFrom ? { fellBackFrom: r.fellBackFrom } : {}) };
   }
 
@@ -418,7 +420,7 @@ export class Npu {
   ): Promise<NpuAnswer> {
     const r = await this.route(work, promptTokens, maxTokens, opts, send);
     // The server's count where it gives one, the kit's estimate where it doesn't.
-    tallyRequest(APP.id, { work, lane: opts.lane ?? 'background', kind: r.acc.kind, promptTokens: r.value.promptTokens || tokensOn(promptTokens, r.acc), answerTokens: r.value.completionTokens, ms: r.value.ms });
+    tallyRequest(APP.id, { work, lane: opts.lane ?? 'background', kind: r.acc.kind, acc: r.acc.id, promptTokens: r.value.promptTokens || tokensOn(promptTokens, r.acc), answerTokens: r.value.completionTokens, ms: r.value.ms });
     // Chat's decode speed, for a slow start (boot-speed.ts): vision's answers are too short, and a picture's encoding may count in.
     if (work === 'chat' && r.value.tokensPerSecond) noteSpeed(APP.id, { acc: r.acc.id, model: r.value.model, answerTokens: r.value.completionTokens, tokensPerSecond: r.value.tokensPerSecond });
     return { ...r.value, accelerator: refOf(r.acc), ...(r.fellBackFrom ? { fellBackFrom: r.fellBackFrom } : {}) };

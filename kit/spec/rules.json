@@ -63,5 +63,11 @@
     "samplesNeeded": 8,
     "slowPercent": 85,
     "bootSlackMs": 120000
+  },
+  "npuPace": {
+    "roomFreshMs": 60000,
+    "lookWaitMs": 20000,
+    "stretchMs": 900000,
+    "otherUsePercent": 1
   }
 }

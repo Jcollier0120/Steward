@@ -6,6 +6,7 @@ import { lineSnapshot, slotDirs, type Lane } from './npu-queue.ts';
 import { agentsAtOnce, firstRoundLockDir, pace, workLockDir, type Pace } from './pace.ts';
 import { passOnOtherPcs } from './manor.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
+import { busyToday } from './token-tally.ts';
 import { workTasks, type Task, type WorkFields } from './work-tasks.ts';
 
 export { currentWork, inWork, outsideWork, startWork, withWork, type WorkFields, type WorkHandle } from './work-tasks.ts';
@@ -56,6 +57,11 @@ export interface PcLoad {
   /** The manor's pace (pace.ts), and the checks pace's cap in hundredths of a percent (0: none; checks-pace.ts). */
   pace: Pace;
   checksCap: number;
+  /**
+   * The NPU's pace for the agents' backlogs (npu-pace.ts, kit 2.85.0) as the last shared look found the room, without
+   * looking again: full, or gentle and why; `lookedAt` null before any look. Left out where no NPU takes chat first.
+   */
+  npu?: { pace: 'full' | 'gentle'; why: string | null; lookedAt: string | null };
 }
 
 /** How many of one kind of work the agent runs at once (`of`, null for no limit), and how many it runs now. */
@@ -106,6 +112,12 @@ export interface WorkQueue {
   slots: number | null;
   holders: WorkPlace[];
   waiting: WorkPlace[];
+  /**
+   * An accelerator's day so far (kit 2.85.0, token-tally.ts' busyToday): every agent's requests on it since midnight,
+   * the PC's own, added together: their time (`busyMs`; the NPU serves one at a time, so the time it was busy), how
+   * many, and their tokens. Left out with nothing counted today.
+   */
+  today?: { day: string; busyMs: number; requests: number; promptTokens: number; answerTokens: number };
 }
 
 /** A result: what a kind of work on a code tree came to. One per kind, repository and tree, the latest. */
@@ -372,12 +384,17 @@ export async function pcLines(o: { runs?: ChecksRun[] } = {}): Promise<WorkQueue
   try {
     const { loadAccelerators, lockDirsOf, turnsWithoutEntry } = await import('./accelerators.ts');
     const cfg = loadAccelerators();
+    const day = busyToday();
+    const todayOf = (id: string): Pick<WorkQueue, 'today'> => {
+      const a = day.accelerators.find((x) => x.id === id);
+      return a ? { today: { day: day.day, busyMs: a.busyMs, requests: a.requests, promptTokens: a.promptTokens, answerTokens: a.answerTokens } } : {};
+    };
     if (!('error' in cfg)) {
       // The entries, then a device whose turn an entry's server takes without an entry of its own (the NPU 3720's graphics).
       for (const a of [...cfg.accelerators.filter((a) => a.enabled !== false), ...turnsWithoutEntry(cfg.accelerators)]) {
         const dirs = lockDirsOf(a);
         const s = lineSnapshot(dirs);
-        lines.push({ id: `accelerator:${a.id}`, kind: 'accelerator', name: a.name ?? a.id, slots: dirs.length, holders: holdersOf(s.holders), waiting: waitersOf(s.waiting) });
+        lines.push({ id: `accelerator:${a.id}`, kind: 'accelerator', name: a.name ?? a.id, slots: dirs.length, holders: holdersOf(s.holders), waiting: waitersOf(s.waiting), ...todayOf(a.id) });
       }
     }
   } catch {}
@@ -422,17 +439,32 @@ async function busyNow(): Promise<number | null> {
   }
 }
 
+/** The NPU's pace as the last shared look found it (npu-pace.ts), or nothing where no NPU takes chat first. Never throws. */
+async function npuPaceSaid(busy: number | null): Promise<Pick<PcLoad, 'npu'>> {
+  try {
+    const { lastNpuRoom, npuPaceSetting, npuTakesFirst, whyGentle } = await import('./npu-pace.ts');
+    if (!npuTakesFirst('chat')) return {};
+    const room = lastNpuRoom();
+    const why = whyGentle({ setting: npuPaceSetting(), room, memory: 1 - os.freemem() / Math.max(1, os.totalmem()), busy, now: Date.now() });
+    return { npu: { pace: why ? 'gentle' : 'full', why, lookedAt: room ? iso(room.at) : null } };
+  } catch {
+    return {};
+  }
+}
+
 /** The PC now: its name, processors, memory, how busy, and its paces. */
 export async function pcLoad(): Promise<PcLoad> {
   const mb = (bytes: number) => Math.round(bytes / 1_048_576);
+  const busy = await busyNow();
   return {
     name: os.hostname(),
     processors: os.availableParallelism(),
     memoryMb: mb(os.totalmem()),
     freeMemoryMb: mb(os.freemem()),
-    busy: await busyNow(),
+    busy,
     pace: pace(),
     checksCap: checksPaceCap(),
+    ...(await npuPaceSaid(busy)),
   };
 }
 

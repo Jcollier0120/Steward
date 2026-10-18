@@ -2,6 +2,41 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.85.0
+
+**The NPU can now run at full speed when an agent has work for it: model work left after a round's calls runs back to back on the NPU while the PC is plugged in, cool and quiet, and has the NPU to itself. The work status says how busy each accelerator was today.**
+
+The owner, 2026-10-18: the NPU is where we want as much work as possible, while the gentle pace keeps the processor, the graphics cards, the disk and the network quiet. Measured on the Snapdragon X2 Elite (GenieX, Qwen3-VL-2B), the whole manor used the NPU for 2 to 7 minutes a day in the week before (29 to 116 requests): a round's 3 to 10 calls, then nothing until the next round. The same NPU did 60 note-sized requests back to back in 53 s, 0.89 s each and 98.5% busy, through `npuBacklog`.
+
+### What's new
+
+- **npu-pace.ts** (node): the NPU at full speed (spec/ACCELERATORS.md, "The NPU at full speed").
+  - `npuBacklog(name, next, { work?, budgetMs?, signal? })` works through an agent's backlog: `next()` does one item (one request, and keeping its answer) and says whether there was one. Each item is a turn of its own in the NPU's line, so a person's requests and the other agents' come in between. The rule is looked at again before each item. It stops when nothing is left, when the rule says gentle, after 15 minutes at a time (`stretchMs`), at an NpuBusy or another failure, or when the agent stops, and answers `{ done, ms, stopped, why }`. It never throws. Only one runs per name at a time in an agent, and it shows as a `model-backlog` task in the work status. `startNpuBacklog` runs it outside the round, so the round gives back its place in the work line while the NPU works through the rest, and `backlogLine` says the end in the log.
+  - `npuPace({ work })` gives `{ full, why, room }`, and `whyGentle()` is the rule. Full speed needs all of these:
+    - Manor's settings.json `"npuPace"` isn't `"gentle"` (full when absent; `MANOR_NPU_PACE` overrides it; gentle under node --test).
+    - An NPU takes the work first (`npuTakesFirst`): work that goes to a graphics card or the processor keeps the rounds' pace.
+    - Mains power, with Windows' energy saver off.
+    - No thermal zone holds the processor back.
+    - No other program used an NPU over a second's look (raw `GPU Engine` counters on a device with no 3D engine), apart from the manor's own servers (`MANOR_NPU_PROGRAMS`).
+    - At most 85% of the memory is in use, and the processor is under 60% busy.
+  - `npuRoom()` looks at the power, the heat and the NPU's users with one PowerShell script (`ROOM_SCRIPT`, about 1.8 s, read by `roomOf`). It shares the look in `npu-room.json` for a minute (`roomFreshMs`), with the folder `npu-room.look` as its lock. `lastNpuRoom()` reads that file without looking.
+- **token-tally.ts:** `busyToday()` adds every agent's requests together for each accelerator on the PC's day: `busyMs` (the NPU serves one request at a time, so this is the time it was busy), `requests`, `promptTokens`, `answerTokens` and `agents`. It also exports `tallyDay()` and the `TallyRequest` and `AcceleratorDay` types.
+- **work-status.ts:** each accelerator's line has `today`, and `pc.npu` gives the NPU's pace as the last look found it. spec/WORK-STATUS.md has both.
+- **rules.json** has a new `npuPace` section (`roomFreshMs`, `lookWaitMs`, `stretchMs`, `otherUsePercent`), which the core checks (core/rules.js, rules.d.ts).
+
+### What changed
+
+- **The tally:**
+  - Each row now names its accelerator (`acc`).
+  - Embeddings are counted too (`work: 'embed'`, its tokens by the kit's estimate), and `readTally` leaves them out of the benchmark's mix.
+  - A day is the PC's own date, not UTC's.
+  - A row from before this version counts as its kind's accelerator.
+- **spec/ROUND.md** says the NPU is the pace's exception. spec/ACCELERATORS.md has the rule, the look, the backlog, the measurements and the new shared file.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Nothing changes until an agent calls `startNpuBacklog` for work it has more of than its round's calls. Each agent takes that up in its own change.
+
 ## 2.84.0
 
 **An agent can now tell when a vendor's screen saver keeps putting the PC to sleep, and say which setting stops it. spec/ROUND.md no longer takes Windows' SleepButton / SC_MONITORPOWER for a sleep the person chose.**
