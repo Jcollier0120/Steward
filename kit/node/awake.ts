@@ -12,8 +12,9 @@ import { powershell, psQuote } from './ps.ts';
  * held (stayAwake, whileAwake, a round's `awake` in schedule.ts), Windows doesn't sleep on its own; once the last hold
  * is let go, it may again.
  *
- * Idle sleep only: a sleep the person chooses (Start's Sleep, the power button, closing the lid) still happens, and the
- * display still turns off. Only work holds it, never a round that merely looks: a hold resets Windows' idle timer, so
+ * Idle sleep only: a sleep the person chooses (Start's Sleep, the power button, closing the lid) still happens, as does
+ * one a program brings on by turning the screen off (a vendor's screen saver: sleep-cause.ts), and the display still
+ * turns off. Only work holds it, never a round that merely looks: a hold resets Windows' idle timer, so
  * rounds every few minutes holding it would keep the PC up all day.
  *
  * On Windows a small helper holds it (awake.cs, compiled once to an exe every agent on the PC shares, as checks-pace.cs

@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.84.0
+
+**An agent can now tell when a vendor's screen saver keeps putting the PC to sleep, and say which setting stops it. spec/ROUND.md no longer takes Windows' SleepButton / SC_MONITORPOWER for a sleep the person chose.**
+
+On 2026-10-18 the owner's ASUS Zenbook A16 (Snapdragon X2) was found sleeping about 30 s after ASUS's OLED Care screen saver (MyASUS's Pixel Refresh) came on, ever since Windows' cumulative update KB5127646 (2026-10-14): all 15 Kernel-Power 506 SC_MONITORPOWER entries came 22 to 30 s after a start in the screen saver's log, and one start closed after 26 s brought none. The overnight sleep the spec cited as "a sleep the person chooses" was one of them.
+
+### What's new
+
+- **sleep-cause.ts** (node): `saverSleeps()` reads the screen saver's logs for the last 7 days (`%ProgramData%\ASUS\ARMOURY CRATE Diagnosis\ROGScreenSaver`) and, only when it started in that week, Windows' Kernel-Power 506 entries (one `wevtutil` query, about 60 ms). It pairs each SC_MONITORPOWER entry (`Reason` 3) with a start 15 to 45 s before it that hadn't closed. It answers `{ saver, sleeps, line }`, or null when there were none, when the vendor's folder isn't there (nothing more is read), off Windows, and under node --test unless the test gives `programData` and `standbys`. It never throws, and changes no setting.
+  - `saverSleepLine(saver, sleeps, now)` is what the person is told, once there were 2 in the week and 1 in the last 3 days: "This PC went to sleep 15 times since Wednesday at 16:54, the last today at 11:10, each about 30 seconds after ASUS's OLED Care screen saver came on. The staff stop while it sleeps: to keep them working while you're away, turn off Pixel Refresh in MyASUS → OLED Care." Ask it at the time you show it, since its days ("today", "yesterday") are the clock's.
+  - The parts are exported for tests and other vendors: `saverEvents`, `standbysOf`, `pairSleeps`, `whenWords`, `ASUS_OLED_CARE` (a `Saver`), `SC_MONITORPOWER`, `AFTER_START_MS`, `LOOK_DAYS`, `SAY_AFTER`, `SAY_WITHIN_DAYS`.
+
+### What changed
+
+- **spec/ROUND.md:** 506's SC_MONITORPOWER (566's SleepButton) is a program turning the screen off, not the person's choice. It ends the same way on Modern Standby, whatever an app holds. The lid logs its own reason (Lid, 15). A new bullet, "A vendor's screen saver can put the PC to sleep", gives the measurements. awake.ts and wake.ts say the same in their notes (awake.cs is unchanged, so the helper isn't rebuilt).
+
+### Before you update
+
+- Nothing: it updates itself as usual. Showing the line is up to each agent; nothing calls `saverSleeps()` by itself.
+
 ## 2.83.2
 
 **A file an agent only reads is now parsed once while it is unchanged, not on every read. The Steward reads Manor's staff list (64 KB) and its own settings every two seconds, and now parses them only when they change.**

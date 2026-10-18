@@ -9,8 +9,9 @@ import { dataFile, readJson, writeJson } from './store.ts';
 
 /**
  * Waking the PC for work due at set times (kit 2.78.2): the Steward's builds, say. A PC with only Modern Standby (S0, a
- * Snapdragon's) has no classic sleep, and a sleep the person chooses (the power button, Start's Sleep) suspends every
- * desktop app until something wakes it; the owner's PC slept so from 00:35 to 08:39 on 2026-10-16, past its 08:00 build.
+ * Snapdragon's) has no classic sleep, and a sleep the person chooses (the power button, Start's Sleep), or a program's
+ * turning the screen off, suspends every desktop app until something wakes it; the owner's PC slept so from 00:35 to
+ * 08:39 on 2026-10-16, past its 08:00 build, 30 s after ASUS's OLED Care screen saver started (sleep-cause.ts).
  *
  * One Task Scheduler task per agent, \<Name>\Wake, with a trigger a few minutes before each time and "wake the computer
  * to run this task". It runs the awake helper (awake.cs) for as long as the work may take (`--for`), and the agent ends

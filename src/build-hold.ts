@@ -4,10 +4,11 @@ import { buildWhen, lastBuildTime, nextBuildTime, type BuildPipeline, type Build
 
 /**
  * Keeping the PC up for its builds (Steward 0.36.66). On a PC with only Modern Standby (a Snapdragon's), a sleep the
- * person chooses, the power button or Start's Sleep, suspends the Steward with every desktop app until something wakes
- * the PC, whatever "sleep: never" says; that setting only stops the PC sleeping on its own. A round's own holds (the
- * kit's awake.ts) cover its work, and between builds a round only looks, so nothing held the PC: on 2026-10-16 the
- * owner's PC went into standby at 00:35, and the 08:00 build began at 08:39, when the mouse moved. So:
+ * person chooses, the power button or Start's Sleep, or a program's turning the screen off, suspends the Steward with
+ * every desktop app until something wakes the PC, whatever "sleep: never" says; that setting only stops the PC sleeping
+ * on its own. A round's own holds (the kit's awake.ts) cover its work, and between builds a round only looks, so
+ * nothing held the PC: on 2026-10-16 the owner's PC went into standby at 00:35 (30 s after ASUS's OLED Care screen
+ * saver started: the kit's sleep-cause.ts), and the 08:00 build began at 08:39, when the mouse moved. So:
  * - From BEFORE_BUILD_MINUTES before each build time until its build closes, the Steward holds the PC (stayAwake), and
  *   at the build time it starts a round, so the build begins on time rather than at the next round.
  * - Plugged in, the PC is woken for each build: the kit's wake task (wake.ts) wakes it BEFORE_BUILD_MINUTES early, and

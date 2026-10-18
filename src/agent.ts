@@ -33,6 +33,7 @@ import { noteFreshStart, watchWake } from './fresh-start.ts';
 import { lateLine, loadPipeline, pipelineView } from './pipeline.ts';
 import { holdForBuilds } from './build-hold.ts';
 import { wakesPc } from './kit/wake.ts';
+import { saverSleepLine, saverSleeps, type SaverSleeps } from './kit/sleep-cause.ts';
 import { keepHeads } from './heads.ts';
 import { withLane } from './stages/seneschal.ts';
 import { workForOthers } from './stages/others.ts';
@@ -406,8 +407,14 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   // Just started: the page may have been down with the PC (shut down, asleep, offline), so what failed before is tried
   // once more at the first round. The PC woke from sleep: the same before is tried again (fresh-start.ts), in a round now rather than at the next.
   noteFreshStart();
+  // Whether a vendor's screen saver has been putting the PC to sleep (the kit's sleep-cause.ts): looked at two minutes
+  // after the page starts and at each wake, never between. Read-only: the page says which setting to turn off.
+  let saverSlept: SaverSleeps | null = null;
+  const lookAtSleeps = () => void saverSleeps().then((s) => (saverSlept = s));
+  setTimeout(lookAtSleeps, 2 * 60_000).unref();
   watchWake(() => {
     builds.look();
+    lookAtSleeps();
     if (rounds) startRound();
   });
   // The manor's branch heads, shared with the other agents, kept fresh beside the rounds, however long one takes, and
@@ -425,7 +432,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const s = loadSettings();
     const busy = runs.length > 0 || refreshing !== null;
     const pv = pipelineView(s.buildPipeline, loadPipeline());
-    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: { times: pv.times, next: pv.next, building: pv.building, took: pv.last ? buildTimeLine(pv.last) : null, late: lateLine(pv.open ?? pv.last, new Date()), wakes: wakesPc() } };
+    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: { times: pv.times, next: pv.next, building: pv.building, took: pv.last ? buildTimeLine(pv.last) : null, late: lateLine(pv.open ?? pv.last, new Date()), wakes: wakesPc() }, asleep: saverSlept ? saverSleepLine(saverSlept.saver, saverSlept.sleeps, Date.now()) : null };
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];

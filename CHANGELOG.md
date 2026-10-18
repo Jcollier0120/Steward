@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.143
+
+**When a screen saver keeps putting the PC to sleep, the Steward's page now says so and names the setting that stops it. On ASUS OLED laptops, since a Windows update in October, the OLED Care screen saver puts the PC to sleep about 30 seconds after it comes on, and the staff stop until someone comes back.**
+
+### What's new
+
+- **The page says when ASUS's OLED Care screen saver has been putting the PC to sleep.** Once it has happened twice in the last week, and at least once in the last 3 days, the line under the rounds says how many times, when it last did, and what to turn off: Pixel Refresh, in MyASUS → OLED Care. The Steward changes no setting itself.
+  - It looks two minutes after it starts and each time the PC wakes, never in between. It reads the screen saver's own small log, and Windows' event log only when the screen saver came on in the week; a PC without the screen saver reads nothing more.
+  - On the laptop where this was found, it counted all 15 such sleeps since 2026-10-14, 22 to 30 seconds after each start, in 60 ms.
+
+### What changed
+
+- **These sleeps were first taken for the person's own.** Windows logs them as if the power button had been pressed (a sleep button, the screen turned off). The overnight sleep from 00:35 to 08:39 on 2026-10-16, which made the 08:00 build late, was in fact the screen saver's. The kit's notes on keeping the PC awake now say so.
+
+### Before you update
+
+- Nothing: it updates itself as usual. This version brings kit 2.84.0.
+
 ## 0.36.142
 
 **A quiet round is about three times quicker. Most of its 30 seconds went on asking GitHub its questions one at a time; it now asks four at once. The first round after a restart no longer re-reads every repository, and a quiet round asks GitHub nothing it already knows.**

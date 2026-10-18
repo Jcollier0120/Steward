@@ -33,6 +33,8 @@ export interface RoundView {
    * the PC is woken for each, plugged in (build-hold.ts); `took`, where the last build's time went (buildtimes.ts).
    */
   build?: { times: string[]; next: string | null; building: boolean; took?: string | null; late?: string | null; wakes?: boolean } | null;
+  /** A vendor's screen saver has been putting the PC to sleep, and which setting turns it off (the kit's sleep-cause.ts' line). */
+  asleep?: string | null;
 }
 
 /** A PR as the page shows it: with what its steward block asks for once merged, in words (after.ts's afterWords). */
