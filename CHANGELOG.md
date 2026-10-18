@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.148
+## 0.36.155
 
 **The Steward no longer rolls kits out to agents Manor has retired, and no longer releases them: today the Aletaster, the Auditor and the game-saves Butler.**
 
@@ -19,6 +19,36 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The Steward reads which agents are retired from the Manor installed on this PC, so the Aletaster and the Auditor are passed over once Manor's next release is installed. Without Manor on this PC, nothing is passed over.
+
+## 0.36.153
+
+**`steward vouch` now refuses a PR whose version files disagree, and says which file to fix, so the mistake is caught before the PR merges instead of holding up the next kit.**
+
+### What changed
+
+- Before it runs any checks, `steward vouch` now reads the version files at the commit it's vouching for: package.json, package-lock.json and src/app.ts, or whichever the repository uses. If they don't all carry the same version, it refuses with the same words a kit's trial uses, and names the fix, for example: "the version files disagree: package.json 0.18.33, package-lock.json 0.18.33, src/mcp.ts 0.18.31; set 0.18.33 in src/mcp.ts". It runs no tests, sets nothing on GitHub and exits with an error. The version to set is the one claimed for the branch, or the highest of the files when nothing is claimed.
+- Until now, vouch only ran the tests. A PR could merge with one version file left behind, and the next kit's trial then refused that repository, which held up the kit's release and every release waiting on it until someone fixed it.
+- If the version is below main's, or below the version claimed for the branch, vouch now warns you but still goes ahead.
+- A repository with a single version file is checked as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.150
+
+**The Steward now hands out kit 2.86.1: your staff keep working after Castellan updates itself. Before, an update could leave some of them failing every round until the PC restarted.**
+
+### What changed
+
+- **The kit 2.86.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)):
+  - When Castellan updated itself, Windows also closed a small helper window that each member of the staff kept, out of sight. After that, every tool they started (git, PowerShell) failed at once. On one PC, after an update that waited for the PC to wake, the Smith, Pinder, the Warrener and the Toller did no work for 23 hours.
+  - Each member of the staff now keeps a helper of its own, which an update doesn't close.
+  - If that helper does go, they notice and start their tools another way, so their rounds go on.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Staff that are failing now start working again once they update.
 
 ## 0.36.147
 
