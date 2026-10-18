@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sharesConsole } from './console.ts';
+import { sharesConsole, startFailed } from './console.ts';
 
 const PRELUDE = "$ProgressPreference = 'SilentlyContinue'; $ErrorActionPreference = 'Stop'; " +
   'try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }\n';
@@ -12,6 +12,8 @@ const PS_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'];
 /**
  * How powershell.exe is started (kit 2.74.4): sharing the page's windowless console when it has one (console.ts), so
  * it starts no console host (conhost.exe) of its own beside it; hidden when there's none. Its output is piped either way.
+ * One that couldn't start because the console had gone (kit 2.86.1, console.ts's startFailed) runs again, hidden: the
+ * worker's scripts on their own (oneShot), and oneShot's once more.
  */
 export const psStart = (shares = sharesConsole()) => ({ windowsHide: !shares });
 
@@ -94,7 +96,8 @@ class Worker {
 
   constructor() {
     const source = readFileSync(new URL('./ps-worker.ps1', import.meta.url), 'utf8');
-    this.proc = spawn('powershell.exe', [...PS_ARGS, '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')], psStart());
+    const start = psStart();
+    this.proc = spawn('powershell.exe', [...PS_ARGS, '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')], start);
     this.proc.stdout.setEncoding('utf8').on('data', (d: string) => this.read(d));
     this.proc.stderr.resume();
     this.proc.stdin.on('error', () => this.end());
@@ -103,7 +106,11 @@ class Worker {
       oneShotOnly = true;
       this.end();
     });
-    this.proc.on('close', () => this.end());
+    this.proc.on('close', (code) => {
+      // The console it shared had gone: the next start is hidden (console.ts), and so are its scripts' (oneShot).
+      startFailed(code, start.windowsHide);
+      this.end();
+    });
   }
 
   run(script: string, timeoutMs: number): Promise<string> {
@@ -200,26 +207,31 @@ export function oneShot(script: string, timeoutMs: number): Promise<string> {
     how = ['-File', file];
   }
   const cleanup = () => file && rmSync(file, { force: true });
-  return new Promise<string>((resolve, reject) => {
-    const p = spawn('powershell.exe', [...PS_ARGS, ...how], psStart());
-    let out = '';
-    let err = '';
-    const timer = setTimeout(() => {
-      p.kill();
-      reject(new Error(`PowerShell timed out after ${timeoutMs} ms`));
-    }, timeoutMs);
-    p.stdout.setEncoding('utf8').on('data', (d) => (out += d));
-    p.stderr.setEncoding('utf8').on('data', (d) => (err += d));
-    p.on('error', (e) => {
-      clearTimeout(timer);
-      reject(e);
+  const deadline = Date.now() + timeoutMs;
+  const attempt = (start: { windowsHide: boolean }): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      const p = spawn('powershell.exe', [...PS_ARGS, ...how], start);
+      let out = '';
+      let err = '';
+      const timer = setTimeout(() => {
+        p.kill();
+        reject(new Error(`PowerShell timed out after ${timeoutMs} ms`));
+      }, Math.max(1000, deadline - Date.now()));
+      p.stdout.setEncoding('utf8').on('data', (d) => (out += d));
+      p.stderr.setEncoding('utf8').on('data', (d) => (err += d));
+      p.on('error', (e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+      p.on('close', (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve(out);
+        // The console it shared had gone between console.ts' look and the start: once more, hidden.
+        else if (startFailed(code, start.windowsHide)) attempt({ windowsHide: true }).then(resolve, reject);
+        else reject(new Error(`PowerShell exited ${code}: ${(err || out).trim().slice(0, 500)}`));
+      });
     });
-    p.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve(out);
-      else reject(new Error(`PowerShell exited ${code}: ${(err || out).trim().slice(0, 500)}`));
-    });
-  }).finally(cleanup);
+  return attempt(psStart()).finally(cleanup);
 }
 
 /**

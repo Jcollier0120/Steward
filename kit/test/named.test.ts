@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -160,4 +160,76 @@ public static class NamedTestJob {
   } finally {
     for (const pid of [pagePid, detached]) if (alive(pid)) process.kill(pid);
   }
+});
+
+// kit 2.86.1: the console cmd's `start /b` gave the launcher has its host in the jobs the page leaves (Task Scheduler's,
+// for every page Manor starts), and Manor's update ends them. The page has a windowless console of its own instead, and the
+// launcher lets go of cmd's, whose host ends with cmd.
+test("on Windows the page started through the launcher has a console of its own: cmd's ends with cmd, and the page's git still starts", { skip: process.platform !== 'win32' }, async () => {
+  const agent = { id: 'kit-named-test', name: 'Kit Named Test' };
+  const exe = await namedLauncher(agent, { kitDir, env: { ...process.env, KIT_NAMED: '1' } });
+  assert.ok(exe);
+  const ready = path.join(home, 'console-ready');
+  const go = path.join(home, 'console-go');
+  const out = path.join(home, 'console.json');
+  const cmdPid = path.join(home, 'console-cmd');
+  const page = path.join(home, 'console-page.cjs');
+  // The page: once told, whether it has a console, and how a program started to share it (cmd standing in for git) exits.
+  writeFileSync(
+    page,
+    `const fs = require('node:fs');
+fs.writeFileSync(${JSON.stringify(ready)}, '');
+const t = setInterval(() => {
+  if (!fs.existsSync(${JSON.stringify(go)})) return;
+  clearInterval(t);
+  let has = false;
+  try { fs.closeSync(fs.openSync(String.raw\`\\\\.\\CONOUT$\`, 'w')); has = true; } catch {}
+  const exit = require('node:child_process').spawnSync('cmd.exe', ['/d', '/c', 'exit 0'], { windowsHide: false }).status;
+  fs.writeFileSync(${JSON.stringify(out)}, JSON.stringify({ has, exit }));
+}, 50);
+`,
+  );
+  // As Manor starts a page: its open detached, with no console, starting cmd as pageLaunch says and waiting for the page.
+  const how = pageLaunch(process.execPath, page, { named: { exe, id: agent.id } });
+  const opener = path.join(home, 'console-open.cjs');
+  writeFileSync(
+    opener,
+    `const log = require('node:fs').openSync(${JSON.stringify(path.join(home, 'console-serve.log'))}, 'a');
+const c = require('node:child_process').spawn(${JSON.stringify(how.file)}, ${JSON.stringify(how.args)}, { ...${JSON.stringify(how.options)}, stdio: ['ignore', log, log], cwd: ${JSON.stringify(os.tmpdir())} });
+require('node:fs').writeFileSync(${JSON.stringify(cmdPid)}, String(c.pid));
+c.unref();
+// As open waits for the page to answer: cmd is in the job Node ends with this process.
+const t = setInterval(() => require('node:fs').existsSync(${JSON.stringify(ready)}) && clearInterval(t), 50);
+`,
+  );
+  spawn(process.execPath, [opener], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, KIT_CEILING: '0' } }).unref();
+  await until(() => existsSync(ready), paced(20_000), 'the page to start');
+  const hostsOfCmd = async () =>
+    (await powershell(`@(Get-CimInstance Win32_Process -Filter "Name='conhost.exe' AND ParentProcessId=${readFileSync(cmdPid, 'utf8')}").ProcessId -join ','`, { timeoutMs: paced(60_000) }))
+      .trim()
+      .split(',')
+      .filter(Boolean)
+      .map(Number);
+  try {
+    await until(async () => (await hostsOfCmd()).length === 0, paced(20_000), "the host of cmd's console to end with cmd");
+  } finally {
+    // As Task Scheduler would end it, had it stayed.
+    for (const pid of await hostsOfCmd()) process.kill(pid);
+    writeFileSync(go, '');
+  }
+  await until(() => existsSync(out), paced(20_000), 'the page to say');
+  assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), { has: true, exit: 0 }, 'its console is its own, and a program shares it');
+  // The launcher holds its output file until the page, and then it, have ended.
+  await until(
+    () => {
+      try {
+        rmSync(path.join(home, 'console-serve.log'));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    paced(20_000),
+    'the launcher to end',
+  );
 });

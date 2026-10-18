@@ -1,14 +1,16 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { claimsOn, employeeFor, pushesHere } from '../claims.ts';
+import { claimsOn, employeeFor, highest, pushesHere } from '../claims.ts';
 import { identityOf } from '../employ.ts';
 import { CHANGES_README } from '../entries.ts';
 import { gitMaybe, showFile } from '../git.ts';
 import { originRepo } from '../kit/manor.ts';
+import { compareVersions } from '../kitfiles.ts';
 import { makersPc, makersRepo } from '../maker.ts';
 import { employeeFromClone } from '../migrate.ts';
 import { originUrl, repoFromUrl } from '../scm.ts';
 import type { Employee } from '../settings.ts';
+import { agreedVersion, readVersion } from '../versions.ts';
 import { checkKind, runChecks, type AffectedScope } from './bump.ts';
 import type { StoodIn } from './standin.ts';
 import type { Ctx } from './common.ts';
@@ -27,7 +29,9 @@ import { hostFor } from '../hosts/index.ts';
  * checks on exactly HEAD's tree, with the same dependencies and kit (assayed.ts), nothing is run again: its pass is taken;
  * and so is its affected pass, when the test files it ran take in every one the vouch would run itself; and so is a pass
  * of the whole checks on exactly that tree, on this PC or another on the licence (standin.ts). Checks that run
- * five minutes past the vouch's average time are stopped, and nothing is set (vouchtime.ts).
+ * five minutes past the vouch's average time are stopped, and nothing is set (vouchtime.ts). Before any of that, HEAD's
+ * version files must agree, as a kit's trial needs them to (versionTrouble): a PR whose files disagree is refused, and
+ * nothing is run or set.
  *
  * A build (stages/mainbuild.ts) trusts it only when a team member's account set it (Settings' team, read from GitHub's
  * record of who created the status), on main's head itself, or on the PR head a merge commit brought in unchanged (a PR
@@ -119,6 +123,8 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   if (pr.state !== 'OPEN') return { ok: false, message: `#${pr.number} is ${pr.state.toLowerCase()}, not open` };
   if (pr.isCrossRepository) return { ok: false, message: `#${pr.number} is from a fork: the Steward tests those itself` };
   if (pr.headRefOid !== head) return { ok: false, message: `#${pr.number}'s head is ${pr.headRefOid.slice(0, 7)}, this clone's HEAD ${head.slice(0, 7)}: push, or check out its head, and vouch again` };
+  const versions = await versionTrouble(ctx, e, { dir: o.dir, head, branch, say: o.say });
+  if (versions) return { ok: false, message: `#${pr.number} at ${head.slice(0, 7)}: ${versions}. Nothing was run or recorded` };
   o.say(`${e.name} #${pr.number} at ${head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, { ...o, repo, head });
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `#${pr.number}'s checks failed at ${head.slice(0, 7)}: ${failed}. Nothing was recorded` };
@@ -151,6 +157,45 @@ export async function makersClone(ctx: Pick<Ctx, 'run' | 'neutralDir'>, repo: st
   const own = repo.split('/').pop() ?? '';
   const me = identityOf(read) ?? { id: own.toLowerCase().replace(/[^a-z0-9-]/g, ''), name: own };
   return employeeFromClone({ id: me.id, name: me.name, repo, checkout: { path: dir } }, true)?.employee ?? null;
+}
+
+/**
+ * Why the version files at `head` won't do, in the words a kit's trial refuses an employee with (bump.ts' bumpOne,
+ * agreedVersion), and what to set where (versionFix); null when they agree, or when there are fewer than two of them,
+ * which have nothing to disagree with. Through Steward 0.36.152 a vouch ran only the checks: Reeve#207 merged with
+ * src/mcp.ts two patches behind its package.json, and the next two kits' trials refused Reeve, holding their releases,
+ * until a PR mended it.
+ *
+ * A version below main's, or below the one claimed for the branch (claims.ts), is said as a warning, not refused; not
+ * where the branch writes its entry in changes/ (entries.ts), whose version the build's stamp gives.
+ */
+export async function versionTrouble(ctx: Ctx, e: Employee, o: { dir: string; head: string; branch: string; say: (line: string) => void }): Promise<string | null> {
+  if (e.versionFiles.length < 2) return null;
+  const at = (rev: string) => Promise.all(e.versionFiles.map(async (f) => [f, await showFile(ctx.run, o.dir, rev, f)] as [string, string | null]));
+  const claimed = o.branch ? claimsOn(e.repo).find((c) => c.branch === o.branch)?.version : undefined;
+  const texts = await at(o.head);
+  const agreed = agreedVersion(texts);
+  if ('error' in agreed) {
+    const fix = versionFix(texts, claimed);
+    return fix ? `${agreed.error}; ${fix}, push, and vouch again` : agreed.error;
+  }
+  if ((await showFile(ctx.run, o.dir, o.head, CHANGES_README)) !== null) return null;
+  const main = agreedVersion(await at(`origin/${e.branch}`));
+  if ('version' in main && compareVersions(agreed.version, main.version) < 0)
+    o.say(`warning: its version ${agreed.version} is below ${e.branch}'s ${main.version}${claimed ? '' : `: claim one (claim-version ${e.id} --branch ${o.branch || '<branch>'} --for "<what the work is>") and set it`}`);
+  if (claimed && compareVersions(agreed.version, claimed) < 0) o.say(`warning: its version ${agreed.version} is below ${claimed}, claimed for ${o.branch}: set ${claimed} in ${e.versionFiles.join(', ')}`);
+  return null;
+}
+
+/**
+ * What to set where when version files disagree: `want` (the version claimed for the branch), else the highest any of
+ * them carries, in each that doesn't carry it. Null when none carries a version to set. Pure.
+ */
+export function versionFix(texts: [string, string | null][], want?: string): string | null {
+  const found = texts.map(([f, t]) => [f, t === null ? null : readVersion(f, t)] as const);
+  const v = want ?? highest(found.map(([, x]) => x));
+  const off = found.filter(([, x]) => x !== v).map(([f]) => f);
+  return v && off.length ? `set ${v} in ${off.join(', ')}` : null;
 }
 
 /**
@@ -238,6 +283,8 @@ async function vouchBranch(ctx: Ctx, e: Employee, o: { dir: string; repo: string
   const pushed = out.trim().split(/\s+/)[0] ?? '';
   if (!pushed) return { ok: false, message: `${o.branch} isn't on origin: push it, and vouch again` };
   if (pushed !== o.head) return { ok: false, message: `origin's ${o.branch} is at ${pushed.slice(0, 7)}, this clone's HEAD ${o.head.slice(0, 7)}: push, or check out its head, and vouch again` };
+  const versions = await versionTrouble(ctx, e, o);
+  if (versions) return { ok: false, message: `${o.branch} at ${o.head.slice(0, 7)}: ${versions}. Nothing was run or recorded` };
   o.say(`${e.name} ${o.branch} (${claim ? `v${claim.version}, ` : ''}no PR yet) at ${o.head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, o);
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `${o.branch}'s checks failed at ${o.head.slice(0, 7)}: ${failed}. Nothing was recorded` };

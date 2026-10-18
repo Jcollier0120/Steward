@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,7 +18,8 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { coveredBy } = await import('../src/stages/mainbuild.ts');
 const { checksOf, VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
-const { makersClone, MERGE_IT_YOURSELF, passingTrouble, setVouch, STATUS_WAITS_MS, vouch, vouchedBy, vouchOn } = await import('../src/stages/vouch.ts');
+const { makersClone, MERGE_IT_YOURSELF, passingTrouble, setVouch, STATUS_WAITS_MS, versionFix, vouch, vouchedBy, vouchOn } = await import('../src/stages/vouch.ts');
+const { readVersion, setVersion } = await import('../src/versions.ts');
 const { makersPcForTests } = await import('../src/maker.ts');
 const { assayerChecksFile, ASSAYED_MS, choseOf, covers, whyShort } = await import('../src/stages/assayed.ts');
 const { noteVouchTime, vouchLimit, vouchTimes, vouchTimesFile } = await import('../src/stages/vouchtime.ts');
@@ -175,6 +176,74 @@ test('steward vouch: a branch with no PR that writes its entry in changes/ is vo
   assert.equal(v.ok, true, v.message);
   assert.equal(v.message, `claude/entry's checks passed at ${head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): open its PR from that commit, and ${MERGE_IT_YOURSELF(null, 'Jcollier0120/Fake')}`);
   assert.equal(r.gh.find((a) => a[0] === 'api')?.[3], `repos/Jcollier0120/Fake/statuses/${head}`);
+});
+
+test("steward vouch refuses a PR whose version files disagree before any check runs, in a kit trial's words and with what to set where; files that agree go on as before, and one version file has nothing to disagree with", async () => {
+  const f = fakeEmployee(path.join(tmp, 'versions-clone'), { version: '0.4.0' });
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/versions');
+  sh(f.checkout, 'remote', 'set-url', 'origin', 'https://github.com/Jcollier0120/Fake.git');
+  /** The files given set to their versions and committed: the new HEAD. */
+  const commitVersions = (to: Record<string, string>) => {
+    for (const [file, v] of Object.entries(to)) {
+      const at = path.join(f.checkout, file);
+      const text = readFileSync(at, 'utf8');
+      writeFileSync(at, setVersion(file, text, readVersion(file, text)!, v));
+    }
+    sh(f.checkout, 'add', '-A');
+    sh(f.checkout, 'commit', '--quiet', '-m', JSON.stringify(to));
+    return sh(f.checkout, 'rev-parse', 'HEAD');
+  };
+  /** PR #9 at `head` vouched for; a check that fails would say "checks failed". */
+  const go = (head: string, more: Parameters<typeof employee>[1] = {}) => {
+    const said: string[] = [];
+    const r = runner((a) => {
+      if (a[0] === 'pr' && a[1] === 'view') return ok({ number: 9, state: 'OPEN', headRefOid: head, isCrossRepository: false });
+      if (a[0] === 'api') return ok('{}');
+    });
+    const e = employee(f.checkout, { fill: '', test: ['node -e process.exit(0)'], ...more });
+    return vouch(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp }), { dir: f.checkout, say: (l) => said.push(l) }).then((v) => ({ v, r, said }));
+  };
+  rmSync(claimsFile(), { force: true });
+
+  // Reeve#207's way: package.json and its lock raised, the code's version left behind. Its checks, which would fail, never run.
+  const behind = commitVersions({ 'package.json': '0.4.1', 'package-lock.json': '0.4.1' });
+  const refused = await go(behind, { test: ['node -e process.exit(1)'] });
+  assert.equal(refused.v.ok, false);
+  assert.equal(refused.v.message, `#9 at ${behind.slice(0, 7)}: the version files disagree: package.json 0.4.1, package-lock.json 0.4.1, src/app.ts 0.4.0; set 0.4.1 in src/app.ts, push, and vouch again. Nothing was run or recorded`);
+  assert.ok(!refused.said.some((l) => /its checks/.test(l)), refused.said.join('\n'));
+  assert.ok(!refused.r.gh.some((a) => a[0] === 'api'), 'nothing set on GitHub');
+
+  // The version claimed for the branch is the one to set, wherever it isn't.
+  mkdirSync(path.dirname(claimsFile()), { recursive: true });
+  writeFileSync(claimsFile(), JSON.stringify([{ repo: 'Jcollier0120/Fake', version: '0.4.2', branch: 'claude/versions', by: 'claude', for: 'v', at: new Date().toISOString() }]));
+  const claimed = await go(behind);
+  assert.equal(claimed.v.ok, false);
+  assert.match(claimed.v.message, /src\/app\.ts 0\.4\.0; set 0\.4\.2 in package\.json, package-lock\.json, src\/app\.ts, push, and vouch again\. Nothing was run or recorded$/);
+
+  // One version file has nothing to disagree with: tested and vouched for as before.
+  const one = await go(behind, { versionFiles: ['package.json'] });
+  assert.equal(one.v.ok, true, one.v.message);
+  assert.equal(one.r.gh.find((a) => a[0] === 'api')?.[3], `repos/Jcollier0120/Fake/statuses/${behind}`);
+  assert.deepEqual(one.said.filter((l) => l.startsWith('warning')), []);
+
+  // Files that agree go on to their checks, as before; a version below the claim's is a warning, not a refusal.
+  const agreed = commitVersions({ 'src/app.ts': '0.4.1' });
+  const passed = await go(agreed);
+  assert.equal(passed.v.ok, true, passed.v.message);
+  assert.equal(passed.r.gh.find((a) => a[0] === 'api')?.[3], `repos/Jcollier0120/Fake/statuses/${agreed}`);
+  assert.deepEqual(passed.said.filter((l) => l.startsWith('warning')), ['warning: its version 0.4.1 is below 0.4.2, claimed for claude/versions: set 0.4.2 in package.json, package-lock.json, src/app.ts']);
+  rmSync(claimsFile(), { force: true });
+  assert.deepEqual((await go(agreed)).said.filter((l) => l.startsWith('warning')), [], 'above main, nothing claimed: nothing to say');
+
+  // And one below main's.
+  const low = commitVersions({ 'package.json': '0.3.9', 'package-lock.json': '0.3.9', 'src/app.ts': '0.3.9' });
+  const below = await go(low);
+  assert.equal(below.v.ok, true, below.v.message);
+  assert.deepEqual(below.said.filter((l) => l.startsWith('warning')), [`warning: its version 0.3.9 is below main's 0.4.0: claim one (claim-version fake --branch claude/versions --for "<what the work is>") and set it`]);
+
+  // What to set where: a file with no version gets one too; with none to go by, there's nothing to say.
+  assert.equal(versionFix([['package.json', '{"version":"0.4.1"}'], ['src/app.ts', null]]), 'set 0.4.1 in src/app.ts');
+  assert.equal(versionFix([['package.json', '{}'], ['src/app.ts', null]]), null);
 });
 
 test("on a maker's other PC, a clone of one of Castellan's own repositories gives its own checks, only where GitHub says this PC's account can push there", async () => {
