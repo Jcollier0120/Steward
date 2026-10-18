@@ -102,7 +102,7 @@ export function releaseDecision(c: ReleaseCandidate, kit: string | null): { rele
 
 /**
  * `unless`, given the commit to release and its version, may say why not (a round leaves a commit whose release
- * failed before to a person). Then the Aletaster tastes that commit (tasting.ts): a release it holds waits, with its
+ * failed before to a person). Then the Assayer checks that commit (tasting.ts): a release it holds waits, with its
  * reason, and the next round asks again.
  *
  * The PC is kept awake while a release is made (the kit's awake.ts, Steward 0.36.45), from when it is decided on until
