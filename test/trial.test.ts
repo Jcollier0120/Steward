@@ -164,6 +164,27 @@ test('an agent that fails without the kit too is not held against it', async () 
   assert.deepEqual([t.passed, t.failed.length, t.own.map((f: { id: string }) => f.id)], [1, 0, ['broken']]);
 });
 
+test("an agent Manor has retired isn't tried, and a failure of its kept from before no longer holds the kit (retired.ts)", async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  // As the Bad was before a test above fixed it on its main: the kit fails its checks.
+  const sour = employee(fakeEmployee(path.join(tmp, 'sour'), { files: { 'tools/kit.ts': kitTool, 'check.mjs': CHECK } }).checkout, { id: 'sour', name: 'Sour', test: ['node check.mjs'] });
+  const left = ctx([good, sour]);
+  left.c.retired = new Set(['sour']);
+  assert.equal((await kitTrialAtMain(left.c, me, at)).state, 'passed', left.c.lines.join('\n'));
+  assert.ok(left.c.lines.some((l) => l.includes('trying it on 1 agents before it is released')), left.c.lines.join('\n'));
+  assert.ok(!left.c.lines.some((l) => l.startsWith('[sour]')), 'never tried');
+  // It failed the kit, then Manor retired it: the kept verdict no longer holds the kit, and nothing is tried again.
+  rmSync(kitTrialsFile(), { force: true });
+  const before = ctx([good, sour]);
+  assert.equal((await kitTrialAtMain(before.c, me, at)).state, 'failed', before.c.lines.join('\n'));
+  const since = ctx([good, sour]);
+  since.c.retired = new Set(['sour']);
+  assert.equal((await kitTrialAtMain(since.c, me, at)).state, 'passed', since.c.lines.join('\n'));
+  assert.ok(since.c.lines.some((l) => l.includes("Sour failed kit 1.0.1's checks, and Manor has retired it since: no longer held against the kit")), since.c.lines.join('\n'));
+  assert.deepEqual(tries(since.c.lines), []);
+  assert.deepEqual(kept()[mainKeyOf(head)].failed, []);
+});
+
 test("a commit of main whose kit and tools/kit.ts are the same takes the kept verdict: nothing is tried again; a change to a kit file is", async () => {
   rmSync(kitTrialsFile(), { force: true });
   try {

@@ -14,6 +14,7 @@ import { kitReach } from './kitreach.ts';
 import { blobOf, kitTrialsFile, type TrialPasses } from './trialpass.ts';
 import { withRepo } from './slots.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
+import { retiredOf } from '../retired.ts';
 
 /**
  * A new kit tried on every employee before it is released (Steward 0.36.124: on main, at a build). When the kit on the
@@ -43,6 +44,9 @@ import { phaseOf, timed } from '../buildtimes.ts';
  * (KitTrial's `retry`), and holds the kit only if it fails then too. And each agent is tried only as far as the kit
  * changes it (kitreach.ts): one none of whose kit files change isn't tried at all, and one whose files change runs only
  * the tests they reach. Its rollout's bump runs the same ones.
+ *
+ * An agent Manor has retired (retired.ts) gets no kit, so it isn't tried: left out of a new trial, dropped from one going
+ * on, and a failure of its that a trial kept no longer holds the kit.
  */
 
 /** How long a round tries agents for before it goes on with the rest of its work (the agents in flight finish). */
@@ -198,7 +202,7 @@ export const TRIAL_NO_ROOM = `${TRIAL_GOING}, and waits for room: more than ${CE
  * those are tried once more, one at a time with nothing of the trial beside them, and what they give then stands. No
  * try starts while more than the manor's ceiling of the PC's memory is in use (TRIAL_NO_ROOM, said as a cut short is).
  */
-async function tryAll(ctx: Ctx, steward: Employee, commit: string, t: KitTrial, sliceMs: number, save: () => void): Promise<string | null> {
+async function tryAll(ctx: Ctx, steward: Employee, commit: string, t: KitTrial, sliceMs: number, save: () => void, retired: ReadonlySet<string>): Promise<string | null> {
   const repo = checkoutOf(steward);
   return timed(phaseOf(ctx), 'trial', `kit ${t.kit}`, () => withKitTree(ctx, steward, commit, async (dir) => {
     let cut: string | null = null;
@@ -216,13 +220,13 @@ async function tryAll(ctx: Ctx, steward: Employee, commit: string, t: KitTrial, 
     const tryOne = async (id: string, again: boolean): Promise<void> => {
       started++;
       const e = ctx.settings.employees.find((x) => x.id === id);
-      const results = e && e.usesKit && existsSync(checkoutOf(e)) ? await tryEach(ctx, [e], t.kit, dir, { repo, head: commit }) : [];
+      const results = e && e.usesKit && !retired.has(e.id) && existsSync(checkoutOf(e)) ? await tryEach(ctx, [e], t.kit, dir, { repo, head: commit }) : [];
       const counted: EmployeeResult[] = [];
       for (const r of results) {
         if (r.outcome === 'failed' && (await networkFailure(ctx, r.message))) cut ??= `its kit's trial on ${r.name} was cut short by the network: the next round tries again`;
         else counted.push(r);
       }
-      // Cut short: still to try. Tried, or gone from the staff meanwhile: no longer.
+      // Cut short: still to try. Tried, or gone from the staff (or retired) meanwhile: no longer.
       if (results.length && !counted.length) return;
       if (again) t.retry = (t.retry ?? []).filter((x) => x.id !== id);
       else t.pending = (t.pending ?? []).filter((x) => x !== id);
@@ -329,6 +333,7 @@ export async function kitTrialAtMain(ctx: Ctx, steward: Employee, at: { commit: 
   const repo = checkoutOf(steward);
   const sha = at.commit.slice(0, 7);
   const kept = readJson<Record<string, KitTrial>>(kitTrialsFile(), {});
+  const retired = retiredOf(ctx);
   let key = mainKeyOf(at.commit);
   let t = kept[key];
   // Tried just now: no branch has moved since.
@@ -345,7 +350,7 @@ export async function kitTrialAtMain(ctx: Ctx, steward: Employee, at: { commit: 
       ctx.log(`[${APP.id}] kit ${at.kit} at ${sha} is the kit ${k} tried (kit ${s.kit}), but for versions and changelogs: not tried again`);
       t = { kit: at.kit, failed: s.failed, passed: s.passed, at: s.at, ...tried, mains: { ...s.mains }, ...(s.untouched ? { untouched: s.untouched } : {}), ...(s.own?.length ? { own: s.own } : {}), steward: s.steward, commit: at.commit, content: content!, from: k };
     } else {
-      const employees = ctx.settings.employees.filter((e) => e.usesKit && existsSync(checkoutOf(e)));
+      const employees = ctx.settings.employees.filter((e) => e.usesKit && !retired.has(e.id) && existsSync(checkoutOf(e)));
       ctx.log(`[${APP.id}] kit ${at.kit} on main (${sha}) has no release: trying it on ${employees.length} agents before it is released, ${trialParallel(ctx.settings.parallel)} at a time`);
       t = { kit: at.kit, failed: [], passed: 0, at: new Date().toISOString(), ...tried, mains: {}, pending: employees.map((e) => e.id), steward: APP.version, commit: at.commit, ...(content ? { content } : {}) };
     }
@@ -360,7 +365,7 @@ export async function kitTrialAtMain(ctx: Ctx, steward: Employee, at: { commit: 
   if (leftOf(trial)) {
     // Refused (no kit.json on its main, say) isn't the kit's doing, and isn't held against it; one the network cut short
     // is no verdict on the kit, and is tried again.
-    const cut = await tryAll(ctx, steward, at.commit, trial, sliceMs, save);
+    const cut = await tryAll(ctx, steward, at.commit, trial, sliceMs, save, retired);
     if (cut || leftOf(trial)) return { state: 'going', why: cut ?? goingWords(trial) };
     fresh = true;
     delete trial.pending;
@@ -370,6 +375,12 @@ export async function kitTrialAtMain(ctx: Ctx, steward: Employee, at: { commit: 
     trial.failed = [...trial.failed].sort((a, b) => order(a.id) - order(b.id));
     trial.at = new Date().toISOString();
     ctx.log(`[${APP.id}] kit ${trial.kit} tried on every agent: ${trial.passed} passed, ${trial.failed.length} failed, ${trial.own?.length ?? 0} failed without it too (not held against it), ${trial.untouched ?? 0} not tried (nothing they take from the kit changes)`);
+  }
+  // Retired since it failed (retired.ts): it gets no kit, so its failure no longer holds it.
+  const gone = trial.failed.filter((f) => retired.has(f.id));
+  if (gone.length) {
+    ctx.log(`[${APP.id}] ${gone.map((f) => f.name).join(', ')} failed kit ${trial.kit}'s checks, and Manor has retired ${gone.length === 1 ? 'it' : 'them'} since: no longer held against the kit`);
+    trial.failed = trial.failed.filter((f) => !retired.has(f.id));
   }
   if (!fresh && trial.failed.length) {
     // Fixed on the agents' side: each whose branch moved since is tried again with the same kit.
