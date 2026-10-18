@@ -88,6 +88,43 @@ export function soonAfter(soon: boolean, run: number, everyMs: number): { sooner
   return { sooner: SOON_MS, run: run + 1 };
 }
 
+/**
+ * Lines a quiet round says each time it runs, for as long as nothing changes (between builds, the alarms Manor keeps,
+ * nothing here to release): every ten minutes they were most of serve.log, 277 times in two days on the makers' PC.
+ */
+export const STEADY_LINES = [
+  /^Settings say it doesn't release by itself/,
+  /^no repositories to look after on this PC/,
+  /^this PC is offline, so the round waits/,
+  /^between builds: /,
+  /^\[steward\] kit \S+ on \S+ passed its trial on the agents/,
+  /^alarms: Manor keeps the manor-wide alarms itself/,
+  /^the staff's table is made again: /,
+];
+
+/**
+ * The rounds' log as serve.log has it (Steward 0.36.141): a steady line (STEADY_LINES) is written when it is new, not
+ * again while each round says it as the round before did, and again once it changes, or after a round without it. Every
+ * other line is written as it comes. A round's own log (its stage record) keeps every line.
+ */
+export function steadyLog(write: (line: string) => void, steady: RegExp[] = STEADY_LINES): { say: (line: string) => void; roundDone: () => void } {
+  let before = new Set<string>();
+  let now = new Set<string>();
+  return {
+    say: (line) => {
+      if (steady.some((re) => re.test(line))) {
+        now.add(line);
+        if (before.has(line)) return;
+      }
+      write(line);
+    },
+    roundDone: () => {
+      before = now;
+      now = new Set();
+    },
+  };
+}
+
 /** What a stage's POST asks: the ticked employees, the kit shown on the page. */
 export function askOf(body: any): StageAsk {
   const employees = Array.isArray(body?.employees) ? body.employees.map(String).filter(Boolean).slice(0, 100) : [];
@@ -250,6 +287,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   let sooner: number | null = null;
   /** The rounds in a row that came sooner: after SOON_IN_A_ROW, one at Settings' interval (soonAfter). */
   let soonRun = 0;
+  /** The rounds' lines in serve.log: one that each quiet round says alike, once (steadyLog). */
+  const roundLog = steadyLog((line) => console.log(`round: ${line}`));
   // The round (stages/round.ts): between builds it only looks; a build's rounds release each repository's main. It passes while a round runs, here or in a terminal, or every stage's slot is taken (stages/slots.ts).
   const roundJob = async (full = false, extra: Pick<StageAsk, 'buildNow' | 'employees'> = {}) => {
     // Off the maker's laptop with Developer options off, no round runs: a developer's work (maker.ts).
@@ -263,8 +302,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       lookNext = [];
       const ask: StageAsk = full ? { full, ...extra } : loadSettings().byItself ? (look.length ? { look } : {}) : { tendOnly: true };
       // A person started it (Run now, Build now): its checks go in the Seneschal's first lane (stages/seneschal.ts).
-      const stage = () => runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) });
+      const stage = () => runStage('round', ask, { run: o.run, owner: o.owner, log: roundLog.say });
       const out = await inStage(end, () => (full ? withLane('person', stage) : stage()));
+      roundLog.roundDone();
       ({ sooner, run: soonRun } = soonAfter(!!out.soon, soonRun, loadSettings().roundMinutes * 60_000));
     } catch (e) {
       if (!(e instanceof LockTimeout)) throw e;
@@ -300,7 +340,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       othersGoing = false;
     }
   };
-  if (!process.env.NODE_TEST_CONTEXT) setInterval(() => void othersJob(), OTHERS_TICK_MS).unref();
+  /** Its tick, only while Settings say it builds and releases by itself (arrange): off, it read the settings every 2 s for nothing. */
+  let othersTick: ReturnType<typeof setInterval> | null = null;
   // The whole suite before a kit's release runs beside the rounds (stages/wholesuite.ts): once it ends, a round releases
   // the kit, or holds it, at once. A run a Steward that is gone left behind is ended first.
   endWholeOrphans((line) => console.log(`whole suite: ${line}`));
@@ -339,6 +380,11 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       rounds.stop();
       rounds = null;
     } else rounds?.reschedule();
+    if (s.byItself && !othersTick && !process.env.NODE_TEST_CONTEXT) othersTick = setInterval(() => void othersJob(), OTHERS_TICK_MS).unref();
+    else if (!s.byItself && othersTick) {
+      clearInterval(othersTick);
+      othersTick = null;
+    }
     builds.look();
   };
   // The builds (build-hold.ts): the PC held up from a few minutes before each build time until its build closes, a round

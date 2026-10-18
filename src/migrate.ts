@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { publisherKey } from './kit/exchequer.ts';
 import { manorHome, originRepo } from './kit/manor.ts';
+import { readJsonShared } from './kit/file-cache.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { gitExe } from './kit/git-exe.ts';
 import { RELEASE_HERE, type Employee } from './settings.ts';
@@ -112,6 +113,15 @@ export function branchTree(checkout: string, branch: string): Tree | null {
 }
 
 export const migrationFile = () => dataFile('settings-migrated.json');
+
+const MISSING = Symbol('missing');
+const BROKEN = Symbol('broken');
+/**
+ * settings.json as it is, for the migrations that look at it on every read of the settings and nearly always find
+ * nothing to do: parsed once while it is unchanged, and frozen (the kit's readJsonShared), MISSING when it isn't there,
+ * BROKEN when it is but can't be read or isn't JSON, which no migration touches.
+ */
+const settingsAsThey = (file: string) => readJsonShared<unknown, typeof BROKEN>(file, MISSING, BROKEN);
 
 const readText = (f: string) => {
   try {
@@ -300,7 +310,9 @@ export function findStewardClone(checkouts: string[]): { checkout: string; repo:
  */
 export function migrateSettings(o: { settingsFile: string; staffFile: string; now?: Date }): Migration | null {
   try {
-    const raw = existsSync(o.settingsFile) ? JSON.parse(readText(o.settingsFile) ?? '{}') : {};
+    const got = settingsAsThey(o.settingsFile);
+    if (got === BROKEN) return null;
+    const raw: any = got === MISSING ? {} : got;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || 'employees' in raw) return null;
     const rows = (readJson<{ rows?: StaffRowLike[] } | null>(o.staffFile, null)?.rows ?? []).filter((r) => r && typeof r === 'object' && !(r as { self?: boolean }).self);
     if (!rows.length) return null;
@@ -439,8 +451,10 @@ const RAN_BEFORE = ['settings.json', 'staff.json', 'alarms.json', 'last-stage.js
  */
 export function migrateToOwnRepos(o: { settingsFile: string; dataDir: string; dotnetHasSdk?: (dir: string) => boolean; hasPublisherKey?: () => boolean }): 'before' | 'elsewhere' | 'new' | null {
   try {
-    const exists = existsSync(o.settingsFile);
-    const raw = exists ? JSON.parse(readText(o.settingsFile) ?? '{}') : {};
+    const got = settingsAsThey(o.settingsFile);
+    if (got === BROKEN) return null;
+    const exists = got !== MISSING;
+    const raw: any = exists ? got : {};
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.releasesCastellan === 'boolean') return null;
     const ranBefore = exists || RAN_BEFORE.some((f) => existsSync(path.join(o.dataDir, f)));
     if (!ranBefore) {

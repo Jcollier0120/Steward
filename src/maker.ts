@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { isDeveloper } from './kit/developer.ts';
 import { publisherKey } from './kit/exchequer.ts';
+import { readJsonShared } from './kit/file-cache.ts';
 import { manorHome } from './kit/manor.ts';
-import { readJson } from './kit/store.ts';
 
 /**
  * The maker's laptop, and everyone else's PC.
@@ -104,9 +104,12 @@ export function makersRepo(repo: string): boolean {
   return r.startsWith(`${MAKERS_ACCOUNT}/`) || r.startsWith(`github.com/${MAKERS_ACCOUNT}/`) || r.startsWith(`www.github.com/${MAKERS_ACCOUNT}/`);
 }
 
-/** The ids in Manor's shipped staff.json: the agents Castellan ships (employ.ts' manorStaff, read here without it). */
+/**
+ * The ids in Manor's shipped staff.json: the agents Castellan ships (employ.ts' manorStaff, read here without it). Its
+ * 64 KB are parsed once while the file is unchanged (the kit's readJsonShared): every read of the settings asks.
+ */
 function shippedStaff(home = manorHome()): Set<string> {
-  const agents = readJson<{ agents?: { id?: unknown }[] } | null>(path.join(home, 'app', 'staff.json'), null)?.agents;
+  const agents = readJsonShared<{ agents?: { id?: unknown }[] } | null>(path.join(home, 'app', 'staff.json'), null)?.agents;
   return new Set((Array.isArray(agents) ? agents : []).map((a) => a?.id).filter((x): x is string => typeof x === 'string'));
 }
 

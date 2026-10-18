@@ -2,6 +2,32 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.141
+
+**The Steward does the same work with less. Reading its settings costs a quarter to a third of what it did. Its 2-second check runs only while it merges and releases by itself. A quiet round no longer writes the same lines to its log every ten minutes, and a slow round now says where its time went.**
+
+### What changed
+
+- **Reading the settings is lighter.** The Steward reads them every time it decides anything: every 2 seconds, and many times in each round and each page load. Measured on 2026-10-18:
+  - on a PC that doesn't release Castellan: 0.82 ms down to 0.17 ms;
+  - with 40 repositories: 0.51 ms down to 0.19 ms.
+
+  How:
+  - The two one-time migrations, which looked at settings.json on every read and nearly always found nothing to do, now look at the kit's parsed copy (the kit 2.83.2).
+  - Manor's staff list is parsed once while it is unchanged, not twice a read.
+  - The Steward's own clone and the ids no repository may take are worked out once a read, not once for each repository.
+  - A settings.json that is there but can't be read is now left alone by the migrations, as one that isn't JSON always was.
+- **The 2-second check for the Seneschal's work runs only while Settings say the Steward merges and releases by itself.** Before, it read the settings every 2 seconds, about 1,800 times an hour, only to find it had nothing to do. Saving Settings starts or stops it.
+- **A round asks Reeve for its alerts only when something reads them:** the work it files for the Wright, or the manor-wide alarms while those are the Steward's. Where Manor keeps those alarms, Reeve was asked every round for nothing.
+- **serve.log is quieter.** The lines a quiet round says every time, such as "between builds: …", "Manor keeps the manor-wide alarms itself …" and "Settings say it doesn't release by itself …", are written once, and again when they change. Each round's own record still keeps them. On the makers' PC they were most of the log: 277 times in two days for the alarms line alone.
+- **A slow round says where its time went.** A round of 10 seconds or more ends with one line, such as "round: took 28.1 s: the staff's table 19.0 s, glance at GitHub 6.2 s", listing its steps of a second or more, slowest first. An idle round on the makers' PC took 28 s for 0.17 s of the processor, and nothing said where.
+- **A quiet round that makes the staff's table again says why,** such as "the staff's table is made again: GitHub says something new of reeve". It says so once, and again when the reason changes. On the makers' PC the table was made again after every quiet round, though nothing had moved.
+- **The kit 2.83.2** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a file only read is parsed once while it is unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.140
 
 **The kit 2.83.1: when your NPU's model server can't be installed, the reason now says why.**

@@ -105,3 +105,32 @@ test('readJson: a settled file read again costs a stat, gives what a fresh read 
   writeFileSync(file, '{not json');
   assert.equal(readJson(file, 'broken'), 'broken');
 });
+
+// Kit 2.83.2: a file only read, parsed once while it is unchanged and frozen; any change parsed again.
+const { readJsonShared } = await import('./fixture/src/kit/file-cache.ts');
+
+test('readJsonShared: a settled file is parsed once, every call gets the same frozen value, and a change is parsed again', () => {
+  const file = path.join(home, 'shared.json');
+  writeFileSync(file, '{"agents":[{"id":"reeve","release":{"repo":"someone/reeve"}}]}');
+  settle(file);
+  const parsed = fileCounts.parsed;
+  const first = readJsonShared<{ agents: { id: string }[] } | null>(file, null);
+  for (let i = 0; i < 50; i++) assert.equal(readJsonShared(file, null), first, 'the same value');
+  assert.equal(fileCounts.parsed - parsed, 1, 'parsed once');
+  assert.deepEqual(first, { agents: [{ id: 'reeve', release: { repo: 'someone/reeve' } }] });
+  // Frozen all the way down: no caller can change what the next one gets.
+  assert.throws(() => void ((first as any).agents[0].id = 'x'), TypeError);
+  assert.throws(() => void (first as any).agents.push({}), TypeError);
+  // readJson still gives each caller its own copy.
+  (readJson(file, {}) as any).agents.push({ id: 'mine' });
+  assert.equal(readJsonShared<any>(file, null).agents.length, 1);
+  // Changed: parsed again, at once.
+  writeFileSync(file, '{"agents":[]}');
+  assert.deepEqual(readJsonShared(file, null), { agents: [] });
+  // Missing: the fallback. There but not JSON: `broken` when given, else the fallback.
+  rmSync(file);
+  assert.equal(readJsonShared(file, 'gone', 'broken'), 'gone');
+  writeFileSync(file, '{not json');
+  assert.equal(readJsonShared(file, 'gone', 'broken'), 'broken');
+  assert.equal(readJsonShared(file, 'gone'), 'gone');
+});

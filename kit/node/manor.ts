@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { readJsonFile, readText } from './file-cache.ts';
+import { readJsonShared, readText, statOf } from './file-cache.ts';
 import { keyInside, pathKey } from './real-path.ts';
 import { themeNamed } from './themes.ts';
 import type { PassQuery, WorkResult } from './work-status.ts';
@@ -306,29 +306,32 @@ export function githubRepo(url: string): string | null {
 
 /**
  * The GitHub repository a clone's origin is (owner/name), read from its git config: a worktree's .git file is followed
- * to the config it shares. Null when it isn't a clone, has no origin, or its origin isn't on GitHub.
+ * to the config it shares. Null when it isn't a clone, has no origin, or its origin isn't on GitHub. Each file costs a
+ * stat while it is unchanged (file-cache.ts, kit 2.83.2): the Steward asks for each of Manor's Repositories on every
+ * read of its settings.
  */
 export function originRepo(checkout: string): string | null {
   try {
     let git = path.join(checkout, '.git');
-    if (statSync(git).isFile()) {
-      const to = /^gitdir:\s*(.+)$/m.exec(readFileSync(git, 'utf8'))?.[1]?.trim();
+    const s = statOf(git);
+    if (s?.isFile()) {
+      const to = /^gitdir:\s*(.+)$/m.exec(readText(git, s) ?? '')?.[1]?.trim();
       if (!to) return null;
       git = path.resolve(checkout, to);
-      const common = path.join(git, 'commondir');
-      if (existsSync(common)) git = path.resolve(git, readFileSync(common, 'utf8').trim());
+      const common = readText(path.join(git, 'commondir'));
+      if (common !== null) git = path.resolve(git, common.trim());
     }
-    const config = readFileSync(path.join(git, 'config'), 'utf8');
-    const url = /\[remote "origin"\][^[]*?^\s*url\s*=\s*(.+)$/m.exec(config)?.[1];
+    const config = readText(path.join(git, 'config'));
+    const url = config === null ? undefined : /\[remote "origin"\][^[]*?^\s*url\s*=\s*(.+)$/m.exec(config)?.[1];
     return url ? githubRepo(url) : null;
   } catch {
     return null;
   }
 }
 
-/** A JSON file's contents, or null when it's missing or unreadable. */
+/** A JSON file's contents, or null when it's missing or unreadable: parsed once while it is unchanged, and frozen. */
 function jsonAt(file: string): unknown {
-  return readJsonFile<unknown>(file, null);
+  return readJsonShared<unknown>(file, null);
 }
 
 const listOf = (v: unknown, key: string): Record<string, unknown>[] => {
@@ -468,11 +471,11 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
  * these as well as on the staff, and never treats one as staff: no kit, no Steward, no merge or release of its own.
  */
 export function manorProjects(home = manorHome()): ManorProject[] {
-  const file = path.join(home, 'settings.json');
-  if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return [];
-  const raw = jsonAt(file);
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
-  return projectsFrom((raw as Record<string, unknown>).projects, manorOwn({ home }));
+  const raw = jsonAt(path.join(home, 'settings.json'));
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !existsSync(path.join(home, 'app'))) return [];
+  const projects = (raw as Record<string, unknown>).projects;
+  // None listed: the manor's own, four more files, aren't read for nothing (kit 2.83.2).
+  return projects === undefined || projects === null ? [] : projectsFrom(projects, manorOwn({ home }));
 }
 
 /** A plain house, for when Manor's own icon can't be had. */
