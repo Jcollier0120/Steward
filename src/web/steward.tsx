@@ -446,7 +446,9 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
         : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${after}`;
   // Where the last build's time went (buildtimes.ts), and that what is merged between builds is released at the next.
   const took = r.on && !noRepos && r.build?.took ? ` ${r.build.took} Between builds, whoever wrote a PR merges it once vouched, and the next build releases it.` : '';
-  return { what, when: `${when}${took}` };
+  // A vendor's screen saver putting the PC to sleep stops the rounds whatever they do: said whatever the mode.
+  const asleep = r.asleep ? ` ${r.asleep}` : '';
+  return { what, when: `${when}${took}${asleep}` };
 }
 
 /**
