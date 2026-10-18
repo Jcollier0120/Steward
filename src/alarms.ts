@@ -173,22 +173,25 @@ export interface FailedSelf {
 /**
  * Releases on GitHub that didn't reach the Exchequer (stages/exchequer.ts): no one is offered them until they're there.
  * One the Exchequer refused is raised at once, as only a person can fix that; one the network kept out only once it has
- * waited Settings' waiting hours, as the rounds try it again meanwhile.
+ * waited Settings' waiting hours, as the rounds try it again meanwhile. The Steward's own too (0.36.139), by its id.
+ * Either has a button, "Publish it now", that has the next round try it at once (exchequer.ts's askAgain).
  */
 export function exchequerConditions(pending: Record<string, ExchequerPending>, employees: Employee[], settings: Settings): Condition[] {
   return Object.entries(pending).flatMap(([id, p]): Condition[] => {
-    const e = employees.find((x) => x.id === id);
-    if (!e) return [];
-    const offered = `Manor installs ${e.name} from the Exchequer alone, so no one is offered v${p.version} until it's there.`;
+    const name = id === APP.id ? APP.name : employees.find((x) => x.id === id)?.name;
+    if (!name) return [];
+    const offered = `Manor installs ${name} from the Exchequer alone, so no one is offered v${p.version} until it's there.`;
+    const action = { label: 'Publish it now', confirm: `Publish ${name} v${p.version} to the Exchequer now, from its release on GitHub? Nothing is built again.` };
     if (p.passing) {
       return [
         {
           id: `exchequer:${id}:${p.version}:waits`,
           who: id,
-          title: `${e.name} v${p.version} is released on GitHub, but the Exchequer couldn't be reached to publish it for ${hours(settings.alarms.waitingHours)} or more`,
-          detail: [`Last try: ${p.why}`, offered, `The rounds keep trying (${p.tries} so far), and this clears by itself once it's there. Release ${e.name} on the Steward's page to try at once.`],
+          title: `${name} v${p.version} is released on GitHub, but the Exchequer couldn't be reached to publish it for ${hours(settings.alarms.waitingHours)} or more`,
+          detail: [`Last try: ${p.why}`, offered, `The rounds keep trying (${p.tries} so far), and this clears by itself once it's there. Publish it now to have the next round try at once.`],
           since: p.since,
           afterMs: settings.alarms.waitingHours * HOUR,
+          action,
         },
       ];
     }
@@ -196,10 +199,11 @@ export function exchequerConditions(pending: Record<string, ExchequerPending>, e
       {
         id: `exchequer:${id}:${p.version}:refused`,
         who: id,
-        title: `${e.name} v${p.version} is released on GitHub, but the Exchequer refused it`,
-        detail: [p.why, offered, `Once that's fixed, release ${e.name} on the Steward's page: it publishes v${p.version} to the Exchequer from GitHub's own files, without building it again.`],
+        title: `${name} v${p.version} is released on GitHub, but the Exchequer refused it`,
+        detail: [p.why, offered, `Once that's fixed, press Publish it now: a round publishes v${p.version} to the Exchequer from GitHub's own files, without building it again.`],
         since: p.since,
         afterMs: 0,
+        action,
       },
     ];
   });

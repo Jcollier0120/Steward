@@ -36,6 +36,7 @@ import { wakesPc } from './kit/wake.ts';
 import { keepHeads } from './heads.ts';
 import { withLane } from './stages/seneschal.ts';
 import { workForOthers } from './stages/others.ts';
+import { askAgain } from './stages/exchequer.ts';
 
 /** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
 const githubReadyHere = (): boolean | undefined => {
@@ -477,11 +478,24 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         if (id.startsWith('unsafe:')) allowUpdate(id.slice('unsafe:'.length));
         return dismiss(id) ? { json: { ok: true } } : { json: { error: 'no such alarm open' }, status: 404 };
       },
-      // An alarm's button (its `action`), on the page or Manor's Needs you, asked first: { id }. None has one now (the
-      // version queues' Move it past went with them, Steward 0.36.124): each is only dismissed.
+      // An alarm's button (its `action`), on the page or Manor's Needs you, asked first: { id }. One has it (0.36.139): a
+      // release on GitHub that didn't reach the Exchequer (stages/exchequer.ts), whose "Publish it now" has a round try it
+      // at once. Every other alarm is only dismissed.
       '/api/alarms/act': ({ body }) => {
         const id = typeof body?.id === 'string' ? body.id.slice(0, 300) : '';
         const a = loadAlarms().open.find((x) => x.id === id);
+        if (a && id.startsWith('exchequer:')) {
+          if (!askAgain(id)) return { json: { error: 'That release no longer waits for the Exchequer.' }, status: 404 };
+          const what = "It's published to the Exchequer";
+          if (!loadSettings().byItself || !duty().onDuty) return { json: { ok: true, message: `${what} at the next round you start.` } };
+          if (rounding() || slotsFull()) {
+            roundAfter = true;
+            return { json: { ok: true, queued: true, message: `${what} by a round as soon as one can start.` } };
+          }
+          if (updateHold()) return { json: { ok: true, queued: true, message: `${what} by the next round, once Manor has updated the Steward.` } };
+          startRound();
+          return { json: { ok: true, message: `${what} by a round starting now.` } };
+        }
         return { json: { error: a ? 'that alarm has nothing to do but be dismissed' : 'no such alarm open' }, status: 404 };
       },
       // Look after repositories Reeve found (found.ts): added to Settings, releasing only as ticked. One

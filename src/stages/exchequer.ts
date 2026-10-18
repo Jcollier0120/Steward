@@ -9,12 +9,14 @@ import { networkLine, passingFailure } from './common.ts';
  * release until it's there. On 2026-10-17 the Exchequer timed out for Bridgeward 0.2.26: the Steward counted the release
  * failed, nothing tried the Exchequer again, and the next round's look at GitHub took v0.2.26 for another Steward's.
  *
- * Now the release counts as this Steward's, and is kept here, by employee, until the agent's own release command with
- * --exchequer (the kit's release.ts exchequerOnly: GitHub's own files, from the commit released) puts it there:
+ * Now the release counts as this Steward's, and is kept here, by employee (the Steward's own by its id, 0.36.139), until
+ * the agent's own release command with --exchequer (the kit's release.ts exchequerOnly: GitHub's own files, from the
+ * commit released) puts it there:
  * - one the network or the Exchequer's own failing kept out (`passing`) is tried again by the rounds, further apart each
  *   time (dueAgain), and an alarm comes only once it has waited Settings' waiting hours;
- * - one the Exchequer refused (it doesn't sell the agent, or turned the draft down) isn't: an alarm says so at once, and a
- *   person's Release on the Steward's page tries it again, once they've fixed it.
+ * - one the Exchequer refused (it doesn't sell the agent, or turned the draft down) isn't: an alarm says so at once.
+ * Either alarm's "Publish it now" (askAgain) has a round try it at once, once the person has fixed what kept it out; an
+ * employee's Release on the Steward's page does too.
  */
 export interface ExchequerPending {
   version: string;
@@ -29,6 +31,8 @@ export interface ExchequerPending {
   last: string;
   /** Tries since the release. */
   tries: number;
+  /** When a person asked for it to be tried now (its alarm's button): the next round's, whatever kept it out. */
+  asked?: string;
 }
 
 export const exchequerPendingFile = () => dataFile('exchequer-pending.json');
@@ -38,6 +42,20 @@ export function notePending(id: string, p: ExchequerPending): void {
   const all = loadExchequerPending();
   all[id] = p;
   writeJson(exchequerPendingFile(), all);
+}
+
+/**
+ * Its alarm's "Publish it now" (exchequerConditions, alarms.ts), by the alarm's id ("exchequer:<id>:<version>:…"): the
+ * next round tries it, whatever kept it out. False when that release no longer waits.
+ */
+export function askAgain(alarmId: string, now = new Date()): boolean {
+  const [kind, id, version] = alarmId.split(':');
+  const all = loadExchequerPending();
+  const p = kind === 'exchequer' && id ? all[id] : undefined;
+  if (!p || p.version !== version) return false;
+  all[id] = { ...p, asked: now.toISOString() };
+  writeJson(exchequerPendingFile(), all);
+  return true;
 }
 
 /** Nothing waits at the Exchequer for this employee any more (published there, or a newer release reached it). */
@@ -109,8 +127,12 @@ export function exchequerCommand(release: string): string | null {
 
 const MINUTE = 60_000;
 
-/** A round's next try of one the network kept out: 15 minutes after the last, then 30, an hour, two, and every three. */
+/**
+ * A round's next try of one the network kept out: 15 minutes after the last, then 30, an hour, two, and every three. One
+ * a person asked for now (askAgain) at once, whatever kept it out.
+ */
 export function dueAgain(p: ExchequerPending, now: Date): boolean {
+  if (p.asked) return true;
   if (!p.passing) return false;
   const wait = Math.min(180 * MINUTE, 15 * MINUTE * 2 ** Math.max(0, p.tries - 1));
   return now.getTime() - Date.parse(p.last) >= wait;
