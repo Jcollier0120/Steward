@@ -36,6 +36,8 @@ test('readings: the newest of each window kept, windows that are over let go, an
   let s = withReading(reading(4000));
   s = noteReading(s, reading(3900), now);
   assert.deepEqual(s.graphql.map((r) => r.remaining), [3900], 'the same window: the newer reading');
+  // A glance's queries asked at once come back in any order: the window's reading with the least left stands.
+  assert.deepEqual(noteReading(s, reading(3950), now).graphql.map((r) => r.remaining), [3900], 'an earlier reading that came back later');
   // GitHub's REST and GraphQL counts have been seen a window apart: the gloomier is believed.
   s = noteReading(s, reading(4826, { resetAt: '2026-10-09T21:53:00.000Z' }), now);
   assert.equal(believed(s, now)?.remaining, 3900);

@@ -13,7 +13,7 @@ process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { addedLines, marksUrgent, urgentReady } = await import('../src/stages/urgent.ts');
+const { addedLines, marksUrgent, urgentLookedFile, urgentReady } = await import('../src/stages/urgent.ts');
 const { boardedUrgent, loadPipeline, savePipeline, urgentKey } = await import('../src/pipeline.ts');
 const { runStage } = await import('../src/steward.ts');
 const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
@@ -89,6 +89,18 @@ test("main's head is urgent when the entry it adds since the newest release, in 
   calls = [];
   assert.deepEqual(await urgentReady(ctx, [{ ...e, id: 'other' }], new Set()), []);
   assert.equal(calls.length, 0);
+});
+
+test("main at its newest release's commit is read not at all; what a head said is kept for after a restart", async () => {
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: counting, neutralDir: home });
+  const released = sh(f.checkout, 'rev-parse', 'v0.4.0');
+  ctx.glance = { at: new Date().toISOString(), stewardReleases: null, repos: { fake: { head: released, prs: [], releases: [{ tagName: 'v0.4.0', isDraft: false, publishedAt: null, commit: released }] } }, errors: {} };
+  calls = [];
+  assert.deepEqual(await urgentReady(ctx, [e], new Set()), []);
+  assert.equal(calls.length, 0, 'no git: nothing on main since its release');
+  // A head read before (the first test's urgent one) is in the data folder, by repository, head and release.
+  const kept = JSON.parse(readFileSync(urgentLookedFile(), 'utf8')) as Record<string, boolean>;
+  assert.ok(Object.entries(kept).some(([k, v]) => k.startsWith(`${e.repo}@`) && k.endsWith('..v0.4.0') && v === true));
 });
 
 /** The world as GitHub would say it in a round's glance: the fake origin's main, and v0.4.0 released. */

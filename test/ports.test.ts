@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -91,6 +91,9 @@ test("each clone's port is read once per commit of origin's branch there: read a
   git.length = 0;
   assert.deepEqual(await cloneUses(run, [e]), [{ port: 19393, id: 'fake', source: 'clone' }]);
   assert.deepEqual(git, [], 'the same commit: not read again');
+  // Kept in the data folder too, so a restart doesn't read every clone again.
+  const { clonePortsFile } = await import('../src/ports.ts');
+  assert.deepEqual(Object.values(JSON.parse(readFileSync(clonePortsFile(), 'utf8'))).map((v: any) => v.port), [19393]);
   writeFileSync(path.join(f.checkout, 'manor-agent.json'), JSON.stringify({ agent: { home: 'http://fake.localhost:19494/' } }));
   sh(f.checkout, 'commit', '--quiet', '-am', 'moved');
   sh(f.checkout, 'push', '--quiet', 'origin', 'main');

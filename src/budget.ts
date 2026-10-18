@@ -64,10 +64,15 @@ export function readingFrom(raw: any, now: Date): RateReading | null {
   return { limit, remaining, used, resetAt: new Date(reset).toISOString(), at: now.toISOString() };
 }
 
-/** The state with this reading kept: the newer of each window's, and no window that is over. */
+/**
+ * The state with this reading kept: the one of each window with the least left (the newest, since GitHub only counts
+ * down within a window, whatever order a glance's queries came back in), and no window that is over.
+ */
 export function noteReading(s: BudgetState, r: RateReading, now: Date): BudgetState {
+  const had = s.graphql.find((x) => x.resetAt === r.resetAt);
+  const best = had && had.remaining < r.remaining ? had : r;
   const live = s.graphql.filter((x) => Date.parse(x.resetAt) > now.getTime() && x.resetAt !== r.resetAt);
-  const kept = Date.parse(r.resetAt) > now.getTime() ? [...live, r] : live;
+  const kept = Date.parse(best.resetAt) > now.getTime() ? [...live, best] : live;
   return { ...s, graphql: kept.sort((a, b) => a.resetAt.localeCompare(b.resetAt)).slice(-4) };
 }
 

@@ -2,6 +2,34 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.142
+
+**A quiet round is about three times quicker. Most of its 30 seconds went on asking GitHub its questions one at a time; it now asks four at once. The first round after a restart no longer re-reads every repository, and a quiet round asks GitHub nothing it already knows.**
+
+### What changed
+
+- **The round's look at GitHub asks 4 of its questions at once.** It asks about 5 repositories per question, and GitHub takes 1–4 seconds over each one. With 40 repositories that is 8 questions, asked one after another, about 20 seconds every round. Measured on 39 repositories on 2026-10-18:
+  - one at a time (before): 20.4 s;
+  - 4 at once (now): about 6–7 s;
+  - 8 at once: 3.6 s. 4 was chosen to stay well inside what GitHub asks of its users.
+
+  The questions and what they cost are the same. If one fails, no more are asked.
+- **The look for urgent fixes between builds reads less.**
+  - A repository whose main is its newest release is skipped: nothing is new.
+  - What the clone has already isn't fetched again.
+  - What it found is kept on disk. Before, a restart fetched and read every repository again, one after another.
+  - On the first round after a restart, with 39 repositories: 24.7 s before, 0.2 s now.
+- **The ports each clone uses are kept on disk too.** A restart no longer reads every clone again.
+- **Agents' pages are asked at once.** The alarms read the Wright's, Reeve's, Manor's and the Bailiff's pages one after another, each allowed up to 8 seconds; now they are asked together.
+- **Closing the issues the Steward filed for the Wright uses what the round already knows.** It used to ask GitHub, one `gh` process for each issue still open, every round. Now:
+  - a PR the round's glance shows still open and in conflict isn't asked about;
+  - neither is a kit PR it shows still open;
+  - an employee's releases come from the glance.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.141
 
 **The Steward does the same work with less. Reading its settings costs a quarter to a third of what it did. Its 2-second check runs only while it merges and releases by itself. A quiet round no longer writes the same lines to its log every ten minutes, and a slow round now says where its time went.**

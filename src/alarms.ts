@@ -20,6 +20,7 @@ import { manorKeeps, tendConditions, type TendState } from './tend.ts';
 import { unstickConditions, type UnstickState } from './unstick.ts';
 import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
 import type { KitTrial } from './stages/trial.ts';
+import type { Glance } from './glance.ts';
 
 /**
  * What needs the person: the few things no one in the manor can see to by themselves. Each round, code (never a
@@ -694,6 +695,8 @@ export async function watchAlarms(
     /** gh, for filing work for the Wright (work.ts), and where it runs from; without it nothing is filed. */
     run?: Runner;
     neutralDir?: string;
+    /** The round's glance at GitHub, for what closing the work filed would otherwise ask (work.ts closeResolved). */
+    glance?: Glance | null;
   },
   deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; pages?: Partial<AgentPages>; reeveInstalled?: () => boolean; surveyorInstalled?: () => boolean; seneschalInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
 ): Promise<AlarmState> {
@@ -702,14 +705,23 @@ export async function watchAlarms(
   const p = { ...agentPages(), ...deps.pages };
   const filing = o.settings.fileWork && !!o.run;
   if (!a.on && !filing) return loadAlarms();
-  const get = deps.getJson ?? getJson;
+  const given = deps.getJson ?? getJson;
+  // A page that throws is one that gave no answer, as getJson says it.
+  const get: GetJson = (url) => Promise.resolve().then(() => given(url)).catch((e) => ({ error: (e as Error).message }));
   const now = deps.now ?? new Date();
-  // The Wright's work and Reeve's alerts are read for the work filed (work.ts) as well as for the alarms.
-  const wright = p.wright ? await get(new URL('/api/work', p.wright).href) : null;
+  const manor = deps.manorUrl === undefined ? p.manor : deps.manorUrl;
+  // The pages read every round, asked at once (Steward 0.36.142): each may take up to 8 seconds, and they were asked one
+  // after another. Manor's state and the Bailiff's reviews are for the alarms alone.
+  const wrightAsked = p.wright ? get(new URL('/api/work', p.wright).href) : null;
+  const stateAsked = a.on && manor ? get(new URL('/api/state', manor).href) : null;
+  const bailiffAsked = a.on && p.bailiff ? get(new URL('/api/reviews', p.bailiff).href) : null;
   // Reeve's only when something reads them: the work filed, or the manor-wide alarms while they are the Steward's (Steward
   // 0.36.141). Where Manor keeps those and nothing is filed, Reeve was asked every round for nothing.
   const askReeve = async () => (p.reeve && (deps.reeveInstalled ?? reeveInstalled)() ? await get(new URL('/api/alerts', p.reeve).href) : null);
-  let reeve = filing ? await askReeve() : undefined;
+  const reeveAsked = filing ? askReeve() : undefined;
+  // The Wright's work and Reeve's alerts are read for the work filed (work.ts) as well as for the alarms.
+  const wright = await wrightAsked;
+  let reeve = await reeveAsked;
   // Failed bumps and releases, and Reeve's alerts that are code work, filed for the Wright: their alarms wait.
   let items: WorkItem[] = [];
   let states = new Map<string, WorkState>();
@@ -718,18 +730,17 @@ export async function watchAlarms(
       items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== undefined && reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings });
       if (items.length) states = await fileWork({ items, work: wright, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), now, log: o.log });
       // And the issues whose failure is gone (a bump, a release, and a conflict or kit trial filed before 0.36.124), closed, so the Wright isn't sent to find nothing to do.
-      await closeResolved({ items, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), log: o.log });
+      await closeResolved({ items, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), log: o.log, glance: o.glance });
     } catch (e) {
       o.log(`work: ${(e as Error).message}`);
     }
   }
   if (!a.on) return loadAlarms();
   const conditions = roundConditions(o);
-  const manor = deps.manorUrl === undefined ? p.manor : deps.manorUrl;
   // The manor-wide alarms are Manor's once it says it keeps them (tend.ts's manorKeeps): then only the repositories' are the Steward's.
   let manorWide = true;
-  if (manor) {
-    const state = await get(new URL('/api/state', manor).href);
+  if (manor && stateAsked) {
+    const state = await stateAsked;
     manorWide = !manorKeeps(state).has('alarms');
     if (manorWide) {
       conditions.push(...manorConditions(state));
@@ -742,7 +753,7 @@ export async function watchAlarms(
   // The Surveyor's page only where the Surveyor is installed: without it, there is nothing to watch, and no alarm.
   if (manorWide && p.surveyor && (deps.surveyorInstalled ?? surveyorInstalled)()) conditions.push(...surveyorConditions(await get(new URL('/api/survey', p.surveyor).href), o.settings));
   if (wright !== null) conditions.push(...wrightConditions(wright));
-  if (p.bailiff) conditions.push(...bailiffConditions(await get(new URL('/api/reviews', p.bailiff).href)));
+  if (bailiffAsked) conditions.push(...bailiffConditions(await bailiffAsked));
   let reeveJobs: Set<string> | null = null;
   if (manorWide && reeve === undefined) reeve = await askReeve();
   if (reeve !== undefined && reeve !== null && manorWide) {

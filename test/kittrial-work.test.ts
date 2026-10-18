@@ -61,3 +61,16 @@ test("an old kit trial's issue closes once its kit PR was closed; one GitHub can
   assert.deepEqual(lines, ['work: closed https://github.com/Jcollier0120/Smith/issues/5: Jcollier0120/Steward#214 was closed']);
   assert.deepEqual(kept(), ['kittrial:reeve:2.69.0']);
 });
+
+test("what the round's glance says already isn't asked: the kit PR open there, nothing viewed, and the issues stay", async () => {
+  writeFileSync(workFiledFile(), JSON.stringify(filed()));
+  const r = runner(() => undefined);
+  const glance = { at: '', stewardReleases: null, repos: { steward: { head: 'a'.repeat(40), prs: [{ number: 214, mergeable: 'MERGEABLE' }], releases: [] } }, errors: {} };
+  await closeResolved({ items: [], employees, run: r.run, cwd: home, log: () => {}, glance });
+  assert.deepEqual(r.gh, [], 'no gh at all');
+  assert.equal(kept().length, 2);
+  // Not among its open PRs any more: asked, as before, to say whether it merged or was closed.
+  const asked = runner((args) => (args[0] === 'issue' && args[1] === 'close' ? ok('') : args[0] === 'pr' && args[1] === 'view' ? ok({ state: 'MERGED' }) : undefined));
+  await closeResolved({ items: [], employees, run: asked.run, cwd: home, log: () => {}, glance: { ...glance, repos: { steward: { ...glance.repos.steward, prs: [] } } } });
+  assert.deepEqual(kept(), []);
+});
