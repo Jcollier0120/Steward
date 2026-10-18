@@ -128,19 +128,28 @@ export const DXGI_PS = `try { Add-Type -TypeDefinition @'
 ${DXGI_CS}
 '@; [ReeveDxgi]::List() } catch { 'problem|graphics cards: ' + $_.Exception.Message }`;
 
-export const DETECT_PS = `$ErrorActionPreference = 'Stop'
+/** How DETECT_PS and NPU_PS start: errors stop the script, no progress bars, UTF-8 out. */
+const PS_START = `$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
-${DXGI_PS}
-try {
-  $drivers = @(Get-CimInstance -ClassName Win32_PnPSignedDriver -Filter "DeviceClass='COMPUTEACCELERATOR'")
+try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }`;
+
+/**
+ * The devices Windows lists as Neural processors (PnP class ComputeAccelerator), each with its driver: the
+ * `npu2|<driver>|<date>|<manufacturer>|<device id>|<name>` lines parseNpus reads. DETECT_PS and NPU_PS share it.
+ */
+const NPU_DEVICES_PS = `  $drivers = @(Get-CimInstance -ClassName Win32_PnPSignedDriver -Filter "DeviceClass='COMPUTEACCELERATOR'")
   $npus = @(Get-CimInstance -ClassName Win32_PnPEntity -Filter "PNPClass='ComputeAccelerator'" | Sort-Object Name)
   foreach ($n in $npus) {
     $d = $drivers | Where-Object { $_.DeviceID -eq $n.PNPDeviceID } | Select-Object -First 1
     $ver = ''; $date = ''
     if ($d) { $ver = [string]$d.DriverVersion; if ($d.DriverDate) { $date = ([datetime]$d.DriverDate).ToString('yyyy-MM-dd') } }
     'npu2|' + $ver + '|' + $date + '|' + ([string]$n.Manufacturer).Replace('|', ' ') + '|' + $n.PNPDeviceID + '|' + $n.Name
-  }
+  }`;
+
+export const DETECT_PS = `${PS_START}
+${DXGI_PS}
+try {
+${NPU_DEVICES_PS}
   if (-not $npus.Count) {
     foreach ($d in @(Get-CimInstance -ClassName Win32_PnPSignedDriver -Filter "DeviceName LIKE '%Hexagon%'" | Sort-Object DeviceName)) {
       $date = ''; if ($d.DriverDate) { $date = ([datetime]$d.DriverDate).ToString('yyyy-MM-dd') }
@@ -153,6 +162,19 @@ try {
   'cpu|' + $p.Architecture + '|' + $p.NumberOfLogicalProcessors + '|' + $p.Name
   'ram|' + (Get-CimInstance -ClassName Win32_ComputerSystem).TotalPhysicalMemory
 } catch { 'problem|processor: ' + $_.Exception.Message }
+`;
+
+/**
+ * Only the NPU lines of DETECT_PS (no graphics cards, no DXGI compile, a second or two sooner): what Windows lists as
+ * Neural processors, for parseNpus. Unlike DETECT_PS it never looks for a Hexagon driver when Windows lists none, and
+ * it ends with a `done|` line, so a caller tells "this PC has no NPU" (done, no npu2 line) from "Windows didn't answer"
+ * (no done line, or a `problem|NPU: …` one). Envoy's speech-NPU check (kit 2.87.0, from its speech-npu.ts).
+ */
+export const NPU_PS = `${PS_START}
+try {
+${NPU_DEVICES_PS}
+  'done|'
+} catch { 'problem|NPU: ' + $_.Exception.Message }
 `;
 
 /** The `adapter|…` lines DXGI_PS prints. */

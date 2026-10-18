@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathKey } from './real-path.ts';
 
 /**
- * The folders Windows keeps for a person (Desktop, Documents, Downloads, Pictures, Music, Videos, Screenshots), where
+ * The folders Windows keeps for a person (Desktop, Documents, Downloads, Pictures, Music, Videos, Screenshots, Captures), where
  * they are on this PC. OneDrive's folder backup moves Desktop, Documents and Pictures into the OneDrive folder, and a
  * person can move any of them, so the usual %USERPROFILE%\Documents is often wrong: the real places are the registry's
  * User Shell Folders, which is what Explorer itself reads. An agent that offers "Automatic: the folders Windows uses"
@@ -20,6 +20,11 @@ export interface KnownFolders {
   videos: string;
   /** Where Windows saves screenshots (Win+PrtScn), when it says; Pictures\Screenshots otherwise. */
   screenshots: string;
+  /**
+   * Where Xbox Game Bar saves its clips and screenshots (Win+Alt+R, Win+Alt+PrtScn), when it says (the Captures known
+   * folder, moved); Videos\Captures otherwise. Kit 2.87.0, for Chronicler and Scribe (captures.ts).
+   */
+  captures: string;
   /** The OneDrive folder, when OneDrive is set up. */
   oneDrive: string | null;
 }
@@ -35,6 +40,7 @@ const NAMES = {
   music: 'My Music',
   videos: 'My Video',
   screenshots: '{B7BEDE81-DF94-4682-A7D8-57A52620B86F}',
+  captures: '{EDC0FE71-98D8-4F4A-B920-C8DC133CB165}',
 } as const;
 
 /** `reg query`'s lines, name to path, with %NAME% expanded from `env` (ignoring case, as Windows does). */
@@ -59,6 +65,7 @@ export function foldersFrom(reg: string | null, o: { home?: string; env?: Record
   // A value still holding a %NAME% that didn't expand is no place to look.
   const at = (name: string, usual: string) => (shell[name] && !/%[^%]+%/.test(shell[name]) ? path.normalize(shell[name]) : path.join(home, usual));
   const pictures = at(NAMES.pictures, 'Pictures');
+  const videos = at(NAMES.videos, 'Videos');
   return {
     home,
     desktop: at(NAMES.desktop, 'Desktop'),
@@ -66,8 +73,9 @@ export function foldersFrom(reg: string | null, o: { home?: string; env?: Record
     downloads: at(NAMES.downloads, 'Downloads'),
     pictures,
     music: at(NAMES.music, 'Music'),
-    videos: at(NAMES.videos, 'Videos'),
+    videos,
     screenshots: shell[NAMES.screenshots] && !/%[^%]+%/.test(shell[NAMES.screenshots]) ? path.normalize(shell[NAMES.screenshots]) : path.join(pictures, 'Screenshots'),
+    captures: shell[NAMES.captures] && !/%[^%]+%/.test(shell[NAMES.captures]) ? path.normalize(shell[NAMES.captures]) : path.join(videos, 'Captures'),
     oneDrive: env.OneDrive || env.OneDriveConsumer || env.OneDriveCommercial || null,
   };
 }

@@ -2,6 +2,90 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.87.0
+
+**Code that several agents each had their own copy of is now in the kit: OCR, the NPU check for speech, BM25 search, the router and the connection, game captures, the game check, the folder watcher and the guard installers' helpers. No agent changes until it adopts them.**
+
+The owner's review, item 9: "Move forked code into the kit." Each of these was copied between agents, and the copies had started to drift. Here they are once, each the union of the copies, with every agent's current behaviour still expressible exactly (an option or a parameter where they differed). Who copies what today:
+
+| Module | Copies today |
+| --- | --- |
+| ocr.ts, ocr.ps1 | the Clerk, the Scribe |
+| detect.ts `NPU_PS` | the Envoy (speech-npu.ts) |
+| search.ts | the Clerk, the Chamberlain |
+| network.ts | the Weigher (checks.ts, speed.ts), the Bridgeward (probe.ts) |
+| captures.ts, folders.ts `captures` | the Chronicler (clips.ts), the Scribe (shots.ts) |
+| accelerators.ts `gameIn`, `gameNow` | the Scribe, the Marshal (game.ts), the Chronicler (autostart.ts) |
+| watch.ts | the Chamberlain (#76), the Cellarer (#29) |
+| guard.ts, guard-kit.ps1 | the Watchman, the Lamplighter |
+
+This merges after kit 2.86.1 (Steward #350); kit 2.88.0 (FFmpeg, #351) comes after it.
+
+### What changed
+
+- **ocr.ts, ocr.ps1:** the Clerk's, with only its import changed (`./ps.ts`). `ocrFiles(jobs, { tmpRoot, onBatch? })` reads images and PDFs (the first five pages, with a thumbnail of page 1) with Windows' own OCR, in batches (`batches`); file names reach PowerShell as text, never as code.
+- **detect.ts:** `NPU_PS`, the NPU lines of `DETECT_PS` alone, ending `done|` once Windows has answered (else `problem|NPU: <why>`). `parseNpus` reads its output. `DETECT_PS` itself is byte for byte as it was: the two now share their opening and their NPU lines. The Envoy's own copy differed only in looping over the devices inline; it had no Hexagon fallback, nor does `NPU_PS`.
+- **search.ts:** `SearchIndex<D, F>`, BM25 (k1 1.2, b 0.75) over the fields an agent names (`fields: [{ text, weight? }]`; a file name or title at `NAME_WEIGHT` 2), with prefix matches at 0.6 (at most 30 words each) and codes found inside words ("25006" in "0x25006").
+  - `search(query, limit = 50, { filter?, width? })`: a filter leaves records out of the answer, not out of how rare a word is.
+  - Equal scores: the newest first (`newest`), else in the records' order.
+  - Each hit has its `snippet` (escaped, the query's words in `<mark>`) from the first passage (`passages`, the first field by default) that has them, and which one it was (`from`).
+  - Also exported: `tokenize`, `snippet` and the constants.
+- **network.ts:**
+  - The router: `parseDefaultGateway`, `defaultGateway(run?)` (null: no default route; undefined: route couldn't run), `pingTimes(address, count, run?)` and `parsePing`, and the Weigher's `gatewayState(run?)` (`up`, `down`, `none`, `unknown`).
+  - The connection: `CONNECTION_SCRIPT`, one script for both agents (`up`, the cost read in its own try, Wi-Fi and its SSID, cellular, the adapter's type and link speed, signal bars, battery saver). `parseConditions` gives `{ cost, metered, batterySaver, connection }` (the Weigher's), `parseConnection` the `Connection` alone (the Bridgeward's). `readConditions(ps?)` throws when PowerShell fails; `readConnection(ps?)` gives null.
+  - `ConnectionKind`, `Connection`, `Conditions`, `Gateway`, `Run`.
+- **captures.ts:**
+  - `gameFromName(name, { requireStamp? })`: the Chronicler's reading by default (a name with no date is its own game); with `requireStamp`, the Scribe's (a copy's " (2)" taken off, and no game without a capture app's date and time).
+  - `capturePlaces({ videos, captures, more })`: Game Bar's, NVIDIA's (the app's and GeForce Experience's), AMD's and Settings' other folders.
+  - `walkCaptures(places, { ext, settledMs, now, list?, skip?, requireStamp?, notGames? })` lists the settled captures, each once, with their game (null when nothing says), newest first. It gives a list where the agents' copies called `add`: the agent maps null to its "Other clips" and adds its own fields. A place with `game` set (a Steam game's screenshot folder) gives every capture there that game.
+  - `NOT_GAMES` (both agents' lists together), `isNvidiaName`, `captureKey`, `list`.
+- **folders.ts:** `KnownFolders.captures`, Game Bar's Captures folder (`{EDC0FE71-…}` in User Shell Folders), else Videos\Captures.
+- **accelerators.ts:**
+  - `gameIn(games)` is the program using a card ("a game" when the check didn't say which), or null.
+  - `gameWatchCards(accs, hardware)`: the config's accelerators while one is an enabled graphics card (as `currentGames` always had it). Else hardware.json's cards are added beside them, for the check only.
+  - `gameNow({ file?, hw?, now?, probe? })`: the game using a card now, from games.json while it's under 15 s old, else checked and written for everyone. Never throws. spec/ACCELERATORS.md says so.
+- **watch.ts:** `FolderWatch`, the Chamberlain's and the Cellarer's watcher. It watches each folder with its subfolders (`fs.watch`, recursive, never keeping the process alive), and keeps the names changed (`Changes`: name → added, removed or renamed) until `take()`. It gives `'all'` for a folder watched only since the last take, a change with no name, more than `MAX_CHANGES` (20,000), or a watcher that failed (closed, then opened again by the next `refresh()`). Each folder's `wants(rel, named)` is the agent's own. `folderKey` is the Chamberlain's `pathKey` and the Cellarer's `folderKey`, and `key` takes another. `watch` takes a stand-in for tests.
+- **guard.ts:** a guard's agent side, taking the agent's names and folders.
+  - The release's scripts: `readScriptManifest`, `sha256Of`, `scriptsBehind`, `guardManifest`, `copyGuardKit`, `GUARD_KIT`.
+  - Turning the guard on and off: `guardCommand(action, { dryRun, out, source, guardRoot, root?, dataDir, args, dev, elevated?, runner?, timeoutMs? })`, `runElevated`, `isElevated`, `DEV_GUARD`, `guardPresent`.
+  - Uninstalling: `uninstallAgent(args, { uninstall, guardOff, out, root, words })`, `guardOnWords(root, words)` and `GUARD_STILL_ON`. The words reproduce each agent's text exactly.
+  - Running programs: `run`, `Runner`, `POWERSHELL`, `psFile`.
+- **guard-kit.ps1:** the installers' helpers, without the agents' prefixes (Write-WOut, Write-LOut). It is dot-sourced, then `Initialize-GuardKit -Log $Log -WhatIf:$WhatIf`. Then: `Write-Out`, `Invoke-Do`, `Invoke-Native`, `Test-Admin`, `ConvertTo-XmlText`, `Get-OwnerSid`, `Test-Trusted -Except`, `Read-ScriptManifest -Files`, `Test-ScriptHashes -Files`, `Set-FolderRights` (the SDDL is the agent's) and `Register-Task`, and `Open-Log` and `Close-Log`. Every hardening is kept as it was:
+  - the log is made afresh (CreateNew), never in a folder that is a link, and held open until the end;
+  - a folder is trusted only when it and all in it are SYSTEM's, Administrators' or TrustedInstaller's;
+  - SHA-256 is compared in lower case, case-sensitively.
+  What changed from the copies: `$Log`, `$WhatIf` and `$script:Files` are passed in rather than read from the installer. `Invoke-Do` refuses before `Initialize-GuardKit`. Naming no scripts is an error, never "all match". The Lamplighter's inbox exception is `-Except 'inbox'`. Every line printed is kept in `$script:GuardLines` (the Lamplighter's `$script:Lines`).
+
+### Where the copies differed
+
+- **network.ts:**
+  - Its ping reading also reads a reply whose time isn't in "ms" by the number before its TTL (Russian's "время=3мс"). The Bridgeward's copy counted those as lost.
+  - The connection script reads the cost in its own try. The Weigher's failed whole when Windows wouldn't give the cost; now the connection is read, with its cost null, and counted as metered, as Unknown is.
+  - `parseConditions` reads the script's last line, so a warning before it does no harm.
+  - JSON without `up` (the Weigher's script before this) is up when it has a cost.
+- `NOT_GAMES` is both agents' lists together: "thumbnails" is new to the Chronicler, "desktop.ini" to the Scribe. Neither is ever a game folder; each agent can pass its own (`notGames`).
+- `gameNow` with no enabled graphics card in the config (no local AI set up, or none on a card, or a config that can't be read) checks hardware.json's cards. The Scribe's and the Marshal's said no game there. It reads the counters (gpu-load.ps1, about 2 s) at most once in 15 s for the whole manor, and only on PCs whose hardware.json lists a card.
+
+### What an agent must do
+
+Nothing until it adopts a module; then it deletes its own copy and imports the kit's (`./kit/<module>.ts`), once it pins kit 2.87.0.
+
+- **The Clerk, the Scribe (OCR):** import `ocrFiles` and `batches` from `./kit/ocr.ts`; delete src/ocr.ts and src/ocr.ps1.
+- **The Envoy:** import `NPU_PS` (and `parseNpus`) from `./kit/detect.ts`.
+- **The Clerk (search):** `new SearchIndex(rolls, { fields: [{ text: r => r.text }, { text: r => r.caption }, { text: r => basename without extension, weight: NAME_WEIGHT }], passages: [{ from: 'text', text: r => r.text }, { from: 'caption', text: r => r.caption }], newest: r => r.mtimeMs })`.
+- **The Chamberlain (search):** `fields: [{ text: i => i.text }, { text: i => (i.from ?? '') + ' ' + (i.to ?? '') }, { text: i => title without extension, weight: NAME_WEIGHT }]`, `newest: i => i.at`, and its kind as `filter`. Its own title regex, `/.[a-z0-9]{1,5}$/i`, has an unescaped dot: it takes a last word of up to five letters off any title ("Meeting notes" is searched as "Meeting"). Pass the same regex to keep that exactly, or `/\.[a-z0-9]{1,5}$/i` to fix it.
+- **The Weigher:** `gatewayState()` for its gateway check, `readConditions()` / `parseConditions()` for its speed test's conditions.
+- **The Bridgeward:** `defaultGateway()` then `pingTimes(gateway, 3)` for its router probe, and `readConnection()` / `parseConnection()`.
+- **The Chronicler:** `walkCaptures(capturePlaces({ videos, captures: knownFolders().captures, more }), { ext: CLIP_EXT, settledMs: SETTLED_MS, now, skip })`, mapping a null game to "Other clips". Its game check: `const g = readGames(); return g && !gamesStale(g, now) ? gameIn(g) : undefined`. Note that `gameIn` says "a game" for a busy card with no program named, where its own said no game. The kit's `knownFolders()` reads the registry once a process; the Chronicler's read it at each look.
+- **The Scribe (screenshots):** `walkCaptures([...capturePlaces(…), ...steam.map(s => ({ dir: s.dir, source: 'steam', byFolder: false, game: s.game }))], { ext: SHOT_EXT, settledMs: SETTLED_MS, now, requireStamp: true })`, adding its `id` to each.
+- **The Scribe, the Marshal (game check):** delete `gameIn` and `gameNow` from game.ts and import them from `./kit/accelerators.ts`. The Marshal keeps its `GameHold`.
+- **The Chamberlain, the Cellarer (watcher), once their PRs (#76, #29) are merged:** import `FolderWatch`, `MAX_CHANGES`, `folderKey` and the types from `./kit/watch.ts`; keep `watchedFolders`. The Chamberlain passes `key: pathKey` (the same function) or uses `folderKey`.
+- **The Watchman, the Lamplighter (guard):**
+  1. Import the agent side from `./kit/guard.ts`, passing the agent's names (`GuardWords`), folders and settings as `args`. The Watchman passes `timeoutMs: 30 * 60_000`; its undo can call `runElevated` with its bin\undo.ps1.
+  2. Copy guard-kit.ps1 beside install-guard.ps1 (`copyGuardKit('src/guard')`, in tools/guard-manifest.ts before it hashes, and commit the copy), and dot-source it in install-guard.ps1: `. (Join-Path $PSScriptRoot 'guard-kit.ps1')`, then `Initialize-GuardKit -Log $Log -WhatIf:$WhatIf`.
+  3. **Add `guard-kit.ps1` to `GUARD_SCRIPTS` (guard.ts, tools/guard-manifest.ts) and to install-guard.ps1's `$script:Files`.** The guard's SYSTEM tasks run scripts from its bin\, and install-guard.ps1 copies every script there only after checking its SHA-256 against the release's manifest: a script it dot-sources that isn't in the list is never copied, and the guard's scripts in bin\ would fail. A guard set up before then has none in bin\; the page says the guard is behind until Update the guard.
+  4. Rename the prefixed calls (`Write-WOut` → `Write-Out`, `Invoke-LDo` → `Invoke-Do`, …). Pass `$script:Files` to `Read-ScriptManifest` and `Test-ScriptHashes`, and the Lamplighter `-Except 'inbox'` to `Test-Trusted`. Tests that stand in for `Get-WOwnerSid` define `Get-OwnerSid` instead, and the Lamplighter's read `$script:GuardLines`.
+
 ## 2.86.1
 
 **A page's console no longer ends when Manor updates, and a page whose console has gone runs its git, gh and PowerShell hidden instead of failing every one.**

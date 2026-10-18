@@ -2,6 +2,29 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.156
+
+**The Steward now hands out kit 2.87.0, which holds code that several of your staff each kept their own copy of: reading text in pictures, search, the network, game captures, the game check, watching folders, and the guard installers' helpers. Nothing changes for a staff member until its own update takes them up.**
+
+### What changed
+
+- **One copy instead of two.** Pairs of your staff had the same code, each its own copy, and the copies had started to drift apart. Kit 2.87.0 holds one of each, so a fix reaches every staff member that uses it:
+  - reading text in screenshots and PDFs with Windows' own OCR (the Clerk's and the Scribe's);
+  - finding which NPU this PC has, for speech (the Envoy's);
+  - search, ranking the best matches first (the Clerk's and the Chamberlain's);
+  - the router and the internet connection: whether the router answers, Wi-Fi or Ethernet, metered or not (the Weigher's and the Bridgeward's);
+  - where game clips and screenshots are saved, and which game each is of (the Chronicler's and the Scribe's);
+  - whether a game is being played, so heavy work waits (the Scribe's, the Marshal's and the Chronicler's). On a PC with no local AI on its graphics card, it now still sees a game there;
+  - watching folders for changes, so a round looks only at what changed (the Chamberlain's and the Cellarer's);
+  - the guard installers' shared steps (the Watchman's and the Lamplighter's), with every safety check they had.
+- A small fix along the way: on a PC set to Russian, a router's ping replies are now read instead of counted as lost.
+
+Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGELOG.md), 2.87.0.
+
+### Before you update
+
+- Nothing: it updates itself as usual. This merges after 0.36.150 (kit 2.86.1).
+
 ## 0.36.155
 
 **The Steward no longer rolls kits out to agents Manor has retired, and no longer releases them: today the Aletaster, the Auditor and the game-saves Butler.**
