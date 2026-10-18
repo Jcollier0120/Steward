@@ -1163,6 +1163,45 @@ async function setUpNpuEmbed(n: NpuPlan, tools: string, io: NpuIo, env: NodeJS.P
 /** The last lines of a program's output, for a problem's line. */
 const tail = (out: string) => out.trim().split(/\r?\n/).slice(-3).join(' / ').slice(0, 300);
 
+/** An Inno Setup server installer's log, in the tools home: kept when it fails, so it outlives a try's own folder. */
+export const installerLogFile = (tools: string) => path.join(tools, 'npu-installer.log');
+
+const readText = (file: string): string => {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Inno Setup's lines that say nothing about why it stopped: a question it answered Yes to goes on, and an EAbort only
+ * follows the line that says why (Setup.MainFunc.pas).
+ */
+const INNO_ROUTINE = /^(Log (opened|closed)|Deinitializing Setup|Need to restart Windows|RestartManager found no applications|Defaulting to Yes for suppressed message box \(Yes\/No\)|(Caught|Got) EAbort exception)/i;
+const INNO_BOX = /^Defaulting to \w+ for suppressed message box \([^)]*\):\s*/i;
+const INNO_TELLING = /\b(fail(ed|s|ure)?|errors?|exception|abort(ed|ing)?|cannot|can't|unable|denied|returned False)\b/i;
+
+/**
+ * Why an Inno Setup installer stopped, from its log (/LOG), each entry a timestamped line joined with the indented ones
+ * below it: the last message box it would have shown (its text alone: the installer's own words, "Uninstall failed
+ * (ErrCode: 2)."), then its last telling line ("InitializeSetup returned False; aborting."). Its last two lines when
+ * neither is there; empty when there's no log (it stopped before writing one).
+ */
+export function installerSaid(log: string): string {
+  const entries: string[] = [];
+  for (const line of log.replace(/^﻿/, '').split(/\r?\n/)) {
+    const m = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+\s+(.*)$/.exec(line);
+    if (m) entries.push(m[1].trim());
+    else if (line.trim() && entries.length) entries[entries.length - 1] += ` ${line.trim()}`;
+  }
+  const said = entries.filter((e) => !INNO_ROUTINE.test(e));
+  const box = said.filter((e) => INNO_BOX.test(e)).at(-1)?.replace(INNO_BOX, '');
+  const why = said.filter((e) => !INNO_BOX.test(e) && INNO_TELLING.test(e)).at(-1);
+  const parts = box || why ? [box, why].filter((x): x is string => !!x) : said.slice(-2);
+  return parts.join(' / ').slice(0, 300);
+}
+
 /**
  * Why the NPU, or only its embeddings, isn't used, in words for the person: setup's note, kept beside config.json
  * (rememberNpuNote) and shown with the accelerators. Never an alarm: its work goes to the graphics card or the processor.
@@ -1246,8 +1285,16 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
     const inst = n.route.install;
     if (inst.kind === 'inno') {
       io.log(`installing ${n.route.server} for this user (no administrator)`);
-      const r = await run(d.dest, inst.args, { timeoutMs: 15 * 60_000 });
-      if (r.code !== 0) return fail(`${n.route.server}'s installer ended with ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''}`, 'install');
+      // An Inno Setup installer prints nothing: its log is the only place it says why it stopped.
+      const log = installerLogFile(tools);
+      mkdirSync(tools, { recursive: true });
+      rmSync(log, { force: true });
+      const r = await run(d.dest, [...inst.args, `/LOG=${log}`], { timeoutMs: 15 * 60_000 });
+      if (r.code !== 0) {
+        const said = r.out.trim() ? tail(r.out) : installerSaid(readText(log));
+        return fail(`${n.route.server}'s installer ended with ${r.code}${said ? `: ${said}` : ''} (its log: ${log})`, 'install');
+      }
+      rmSync(log, { force: true });
     } else {
       const into = expandRoute(inst.into, { tools });
       io.log(`unpacking ${n.route.server} into ${into}`);

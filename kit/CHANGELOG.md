@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.83.1
+
+**When the NPU's server installer fails, setup now says why, in the installer's own words, instead of only "GenieX's installer ended with 1".**
+
+On 2026-10-18 the Smith's try of GenieX 0.9.1 on a Snapdragon X2 Elite failed with just that line. An Inno Setup installer prints nothing, so finding the reason took a hand-run of the installer with logging on.
+
+### What changed
+
+- **setup.ts:** `setUpNpu` runs an Inno Setup server installer (GenieX's) with `/LOG=` the tools home's `npu-installer.log`. When it fails, its problem line carries `installerSaid(log)`: the message box it would have shown (its text alone), then its last telling line. For example: "GenieX's installer ended with 1: Uninstall failed (ErrCode: 2). / InitializeSetup returned False; aborting. (its log: …\npu-installer.log)". The log is kept until an install works, and it lives in the tools home, so it outlives a Smith try's own folder.
+- **spec/NPU-VENDORS.md:** the server step says so.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.83.0
 
 **Graphics that share the PC's memory, and the processor, now chat and see with one Qwen3-VL-2B server in place of Qwen3-4B and Qwen3-VL-4B: about twice as fast, about 2 GB less memory than Qwen3-VL-4B alone, and the same scores. Cards with memory of their own keep the 4B models. On the Adreno, setup takes llama.cpp b11715 or later.**
