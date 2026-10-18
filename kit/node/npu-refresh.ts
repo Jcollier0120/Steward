@@ -3,8 +3,8 @@ import { type AcceleratorEntry, readConfigFile, validateKeeperConfig, writeConfi
 import { expandEnv } from './accelerators.ts';
 import type { Detection } from './detect.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
-import { compareVersions, NPU_CATALOG, type NpuCatalog, npuEntry, planNpu, runsRoute, smallPc } from './npu-vendors.ts';
-import { mergeEntries, portablePath, type NpuRefreshRecord, readNpuRefresh, rememberNpuRefresh } from './setup.ts';
+import { compareVersions, expandRoute, NPU_CATALOG, type NpuCatalog, npuEntry, npuMemoryFit, planNpu, routeFor, runsRoute, smallPc } from './npu-vendors.ts';
+import { mergeEntries, type NpuEmbedOffer, type NpuRefreshRecord, overlayFiles, portablePath, readNpuRefresh, rememberNpuRefresh } from './setup.ts';
 
 /**
  * The NPU's servers brought up to this kit's command on a PC set up by an older one. Setup writes the
@@ -18,6 +18,13 @@ import { mergeEntries, portablePath, type NpuRefreshRecord, readNpuRefresh, reme
  * this kit doesn't try again, unless the test failed for its server (serverFailed): then a look an hour later tests it
  * again, NPU_REFRESH_TRIES tests in all. A command written by a newer kit is never taken back, and an entry a person
  * pointed at another server is left alone.
+ *
+ * Since kit 2.86.0 it also offers the NPU its own embeddings, where its entry has none (set up before the route made
+ * them, as a Snapdragon set up before kit 2.63.0, or by a setup whose test of them failed): when the PC has room for
+ * them beside its chat (npuMemoryFit, as setup decides) and their server and model are already here, so nothing is
+ * downloaded. They're tested after the chat, in the same turn, and taken up only when they answer; refused, the chat's
+ * new command (if any) is written without them, and the record says so (embedOffer): a later kit offers them again,
+ * NPU_REFRESH_TRIES kits in all, then not until the route's embedding server changes.
  */
 
 /** The tests one kit makes of a new command whose server keeps failing it, the first included. */
@@ -87,6 +94,8 @@ export interface NpuRefreshDeps {
   testChat: (e: AcceleratorEntry) => Promise<string[]>;
   /** A test embedding, the same way. */
   testEmbed: (e: AcceleratorEntry, dims?: number) => Promise<string[]>;
+  /** Copies the route's server's files over its embedding server's (setup's overlayFiles), before embeddings offered to the NPU are tested. */
+  overlay?: (from: string, into: string, files: string[]) => number;
   /** Where the test's servers print, named in the log when a test fails. */
   serverLog?: string;
   log: (line: string) => void;
@@ -183,8 +192,10 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   const again = had?.kit === d.kit && had.did === 'failed' && typeof had.retryAt === 'string';
   if (had?.kit === d.kit && !(again && d.now() >= Date.parse(had.retryAt!))) return { did: 'looked' };
   if (had?.kit && compareVersions(had.kit, d.kit) > 0) return { did: 'newer-kit' };
+  // The NPU's own embeddings, refused at an earlier look: carried in every record until they're taken up.
+  let embedOffer: NpuEmbedOffer | undefined = had?.embedOffer;
   const done = (did: NpuRefreshRecord['did'], more: Omit<NpuRefreshOutcome, 'did'> = {}, tries?: number): NpuRefreshOutcome => {
-    rememberNpuRefresh(d.configFile, { kit: d.kit, at: new Date(d.now()).toISOString(), did, ...(more.problems?.length ? { problems: more.problems } : {}), ...(tries ? { tries } : {}), ...(more.retryAt ? { retryAt: more.retryAt } : {}) });
+    rememberNpuRefresh(d.configFile, { kit: d.kit, at: new Date(d.now()).toISOString(), did, ...(more.problems?.length ? { problems: more.problems } : {}), ...(tries ? { tries } : {}), ...(more.retryAt ? { retryAt: more.retryAt } : {}), ...(embedOffer ? { embedOffer } : {}) });
     return { did, ...more };
   };
 
@@ -201,31 +212,59 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   const route = catalog.routes[npu.vendor];
   if (!route || !runsRoute(entry, route, d.tools)) return done('not-route');
 
-  // What setup would write now, on the same ports, with or without its embeddings as before, and the models this PC's
-  // generation and memory take (a Snapdragon X2's Qwen3-VL-2B: pulled by setup, so a model not here yet is needs-setup).
-  const plan = planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed: !entry.embed?.startCommand?.length, cards, small: smallPc(detected.ramBytes) });
+  // What setup would write now, on the same ports, and the models this PC's generation and memory take (a Snapdragon
+  // X2's Qwen3-VL-2B: pulled by setup, so a model not here yet is needs-setup). Its embeddings as they were, unless the
+  // NPU makes none and may now: room for them beside its chat (npuMemoryFit, as setup decides), not refused
+  // NPU_REFRESH_TRIES times already by this embedding server, and their server and model here (nothing downloaded).
+  const small = smallPc(detected.ramBytes);
+  const generation = routeFor(route, npu.generation, small);
+  const own = generation.embedServer ? `${generation.embedServer.server} ${generation.embedServer.version}` : null;
+  const hadEmbed = !!entry.embed?.startCommand?.length;
+  const refusedTries = own && embedOffer?.server === own ? embedOffer.tries : 0;
+  const mayOffer = !hadEmbed && !!own && npuMemoryFit(generation, detected.ramBytes).embed && refusedTries < NPU_REFRESH_TRIES;
+  const planFor = (noEmbed: boolean) =>
+    planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed, cards, small });
+  let plan = planFor(!hadEmbed && !mayOffer);
+  // Their server or model not here yet: left for setup (Set up local AI), and the rest goes on without them.
+  if (mayOffer && plan && plan.downloadBytes > 0) plan = planFor(true);
   if (!plan) return done('no-npu');
   if (!plan.installed || plan.runtime || plan.downloadBytes > 0) return done('needs-setup');
+  const offered = !hadEmbed && !!plan.embed;
   // The graphics' turn its embeddings take (embedTurn); a detection that listed no cards keeps the entry's.
   const turn = plan.embed?.turn ?? (cards.length || typeof entry.embed?.turn !== 'string' ? undefined : entry.embed.turn);
   const fresh = npuEntry(plan.route, { tools: d.tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, d.home), embed: plan.embed ? { exe: plan.embed.exe, model: plan.embed.model, ...(turn ? { turn } : {}) } : undefined });
   // Its slots, timeouts (measured on this PC, or a person's) and switch stay as they are.
   const { chat: _chat, vision: _vision, embed: _embed, ...kept } = entry;
-  const next: AcceleratorEntry = { ...kept, maxContextTokens: fresh.maxContextTokens, quirks: fresh.quirks, chat: fresh.chat, ...(fresh.vision ? { vision: fresh.vision } : {}), ...(fresh.embed ? { embed: fresh.embed } : {}) };
+  let next: AcceleratorEntry = { ...kept, maxContextTokens: fresh.maxContextTokens, quirks: fresh.quirks, chat: fresh.chat, ...(fresh.vision ? { vision: fresh.vision } : {}), ...(fresh.embed ? { embed: fresh.embed } : {}) };
   if (served(entry) === served(next)) return done('current');
 
-  const changes = [
+  const offerWords = offered ? `embeddings: on the NPU's own server (${own}, ${next.embed!.model})${next.embed!.turn ? ` in ${next.embed!.turn}'s turn` : ''}` : null;
+  let changes = [
     // Another model (its generation's own, once setup has pulled it: a Snapdragon X2's Qwen3-VL-2B).
     ...(entry.chat.model !== next.chat!.model ? [`model ${next.chat!.model} in ${entry.chat.model}'s place`] : []),
     ...argChanges(entry.chat.startCommand, next.chat!.startCommand ?? []),
     ...envChanges(entry.chat.env, next.chat!.env),
     ...(entry.embed?.startCommand && next.embed?.startCommand ? argChanges(entry.embed.startCommand, next.embed.startCommand).map((c) => `embeddings: ${c}`) : []),
-    ...(next.embed && (entry.embed?.turn ?? null) !== (next.embed.turn ?? null) ? [`embeddings: in ${next.embed.turn ? `${next.embed.turn}'s` : "the NPU's"} turn`] : []),
+    ...(offerWords ? [offerWords] : []),
+    ...(!offered && next.embed && (entry.embed?.turn ?? null) !== (next.embed.turn ?? null) ? [`embeddings: in ${next.embed.turn ? `${next.embed.turn}'s` : "the NPU's"} turn`] : []),
     ...(stable(entry.quirks ?? []) !== stable(next.quirks ?? []) ? [`quirks: ${next.quirks?.length ? next.quirks.join(', ') : 'none'}`] : []),
     // A picture fitted within its vision's count (the X2's Qwen3-VL-2B), or sent at its own size again.
     ...((entry.vision?.pictureTokens ?? null) !== (next.vision?.pictureTokens ?? null) ? [next.vision?.pictureTokens ? `pictures: at most ${next.vision.pictureTokens} tokens` : 'pictures: at their own size'] : []),
   ];
   if (!d.idle()) return { did: 'busy' };
+  // Embeddings offered whose test failed: the rest is written without them.
+  let refused: string[] = [];
+  // The route's server's files copied over the embedding server's, as setup does, once its servers are stopped (a loaded DLL can't be replaced).
+  const overlaid = (): string[] => {
+    const o = plan.embed?.server.overlay;
+    if (!o) return [];
+    try {
+      (d.overlay ?? overlayFiles)(expandRoute(o.from, { tools: d.tools, env: d.env }), plan.embed!.folder, o.files);
+      return [];
+    } catch (e: any) {
+      return [`${own}'s files couldn't be copied from ${o.from}: ${String(e?.message ?? e).split(/\r?\n/)[0]}`];
+    }
+  };
   let problems: string[];
   try {
     problems = await d.withTurn(async () => {
@@ -234,9 +273,15 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
       const stayed = await stillAnswering(d, servers(next).map((s) => s.base));
       if (stayed.length) return stayed;
       const p = await d.testChat(next);
-      if (!p.length && next.embed?.startCommand?.length) p.push(...(await d.testEmbed(next, plan.embed?.server.model.dims)));
-      // The old command starts again at the next request.
-      if (p.length) for (const s of servers(next)) await d.stopServer(s.program, s.base);
+      if (!p.length && next.embed?.startCommand?.length) {
+        const e = offered ? overlaid() : [];
+        if (!e.length) e.push(...(await d.testEmbed(next, plan.embed?.server.model.dims)));
+        if (offered) refused = e;
+        else p.push(...e);
+      }
+      // The old command starts again at the next request; a refused embedding server isn't left running beside the chat that answered.
+      const stopping = p.length ? servers(next) : refused.length ? servers(next).filter((s) => s.base !== next.chat?.baseUrl) : [];
+      for (const s of stopping) await d.stopServer(s.program, s.base);
       return p;
     });
   } catch (e) {
@@ -250,6 +295,16 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
     d.log(`the NPU's servers keep their command: this kit's (${d.kit}: ${changes.join('; ') || 'its caps'}) didn't answer its test: ${problems.join('; ')}${then}${d.serverLog ? `. What its servers printed: ${d.serverLog}` : ''}`);
     return done('failed', { problems, changes, ...(retryAt ? { retryAt } : {}) }, tries);
   }
+  if (refused.length) {
+    const tries = refusedTries + 1;
+    embedOffer = { server: own!, tries, at: new Date(d.now()).toISOString(), problems: refused };
+    const then = tries < NPU_REFRESH_TRIES ? `a later kit offers them again (${tries} of ${NPU_REFRESH_TRIES})` : `not offered again until the route's embedding server is another (${tries} of ${NPU_REFRESH_TRIES})`;
+    d.log(`the NPU's own embeddings (${own}) weren't taken up, their test failed: ${refused.join('; ')}; they go where they went before, and ${then}${d.serverLog ? `. What its servers printed: ${d.serverLog}` : ''}`);
+    const { embed: _offered, ...without } = next;
+    next = without;
+    changes = changes.filter((c) => c !== offerWords);
+    if (served(entry) === served(next)) return done('current', { problems: refused });
+  } else if (offered) embedOffer = undefined;
   // Written over config.json as it is now, unless the NPU's entry changed while the test ran: then the next kit's look decides.
   const now = readConfigFile(d.configFile);
   const still = (Array.isArray(now.raw.accelerators) ? now.raw.accelerators : []).find((a: any) => a?.id === 'npu');

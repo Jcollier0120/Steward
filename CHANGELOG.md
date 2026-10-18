@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.147
+
+**The Steward now hands out kit 2.86.0, which moves your staff's search and matching work onto the NPU on PCs that were set up before the NPU could do it.**
+
+### What changed
+
+- **Search and matching on the NPU.** Some PCs were set up before their NPU could make embeddings, the numbers your staff use to search your code and find matching documents. Those PCs still made them on the graphics card, or, for Reeve's search, with a smaller model that reads only the first hundred words or so of each piece. Now the staff member that looks after your local AI moves this work to the NPU on its own, once it has tested it. It does this only when everything the NPU needs is already on the PC and there's memory for it, so nothing is downloaded. What you get:
+  - Better search: each piece of a file is read whole. In our tests the right file was among the first five every time, against 8 times in 9.
+  - Your graphics card is left to you, if Castellan's Settings keep it out of the staff's work.
+  - Embeddings come about twice as fast as they did on the graphics card.
+  - If the test fails, nothing changes, and a later update tries again, at most three times.
+
+### Before you update
+
+- On a PC this changes, Reeve builds its search indexes again once, with the NPU's model. It shows that it's settling in while it does, and the first time takes a while. Chamberlain's and Clerk's indexes carry over as they are.
+
 ## 0.36.146
 
 **The Steward now hands out kit 2.85.0, which lets the NPU run at full speed when your staff have work for it, and says how busy each accelerator was today.**
