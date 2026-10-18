@@ -46,7 +46,7 @@ import type { Glance } from './glance.ts';
  * - an issue the Wright got stuck on, or its PR that changes what a person reviews, at once; its page down, for two;
  * - the Bailiff unable to review (Claude Code not signed in), or a review of its failing twice, at once; its page down,
  *   for two (the Wright's drafts wait for it).
- * - a release the Aletaster's tasting has held a while (tasting-held.json; Settings: tastingHours);
+ * - a release the Assayer's release check has held a while (tasting-held.json; Settings: tastingHours);
  * - an update of the Steward itself that its install rolled back (unsafe-updates.json), at once;
  * - a package whose install script isn't on Settings' list, which held an install of the Steward's (install-held.json,
  *   installscripts.ts), at once, naming the package, its version, the repository and the script;
@@ -224,7 +224,7 @@ export function roundConditions(o: {
   failedRollouts?: Record<string, FailedRollout>;
   failedSelf?: Record<string, FailedSelf>;
   rolloutWaits?: { kit: string; own: string } | null;
-  /** Releases the Aletaster's tasting holds (tasting.ts's tasting-held.json), by employee. */
+  /** Releases the Assayer's release check holds (tasting.ts's tasting-held.json), by employee. */
   tastingHolds?: Record<string, TastingHold>;
   /** Releases that wait until this PC can sign (signing.ts's signing-waits.json), by employee. */
   signingWaits?: Record<string, SigningWait>;
@@ -352,8 +352,8 @@ export function roundConditions(o: {
       out.push({
         id: `tasting:${id}:${hold.commit.slice(0, 7)}:${hold.version}`,
         who: id,
-        title: `${e.name} v${hold.version} has waited ${hours(h)} or more for the Aletaster's tasting`,
-        detail: [hold.why, `Fix what the tasting found and push to ${e.branch} (the next round asks again), or switch off "Waits for the Aletaster's tasting" in the Steward's Settings to release without it.`],
+        title: `${e.name} v${hold.version} has waited ${hours(h)} or more for the Assayer's release check`,
+        detail: [hold.why, `Fix what the check found and push to ${e.branch} (the next round asks again), or switch off "Waits for the Assayer's release check" in the Steward's Settings to release without it.`],
         url: hold.url,
         since: hold.since,
         afterMs: h * HOUR,

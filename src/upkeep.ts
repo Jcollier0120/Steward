@@ -119,8 +119,7 @@ export type Poke = typeof pokePage;
 
 /**
  * After a stage released something: each page in Settings' "Told after a release" is POSTed (Manor's update check,
- * so it installs the release within minutes rather than at its next look, hours away; the Aletaster's Run now, so it
- * tastes it). A page that doesn't answer is only logged: none of this holds anything up. Never under node --test,
+ * so it installs the release within minutes rather than at its next look, hours away). A page that doesn't answer is only logged: none of this holds anything up. Never under node --test,
  * unless a test gives its own `poke`.
  */
 export async function tellAfterRelease(urls: string[], log: (line: string) => void, poke?: Poke): Promise<void> {
