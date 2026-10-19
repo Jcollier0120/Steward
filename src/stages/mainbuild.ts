@@ -4,7 +4,7 @@ import { fetchFor, gitMaybe, removeWorktree } from '../git.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { checksLogOf, runChecks, type AffectedScope, type FailedChecks } from './bump.ts';
-import { checkoutOf, freshWorktree, hostIs, interrupted, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, forgetGlance, freshWorktree, hostIs, interrupted, workRootOf, type Ctx } from './common.ts';
 import { setVouch, stoodInDescription, vouchDescription, vouchOn } from './vouch.ts';
 import type { StoodIn } from './standin.ts';
 import { recordTested } from '../tested.ts';
@@ -168,6 +168,11 @@ export const OWN_MERGE_WAITS_MS = [5_000, 15_000, 30_000];
  * A PR the Steward opened itself (a kit's rollout, a stamp), merged by it at `head`, its branch deleted: GitHub may need
  * a moment to tell whether a PR just opened merges, so a refusal is asked again after each of OWN_MERGE_WAITS_MS. Null
  * once merged, else why not. Never throws.
+ *
+ * Merged, its branch has moved past the stage's glance, so what comes after in the round (a build's release above all)
+ * reads it from GitHub afresh (common.ts's freshBranch). On 2026-10-19 a build stamped Manor 0.17.2 again, its entry
+ * taking in the Seneschal's, and then released v0.17.2 from the commit before that stamp: the glance and the clone both
+ * still said that commit, so nothing was fetched (Steward 0.36.160).
  */
 export async function mergeOwn(ctx: Ctx, e: Pick<Employee, 'id' | 'repo'>, pr: { number: number; head: string }): Promise<string | null> {
   const host = hostFor(ctx, e);
@@ -179,6 +184,7 @@ export async function mergeOwn(ctx: Ctx, e: Pick<Employee, 'id' | 'repo'>, pr: {
     if (r.code === 0) {
       // This Steward's merge, not a stranger's (strangers.ts).
       noteMerged(e, pr.number);
+      forgetGlance(ctx, e);
       // And the repository's heads read again in a moment (heads.ts), so Reeve brings its clones up to the merge.
       headsMoved(e.repo);
       ctx.log(`[${e.id}] merged its own #${pr.number} (${pr.head.slice(0, 7)})`);

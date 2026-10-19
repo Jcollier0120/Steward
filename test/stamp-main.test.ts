@@ -15,6 +15,8 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 const { CHANGES_README, changesReadme, fragmentFor } = await import('../src/entries.ts');
 const { stampAll, stampBranch, stampDirOf, stampMain, stampTree } = await import('../src/stages/stamp.ts');
 const { mainGate } = await import('../src/stages/mainbuild.ts');
+const { releaseUnreleased } = await import('../src/stages/round.ts');
+const { TAG_RELEASE } = await import('../src/settings.ts');
 const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
 const { claimsFile } = await import('../src/claims.ts');
 const { writeJson } = await import('../src/kit/store.ts');
@@ -114,7 +116,8 @@ test('stampTree: nothing to stamp is null and touches nothing; an empty entry, o
  * A repository on changes/: main at 0.4.0 (released), `entries` merged into it unstamped beside a feature. GitHub stands
  * in: statuses kept by commit (a team member's vouch on main's head when `vouched`), PRs opened as #41, #42…, listed
  * while open, merged by moving main to their head and deleting their branch (unless `refuse` says why not; it may be
- * changed between builds), and closed by deleting their branch.
+ * changed between builds), and closed by deleting their branch. A release it is asked to make is kept, with its commit
+ * and its notes.
  */
 function onMain(name: string, entries: Record<string, string>, o: { vouched?: boolean; refuse?: string } = {}) {
   const dir = path.join(tmp, name);
@@ -130,6 +133,7 @@ function onMain(name: string, entries: Record<string, string>, o: { vouched?: bo
   const statuses = new Map<string, unknown[]>(o.vouched ? [[head, [byTeam]]] : []);
   const opened: { main: string; branch: string }[] = [];
   const prs: { number: number; branch: string; open: boolean }[] = [];
+  const releases: { tag: string; target: string; notes: string | null }[] = [];
   const prOf = (a: string[]) => prs.find((p) => p.number === Number(a[2]))!;
   const r = runner((a) => {
     const read = /^repos\/Jcollier0120\/Fake\/commits\/([0-9a-f]{40})\/statuses\?per_page=100$/.exec(a[1] ?? '');
@@ -141,6 +145,11 @@ function onMain(name: string, entries: Record<string, string>, o: { vouched?: bo
       return ok('{}');
     }
     if (a[0] === 'release' && a[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-01T00:00:00Z' }]);
+    if (a[0] === 'release' && a[1] === 'create') {
+      const notes = a.indexOf('--notes-file');
+      releases.push({ tag: a[2], target: a[a.indexOf('--target') + 1], notes: notes >= 0 ? readFileSync(a[notes + 1], 'utf8') : null });
+      return ok(`https://github.com/${REPO}/releases/tag/${a[2]}\n`);
+    }
     if (a[0] === 'pr' && a[1] === 'create') {
       const branch = a[a.indexOf('--head') + 1];
       opened.push({ main: sh(f.origin, 'rev-parse', 'refs/heads/main'), branch: sh(f.origin, 'rev-parse', `refs/heads/${branch}`) });
@@ -173,7 +182,7 @@ function onMain(name: string, entries: Record<string, string>, o: { vouched?: bo
   const e = employee(f.checkout, { fill: '', test: ['node -e process.exit(1)'] });
   const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
   const at = (rev: string, file: string) => sh(f.origin, 'show', `${rev}:${file}`);
-  return { ...f, e, ctx, r, o, head, statuses, opened, at, main: () => sh(f.origin, 'rev-parse', 'refs/heads/main'), stampRefs: () => sh(f.origin, 'for-each-ref', '--format=%(refname)', 'refs/heads/steward/') };
+  return { ...f, e, ctx, r, o, head, statuses, opened, releases, at, main: () => sh(f.origin, 'rev-parse', 'refs/heads/main'), stampRefs: () => sh(f.origin, 'for-each-ref', '--format=%(refname)', 'refs/heads/steward/') };
 }
 
 test('main with nothing unstamped: no stamp, no worktree, no branch, and GitHub not asked', async () => {
@@ -312,4 +321,38 @@ test("a build's stamps: each repository against its releases and the versions cl
   } finally {
     writeJson(claimsFile(), []);
   }
+});
+
+test("a version stamped but not released, stamped again at a build that then releases it: the release is of that second stamp, its notes with every change", async () => {
+  // Steward 0.36.160. On 2026-10-19 the owner's build stamped Manor 0.17.2 again (#321, the Seneschal's entry joining
+  // the two it had) and then released v0.17.2 from the commit before that stamp: the round's glance, taken as it began,
+  // and the clone both said that commit, so the release fetched nothing, and its CHANGELOG lacked the Seneschal.
+  const p = onMain('stamp-again-release', { [fragmentFor('claude/feature')]: ENTRY('A feature.') }, { vouched: true });
+  const e = { ...p.e, release: TAG_RELEASE };
+  // An earlier build stamped v0.4.1, and didn't release it.
+  assert.equal((await stampMain(p.ctx, e, { released: ['0.4.0'], taken: [] }))?.version, '0.4.1', p.ctx.lines.join('\n'));
+  // A PR merged since, its entry unstamped, vouched for.
+  sh(p.checkout, 'fetch', '--quiet', 'origin');
+  sh(p.checkout, 'reset', '--quiet', '--hard', 'origin/main');
+  writeFileSync(path.join(p.checkout, 'src/fix.ts'), 'export const fix = 1;\n');
+  writeFileSync(path.join(p.checkout, fragmentFor('claude/fix')), ENTRY('A fix.'));
+  sh(p.checkout, 'add', '-A');
+  sh(p.checkout, 'commit', '--quiet', '-m', 'A fix');
+  sh(p.checkout, 'push', '--quiet', 'origin', 'main');
+  const before = p.main();
+  p.statuses.set(before, [byTeam]);
+  // The build's round: its glance says main is at that commit, as the clone does.
+  p.ctx.glance = { at: new Date().toISOString(), stewardReleases: null, repos: { fake: { head: before, prs: [], releases: [{ tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-01T00:00:00Z', commit: null }] } }, errors: {} };
+  assert.equal(sh(p.checkout, 'rev-parse', 'refs/remotes/origin/main'), before);
+
+  const { results } = await stampAll(p.ctx, [e]);
+  assert.deepEqual(results.map((r) => r.message), ['stamp: stamped v0.4.1, its entry joining the changes that release brings, and merged it'], p.ctx.lines.join('\n'));
+  const stamp = p.main();
+  assert.equal(sh(p.origin, 'rev-parse', `${stamp}^`), before);
+
+  const [released] = await releaseUnreleased(p.ctx, [e]);
+  assert.equal(released.outcome, 'done', `${released.message}\n${p.ctx.lines.join('\n')}`);
+  assert.equal(released.commit, stamp.slice(0, 7), 'released from the stamp it merged, not from the commit before');
+  assert.deepEqual(p.releases.map((r) => [r.tag, r.target]), [['v0.4.1', stamp]]);
+  assert.match(p.releases[0].notes ?? '', /\*\*Brings 2 changes: A feature; A fix\.\*\*/);
 });

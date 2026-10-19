@@ -243,7 +243,7 @@ export function exchequerNote(output: string): string {
 export const glanceOf = (ctx: Ctx, e: Employee): RepoGlance | null => ctx.glance?.repos[e.id] ?? null;
 
 /** Once the Steward has changed an employee's repository (a merge), the glance no longer says how it is. */
-export const forgetGlance = (ctx: Ctx, e: Employee) => {
+export const forgetGlance = (ctx: Ctx, e: Pick<Employee, 'id'>) => {
   if (ctx.glance) delete ctx.glance.repos[e.id];
 };
 
