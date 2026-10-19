@@ -242,12 +242,14 @@ test('device matching: each card to llama.cpp\'s device by name, the second card
 
 test("sizing by memory: all of a card's servers fit at once, with room for the desktop; else vision is left off", () => {
   const all = ['chat', 'vision', 'embed'];
+  // Chat and vision on one Qwen3-VL-2B server (kit 2.89.0): 2.1 GB and its context, beside the embeddings.
   assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 24 }), { slots: 2, maxContextTokens: 16384, kinds: all });
-  assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 16 }), { slots: 2, maxContextTokens: 8192, kinds: all }, 'three servers at 16K would not leave the desktop its room');
-  assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 12 }), { slots: 2, maxContextTokens: 16384, kinds: ['chat', 'embed'], left: ['vision'] });
-  assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 8 }), { slots: 1, maxContextTokens: 4096, kinds: ['chat', 'embed'], left: ['vision'] });
+  assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 16 }), { slots: 2, maxContextTokens: 16384, kinds: all }, 'one 2B server and the embeddings at 16K leave the desktop its room');
+  assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 12 }), { slots: 2, maxContextTokens: 16384, kinds: all }, 'vision fits now, on chat\'s server');
+  assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 8 }), { slots: 1, maxContextTokens: 8192, kinds: all }, 'an 8 GB card sees too');
+  assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 6 }), { slots: 1, maxContextTokens: 4096, kinds: ['chat', 'embed'], left: ['vision'] }, 'vision left off: chat without the projector');
   assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 4 }), { slots: 1, maxContextTokens: 4096, kinds: ['chat', 'embed'], left: ['vision'] }, 'nothing fits: the smallest');
-  assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 12, kinds: all as any, keepKinds: true }), { slots: 1, maxContextTokens: 4096, kinds: all }, 'asked for by name: kept, and smaller');
+  assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 6, kinds: all as any, keepKinds: true }), { slots: 1, maxContextTokens: 4096, kinds: all }, 'asked for by name: kept, and smaller');
   assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 12, kinds: ['chat'] }), { slots: 2, maxContextTokens: 16384, kinds: ['chat'] });
   assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 0.1, ramGb: 47.6 }), { slots: 1, maxContextTokens: 8192, kinds: all });
   assert.deepEqual(sizing({ kind: 'gpu', memoryGb: 0.1, ramGb: 16 }), { slots: 1, maxContextTokens: 4096, kinds: all });
@@ -265,40 +267,37 @@ test('the plan for a desktop: CUDA with its runtime per card, ports from 18191, 
   assert.deepEqual(
     plan.targets.map((t) => [t.id, t.variant?.variant ?? t.problem, t.slots, t.maxContextTokens, t.ports]),
     [
-      ['gpu-nvidia-geforce-rtx-4090', 'cuda-12.4-x64', 2, 16384, { chat: 18191, vision: 18192, embed: 18193 }],
-      ['gpu-nvidia-geforce-rtx-4090-2', 'cuda-12.4-x64', 2, 16384, { chat: 18194, vision: 18195, embed: 18196 }],
-      ['gpu-intel-r-uhd-graphics-770', 'vulkan-x64', 1, 8192, { chat: 18197, embed: 18198 }],
-      ['gpu-graphics-card-5', 'vulkan-x64', 1, 8192, { chat: 18199, embed: 18200 }],
+      ['gpu-nvidia-geforce-rtx-4090', 'cuda-12.4-x64', 2, 16384, { chat: 18191, embed: 18192 }],
+      ['gpu-nvidia-geforce-rtx-4090-2', 'cuda-12.4-x64', 2, 16384, { chat: 18193, embed: 18194 }],
+      ['gpu-intel-r-uhd-graphics-770', 'vulkan-x64', 1, 8192, { chat: 18195, embed: 18196 }],
+      ['gpu-graphics-card-5', 'vulkan-x64', 1, 8192, { chat: 18197, embed: 18198 }],
     ],
   );
-  // The integrated ones chat and see on one Qwen3-VL-2B server each.
-  assert.deepEqual(plan.targets.map((t) => t.chatOnVision), [undefined, undefined, true, true]);
-  // One CUDA build and runtime (into one folder), one Vulkan build, six model files: the 4B ones for the cards, the 2B ones for the integrated graphics.
+  // Each chats and sees on one Qwen3-VL-2B server, the cards too (kit 2.89.0).
+  assert.deepEqual(plan.targets.map((t) => t.chatOnVision), [true, true, true, true]);
+  // One CUDA build and runtime (into one folder), one Vulkan build, three model files: the 2B and its projector for every card, and the embeddings; neither 4B.
   assert.deepEqual(
     plan.downloads.map((d) => d.what),
     [
       'llama-b11749-bin-win-cuda-12.4-x64.zip',
       'cudart-llama-bin-win-cuda-12.4-x64.zip',
       'llama-b11749-bin-win-vulkan-x64.zip',
-      'unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf',
-      'Qwen/Qwen3-VL-4B-Instruct-GGUF/Qwen3VL-4B-Instruct-Q4_K_M.gguf',
-      'Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf',
-      'Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf',
       'Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf',
       'Qwen/Qwen3-VL-2B-Instruct-GGUF/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf',
+      'Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf',
     ],
   );
   assert.equal(plan.targets[0].folder, path.join(home, 'servers', 'llama.cpp', 'b11749-cuda-12.4-x64'));
-  assert.equal(plan.downloadBytes, 263288146 + 391443627 + 33192213 + 2497281120 + 2497281664 + 453974304 + 639150592 + 1107409952 + 445053216);
-  assert.ok(describePlan(plan).some((l) => /^Download: 8\.3 GB into /.test(l)));
+  assert.equal(plan.downloadBytes, 263288146 + 391443627 + 33192213 + 1107409952 + 445053216 + 639150592);
+  assert.ok(describePlan(plan).some((l) => /^Download: 2\.9 GB into /.test(l)));
   // A model already downloaded (right size) isn't fetched again.
   mkdirSync(path.join(home, 'models'), { recursive: true });
-  const again = await planSetup({ detection: parseDetection(DESKTOP), ids: ['gpu-nvidia-geforce-rtx-4090'], kinds: ['chat'], raw: {}, releases: RELEASES, hfFiles: hf, home, fileSize: (p) => (p.endsWith('Q4_K_M.gguf') ? 2497281120 : -1) });
+  const again = await planSetup({ detection: parseDetection(DESKTOP), ids: ['gpu-nvidia-geforce-rtx-4090'], kinds: ['chat'], raw: {}, releases: RELEASES, hfFiles: hf, home, fileSize: (p) => (p.endsWith('Q4_K_M.gguf') ? 1107409952 : -1) });
   assert.deepEqual(again.downloads.map((d) => [d.what.split('/').pop(), d.have]), [
     ['llama-b11749-bin-win-cuda-12.4-x64.zip', false],
     ['cudart-llama-bin-win-cuda-12.4-x64.zip', false],
-    ['Qwen3-4B-Instruct-2507-Q4_K_M.gguf', true],
-  ]);
+    ['Qwen3VL-2B-Instruct-Q4_K_M.gguf', true],
+  ], 'chat alone: the 2B without its projector');
 });
 
 test('the plan for this laptop: the Adreno\'s OpenCL build; the NPU is left alone; ports already taken are skipped, an entry keeps its own', async () => {
@@ -805,7 +804,7 @@ test("setup on Intel's integrated graphics: one Qwen3-VL-2B server for chat and 
   assert.equal(chatsOnVision({ id: INTEL_ID, memoryGb: 0.1, device: 'Vulkan0' }, 15.4), true);
   assert.equal(chatsOnVision({ id: INTEL_ID, memoryGb: 0.1, device: 'Vulkan' }, 15.4), true, "the build's backend, before the device's number is known");
   assert.equal(chatsOnVision({ id: INTEL_ID, memoryGb: 0.1, device: 'Vulkan0' }, CHAT_ON_VISION_RAM_GB), false, 'enough memory for both');
-  assert.equal(chatsOnVision({ id: 'gpu-intel-r-arc-tm-a770-graphics', memoryGb: 16, device: 'Vulkan0' }, 15.4), false, 'a card with memory of its own');
+  assert.equal(chatsOnVision({ id: 'gpu-intel-r-arc-tm-a770-graphics', memoryGb: 16, device: 'Vulkan0' }, 64), true, 'a card with memory of its own, whatever the PC has (kit 2.89.0)');
   assert.equal(chatsOnVision({ id: 'gpu-amd-radeon-tm-890m-graphics', memoryGb: 0.5, device: 'Vulkan0' }, 15.4), false, "another maker's: not measured");
 
   const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'run-'));
@@ -899,7 +898,7 @@ test("a PC set up before: Intel's integrated graphics under 32 GB move chat onto
     return withChatOnVision(c, 15.4).changed;
   };
   assert.deepEqual(withChatOnVision(intelConfig(), 32).changed, [], '32 GB: room for both');
-  assert.deepEqual(card1({ memoryGb: 8 }), [], 'memory of its own');
+  assert.deepEqual(card1({ memoryGb: 8 }), [INTEL_ID], 'memory of its own: moved too, from kit 2.89.0 (the next test)');
   assert.deepEqual(card1({ id: 'gpu-amd-radeon-tm-890m-graphics' }), [], "another maker's");
   assert.deepEqual(card1({ slots: 2 }), [], 'two slots: the vision server takes one request at a time');
   assert.deepEqual(card1({ chat: { ...intelChat, model: 'my-model' } }), [], "a person's own chat model");
@@ -926,6 +925,134 @@ test("the keeper's look on a PC under 32 GB: chat moves onto the vision server i
   assert.deepEqual(card.vision, { model: VL, timeouts: { requestBaseMs: 90_000 } });
   assert.equal(log.length, 3);
   assert.match(log[1], /^gpu-intel-r-graphics: chat now runs on the vision server, qwen3-vl-4b-instruct for both \(kit 2\.80\.0\)/);
+});
+
+// A gaming desktop with an RTX 4080 SUPER (16 GB of its own), as measured on 2026-10-19, and one with a 12 GB card.
+const CARD_DESKTOP = `adapter|0|4318|17171480576|34225520640|0x00000000_0x0000d1f1|0|NVIDIA GeForce RTX 4080 SUPER
+cpu|9|16|AMD Ryzen 7 7800X3D 8-Core Processor
+ram|34359738368
+`;
+const CARD_ID = 'gpu-nvidia-geforce-rtx-4080-super';
+const SUPER_LIST = '  CUDA0: NVIDIA GeForce RTX 4080 SUPER (16375 MiB, 15061 MiB free)\n';
+const CUDA = '%USERPROFILE%\\.manor\\accelerators\\servers\\llama.cpp\\b11734-cuda-12.4-x64\\llama-server.exe';
+const NO_CACHE = { LLAMA_ARG_CACHE_RAM: '0' };
+// What kit 2.88 set up on that card: Qwen3-4B for chat on two slots beside Qwen3-VL-4B for vision on one.
+const cardConfig = () => ({
+  accelerators: [
+    {
+      id: CARD_ID,
+      kind: 'gpu',
+      slots: 2,
+      maxContextTokens: 8192,
+      quirks: [],
+      memoryGb: 15.7,
+      chat: { baseUrl: 'http://127.0.0.1:18191', model: 'qwen3-4b-instruct-2507', startCommand: [CUDA, '--host', '127.0.0.1', '--port', '18191', '--device', 'CUDA0', '-ngl', '99', '-m', `${MODELS}\\Qwen3-4B-Instruct-2507-Q4_K_M.gguf`, '-c', '16384', '--parallel', '2', '--jinja', '--alias', 'qwen3-4b-instruct-2507'], env: NO_CACHE },
+      vision: { baseUrl: 'http://127.0.0.1:18192', model: VL, startCommand: [CUDA, '--host', '127.0.0.1', '--port', '18192', '--device', 'CUDA0', '-ngl', '99', '-m', `${MODELS}\\Qwen3VL-4B-Instruct-Q4_K_M.gguf`, '--mmproj', `${MODELS}\\mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf`, '-c', '8192', '--parallel', '1', '--jinja', '--alias', VL], env: NO_CACHE },
+      embed: { baseUrl: 'http://127.0.0.1:18193', model: 'qwen3-embedding-0.6b-gguf', startCommand: [CUDA, '--port', '18193', '--embeddings', '-c', '4096', '-ub', '512'], env: NO_CACHE, maxContextTokens: 1365 },
+    },
+  ],
+  acceleratorOrder: 'auto',
+});
+
+test('setup on a card with memory of its own: one Qwen3-VL-2B server for chat and vision, with chat\'s slots and context; neither 4B downloaded', async () => {
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'card-'));
+  const plan = await planSetup({ detection: parseDetection(CARD_DESKTOP), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.deepEqual(plan.problems, []);
+  const [t] = plan.targets;
+  assert.equal(t.id, CARD_ID);
+  assert.equal(t.chatOnVision, true);
+  assert.deepEqual([t.kinds, t.slots, t.maxContextTokens], [['chat', 'vision', 'embed'], 2, 16384], "sized for the 2B's one server");
+  assert.deepEqual(t.ports, { chat: 18191, embed: 18192 }, 'no port for vision');
+  assert.deepEqual(plan.models.map((m) => [m.model, m.role]), [[SMALL, 'model'], [SMALL, 'mmproj'], ['qwen3-embedding-0.6b-gguf', 'model']], 'neither 4B downloaded');
+  assert.equal(plan.downloadBytes, 263288146 + 391443627 + 1107409952 + 445053216 + 639150592);
+  assert.ok(describePlan(plan).some((l) => l.includes(`chat and vision on 18191 (one ${SMALL} server), embed on 18192`)), describePlan(plan).join('\n'));
+
+  const r = await runSetup(plan, {}, {
+    log: () => {},
+    download: async (d) => {
+      mkdirSync(path.dirname(d.dest), { recursive: true });
+      writeFileSync(d.dest, 'x');
+    },
+    unpack: () => {},
+    listDevices: async () => SUPER_LIST,
+  });
+  assert.deepEqual(r.problems, []);
+  const [e] = r.entries;
+  const exe = portablePath(path.join(home, 'servers', 'llama.cpp', 'b11749-cuda-12.4-x64', 'llama-server.exe'));
+  const model = portablePath(path.join(home, 'models', 'Qwen3VL-2B-Instruct-Q4_K_M.gguf'));
+  const mmproj = portablePath(path.join(home, 'models', 'mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf'));
+  assert.deepEqual(e.chat, {
+    baseUrl: 'http://127.0.0.1:18191',
+    model: SMALL,
+    // Its encoder on the card, uncapped, as a card's vision server's was; chat's two slots and its 2 × 16384 tokens.
+    startCommand: [exe, '--host', '127.0.0.1', '--port', '18191', '--device', 'CUDA0', '-ngl', '99', '-m', model, '--mmproj', mmproj, '-c', '32768', '--parallel', '2', '--jinja', '--alias', SMALL],
+    env: NO_CACHE,
+  });
+  assert.deepEqual(e.vision, { model: SMALL }, "vision on chat's server, on the rules' time");
+  assert.equal(e.embed!.baseUrl, 'http://127.0.0.1:18192');
+  assert.deepEqual(validateAccelerators(r.raw), []);
+  const { endpointFor } = await import('./fixture/src/kit/accelerator-config.ts');
+  assert.equal(endpointFor(readAccelerators(r.raw).accelerators[0], 'vision').baseUrl, 'http://127.0.0.1:18191', "vision's requests go to chat's server");
+
+  // A card with one slot: the one server's context is vision's 8192 at least, for a picture, with one slot.
+  const one = acceleratorEntry({ id: CARD_ID, kind: 'gpu', memoryGb: 8, device: 'CUDA0', server: 'C:\\s\\llama-server.exe', models: { vision: { path: 'C:\\m\\vl.gguf', mmproj: 'C:\\m\\mmproj.gguf', model: SMALL } }, ports: { chat: 18191 }, slots: 1, maxContextTokens: 4096, chatOnVision: true });
+  assert.deepEqual(one.chat!.startCommand!.slice(-7), ['-c', '8192', '--parallel', '1', '--jinja', '--alias', SMALL]);
+
+  // Asked for chat alone: the 2B with no projector, and no vision to share.
+  const alone = await planSetup({ detection: parseDetection(CARD_DESKTOP), ids: [], kinds: ['chat'], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.equal(alone.targets[0].chatOnVision, undefined);
+  assert.deepEqual(alone.models.map((m) => [m.model, m.role]), [[SMALL, 'model']]);
+  // An 8 GB card, which left vision off beside Qwen3-4B, sees now; a 6 GB card still doesn't, and chats on the 2B alone.
+  const eight = await planSetup({ detection: parseDetection(CARD_DESKTOP.replace('17171480576', '8589934592')), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.deepEqual([eight.targets[0].chatOnVision, eight.targets[0].slots, eight.targets[0].maxContextTokens, eight.targets[0].left], [true, 1, 8192, undefined]);
+  const six = await planSetup({ detection: parseDetection(CARD_DESKTOP.replace('17171480576', '6442450944')), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.deepEqual([six.targets[0].chatOnVision, six.targets[0].left], [undefined, ['vision']]);
+  assert.deepEqual(six.models.map((m) => [m.model, m.role]), [[SMALL, 'model'], ['qwen3-embedding-0.6b-gguf', 'model']]);
+
+  // Set up again on a PC an older kit set up: chat takes the port its vision server had, where that model runs; the embeddings keep theirs.
+  const again = await planSetup({ detection: parseDetection(CARD_DESKTOP), ids: [], raw: cardConfig(), releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.deepEqual(again.targets[0].ports, { chat: 18192, embed: 18193 });
+});
+
+test("a PC set up before: a card with memory of its own moves chat onto its vision server, with chat's slots and context, whatever the PC's memory", async () => {
+  const { withChatOnVision, refreshCardVision } = await import('./fixture/src/kit/setup.ts');
+  const raw = cardConfig();
+  const r = withChatOnVision(raw, 64);
+  assert.deepEqual(r.changed, [CARD_ID]);
+  const card = r.raw.accelerators[0];
+  const vision = raw.accelerators[0].vision.startCommand;
+  assert.deepEqual(
+    card.chat,
+    { baseUrl: 'http://127.0.0.1:18192', model: VL, startCommand: vision.map((s, i) => (vision[i - 1] === '-c' ? '16384' : vision[i - 1] === '--parallel' ? '2' : s)), env: NO_CACHE },
+    "the vision server's port and command, where that model already runs, with chat's two slots and 16384 tokens",
+  );
+  assert.deepEqual(card.vision, { model: VL });
+  assert.deepEqual(card.embed, raw.accelerators[0].embed, 'the embeddings as they were');
+  assert.deepEqual(withChatOnVision(r.raw, 64).changed, [], 'again: nothing to do');
+  assert.deepEqual(validateAccelerators(r.raw), []);
+  assert.ok(!readAccelerators(r.raw).accelerators.some((a) => a.chat?.baseUrl === 'http://127.0.0.1:18191'), "chat's old port is no configured server's: the keeper's orphan check stops Qwen3-4B there");
+
+  // Left as it is: not setup's own pair.
+  const changed = (edit: (a: any) => void) => {
+    const c = cardConfig() as any;
+    edit(c.accelerators[0]);
+    return withChatOnVision(c, 64).changed;
+  };
+  assert.deepEqual(changed((a) => (a.chat.startCommand[a.chat.startCommand.indexOf('--parallel') + 1] = '1')), [], "chat's slots aren't the card's");
+  assert.deepEqual(changed((a) => (a.vision.startCommand[a.vision.startCommand.indexOf('--parallel') + 1] = '2')), [], 'a vision server with two slots: a person\'s');
+  assert.deepEqual(changed((a) => (a.chat.model = 'qwen3-8b')), [], "a person's own chat model");
+  assert.deepEqual(changed((a) => delete a.memoryGb), [], 'no memory recorded: not known to be its own');
+
+  // The keeper's look says so in the card's words, once for the kit.
+  const dir = mkdtempSync(path.join(process.env.REEVE_HOME!, 'card-move-'));
+  const file = path.join(dir, 'config.json');
+  writeFileSync(file, JSON.stringify(cardConfig(), null, 2));
+  const log: string[] = [];
+  assert.deepEqual(refreshCardVision({ configFile: file, kit: '2.89.0', ramGb: 64, log: (l) => log.push(l) }), [CARD_ID]);
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).accelerators[0].chat.baseUrl, 'http://127.0.0.1:18192');
+  assert.equal(log.length, 1, log.join('\n'));
+  assert.match(log[0], /^gpu-nvidia-geforce-rtx-4080-super: chat now runs on the vision server, qwen3-vl-4b-instruct for both \(kit 2\.89\.0\): one server on the card where there were two/);
+  assert.deepEqual(refreshCardVision({ configFile: file, kit: '2.89.0', ramGb: 64, log: (l) => log.push(l) }), [], 'once for each kit version');
 });
 
 test('a reranker: set up only when asked for, as an add-on that keeps what its accelerator serves, on its own port; the keeper keeps it', async () => {
