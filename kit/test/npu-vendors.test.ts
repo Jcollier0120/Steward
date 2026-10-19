@@ -551,6 +551,10 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
   assert.deepEqual(tail(V.routeFor({ ...structuredClone(q), version: '0.9.1' }, 'snapdragon-x2')), ['--compute', 'npu', '--nctx', '2560']);
   assert.equal(V.serverVersionOf(q), undefined, "the route's own 0.8.0 takes none");
   assert.equal(V.atVersion(q, null), q);
+  // The kit's build of GenieX's plugin: 0.8.0's for the route's own version, 0.9.1's from 0.9.0 on, for the X2 alone.
+  assert.equal(V.pluginPatchOf(q, 'snapdragon-x2')!.serverVersion, '0.8.0');
+  for (const version of ['0.9.0', '0.9.1', '0.10.2']) assert.equal(V.pluginPatchOf(V.atVersion(q, version), 'snapdragon-x2')!.serverVersion, '0.9.1', version);
+  for (const version of [null, '0.9.1']) for (const g of ['snapdragon-x', null]) assert.equal(V.pluginPatchOf(V.atVersion(q, version), g), undefined, `${version} ${g}`);
 
   // setup on a PC whose GenieX is 0.9.1 (Use it left it): its command, its embedding server in a folder of its own.
   const plan = (version: string | null, have: string[] = [G]) => planSetup({ detection: parseDetection(`${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(have), serverVersion: async () => version });

@@ -5,12 +5,13 @@ import { type AcceleratorEntry, readConfigFile } from './accelerator-config.ts';
 import type { Detection } from './detect.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { NPU_REFRESH_RETRY_MS, NPU_REFRESH_TRIES, serverFailed, servers, stillAnswering } from './npu-refresh.ts';
-import { compareVersions, expandRoute, generationOf, NPU_CATALOG, type NpuCatalog, type NpuPluginPatch, runsRoute, sha256File } from './npu-vendors.ts';
+import { atVersion, compareVersions, expandRoute, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuPluginPatch, type NpuRoute, pluginPatchOf, runsRoute, sha256File } from './npu-vendors.ts';
 
 /**
  * A file of the NPU's server replaced with the kit's own build of it (npu-vendors.ts' NpuPluginPatch): on the Snapdragon
- * X2, Castellan's build of GenieX 0.8.0's llama.cpp plugin, which holds about 2 GB less (qualcomm/GenieX#1557), until
- * Qualcomm ships the fixes. The keeper (the Smith, else Reeve) looks once for each kit version, after the NPU's refresh,
+ * X2, Castellan's build of GenieX's llama.cpp plugin, which holds about 2 GB less (qualcomm/GenieX#1557), until Qualcomm
+ * ships the fixes. The build is for the version on the PC (the route's `versions`, pluginPatchOf): 0.8.0's, or 0.9.1's
+ * once the Smith's Use it put GenieX 0.9.1 in place. The keeper (the Smith, else Reeve) looks once for each kit version, after the NPU's refresh,
  * and again whenever the file changes (GenieX installed or updated since). The patch goes in only over the very file
  * GenieX's pinned version installs, while the files it is built against are that version's too, and only when nobody
  * uses the NPU: holding the NPU's turn, it stops the NPU's servers, keeps GenieX's own file beside it (`<file>.stock`),
@@ -62,6 +63,8 @@ export interface NpuPatchDeps {
   now: () => number;
   detect: () => Promise<Detection>;
   catalog?: NpuCatalog;
+  /** The version of the route's server on the PC, null when it can't say (the route's own then): installedVersion. */
+  serverVersion?: (route: NpuRoute) => Promise<string | null>;
   /** The kit's node part, which holds the patched files (`patched.from`): this file's folder. */
   kitDir?: string;
   hash?: (file: string) => Promise<string>;
@@ -188,8 +191,11 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
   const detected = await d.detect();
   const npu = detected.npu;
   const catalog = d.catalog ?? NPU_CATALOG;
-  const route = npu?.supported && npu.vendor ? catalog.routes[npu.vendor] : undefined;
-  const patch = route ? generationOf(route, npu!.generation)?.pluginPatch : undefined;
+  const generic = npu?.supported && npu.vendor ? catalog.routes[npu.vendor] : undefined;
+  // The build is the one for the version on the PC: GenieX 0.9.1's once the Smith's Use it put it in place.
+  const version = generic ? await (d.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: d.tools, env: d.env })))(generic) : null;
+  const route = generic ? atVersion(generic, version) : undefined;
+  const patch = route ? pluginPatchOf(route, npu!.generation) : undefined;
   // This PC's file: this kit's patch's, else the one an older kit's look patched (which this kit may have to put back).
   const target = patch ? patchTarget(patch, d.tools, d.env) : had?.path;
   const keepOf = (more: Partial<NpuPatchRecord>): Partial<NpuPatchRecord> => ({ ...(target ? { path: target, file: stateOf(target) } : {}), ...(off ? { off } : {}), ...more });
@@ -221,7 +227,7 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
   const why = async (): Promise<string | null> => {
     if (off) return 'config.json says npuPatch: false';
     if (!patch || !route) return "this kit doesn't patch this PC's NPU server";
-    if (patch.serverVersion !== route.version) return `the patch is for ${route.server} ${patch.serverVersion}, and this kit sets up ${route.version}`;
+    if (patch.serverVersion !== route.version) return `the patch is for ${route.server} ${patch.serverVersion}, and this PC's is ${route.version}`;
     for (const [name, want] of Object.entries(patch.needs)) {
       const f = path.join(path.dirname(target), name);
       const s = stateOf(f);

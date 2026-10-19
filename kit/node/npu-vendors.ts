@@ -168,7 +168,10 @@ export interface NpuGeneration {
   hexagonArch?: string;
   /** The chip Qualcomm AI Hub builds its models for (`qualcomm-snapdragon-x-elite`): GenieX's config.json chipset, when played. */
   aiHubChipset?: string;
-  /** A build of one of its server's own files the kit carries in its place (npu-patch.ts): the X2's GenieX llama.cpp plugin. */
+  /**
+   * A build of one of its server's own files the kit carries in its place (npu-patch.ts): the X2's GenieX llama.cpp plugin,
+   * for the route's pinned version. A later version's is in the route's `versions` (pluginPatchOf).
+   */
   pluginPatch?: NpuPluginPatch;
 }
 
@@ -186,6 +189,11 @@ export interface NpuServerVersion {
   serve?: Record<string, string[]>;
   /** Its embedding server's fields in this version, over the route's: the llama.cpp build that loads its libraries, and its folder. */
   embedServer?: Partial<Pick<NpuEmbedServer, 'version' | 'download' | 'into' | 'exe' | 'env'>>;
+  /**
+   * The kit's build of one of the server's files for this version, by generation (npu-patch.ts): in place of the
+   * generation's own `pluginPatch`, which is for the route's pinned version. A generation it doesn't name gets none.
+   */
+  pluginPatch?: Record<string, NpuPluginPatch>;
   basis: string;
 }
 
@@ -649,6 +657,16 @@ export function serverVersionOf(route: NpuRoute): NpuServerVersion | undefined {
   let best: NpuServerVersion | undefined;
   for (const v of route.versions ?? []) if (compareVersions(v.version, route.version) <= 0 && (!best || compareVersions(v.version, best.version) > 0)) best = v;
   return best;
+}
+
+/**
+ * The kit's build of a server file for a generation at the route's version: its `versions` entry's when one applies (GenieX
+ * 0.9's), else the generation's own (for the pinned version).
+ */
+export function pluginPatchOf(route: NpuRoute, generation: string | null | undefined): NpuPluginPatch | undefined {
+  const v = serverVersionOf(route);
+  if (v) return generation && v.pluginPatch && Object.hasOwn(v.pluginPatch, generation) ? v.pluginPatch[generation] : undefined;
+  return generationOf(route, generation)?.pluginPatch;
 }
 
 // ------------------------------------------------------------------------------------------------

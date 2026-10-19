@@ -394,7 +394,7 @@ The keeper puts it in after the NPU's refresh (npu-patch.ts, npu-vendors.json's 
 - **When:** only over GenieX 0.8.0's own file, while the files it links against are 0.8.0's, and only when nobody uses the NPU.
 - **How:** in the NPU's turn, GenieX stopped first. GenieX's file is kept as `geniex_plugin.dll.stock`.
 - **Kept:** only once a picture and a chat answer through it. Otherwise GenieX's own goes back, as it does when config.json says `npuPatch: false` or a later kit drops the patch.
-- **Left alone:** a GenieX update.
+- **Left alone:** a GenieX update the kit has no build for. From kit 2.88.1 it has one for 0.9.1 (A later GenieX on the PC, below).
 - **Files moved by renaming:** Windows lets a loaded DLL be renamed but not replaced, so a GenieX the keeper didn't stop keeps running on what it loaded.
 
 GENIEX_IMAGE_MAX_TOKENS, which only the build reads, is set to the 2B's `pictureTokens` (`pictureTokensEnv`). That way a picture that didn't come through `fitPicture` is scaled down too, rather than overflowing the window.
@@ -433,7 +433,7 @@ Measured on the 48 GB X2 Elite, 2026-10-18, each on a private port in the NPU's 
 | After a picture: private / on the Adreno | 1.97–2.07 / 1.54 GB | 0.74–0.90 GB / none |
 | The PC's available memory: after a picture / 75 s later | 3.2 / 2.1 GB lower | 3.6 / 3.6 GB lower |
 
-Both misread the Smith's tally picture drawn on a whole number of 32 px squares ("Tally 827"), as 0.8.0 always did, and both answered every must-pass quality item right. What 0.9.1 gives a PC that runs it: pictures about three times sooner, the Adreno left free (no 1.5 GB there, no picture work beside the card's own servers), and 1.2 GB less private memory after a picture. What it costs: about 1.5 GB more held at rest, and 1.6 s more to the first answer after a start, because Castellan's build (built against 0.8.0's libraries) doesn't apply to it: 0.9.1 reads the model file into memory and loads its vision encoder at the start. qualcomm/GenieX#1557, the upstream fix, is still open. So the route keeps 0.8.0 for every PC, and 0.9 is how a PC runs it once its owner chose it.
+Both misread the Smith's tally picture drawn on a whole number of 32 px squares ("Tally 827"), as 0.8.0 always did, and both answered every must-pass quality item right. What 0.9.1 gives a PC that runs it: pictures about three times sooner, the Adreno left free (no 1.5 GB there, no picture work beside the card's own servers), and 1.2 GB less private memory after a picture. What it costs with its own plugin: about 1.5 GB more held at rest, and 1.6 s more to the first answer after a start, because Castellan's build for 0.8.0 (built against 0.8.0's libraries) doesn't apply to it: 0.9.1 reads the model file into memory and loads its vision encoder at the start. qualcomm/GenieX#1557, the upstream fix, is still open. Castellan's build for 0.9.1 (below) takes that cost back. The route still keeps 0.8.0 for every PC, and 0.9 is how a PC runs it once its owner chose it.
 
 **Its embeddings.** llama.cpp b11125's `llama-server` doesn't start over GenieX 0.9.1's libraries (0xC0000139: an entry point it needs isn't there). From 0.9.0 the embedding server is llama.cpp b11645, which is e467e5b and one Metal-only commit (13 MB, SHA-256 pinned), in a folder of its own (`b11645-hexagon`), so the b11125 folder a PC still running 0.8.0 uses is never copied over. GenieX's same 13 files go over it. Measured the same evening, b11645 over 0.9.1's libraries against b11125 over 0.8.0's, 206 texts (Reeve's nine search-eval questions with their Qwen3 prefix, and Reeve-sized chunks of GamerNexus):
 
@@ -446,6 +446,22 @@ Both misread the Smith's tally picture drawn on a whole number of 32 px squares 
 | On the NPU / working set / private | 1.41 / 2.00 / 0.63 GB | 1.10 / 1.39 / 0.33 GB |
 
 The vectors are the same: cosine 0.99936 or more between the two (a median 0.999998), and the top five chunks for each of the nine questions came out in the same order. So an index built with either serves both, and nothing is indexed again. Reeve's search eval (kit 2.86.0's nine questions) gave the same answer to each: an index of GamerNexus and the Maestro docs built with b11125 over 0.8.0, then asked with each server, put the right file first for 4 of 9 and in the top five for 9 of 9, each question at the same rank with both.
+
+**Castellan's build for 0.9.1.** The same patch, carried to GenieX v0.9.1 and built against its libraries (`node/geniex/0.9.1/`, its README says what the port kept of 0.9.1's own changes), signed as 0.8.0's is. The route's 0.9.0 entry names it for the X2 (`NpuServerVersion.pluginPatch`, `pluginPatchOf`), pinned to 0.9.1: its own file, the six files it links against, and the build's hash. So the keeper puts it in over GenieX 0.9.1's own plugin, as it does 0.8.0's over 0.8.0's, and a GenieX 0.9.0 or 0.9.2 keeps its own. The keeper asks the PC's GenieX its version for this (`installedVersion`); a PC moved from 0.8.0 to 0.9.1 gets 0.9.1's build, with 0.9.1's own kept as `.stock` in place of 0.8.0's, and the other way round. Measured the same evening, with the same requests:
+
+| | 0.8.0 with its build, pictures on the Adreno | 0.9.1's own plugin | 0.9.1 with its build |
+|---|---|---|---|
+| The first answer after a start | 3.1 s | 4.7 s | 3.5 s |
+| After a chat: working set / private / on the NPU | 1.6 / 0.22 / 1.48 GB | 3.27 / 0.73 / 3.21 GB | 1.62 / 0.25 / 1.50 GB |
+| After a picture: on the NPU / on the Adreno | 1.48 / 1.54 GB | 3.21 GB / none | 2.45 GB / none |
+| The PC's available memory: after a picture / 75 s later | 3.2 / 2.1 GB lower | 3.6 / 3.6 GB lower | 2.6 / 1.6 GB lower |
+| The first picture after a chat | 2.0 s | 0.59 s | 1.0 s |
+| A picture after 75 quiet seconds | 634 ms | 167 ms | 988 ms |
+| Screen questions / photos | 33 of 35, 4.49 s / 21 of 21, 4.42 s | 34 of 35, 1.50 s / 21 of 21, 1.45 s | 34 of 35, 1.50 s / 21 of 21, 1.45 s |
+| npu-bench's four pictures | 419 ms | 282 ms | 278 ms |
+| Chat / quality items | 73.0 t/s, 22 of 24 | 72.6 t/s, 21 of 24 | 72.5 t/s, 21 of 24 |
+
+0.9.1 with its build holds at rest what 0.8.0 with its build does, its first answer comes 1.2 s sooner than with its own plugin, and its pictures are as quick and as right. The first picture after a chat or a quiet spell takes 0.4 to 0.8 s more, while the encoder loads on HTP1. With this, the cost that kept the route on 0.8.0 is gone on the X2. The route still pins 0.8.0: a route's version is the same for every generation, and 0.9.1 hasn't been measured on the first X.
 
 ### Resting when unused (kit 2.71.0)
 

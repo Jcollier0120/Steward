@@ -176,7 +176,51 @@
               "ADSP_LIBRARY_PATH": "{tools}\\servers\\llama.cpp\\b11645-hexagon"
             }
           },
-          "basis": "GenieX 0.9.0 and 0.9.1 carry llama.cpp e467e5b and read a vision model's pictures on the Hexagon's second session (HTP1) by default (qualcomm/GenieX#1548); asked for the Adreno (--vit-compute GPUOpenCL), 0.9.1 crashed on the first picture, trying to allocate 9.4 GB in OpenCL (the Smith's two tries of it, 2026-10-18). Measured on the X2 Elite with Qwen3-VL-2B Q4_0 (2026-10-18, on private ports in the NPU's turn), 0.9.1 without --vit-compute against 0.8.0 with Castellan's patch and its pictures on the Adreno: 34 of 35 screen questions at 1,024 picture tokens, a median 1.50 s each (33 of 35, 4.49 s); 21 of 21 questions about ten photos, a median 1.45 s (21 of 21, 4.42 s); npu-bench's four pictures right, a median 282 ms (419); the first picture after a chat in 0.55 s (2.0); chat at 72.6 tokens written a second (73.0), 21 of 24 quality items with every must-pass one right (22); nothing on the Adreno, where 0.8.0 holds 1.54 GB after a picture. It holds more at rest, having no Castellan's patch: 3.2 GB on the NPU and a 3.3 GB working set after a chat (1.48 and 1.6), and the PC's available memory 3.6 GB lower after a picture and still after 75 quiet seconds (3.2, then 2.1 once 0.8.0's patch freed its encoder); its first answer after a start took 4.7 s (3.1). Its embedding server is llama.cpp b11645 (e467e5b and one Metal-only commit), whose llama-server loads GenieX 0.9's libraries; b11125's doesn't (0xC0000139: an entry point it needs isn't there). Over 0.9.1's libraries on the Hexagon it gave b11125-over-0.8.0's vectors (cosine 0.99936 or more over 206 texts, median 0.999998; the same top five chunks for all nine of Reeve's search-eval questions; Reeve's search eval over an index b11125 built gave 4 of 9 first and 9 of 9 in the top five with either, each question at the same rank), 72 ms a chunk in Reeve's batches of 16 (112), and held 1.10 GB on the NPU and a 1.39 GB working set (1.41 and 2.00)."
+          "pluginPatch": {
+            "snapdragon-x2": {
+              "what": "Castellan's build of GenieX 0.9.1's llama.cpp plugin: qualcomm/GenieX v0.9.1 with four commits of Castellan's (kit node/geniex/README.md), signed with Castellan's certificate. As 0.8.0's: the model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row; the vision encoder loads with the first picture, on the Hexagon's second session, and is freed again after 60 s without one; and GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens",
+              "serverVersion": "0.9.1",
+              "folder": "%LOCALAPPDATA%\\GenieX CLI\\llama_cpp",
+              "file": "geniex_plugin.dll",
+              "stock": {
+                "size": 356864,
+                "sha256": "8102e9de747236b3848f2ec3bca1592a1e3ef8b1bce8d7c3ba843b790c071f9c"
+              },
+              "patched": {
+                "from": "geniex/0.9.1/geniex_plugin.dll",
+                "size": 370768,
+                "sha256": "aa697e55d02300369d1a5917806c920f54b13a7b8e3d3519031ffa9dae457d1b"
+              },
+              "needs": {
+                "llama.dll": {
+                  "size": 3099136,
+                  "sha256": "a6c7c61b709855ad621bdd773854c594eb6c43393a996ac6a279127406e12d03"
+                },
+                "llama-common.dll": {
+                  "size": 5219840,
+                  "sha256": "eb1152008ea06cfe0fd916757fdbe17054b1b3c8beaefa024b18c1279c4bf19e"
+                },
+                "mtmd.dll": {
+                  "size": 1550336,
+                  "sha256": "629bbb876548710e980125895c46bf92c5cb7b0e9b92c9e34381ef2bd7fc73e5"
+                },
+                "ggml.dll": {
+                  "size": 72192,
+                  "sha256": "e85630d0f7201a0362c353377aa7a623e690bbe7e5dc32216155d44865e70387"
+                },
+                "ggml-base.dll": {
+                  "size": 670208,
+                  "sha256": "4ce3aa70cc2a0924b74c20a9b2b7936a34ba0dbad3f493b88f7d51c2ad09bf6d"
+                },
+                "..\\geniex.dll": {
+                  "size": 4987904,
+                  "sha256": "7e0ef6fb9d155e0a93d279614ed0b6c3fd65951c3821064f4e9edfe09c115c68"
+                }
+              },
+              "basis": "Measured on the X2 Elite with Qwen3-VL-2B Q4_0 (--compute npu --nctx 2560, GENIEX_IMAGE_MAX_TOKENS 1024, 2026-10-18, on a private port in the NPU's turn), GenieX 0.9.1's own plugin against this build: after a chat, a 3.27 GB working set, 0.73 GB private and 3.21 GB on the NPU against 1.62, 0.25 and 1.50; after a picture, 3.21 GB on the NPU against 2.45, and 75 quiet seconds later 3.21 against 1.52 (its encoder freed), the PC's available memory 3.6 GB lower against 1.6; its first answer after a start in 3.5 s against 4.7. Its pictures as 0.9.1's own: 34 of 35 screen questions at 1,024 picture tokens in a median 1.50 s, 21 of 21 questions about ten photos in 1.45 s, npu-bench's four pictures right in a median 278 ms; chat at 72.5 tokens written a second, and 21 of 24 quality items, every must-pass one right, as 0.9.1's own. The first picture after a chat takes 1.0 s (0.59) and one after a quiet minute 0.99 s (0.17): its encoder loads then. Every symbol it takes from GenieX's own libraries (llvm-readobj) is in 0.9.1's, which match the GenieX 0.9.1 SDK's byte for byte."
+            }
+          },
+          "basis": "GenieX 0.9.0 and 0.9.1 carry llama.cpp e467e5b and read a vision model's pictures on the Hexagon's second session (HTP1) by default (qualcomm/GenieX#1548); asked for the Adreno (--vit-compute GPUOpenCL), 0.9.1 crashed on the first picture, trying to allocate 9.4 GB in OpenCL (the Smith's two tries of it, 2026-10-18). Measured on the X2 Elite with Qwen3-VL-2B Q4_0 (2026-10-18, on private ports in the NPU's turn), 0.9.1 without --vit-compute against 0.8.0 with Castellan's patch and its pictures on the Adreno: 34 of 35 screen questions at 1,024 picture tokens, a median 1.50 s each (33 of 35, 4.49 s); 21 of 21 questions about ten photos, a median 1.45 s (21 of 21, 4.42 s); npu-bench's four pictures right, a median 282 ms (419); the first picture after a chat in 0.55 s (2.0); chat at 72.6 tokens written a second (73.0), 21 of 24 quality items with every must-pass one right (22); nothing on the Adreno, where 0.8.0 holds 1.54 GB after a picture. Its own plugin holds more at rest (Castellan's build for 0.9.1, pluginPatch, brings that back): 3.2 GB on the NPU and a 3.3 GB working set after a chat (1.48 and 1.6), and the PC's available memory 3.6 GB lower after a picture and still after 75 quiet seconds (3.2, then 2.1 once 0.8.0's patch freed its encoder); its first answer after a start took 4.7 s (3.1). Its embedding server is llama.cpp b11645 (e467e5b and one Metal-only commit), whose llama-server loads GenieX 0.9's libraries; b11125's doesn't (0xC0000139: an entry point it needs isn't there). Over 0.9.1's libraries on the Hexagon it gave b11125-over-0.8.0's vectors (cosine 0.99936 or more over 206 texts, median 0.999998; the same top five chunks for all nine of Reeve's search-eval questions; Reeve's search eval over an index b11125 built gave 4 of 9 first and 9 of 9 in the top five with either, each question at the same rank), 72 ms a chunk in Reeve's batches of 16 (112), and held 1.10 GB on the NPU and a 1.39 GB working set (1.41 and 2.00)."
         }
       ],
       "port": 18181,
