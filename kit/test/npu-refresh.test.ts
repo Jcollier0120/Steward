@@ -86,6 +86,8 @@ function fakePc(entry: Record<string, any> | null, o: { record?: object; idle?: 
       return o.answers ?? [];
     },
     testEmbed: async (_e, dims) => (did.push(`test embed ${dims}`), o.embeds ?? []),
+    // The route's own version installed, unless a test says otherwise: no server of this PC's is asked.
+    serverVersion: async (r) => r.version,
     log: (l) => log.push(l),
   };
   const config = () => JSON.parse(readFileSync(configFile, 'utf8'));
@@ -619,6 +621,59 @@ test("an X2 set up with the 2B by kit 2.78.8 to 2.80.1: its window cut to 2,560 
   const fresh = fakePc(now);
   fresh.deps.detect = async () => (fresh.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
   assert.deepEqual(await refreshNpu(fresh.deps), { did: 'current' });
+});
+
+test("an X2 the Smith's Use it moved to GenieX 0.9.1: its command kept, never put back to 0.8.0's; its embeddings offered on b11645, the llama.cpp that loads 0.9's libraries", async () => {
+  const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
+  const x2 = parseNpus(X2, 'arm64')[0];
+  const q = V.NPU_CATALOG.routes.qualcomm;
+  // What Use it writes (the Smith's useTrial): the try's route, at the candidate's version, without embeddings.
+  const tried = V.routeFor({ ...structuredClone(q), version: '0.9.1' }, 'snapdragon-x2');
+  const used = { ...V.npuEntry(tried, { tools, exe: V.serverExe(tried, tools), port: q.port, portable: (p) => portablePath(p, home) }), timeouts: { ...MEASURED } };
+  assert.deepEqual(used.chat!.startCommand!.slice(-4), ['--compute', 'npu', '--nctx', '2560']);
+  const on = (version: string | null) => {
+    const pc = fakePc(used);
+    pc.deps.detect = async () => (pc.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+    pc.deps.serverVersion = async () => version;
+    pc.deps.overlay = (from, into, files) => (pc.did.push(`overlay ${files.length} from ${path.win32.basename(path.win32.dirname(from))} into ${path.win32.basename(into)}`), files.length);
+    return pc;
+  };
+  const pc = on('0.9.1');
+  const r = await refreshNpu(pc.deps);
+  assert.deepEqual(r, { did: 'refreshed', changes: ["embeddings: on the NPU's own server (llama.cpp b11645, qwen3-embedding-0.6b-gguf)"] });
+  assert.ok(pc.did.includes('overlay 13 from GenieX CLI into b11645-hexagon'), pc.did.join(', '));
+  assert.deepEqual(pc.npu().chat, used.chat, "its command as Use it wrote it: no --vit-compute, which crashes GenieX 0.9.1's first picture");
+  assert.match(pc.npu().embed.startCommand[0], /\\b11645-hexagon\\llama-server\.exe$/);
+  // Its next look, embeddings and all: current.
+  const next = fakePc(pc.npu());
+  next.deps.detect = async () => (next.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+  next.deps.serverVersion = async () => '0.9.1';
+  assert.deepEqual(await refreshNpu(next.deps), { did: 'current' });
+  // Read as the route's own 0.8.0 (as before kit 2.88.1), the look would have put --vit-compute GPUOpenCL back.
+  const old = await refreshNpu(on('0.8.0').deps);
+  assert.equal(old.did, 'refreshed');
+  assert.ok(old.changes!.includes('--vit-compute GPUOpenCL added'), old.changes!.join(', '));
+  // A GenieX that can't say its version may be 0.8.0 (an X2 set up before kit 2.88.1) or 0.9.1 (one set up since, or
+  // moved): its command kept as it is, nothing written, so a later look asks again.
+  const unsaid = on(null);
+  assert.deepEqual(await refreshNpu(unsaid.deps), { did: 'unknown-version' });
+  assert.deepEqual(unsaid.npu().chat, used.chat);
+  assert.equal(existsSync(npuRefreshFile(unsaid.configFile)), false);
+  assert.ok(!unsaid.did.includes('turn'), unsaid.did.join(', '));
+  // The same on an X2 still on 0.8.0's command: --vit-compute GPUOpenCL kept, which 0.8.0's pictures need.
+  const before = V.routeFor(V.atVersion(V.pinnedRoute(q, 'snapdragon-x2'), '0.8.0'), 'snapdragon-x2');
+  const onOld = { ...V.npuEntry(before, { tools, exe: V.serverExe(before, tools), port: q.port, portable: (p) => portablePath(p, home) }), timeouts: { ...MEASURED } };
+  assert.ok(onOld.chat!.startCommand!.includes('GPUOpenCL'));
+  const oldUnsaid = fakePc(onOld);
+  oldUnsaid.deps.detect = async () => (oldUnsaid.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+  oldUnsaid.deps.serverVersion = async () => null;
+  assert.deepEqual(await refreshNpu(oldUnsaid.deps), { did: 'unknown-version' });
+  assert.deepEqual(oldUnsaid.npu().chat, onOld.chat);
+  // No GenieX there at all: left for setup, as before.
+  const gone = fakePc(onOld, { exists: () => false });
+  gone.deps.detect = async () => (gone.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+  gone.deps.serverVersion = async () => null;
+  assert.deepEqual(await refreshNpu(gone.deps), { did: 'needs-setup' });
 });
 
 test("the changed arguments, as the keeper's log says them", () => {

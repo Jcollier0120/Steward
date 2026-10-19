@@ -1,9 +1,10 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { type AcceleratorEntry, readConfigFile, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { expandEnv } from './accelerators.ts';
 import type { Detection } from './detect.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
-import { compareVersions, expandRoute, NPU_CATALOG, type NpuCatalog, npuEntry, npuMemoryFit, planNpu, routeFor, runsRoute, smallPc } from './npu-vendors.ts';
+import { atVersion, compareVersions, expandRoute, installedVersion, NPU_CATALOG, type NpuCatalog, npuEntry, npuMemoryFit, type NpuRoute, pinnedRoute, planNpu, routeFor, runsRoute, serverExe, smallPc } from './npu-vendors.ts';
 import { mergeEntries, type NpuEmbedOffer, type NpuRefreshRecord, overlayFiles, portablePath, readNpuRefresh, rememberNpuRefresh } from './setup.ts';
 
 /**
@@ -54,8 +55,8 @@ export const stillAnswered = (base: string, what: string) => `${base} still answ
 export const serverFailed = (problems: string[]) =>
   problems.length > 0 && problems.every((p) => /refused the connection|exited \(code [^)]*\) and .* isn't answering|still answered \d+ s after its server was stopped/.test(p));
 
-/** What a look did: written to `npu-refresh.json` (setup's `set-up` included), except `looked`, `newer-kit`, `busy` and `unreadable`. */
-export type NpuRefreshDid = NpuRefreshRecord['did'] | 'looked' | 'newer-kit' | 'busy' | 'unreadable';
+/** What a look did: written to `npu-refresh.json` (setup's `set-up` included), except `looked`, `newer-kit`, `busy`, `unreadable` and `unknown-version` (a server that can't say which of its generation's two versions it is). */
+export type NpuRefreshDid = NpuRefreshRecord['did'] | 'looked' | 'newer-kit' | 'busy' | 'unreadable' | 'unknown-version';
 
 export interface NpuRefreshOutcome {
   did: NpuRefreshDid;
@@ -96,6 +97,8 @@ export interface NpuRefreshDeps {
   testEmbed: (e: AcceleratorEntry, dims?: number) => Promise<string[]>;
   /** Copies the route's server's files over its embedding server's (setup's overlayFiles), before embeddings offered to the NPU are tested. */
   overlay?: (from: string, into: string, files: string[]) => number;
+  /** The version of the route's server installed here (npu-vendors.ts' installedVersion by default): a later one the Smith's Use it left is run as that version runs. */
+  serverVersion?: (route: NpuRoute) => Promise<string | null>;
   /** Where the test's servers print, named in the log when a test fails. */
   serverLog?: string;
   log: (line: string) => void;
@@ -216,14 +219,21 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   // X2's Qwen3-VL-2B: pulled by setup, so a model not here yet is needs-setup). Its embeddings as they were, unless the
   // NPU makes none and may now: room for them beside its chat (npuMemoryFit, as setup decides), not refused
   // NPU_REFRESH_TRIES times already by this embedding server, and their server and model here (nothing downloaded).
+  // At the server's version on this PC: a later GenieX the Smith's Use it left keeps that version's command, and its
+  // embedding server is the llama.cpp build that loads its libraries.
   const small = smallPc(detected.ramBytes);
-  const generation = routeFor(route, npu.generation, small);
+  const version = await (d.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: d.tools, env: d.env, exists: d.exists })))(route);
+  // A generation whose pin isn't the route's version (the X2's GenieX 0.9.1, from kit 2.88.1) may run either: the route's
+  // where an older kit set it up, the pin's where this one did. A server that is there but can't say which keeps its
+  // command, not written, so a later look asks again.
+  if (version === null && pinnedRoute(route, npu.generation).version !== route.version && (d.exists ?? existsSync)(serverExe(route, d.tools, d.env))) return { did: 'unknown-version' };
+  const generation =routeFor(atVersion(pinnedRoute(route, npu.generation), version), npu.generation, small);
   const own = generation.embedServer ? `${generation.embedServer.server} ${generation.embedServer.version}` : null;
   const hadEmbed = !!entry.embed?.startCommand?.length;
   const refusedTries = own && embedOffer?.server === own ? embedOffer.tries : 0;
   const mayOffer = !hadEmbed && !!own && npuMemoryFit(generation, detected.ramBytes).embed && refusedTries < NPU_REFRESH_TRIES;
   const planFor = (noEmbed: boolean) =>
-    planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed, cards, small });
+    planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed, cards, small, serverVersion: version });
   let plan = planFor(!hadEmbed && !mayOffer);
   // Their server or model not here yet: left for setup (Set up local AI), and the rest goes on without them.
   if (mayOffer && plan && plan.downloadBytes > 0) plan = planFor(true);

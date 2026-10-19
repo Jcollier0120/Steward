@@ -187,6 +187,8 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
     log: (l: string) => lines.push(l),
     io: {
       setup: { run: async () => ({ code: 0, out: '' }) },
+      // The route's own version installed: no server of this PC's is asked which it is.
+      serverVersion: async (r: any) => r.version,
       start: async (e: any) => {
         fake.starts++;
         fake.commands.push(e.chat.startCommand);
@@ -655,7 +657,13 @@ test("every X2 measures Qwen3-VL-2B as setup runs it, whatever its memory; --mod
     assert.equal(four.report.run.model, FOUR_B, `--model the route's own on ${what}`);
     assert.ok(!four.s.fake.commands[0].includes('--vit-compute'), `${what}: GenieX's QAIRT model never gets the 2B's arguments`);
   }
-  const none = await B.npuBench({ ...(await scene({ vendor: 'qualcomm' })).opts, detection: parseDetection(`${ARM}${X2}\n`), profile: 'quick', model: 'a/b' });
+  // On an X2 whose GenieX is 0.9.1 (the Smith's Use it left it), as setup and the keeper run it there.
+  const s9 = await scene({ vendor: 'qualcomm' });
+  const nine = await B.npuBench({ ...s9.opts, detection: parseDetection(`${ARM}${X2}\n`), profile: 'quick', io: { ...s9.opts.io, serverVersion: async () => '0.9.1' } });
+  assert.equal(nine.code, 0, s9.lines.join('\n'));
+  assert.equal(nine.report.run.server, 'GenieX 0.9.1');
+  assert.deepEqual(s9.fake.commands[0].slice(-4), ['--compute', 'npu', '--nctx', '2560'], "GenieX 0.9 reads its pictures on the Hexagon's second session");
+  const none =await B.npuBench({ ...(await scene({ vendor: 'qualcomm' })).opts, detection: parseDetection(`${ARM}${X2}\n`), profile: 'quick', model: 'a/b' });
   assert.match(none.report.marks.map((m) => m.say).join('\n'), new RegExp(`has no model a/b \\(it has ${TWO_B}, ${FOUR_B}\\)`), 'what it has: the X2\'s own, then the route\'s');
   assert.deepEqual(B.parseBenchArgs(['--small-pc']), { smallPc: true });
 });
