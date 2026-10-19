@@ -101,6 +101,10 @@ test('on Windows the helper compiles, holds Windows awake while its input is ope
   const source = readFileSync(new URL('./fixture/src/kit/awake.cs', import.meta.url), 'utf8');
   assert.equal((await powershell(awakeCompileScript(exe, source), { timeoutMs: 120_000 })).trim(), 'ready');
   assert.ok(existsSync(exe));
+  // A Windows application, not a console one, so nothing that starts it opens a terminal (kit 2.88.2): the PE
+  // optional header's Subsystem is 2 (Windows GUI), not 3 (console).
+  const pe = readFileSync(exe);
+  assert.equal(pe.readUInt16LE(pe.readUInt32LE(0x3c) + 24 + 68), 2, 'built for the Windows subsystem, not the console');
   const child = spawn(exe, [String(process.pid)], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
   const exited = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
   let code: number | null | undefined;

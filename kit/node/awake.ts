@@ -21,7 +21,15 @@ import { powershell, psQuote } from './ps.ts';
  * is): started when the first hold begins, its input closed when the last ends. It lets go if the agent ends first, and
  * Windows drops its request when it exits, so a hold never outlives the agent. Elsewhere nothing is done. Never fails the
  * work: a helper that can't be built or started leaves the PC to its own power settings, said once in the log.
+ *
+ * The helper is a Windows application, not a console one (kit 2.88.2), so nothing that starts it shows a window. As a
+ * console program, Task Scheduler's \<Name>\Wake (wake.ts) opened a terminal for it on the desktop, which stayed up for
+ * the whole hold (65 minutes for the Steward's builds) and then as an exited tab. Its name carries what it's built as,
+ * so a PC that built the console one builds this one beside it, and the wake task's key changes and moves it over.
  */
+
+/** What the helper is compiled as: no console, so no window however it's started. */
+const AWAKE_OUTPUT = 'WindowsApplication';
 
 /** A hold had of Windows: ended once nothing holds the PC awake. */
 export interface WindowsHold {
@@ -85,7 +93,7 @@ export const awakeFor = (): string[] => [...holding.values()];
 
 /** The compiled helper, shared by every agent on the PC: beside the checks pace's launcher, named for its source. */
 export function awakeExe(source = awakeSource()): string {
-  const hash = createHash('sha256').update(source).digest('hex').slice(0, 12);
+  const hash = createHash('sha256').update(`${AWAKE_OUTPUT}\n${source}`).digest('hex').slice(0, 12);
   return path.join(path.dirname(locksDir), 'kit', `awake-${hash}.exe`);
 }
 
@@ -95,7 +103,7 @@ const awakeSource = () => readFileSync(new URL('./awake.cs', import.meta.url), '
 export function awakeCompileScript(exe: string, source: string): string {
   return `if (-not (Test-Path -LiteralPath ${psQuote(exe)})) {
   $tmp = ${psQuote(exe.replace(/\.exe$/i, ''))} + '.' + [guid]::NewGuid().ToString('n') + '.exe'
-  Add-Type -TypeDefinition ${psQuote(source)} -OutputAssembly $tmp -OutputType ConsoleApplication
+  Add-Type -TypeDefinition ${psQuote(source)} -OutputAssembly $tmp -OutputType ${AWAKE_OUTPUT}
   try { Move-Item -LiteralPath $tmp -Destination ${psQuote(exe)} } catch { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
 }
 'ready'`;
