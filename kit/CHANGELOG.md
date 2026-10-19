@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.88.4
+
+**Smart App Control: llama.cpp no longer trips it at every start, and a server it blocks says so in plain words.**
+
+On 2026-10-19 the owner's gaming desktop (Intel processor, RTX 4080 SUPER) had Smart App Control on, and it blocked one llama.cpp file: `ggml-cpu-ivybridge.dll`, one of the processor variants ggml loads at each start to pick the best for the processor. The Code Integrity log showed events 3033 and 3077 (policy VerifiedAndReputableDesktop), and nothing else was blocked. The CUDA backend loaded, and the card ran. ggml skips a variant it can't load, but every start loaded it again, so Windows blocked it again and could show its notice each time.
+
+### What changed
+
+- `setup.ts`: setup asks each llama.cpp build to list its devices once, the processor's build too. The build logs `loaded CPU backend from …`, and setup keeps only that variant, removing the other `ggml-cpu-*.dll` files (`cpuVariantLoaded`, `keepCpuVariant`). The kept variant is the one ggml would pick again, so a start loads one file, not a dozen, and a variant Smart App Control blocks is never loaded again. A build that doesn't say which variant it picked keeps them all.
+- New `app-control.ts`: it reads the Code Integrity log (`wevtutil`, no elevation needed) for blocks of files in a folder (`blockedIn`), and says them in plain words (`blockedSay`): "Windows' Smart App Control blocked ggml-cuda.dll, part of llama.cpp: its maker doesn't sign it, and Smart App Control blocks unsigned files it doesn't know". Another policy is named by its own name.
+- When a card's llama.cpp lists no device, setup's problem names the block first, if there was one. The same goes for a server that can't start or exits while starting (`accelerators.ts` `start`), GenieX's included.
+
+### Before you update
+
+- Nothing in an agent's code. The next setup trims each build's processor variants. A build set up earlier keeps them all until then.
+- Still open: llama.cpp's and GenieX's files aren't signed, so Smart App Control could block one the server needs (`llama-server.exe`, `ggml-cuda.dll`). The person is now told when that happens. The fix for it is a signed copy of each build, published by the manor, and that waits on the owner.
+
 ## 2.88.3
 
 **The tour holds the page on every step, as Castellan's own welcome does: the person answers it or skips it before going on.**

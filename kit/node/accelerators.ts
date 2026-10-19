@@ -3,6 +3,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync
 import os from 'node:os';
 import path from 'node:path';
 import { alive, startApart } from './apart.ts';
+import { blockedIn, blockedSay } from './app-control.ts';
 import * as core from './core/index.js';
 import { acceleratorsDir, lockDirFor } from './lock.ts';
 import { lineState, queueDirFor, readLine, slotDirs, type Lane } from './npu-queue.ts';
@@ -803,6 +804,7 @@ async function untilReady(baseUrl: string, ms: number, o: { listsWhenLoaded?: bo
 async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile?: string; env?: NodeJS.ProcessEnv } = {}): Promise<ServerReady> {
   const [cmd, ...args] = ep.startCommand!.map((a) => expandEnv(a));
   const program = path.win32.basename(cmd);
+  const startedAt = Date.now();
   let spawnError: Error | undefined;
   let exited: number | null | undefined;
   let log: number | undefined;
@@ -843,7 +845,7 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
   };
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 250));
-    if (spawnError) throw new AcceleratorDown(core.say.couldNotStart(cmd, spawnError.message));
+    if (spawnError) throw new AcceleratorDown(await blockedFirst(cmd, startedAt, core.say.couldNotStart(cmd, spawnError.message)));
     const state = await probe(ep.baseUrl, 2000, lists);
     if (state === 'ready') {
       loaded();
@@ -856,9 +858,18 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
     }
     // GenieX exits at once (code 0) when another server holds its port: it is down only if nothing answers.
     if (apart && exited === undefined && !alive(apart)) exited = null;
-    if (exited !== undefined) throw new AcceleratorDown(core.say.exitedWhileStarting(program, exited, ep.baseUrl));
+    if (exited !== undefined) throw new AcceleratorDown(await blockedFirst(cmd, startedAt, core.say.exitedWhileStarting(program, exited, ep.baseUrl)));
   }
   throw new AcceleratorDown(core.say.didNotAnswer(program, ep.baseUrl, Math.round(waitMs / 1000)));
+}
+
+/**
+ * A server that couldn't start, with what Windows' Smart App Control (or another application control policy) blocked of
+ * it said first, when its log names a file in the server's folder since the start (app-control.ts, kit 2.88.4).
+ */
+async function blockedFirst(cmd: string, since: number, said: string): Promise<string> {
+  const why = blockedSay(await blockedIn(path.dirname(cmd), Date.now() - since + 5_000), path.win32.basename(cmd));
+  return why ? `${why}. ${said}` : said;
 }
 
 /**
