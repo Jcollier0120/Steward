@@ -2,6 +2,54 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.89.0
+
+**Graphics cards with memory of their own now chat and see with one Qwen3-VL-2B server, as integrated graphics and the processor already do, in place of Qwen3-4B beside Qwen3-VL-4B.**
+
+- **A smaller first download:** setting up local AI on such a PC downloads 2.2 GB of models where it downloaded 6.1 GB.
+- **More of the card left free:** about 4 GB of a 16 GB card.
+- **One server fewer to start again after a game.**
+- **Faster answers at the same scores:** about twice as fast.
+- **Pictures on smaller cards:** 8 to 12 GB cards now read pictures too.
+
+A PC set up before moves its chat onto the Qwen3-VL-4B server it already has at the keeper's next look, so its card holds one server in place of two with nothing to download. It gets the 2B the next time its local AI is set up.
+
+The owner asked on 2026-10-19, from a gaming desktop setting up its local AI, whether its models could be consolidated as the NPUs' were. Measured that day on its RTX 4080 SUPER (CUDA, llama.cpp b11734), with the harness of the 2026-10-17 runs:
+
+- Every server passed all 13 of the Smith's checks.
+- On the 18 tasks scored by code, Qwen3-VL-2B and Qwen3-4B got 16 each, and Qwen3-VL-4B got 15.
+- At the card's own flags (two slots, `-c 16384`), 18 other tasks of the same kind, asked twice, scored 15, 16 and 16.
+- The 2B wrote 332 tokens a second against Qwen3-4B's 180, and read 22,370 against 10,845.
+- The 2B's one server held 3,932 MiB of the card where the two 4B servers held 9,780.
+
+spec/ACCELERATORS.md has the tables.
+
+### What changed
+
+- **setup.ts:**
+  - `specFor(kind)` gives `SMALL_SPEC` for chat and vision on every accelerator, cards with memory of their own included. It takes the kind alone, and `runsSmall` is gone. Setup downloads neither 4B model any more. `MODEL_SPECS` keeps their entries: the keeper's look knows an older kit's pair by them.
+  - Every accelerator asked for chat and vision gets one server for both on chat's port (`chatOnVision`). The server takes chat's slots and the larger of chat's and vision's contexts (`kindFlags`). On a 16 GB card that is `-c 32768 --parallel 2`, its projector on the card.
+  - Sizing counts that one server (`cardNeedGb`), with the 2B's sizes as measured on the 4080 SUPER (`SERVER_GB`: 2.1 GB with its projector, 1.4 without; `KV_BYTES`: 112 KiB a token for every model):
+    - A 16 GB card serves two requests of 16,384 tokens, where it served two of 8,192.
+    - A 12 GB card chats and sees at two of 16,384, where it left vision off.
+    - An 8 GB card chats and sees at one of 8,192, where it chatted alone at 4,096.
+    - A 6 GB card still leaves vision off.
+  - The keeper's move covers cards set up before:
+    - `chatsOnVision` is true for a card with memory of its own, whatever the PC's memory.
+    - `withChatOnVision` moves its chat onto its Qwen3-VL-4B server's port and command, with chat's slots (`--parallel`) and the larger context (`-c`), so a card keeps its two chat slots.
+    - It still changes only setup's own pair. The keeper's log says what the card gained.
+- **spec/ACCELERATORS.md:** "Chat and vision on one small model" covers cards, with the measurements and the new sizes. The example config shows the 2B.
+
+### Before you update
+
+- Nothing in an agent's code, unless it calls `specFor(kind, accelerator)` or `runsSmall` (none of the manor's repositories does): `specFor` takes the kind alone.
+- On a PC set up before, the keeper's look moves chat onto the card's Qwen3-VL-4B server:
+  - Nothing is started or stopped, and nothing is downloaded.
+  - A vision server already running takes chat one request at a time until its next start.
+  - The Qwen3-4B server left on chat's old port stops as an orphan after 5 minutes.
+  - The models' files stay in `models\`.
+- The next Set up local AI downloads the 2B (1.55 GB with its projector) and sizes the card for it.
+
 ## 2.88.3
 
 **The tour holds the page on every step, as Castellan's own welcome does: the person answers it or skips it before going on.**

@@ -127,8 +127,9 @@ export interface ModelSpec {
 }
 
 /**
- * The models on graphics cards with memory of their own, the same as on the NPU so answers stay comparable: Qwen's own
- * GGUF repos first, then well-known quantizers. Graphics that share the PC's memory and the processor run SMALL_SPEC.
+ * Each kind's model, Qwen's own GGUF repos first, then well-known quantizers. Chat's and vision's are what kits before
+ * 2.89.0 set up on cards with memory of their own, Qwen3-4B beside Qwen3-VL-4B: setup now gives every accelerator
+ * SMALL_SPEC for both (specFor), and the keeper's look knows an older kit's pair by them (withChatOnVision).
  */
 export const MODEL_SPECS: Record<EndpointKind, ModelSpec> = {
   chat: {
@@ -157,14 +158,16 @@ export const MODEL_SPECS: Record<EndpointKind, ModelSpec> = {
 };
 
 /**
- * Chat's and vision's model where an accelerator runs the small one (runsSmall): Qwen3-VL-2B, one server for both. It was
- * measured against Qwen3-4B and Qwen3-VL-4B (2026-10-17) on 34 of the manor's kind of requests, then pictures and text in
- * turn, on a Core Ultra 5 225U's Intel Graphics and processor, a Radeon 860M and an Adreno X2-90.
+ * Chat's and vision's model on every accelerator llama.cpp runs: Qwen3-VL-2B, one server for both. It was measured
+ * against Qwen3-4B and Qwen3-VL-4B (2026-10-17) on 34 of the manor's kind of requests, then pictures and text in turn, on
+ * a Core Ultra 5 225U's Intel Graphics and processor, a Radeon 860M and an Adreno X2-90 (shared memory and the processor,
+ * from kit 2.83.0); and on an RTX 4080 SUPER, CUDA, b11734 (2026-10-19; cards with memory of their own, from kit 2.89.0).
  * - Its answers were as good: the Smith's 13 checks right, as both 4Bs'; 16 of 18 tasks right (15 on the Adreno), where
  *   Qwen3-4B got 16 and Qwen3-VL-4B 15. Its one slip of its own: it read a command line's `-ngl 99` as its context.
- * - It wrote 1.8 to 2.2 times as fast and read 2.4 to 2.6 times as fast.
+ * - It wrote 1.8 to 2.2 times as fast and read 2.4 to 2.6 times as fast; on the 4080 SUPER, 332 tokens a second against
+ *   Qwen3-4B's 180.
  * - Its server held 3.3 to 3.7 GB of the PC's memory, where Qwen3-VL-4B's held 5.0 to 5.5 and Qwen3-4B's another 3.5 to
- *   4.0 beside it.
+ *   4.0 beside it; on the 4080 SUPER at -c 16384, 3,932 MiB of the card, where the two 4B servers held 9,780.
  * - Pictures: it read the Smith's check picture (513 × 512) right; at 512 × 512 it misread it, as Qwen3-VL-4B did.
  */
 export const SMALL_SPEC: ModelSpec = {
@@ -175,17 +178,11 @@ export const SMALL_SPEC: ModelSpec = {
 };
 
 /**
- * Whether an accelerator's chat and vision run SMALL_SPEC: the processor, and graphics that share the PC's memory (under
- * OWN_MEMORY_GB of their own, as sizing counts it), where each server's memory is the PC's. Cards with memory of their
- * own keep Qwen3-4B and Qwen3-VL-4B: the small one wasn't measured on them.
+ * The model setup gives a kind: SMALL_SPEC for chat and vision on every accelerator (cards with memory of their own too,
+ * from kit 2.89.0), else MODEL_SPECS'.
  */
-export function runsSmall(a: { kind: 'gpu' | 'cpu'; memoryGb?: number }): boolean {
-  return a.kind === 'cpu' || (a.memoryGb ?? 0) < OWN_MEMORY_GB;
-}
-
-/** The model an accelerator runs for a kind: SMALL_SPEC for chat and vision where it runsSmall, else MODEL_SPECS'. */
-export function specFor(kind: EndpointKind, a: { kind: 'gpu' | 'cpu'; memoryGb?: number }): ModelSpec {
-  return (kind === 'chat' || kind === 'vision') && runsSmall(a) ? SMALL_SPEC : MODEL_SPECS[kind];
+export function specFor(kind: EndpointKind): ModelSpec {
+  return kind === 'chat' || kind === 'vision' ? SMALL_SPEC : MODEL_SPECS[kind];
 }
 
 /**
@@ -347,7 +344,7 @@ export const VISION_ON_PROCESSOR_TIMEOUTS = { requestBaseMs: 90_000 } as const;
 /**
  * Whether the processor encodes an accelerator's pictures, so its vision caps them (PICTURE_CAP) and has its own time
  * (VISION_ON_PROCESSOR_TIMEOUTS): a card that encodes on the processor, and the processor itself, which sees with
- * SMALL_SPEC (runsSmall). On the Core Ultra 5 225U's processor (b11669, 2026-10-17), Qwen3-VL-2B read the Smith's check
+ * SMALL_SPEC. On the Core Ultra 5 225U's processor (b11669, 2026-10-17), Qwen3-VL-2B read the Smith's check
  * picture in 5.6 s and a small table in 3.2 s.
  */
 export function picturesOnProcessor(e: { kind?: 'gpu' | 'cpu'; id: string; memoryGb?: number; device: string | null }): boolean {
@@ -370,8 +367,9 @@ export const CHAT_ON_VISION_RAM_GB = 32;
 /**
  * Whether a card an older kit set up with Qwen3-4B and Qwen3-VL-4B moves its chat onto its vision server
  * (withChatOnVision): one Qwen3-VL-4B for both, on chat's endpoint, with vision's flags, in place of a Qwen3-4B beside
- * it. Setup itself, from kit 2.83.0, gives every accelerator that runsSmall one SMALL_SPEC server for both; this moves
- * only a PC that hasn't been set up again since, without a download. That is a card that encodes on the processor
+ * it. Setup itself gives every accelerator one SMALL_SPEC server for both (shared memory and the processor from kit
+ * 2.83.0, cards from 2.89.0); this moves only a PC that hasn't been set up again since, without a download, until its
+ * next setup brings the 2B. That is a card that encodes on the processor
  * (encodesOnProcessor: Intel's integrated graphics, whose memory is the PC's) on a PC with under
  * CHAT_ON_VISION_RAM_GB. On a Core Ultra 5 225U with 15.4 GB
  * (b11669, 2026-10-16), the chat server held 3.5 GB and the vision server 5.0 GB, both of the PC's memory, so the two at
@@ -380,19 +378,29 @@ export const CHAT_ON_VISION_RAM_GB = 32;
  * but got 15 of 18 of the manor's kind of tasks right against Qwen3-4B's 16: it found the wrong line in a 2,700-token
  * log, and its sum was wrong where Qwen3-4B's was right (but for its working shown). A picture, text, then a picture
  * again all answered on the one server.
+ * From kit 2.89.0 it is also every card with memory of its own (OWN_MEMORY_GB), whatever the PC's memory. On an RTX
+ * 4080 SUPER (CUDA, b11734, 2026-10-19), with the same harness, Qwen3-VL-4B passed the 13 checks and got 15 of the 18
+ * tasks against Qwen3-4B's 16, its wrong answers the ones it gave on the 225U and the Adreno; and at the card's own flags
+ * (-c 16384, two slots) the one server held 5,969 MiB of the card where the two held 4,942 and 4,838, and wrote 177
+ * tokens a second against Qwen3-4B's 180.
  * `device` may be the build's backend before its device's number is known.
  */
 export function chatsOnVision(card: { id: string; memoryGb?: number; device: string | null }, ramGb: number): boolean {
-  return encodesOnProcessor(card) && ramGb < CHAT_ON_VISION_RAM_GB;
+  return (card.memoryGb ?? 0) >= OWN_MEMORY_GB || (encodesOnProcessor(card) && ramGb < CHAT_ON_VISION_RAM_GB);
 }
 
-/** A server's own flags after its model, by kind: what it serves, its context and batch, one request at a time but chat's. */
-function kindFlags(kind: EndpointKind, e: Pick<EntryInput, 'id' | 'kind' | 'memoryGb' | 'device' | 'slots' | 'maxContextTokens'>, mmproj: string | undefined, model: string): string[] {
+/**
+ * A server's own flags after its model, by kind: what it serves, its context and batch, one request at a time but chat's.
+ * A vision server that chat runs on too (`withChat`) takes chat's slots, and the larger of the two contexts.
+ */
+function kindFlags(kind: EndpointKind, e: Pick<EntryInput, 'id' | 'kind' | 'memoryGb' | 'device' | 'slots' | 'maxContextTokens'>, mmproj: string | undefined, model: string, withChat = false): string[] {
   switch (kind) {
     case 'chat':
       return ['-c', String(serverContext('chat', e)), '--parallel', String(e.slots), '--jinja', '--alias', model];
-    case 'vision':
-      return ['--mmproj', portablePath(mmproj ?? ''), ...(encodesOnProcessor(e) ? [ENCODER_ON_PROCESSOR] : []), ...(picturesOnProcessor(e) ? [PICTURE_CAP, String(PICTURE_TOKENS)] : []), '-c', String(serverContext('vision', e)), '--parallel', '1', '--jinja', '--alias', model];
+    case 'vision': {
+      const context = withChat ? Math.max(serverContext('chat', e), serverContext('vision', e)) : serverContext('vision', e);
+      return ['--mmproj', portablePath(mmproj ?? ''), ...(encodesOnProcessor(e) ? [ENCODER_ON_PROCESSOR] : []), ...(picturesOnProcessor(e) ? [PICTURE_CAP, String(PICTURE_TOKENS)] : []), '-c', String(context), '--parallel', String(withChat ? e.slots : 1), '--jinja', '--alias', model];
+    }
     case 'embed':
       // The compute buffer grows with -c × -ub: at -c 8192 -ub 8192 it was one 4.7 GB allocation, which the Adreno
       // X2-90's OpenCL refused ("failed to allocate compute pp buffers"). At -c 4096 -ub 512 (b11669, 2026-10-15) a
@@ -407,14 +415,19 @@ function kindFlags(kind: EndpointKind, e: Pick<EntryInput, 'id' | 'kind' | 'memo
 }
 
 /**
- * What each server takes on a card besides its context, in GB: the model and its compute buffers.
- * Qwen3-4B Q4_K_M is 2.5, Qwen3-VL-4B Q4_K_M and its projector 2.95, Qwen3-Embedding-0.6B Q8_0 0.64
- * with a compute buffer of about 1.2 at -ub 2048 (4.7 at 8192 on the Adreno). Estimates from the files
- * and llama.cpp's buffers, not measured on a card of its own.
+ * What each server takes on a card besides its context, in GB: the model, its compute buffers and its process's share
+ * of the card. Chat's and vision's are SMALL_SPEC's, measured on an RTX 4080 SUPER (CUDA, b11734, 2026-10-19) as what
+ * the card held with the server up less its KV cache: Qwen3-VL-2B alone 1,387 MiB, with its projector 2,140 MiB, the
+ * one server for both (cardNeedGb). The embedding model's and the reranker's are estimates from the files (Q8_0, 0.64
+ * GB, with a compute buffer of about 1.2 at -ub 2048), kept although the embedding server held 1,340 MiB there at its
+ * smaller -c 4096 -ub 512 (serverContext).
  */
-export const SERVER_GB: Record<EndpointKind, number> = { chat: 2.9, vision: 3.45, embed: 1.85, rerank: 1.85 };
-/** The KV cache at f16, a token: 36 layers × 8 KV heads × 128 × K and V × 2 bytes for the 4B models, 28 layers for the 0.6B ones. */
-const KV_BYTES: Record<EndpointKind, number> = { chat: 147_456, vision: 147_456, embed: 114_688, rerank: 114_688 };
+export const SERVER_GB: Record<EndpointKind, number> = { chat: 1.4, vision: 2.1, embed: 1.85, rerank: 1.85 };
+/**
+ * The KV cache at f16, a token, for every model setup gives a card: 28 layers × 8 KV heads × 128 × K and V × 2 bytes
+ * (Qwen3-VL-2B's, and the 0.6B models'). On the 4080 SUPER the 2B's server held 1,800 MiB more at -c 32768 than at 16384.
+ */
+const KV_BYTES = 114_688;
 /** What a card keeps for the desktop and the programs on it. A game gets the rest back from the reaper, which stops the card's servers while it plays. */
 export const DESKTOP_GB = 1.5;
 /** The sizes tried on a card of its own, largest first. */
@@ -425,9 +438,14 @@ const CARD_SIZES = [
   { slots: 1, maxContextTokens: 4096 },
 ];
 
-/** The memory a card's servers take at once, by those estimates, in GB. */
+/**
+ * The memory a card's servers take at once, by those estimates, in GB. Chat and vision together are one server
+ * (chatOnVision): vision's, at the larger of their contexts.
+ */
 export function cardNeedGb(kinds: EndpointKind[], s: { slots: number; maxContextTokens: number }): number {
-  return kinds.reduce((sum, k) => sum + SERVER_GB[k] + (serverContext(k, s) * KV_BYTES[k]) / 1024 ** 3, 0);
+  const shared = kinds.includes('chat') && kinds.includes('vision');
+  const context = (k: EndpointKind) => (shared && k === 'vision' ? Math.max(serverContext('chat', s), serverContext('vision', s)) : serverContext(k, s));
+  return kinds.filter((k) => !(shared && k === 'chat')).reduce((sum, k) => sum + SERVER_GB[k] + (context(k) * KV_BYTES) / 1024 ** 3, 0);
 }
 
 export interface Sizing {
@@ -442,7 +460,7 @@ export interface Sizing {
 /**
  * Slots, the request cap and what it serves, from a card's memory: the largest size at which all its
  * servers (each running at once, every layer on the card) fit with DESKTOP_GB to spare. When none does,
- * vision is left off (the rarest request, and the biggest server after chat), unless it was asked for
+ * vision is left off (the rarest request: chat's server then runs without the projector, at its own context), unless it was asked for
  * by name (`keepKinds`); when still none does, the smallest. A card that shares the PC's memory goes by
  * the PC's, and the processor serves one request at a time.
  */
@@ -478,7 +496,10 @@ export interface EntryInput {
   ports: Partial<Record<EndpointKind, number>>;
   slots: number;
   maxContextTokens: number;
-  /** Chat on the vision server (runsSmall's one server for both): chat's port runs vision's model and flags, and vision has no server of its own. */
+  /**
+   * Chat on the vision server (one SMALL_SPEC server for both): chat's port runs
+   * vision's model and flags, with chat's slots and context, and vision has no server of its own.
+   */
   chatOnVision?: boolean;
 }
 
@@ -506,7 +527,7 @@ export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
     if (!m || !port) continue;
     const model = m.model ?? MODEL_SPECS[runs].model;
     const common = ['--host', '127.0.0.1', '--port', String(port), ...pin, '-m', portablePath(m.path)];
-    a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand: [server, ...common, ...kindFlags(runs, e, m.mmproj, model)], env: { ...NO_RAM_CACHE } };
+    a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand: [server, ...common, ...kindFlags(runs, e, m.mmproj, model, runs !== kind)], env: { ...NO_RAM_CACHE } };
     if (kind === 'embed') a.embed!.maxContextTokens = Math.min(EMBED_CAP, e.maxContextTokens);
     if (kind === 'vision' && picturesOnProcessor(e)) a.vision!.timeouts = { ...VISION_ON_PROCESSOR_TIMEOUTS };
   }
@@ -617,7 +638,7 @@ export interface SetupTarget {
    * had for them is kept as it was (keepingAddOns), never removed.
    */
   leftToNpu?: EndpointKind[];
-  /** Its chat runs on its vision server, one SMALL_SPEC for both (runsSmall): vision has no port of its own. */
+  /** Its chat runs on its vision server, one model for both (specFor's): vision has no port of its own. */
   chatOnVision?: boolean;
   /** Filled in once its build is here (llama-server --list-devices). */
   device?: string | null;
@@ -779,8 +800,8 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     if ('none' in v) t.problem = v.none;
     else {
       t.variant = v;
-      // One SMALL_SPEC server for chat and vision, on chat's port.
-      if (size.kinds.includes('chat') && size.kinds.includes('vision') && runsSmall(t)) t.chatOnVision = true;
+      // One SMALL_SPEC server for chat and vision, on chat's port: on a card with memory of its own too, from kit 2.89.0.
+      if (size.kinds.includes('chat') && size.kinds.includes('vision')) t.chatOnVision = true;
     }
     targets.push(t);
   }
@@ -811,9 +832,9 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     }
   }
 
-  // Which models: each target's (specFor), each once; a projector only where it sees (SMALL_SPEC chatting alone hasn't one).
-  const seeing = new Set(targets.filter((t) => t.variant && t.kinds.includes('vision')).map((t) => specFor('vision', t)));
-  const needed = [...new Set(targets.filter((t) => t.variant).flatMap((t) => t.kinds.map((k) => specFor(k, t))))].map((s) => (s.mmproj && !seeing.has(s) ? { ...s, mmproj: undefined } : s));
+  // Which models: each target's (specFor), each once; a projector only where one sees (SMALL_SPEC chatting alone hasn't one).
+  const seeing = targets.some((t) => t.variant && t.kinds.includes('vision'));
+  const needed = [...new Set(targets.filter((t) => t.variant).flatMap((t) => t.kinds.map((k) => specFor(k))))].map((s) => (s.mmproj && !seeing ? { ...s, mmproj: undefined } : s));
   const found = needed.length ? await findModels(needed, o.hfFiles) : { models: [], problems: [] };
   problems.push(...found.problems);
   for (const m of found.models) {
@@ -888,7 +909,7 @@ export function describePlan(p: SetupPlan): string[] {
     }
     const serves = t.kinds
       .filter((k) => !(t.chatOnVision && k === 'vision'))
-      .map((k) => (t.chatOnVision && k === 'chat' ? `chat and vision on ${t.ports.chat} (one ${specFor('vision', t).model} server)` : `${k} on ${t.ports[k]}`))
+      .map((k) => (t.chatOnVision && k === 'chat' ? `chat and vision on ${t.ports.chat} (one ${specFor('vision').model} server)` : `${k} on ${t.ports[k]}`))
       .join(', ');
     lines.push(`${t.name} (${t.id}): llama.cpp ${p.build ?? '?'} ${t.variant?.variant}, ${t.slots} slot${t.slots === 1 ? '' : 's'}, ${t.maxContextTokens} tokens a request; ${serves}${t.device ? `; device ${t.device}` : ''}`);
     if (t.left?.length) lines.push(`  ${t.left.join(' and ')} left off: the card's ${t.memoryGb} GB won't hold it beside ${t.kinds.join(' and ')} at once (to have it anyway: accelerators setup --serve chat,vision,embed)`);
@@ -1023,7 +1044,7 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
     }
     const models: EntryInput['models'] = {};
     for (const k of t.kinds) {
-      const spec = specFor(k, t);
+      const spec = specFor(k);
       const p = modelPath(spec, 'model');
       if (p) models[k] = { path: p, mmproj: k === 'vision' ? modelPath(spec, 'mmproj') : undefined, model: spec.model };
     }
@@ -1617,31 +1638,44 @@ export function withoutRamCache(raw: Record<string, any>): { raw: Record<string,
 /**
  * config.json with each card that now chats on its vision server (chatsOnVision on a PC of `ramGb`) brought to that,
  * where an older kit's setup gave it a Qwen3-4B chat server beside its Qwen3-VL-4B one, and the cards changed. Chat
- * moves onto the vision server's port and command, where that model already runs, and vision keeps its model and
- * time, on chat's server (the core's endpointFor). So nothing is started or stopped: a vision server running takes chat
- * as it is, and the Qwen3-4B server left on chat's old port is the keeper's orphan, stopped once it has run 5 minutes
- * with no configured server its own. Only setup's own pair is changed, each llama-server's, with setup's models, one
- * slot, on ports of their own: a card with another model, more slots or chat and vision on one port already is left as it is.
+ * moves onto the vision server's port and command, where that model already runs, with chat's slots (`--parallel`) and
+ * the larger of the two contexts (`-c`), as setup writes it now; and vision keeps its model and time, on chat's server
+ * (the core's endpointFor). So nothing is started or stopped: a vision server running takes chat as it is (one request
+ * at a time, where it had one slot, until its next start), and the Qwen3-4B server left on chat's old port is the keeper's orphan,
+ * stopped once it has run 5 minutes with no configured server its own. Only setup's own pair is changed, each
+ * llama-server's, with setup's models, on ports of their own, chat with the card's slots and vision with one: a card
+ * with another model, other slots or chat and vision on one port already is left as it is.
  */
 export function withChatOnVision(raw: Record<string, any>, ramGb: number): { raw: Record<string, any>; changed: string[] } {
   if (!Array.isArray(raw.accelerators)) return { raw, changed: [] };
   const changed: string[] = [];
   const llama = (cmd: unknown): cmd is string[] => Array.isArray(cmd) && cmd.length > 0 && cmd.every((s) => typeof s === 'string') && /^llama-server(\.exe)?$/i.test(path.win32.basename(cmd[0]));
+  // A flag's whole number in a command (-c 16384), or NaN.
+  const flag = (cmd: string[], name: string) => (cmd.indexOf(name) >= 0 ? Number(cmd[cmd.indexOf(name) + 1]) : NaN);
   const accelerators = raw.accelerators.map((a: any) => {
     const chat = a?.chat;
     const vision = a?.vision;
-    if (a?.kind !== 'gpu' || typeof a.id !== 'string' || (a.slots ?? 1) !== 1 || !chat || !vision) return a;
+    if (a?.kind !== 'gpu' || typeof a.id !== 'string' || !chat || !vision) return a;
     if (chat.model !== MODEL_SPECS.chat.model || vision.model !== MODEL_SPECS.vision.model) return a;
     if (typeof chat.baseUrl !== 'string' || typeof vision.baseUrl !== 'string' || chat.baseUrl === vision.baseUrl) return a;
     if (!llama(chat.startCommand) || !llama(vision.startCommand) || !vision.startCommand.includes('--mmproj')) return a;
+    // Chat's slots, as its command says (else the card's), and a card that shares the PC's memory has one, as setup gives it.
+    const slots: number = a.slots ?? 1;
+    const chatSlots = flag(chat.startCommand, '--parallel');
+    const visionContext = flag(vision.startCommand, '-c');
+    const chatContext = flag(chat.startCommand, '-c');
+    if (!Number.isInteger(slots) || slots < 1 || (!Number.isNaN(chatSlots) && chatSlots !== slots) || ((a.memoryGb ?? 0) < OWN_MEMORY_GB && slots !== 1)) return a;
+    if (flag(vision.startCommand, '--parallel') !== 1 || !(visionContext > 0)) return a;
     const dev = vision.startCommand.indexOf('--device');
     if (!chatsOnVision({ id: a.id, memoryGb: typeof a.memoryGb === 'number' ? a.memoryGb : undefined, device: dev >= 0 ? (vision.startCommand[dev + 1] ?? null) : null }, ramGb)) return a;
     changed.push(a.id);
     const { baseUrl: _b, startCommand: _s, env: _e, turn: _t, ...visionOwn } = vision;
     const { env: _ce, turn: _ct, ...chatOwn } = chat;
+    const context = Math.max(visionContext, chatContext > 0 ? chatContext : 0);
+    const startCommand = vision.startCommand.map((s: string, i: number, cmd: string[]) => (cmd[i - 1] === '-c' ? String(context) : cmd[i - 1] === '--parallel' ? String(slots) : s));
     return {
       ...a,
-      chat: { ...chatOwn, baseUrl: vision.baseUrl, model: vision.model, startCommand: vision.startCommand, ...(vision.env ? { env: vision.env } : {}), ...(vision.turn ? { turn: vision.turn } : {}) },
+      chat: { ...chatOwn, baseUrl: vision.baseUrl, model: vision.model, startCommand, ...(vision.env ? { env: vision.env } : {}), ...(vision.turn ? { turn: vision.turn } : {}) },
       vision: visionOwn,
     };
   });
@@ -1687,7 +1721,12 @@ export function refreshCardVision(o: { configFile: string; kit: string; now?: ()
       o.log(
         `${embed.changed.join(', ')}: the embedding server now starts at -c ${EMBED_CONTEXT} -ub 512, its requests capped at ${EMBED_CAP} tokens (kit ${o.kit}): about 0.6 GB less of the graphics' memory, the same vectors, from its next start`,
       );
-    if (shared.changed.length) o.log(`${shared.changed.join(', ')}: chat now runs on the vision server, ${MODEL_SPECS.vision.model} for both (kit ${o.kit}): one server in the PC's memory where there were two, about 3.5 GB less while both are used; chat's old server stops as an orphan`);
+    if (shared.changed.length) {
+      const own = new Set(shared.changed.filter((id) => (raw.accelerators.find((a: any) => a?.id === id)?.memoryGb ?? 0) >= OWN_MEMORY_GB));
+      const pc = shared.changed.filter((id) => !own.has(id));
+      if (pc.length) o.log(`${pc.join(', ')}: chat now runs on the vision server, ${MODEL_SPECS.vision.model} for both (kit ${o.kit}): one server in the PC's memory where there were two, about 3.5 GB less while both are used; chat's old server stops as an orphan`);
+      if (own.size) o.log(`${[...own].join(', ')}: chat now runs on the vision server, ${MODEL_SPECS.vision.model} for both (kit ${o.kit}): one server on the card where there were two, about 3.7 GB of it free again, and one server fewer to start after a game; chat's old server stops as an orphan`);
+    }
     if (cache.changed.length) o.log(`${cache.changed.join(', ')}: llama-server keeps no RAM cache of earlier prompts from its next start (kit ${o.kit}): up to 8 GB a server by default, for little gain here`);
   }
   const record: CardRefreshRecord = { kit: o.kit, at: new Date((o.now ?? Date.now)()).toISOString(), ...(changed.length && !saved.problems.length ? { changed } : {}), ...(saved.problems.length ? { problems: saved.problems } : {}) };
