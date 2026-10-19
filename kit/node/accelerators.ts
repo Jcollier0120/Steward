@@ -3,7 +3,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync
 import os from 'node:os';
 import path from 'node:path';
 import { alive, startApart } from './apart.ts';
-import { blockedIn, blockedSay } from './app-control.ts';
+import { blockedIn, blockedSay, cpuVariants, keepCpuVariant, loadedCpuVariant } from './app-control.ts';
 import * as core from './core/index.js';
 import { acceleratorsDir, lockDirFor } from './lock.ts';
 import { lineState, queueDirFor, readLine, slotDirs, type Lane } from './npu-queue.ts';
@@ -668,6 +668,22 @@ async function trimLoaded(pid: number, program: string, base: string, logFile: s
   console.error(line);
 }
 
+/**
+ * Once a llama-server is ready, the processor variants its folder holds beside the one it loaded are removed (kit
+ * 2.90.0), so no later start loads them all again to choose: what setup's keepCpuVariant does where the build says its
+ * choice, read from the running server where it doesn't. Asked once a folder: then it holds one.
+ */
+async function keepLoadedVariant(pid: number, folder: string, base: string, logFile: string | undefined): Promise<void> {
+  const chosen = await loadedCpuVariant(pid);
+  const removed = keepCpuVariant(folder, chosen);
+  if (!removed.length) return;
+  const line = `${new Date().toISOString()} kit: llama-server at ${base} runs ${chosen} on this processor; its ${removed.length} other processor variants are removed, so no start loads them again`;
+  try {
+    if (logFile) return appendFileSync(logFile, `${line}\n`);
+  } catch {}
+  console.error(line);
+}
+
 /** Whether an endpoint answers now, without starting it. */
 export async function ping(baseUrl: string, ms = PROBE_MS): Promise<boolean> {
   return (await probe(baseUrl, ms)) === 'ready';
@@ -842,6 +858,7 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
   // Once its model has loaded, in the background: the request that started it goes on at once (working-set.ts).
   const loaded = () => {
     if (pid && trimmedOnceLoaded(ep.startCommand)) void trimLoaded(pid, program, ep.baseUrl, o.logFile);
+    if (pid && /^llama-server\.exe$/i.test(program) && cpuVariants(path.dirname(cmd)) > 1) void keepLoadedVariant(pid, path.dirname(cmd), ep.baseUrl, o.logFile);
   };
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 250));

@@ -5,7 +5,8 @@ import { homedir, totalmem } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { type Block, blockedIn, blockedSay } from './app-control.ts';
+import { type Block, blockedIn, blockedSay, cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
+export { cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
 import { chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
@@ -21,7 +22,8 @@ import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, exp
  * maker (npu-vendors.ts: GenieX on a Snapdragon, OpenVINO Model Server on an Intel Core Ultra, FastFlowLM on an AMD
  * Ryzen AI 300), downloaded and checked against its pinned SHA-256, installed for this user, its models pulled, and its
  * entry written only once it has answered a test request; llama.cpp's server for each graphics card (and the
- * processor, when there's no card) from ggml-org/llama.cpp's newest build, the models as GGUF files from Hugging
+ * processor, when there's no card) from the newest of ggml-org/llama.cpp's builds the manor has signed (kit 2.90.0:
+ * SIGNED_LLAMA_REPO), the models as GGUF files from Hugging
  * Face, and an accelerator entry per card in config.json. It says how much it will download and asks first. An NPU
  * entry a person configured is left as it is; on a PC with no NPU (or one the manor can't use) the one install wrote by
  * default (and only that one) is dropped.
@@ -31,6 +33,22 @@ import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, exp
  */
 
 export const LLAMA_REPO = 'ggml-org/llama.cpp';
+/**
+ * Where llama.cpp's builds come from (kit 2.90.0): ggml-org's own, each .exe and .dll ggml-org left unsigned signed by
+ * the manor (the Steward's tools/sign-llama.ts), in the public releases repository as `llama.cpp-<build>`. Windows'
+ * Smart App Control blocks unsigned files it doesn't know (app-control.ts): on 2026-10-19 it blocked one of b11734's
+ * processor variants on the gaming desktop. A build reaches the PCs only once it's signed, after the Smith's checks
+ * on it: the newest signed build is the pin. KIT_LLAMA_UNSIGNED=1 takes ggml-org's newest instead, to try a build.
+ */
+export const SIGNED_LLAMA_REPO = 'Jcollier0120/Manor-releases';
+export const signedLlamaTag = (build: string) => `llama.cpp-${build}`;
+/** The builds variantFor names: the ones the manor signs. */
+export const LLAMA_VARIANTS = ['cpu-x64', 'cpu-arm64', 'cuda-12.4-x64', 'vulkan-x64', 'opencl-adreno-arm64'];
+/**
+ * NVIDIA's CUDA runtime beside the CUDA build, taken from ggml-org's release as it is: NVIDIA's files, unsigned as NVIDIA
+ * ships them, the same in every build, and not the manor's to sign. Smart App Control let them run on the desktop.
+ */
+export const CUDART_ZIP = 'cudart-llama-bin-win-cuda-12.4-x64.zip';
 /** The first port a set-up server takes; each takes the next free one. */
 export const FIRST_PORT = 18191;
 
@@ -47,6 +65,8 @@ export interface ReleaseAsset {
 export interface Release {
   tag: string;
   assets: ReleaseAsset[];
+  /** The signed copy's tag in SIGNED_LLAMA_REPO (`llama.cpp-b11734`), where `tag` is its build (kit 2.90.0). */
+  signed?: string;
 }
 
 /** The release list as GitHub's API (and `gh api`) returns it. */
@@ -57,6 +77,23 @@ export function parseReleases(json: any): Release[] {
       tag: r.tag_name,
       assets: (r.assets ?? []).map((a: any) => ({ name: String(a.name), size: Number(a.size) || 0, url: String(a.browser_download_url ?? ''), digest: typeof a.digest === 'string' ? a.digest : undefined })),
     }));
+}
+
+/**
+ * The signed builds among the releases repository's releases (its staff's and FFmpeg's are skipped), each as its
+ * build (`b11734`), newest first; a build signed again (`llama.cpp-b11734-2`) counts once, as its newest signing.
+ * NVIDIA's runtime (CUDART_ZIP) isn't in them: llamaReleases adds it from ggml-org's release of the build.
+ */
+export function parseSignedReleases(json: any): Release[] {
+  const signed = parseReleases(json)
+    .map((r) => ({ r, m: /^llama\.cpp-(b\d+)(?:-(\d+))?$/.exec(r.tag) }))
+    .filter((x): x is { r: Release; m: RegExpExecArray } => !!x.m)
+    .sort((a, b) => Number(b.m[1].slice(1)) - Number(a.m[1].slice(1)) || Number(b.m[2] ?? 1) - Number(a.m[2] ?? 1));
+  const out: Release[] = [];
+  for (const { r, m } of signed) {
+    if (!out.some((o) => o.tag === m[1])) out.push({ tag: m[1], signed: r.tag, assets: r.assets });
+  }
+  return out;
 }
 
 /** llama.cpp's Windows build for an accelerator: its variant (the asset's name between `bin-win-` and `.zip`), and CUDA's runtime. */
@@ -80,7 +117,7 @@ export function variantFor(t: { kind: 'gpu' | 'cpu' | 'npu'; vendor?: string; ar
   }
   const vendor = (t.vendor ?? '').toLowerCase();
   if (t.arch === 'x64') {
-    if (vendor === 'nvidia') return { variant: 'cuda-12.4-x64', cudart: 'cudart-llama-bin-win-cuda-12.4-x64.zip', backend: 'CUDA' };
+    if (vendor === 'nvidia') return { variant: 'cuda-12.4-x64', cudart: CUDART_ZIP, backend: 'CUDA' };
     if (vendor === 'qualcomm') return { none: 'an Adreno card on an x64 PC' };
     return { variant: 'vulkan-x64', backend: 'Vulkan' };
   }
@@ -810,12 +847,15 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   // Which build.
   const variants = targets.filter((t) => t.variant).map((t) => t.variant!);
   const picked = variants.length ? pickRelease(o.releases, variants) : null;
-  if (variants.length && !picked) problems.push(`no ${LLAMA_REPO} release has ${[...new Set(variants.map((v) => v.variant))].join(', ')} (looked at ${o.releases.length})`);
+  const unsigned = o.releases.length > 0 && o.releases.every((r) => !r.signed);
+  const where = unsigned ? `${LLAMA_REPO} release` : `llama.cpp build signed for the manor (${SIGNED_LLAMA_REPO})`;
+  if (variants.length && !picked) problems.push(`no ${where} has ${[...new Set(variants.map((v) => v.variant))].join(', ')} (looked at ${o.releases.length})`);
   const build = picked?.release.tag ?? null;
   const downloads: Download[] = [];
   if (picked) {
     for (const t of targets.filter((t) => t.variant)) {
-      t.folder = path.join(serversDir, `${build}-${t.variant!.variant}`);
+      // A signed build's folder is named by its signed tag, so a PC set up with ggml-org's unsigned copy gets it anew.
+      t.folder = path.join(serversDir, `${picked.release.signed ?? build}-${t.variant!.variant}`);
       for (const name of [assetName(build!, t.variant!.variant), ...(t.variant!.cudart ? [t.variant!.cudart] : [])]) {
         if (downloads.some((d) => d.what === name && d.unpackTo === t.folder)) continue;
         const asset = picked.assets.find((a) => a.name === name)!;
@@ -992,35 +1032,6 @@ export async function listDevices(server: string): Promise<string> {
   // same build and the same backends, logs each backend's devices to stderr unbuffered.
   const bench = path.join(path.dirname(exe), 'llama-bench.exe');
   return existsSync(bench) ? `${text}\n${await run(bench)}` : text;
-}
-
-/**
- * The processor variant ggml chose as it started (`load_backend: loaded CPU backend from …\ggml-cpu-haswell.dll`), its
- * file name; null when it didn't say (a build with one ggml-cpu.dll, or output lost).
- */
-export function cpuVariantLoaded(text: string): string | null {
-  const m = /loaded CPU backend from (.*?ggml-cpu-[^\\/\s]+\.dll)/i.exec(text);
-  return m ? path.win32.basename(m[1]) : null;
-}
-
-/**
- * Keeps only the processor variant ggml chose in a llama.cpp build's folder (kit 2.88.4), and returns the files
- * removed. ggml loads every ggml-cpu-*.dll at each start to choose the best for this processor, so one that Smart App
- * Control blocks (app-control.ts) is blocked again, and its notice shown again, at every start. The one chosen is the
- * one it would choose again, so nothing changes but that, and a quicker start. Nothing is removed when `chosen` isn't
- * there, nor a variant that can't be removed now.
- */
-export function keepCpuVariant(folder: string, chosen: string | null): string[] {
-  if (!chosen || !existsSync(path.join(folder, chosen))) return [];
-  const removed: string[] = [];
-  for (const f of readdirSync(folder)) {
-    if (!/^ggml-cpu-.+\.dll$/i.test(f) || f.toLowerCase() === chosen.toLowerCase()) continue;
-    try {
-      rmSync(path.join(folder, f));
-      removed.push(f);
-    } catch { /* in use: kept, and asked of again by the next setup */ }
-  }
-  return removed;
 }
 
 export interface SetupIo extends NpuIo {
@@ -2003,20 +2014,36 @@ export function ghExe(): string | null {
   return null;
 }
 
-/** ggml-org/llama.cpp's newest releases, through gh (signed in or not), else GitHub's public API. */
-export async function llamaReleases(): Promise<Release[]> {
+/** GitHub's API answer for a path (`repos/…`), through gh (signed in or not), else its public API. */
+async function githubJson(api: string): Promise<any> {
   const gh = ghExe();
   if (gh) {
     const json = await new Promise<string>((resolve, reject) =>
-      execFile(gh, ['api', 'repos/ggml-org/llama.cpp/releases?per_page=10'], { windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 60_000 }, (e, stdout, stderr) =>
+      execFile(gh, ['api', api], { windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 60_000 }, (e, stdout, stderr) =>
         e ? reject(new Error(`gh api failed: ${String(stderr || e.message).trim()}`)) : resolve(stdout),
       ),
     ).catch(() => '');
-    if (json) return parseReleases(JSON.parse(json));
+    if (json) return JSON.parse(json);
   }
-  const res = await fetch('https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10', { headers: { accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(60_000) });
-  if (!res.ok) throw new Error(`GitHub's release list: ${res.status}`);
-  return parseReleases(await res.json());
+  const res = await fetch(`https://api.github.com/${api}`, { headers: { accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(60_000) });
+  if (!res.ok) throw new Error(`GitHub's ${api.replace(/\?.*/, '')}: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * llama.cpp's builds the manor signed (SIGNED_LLAMA_REPO), newest first, the newest two with NVIDIA's runtime from
+ * ggml-org's release of their build (an older one is taken only when a newer lacks a file). Never ggml-org's unsigned
+ * copies, but with KIT_LLAMA_UNSIGNED=1: its newest releases as they are, to try a build before it's signed.
+ */
+export async function llamaReleases(): Promise<Release[]> {
+  if (process.env.KIT_LLAMA_UNSIGNED === '1') return parseReleases(await githubJson(`repos/${LLAMA_REPO}/releases?per_page=10`));
+  const signed = parseSignedReleases(await githubJson(`repos/${SIGNED_LLAMA_REPO}/releases?per_page=100`));
+  for (const r of signed.slice(0, 2)) {
+    if (!r.assets.some((a) => a.name === assetName(r.tag, 'cuda-12.4-x64')) || r.assets.some((a) => a.name === CUDART_ZIP)) continue;
+    const runtime = parseReleases([await githubJson(`repos/${LLAMA_REPO}/releases/tags/${r.tag}`).catch(() => null)])[0]?.assets.find((a) => a.name === CUDART_ZIP);
+    if (runtime) r.assets.push(runtime);
+  }
+  return signed;
 }
 
 /** A Hugging Face repo's files with sizes and sha256s; null when there's no such repo. */

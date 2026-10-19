@@ -1096,3 +1096,37 @@ test('a reranker: set up only when asked for, as an add-on that keeps what its a
   const kept = reapedServers(readAccelerators(r.raw).accelerators, 'C:\logs', { otherMs: 600_000 }, () => ['C:\locks\gpu']);
   assert.ok(kept.some((s) => s.base === 'http://127.0.0.1:18192' && s.idleMs === 600_000 && s.spec.logFile === path.join('C:\logs', `${card}.rerank.log`)));
 });
+
+test("setup takes llama.cpp's builds the manor signed, never ggml-org's unsigned ones (kit 2.90.0)", async () => {
+  const { parseSignedReleases } = await import('./fixture/src/kit/setup.ts');
+  const signedAsset = (name: string, size = 1000) => ({ ...asset(name, size), browser_download_url: `https://github.com/Jcollier0120/Manor-releases/releases/download/x/${name}` });
+  // The releases repository as GitHub lists it: the staff's, FFmpeg's, and llama.cpp's builds signed, one of them twice.
+  const signed = parseSignedReleases([
+    { tag_name: 'manor-v0.16.6', assets: [signedAsset('Manor-Setup-0.16.6-arm64.exe')] },
+    { tag_name: 'llama.cpp-b11749', assets: [signedAsset('llama-b11749-bin-win-cpu-x64.zip')] },
+    { tag_name: 'llama.cpp-b11749-2', assets: [signedAsset('llama-b11749-bin-win-cpu-x64.zip'), signedAsset('llama-b11749-bin-win-cuda-12.4-x64.zip', 263288146)] },
+    { tag_name: 'ffmpeg-v8.1.3-5', assets: [signedAsset('ffmpeg-8.1.3-lean-lgpl-shared-win-x64.zip')] },
+    { tag_name: 'llama.cpp-b11800', draft: true, assets: [signedAsset('llama-b11800-bin-win-cpu-x64.zip')] },
+    { tag_name: 'llama.cpp-b11734', assets: [signedAsset('llama-b11734-bin-win-cpu-x64.zip')] },
+  ]);
+  assert.deepEqual(signed.map((r) => [r.tag, r.signed]), [['b11749', 'llama.cpp-b11749-2'], ['b11734', 'llama.cpp-b11734']], 'newest first, a build signed again as its newest signing; a draft is not released yet');
+  // NVIDIA's runtime comes from ggml-org's release of the build, as llamaReleases adds it.
+  signed[0].assets.push(parseReleases([{ tag_name: 'b11749', assets: [asset('cudart-llama-bin-win-cuda-12.4-x64.zip', 391443627)] }])[0].assets[0]);
+  const plan = (releases: any[]) => planSetup({ detection: parseDetection(DESKTOP_NO_NPU), ids: ['gpu-nvidia-geforce-rtx-4090'], kinds: ['chat'], raw: {}, releases, hfFiles: hf, home: mkdtempSync(path.join(process.env.REEVE_HOME!, 'signed-')), localAppData: LOCAL });
+  const p = await plan(signed);
+  assert.equal(p.build, 'b11749');
+  assert.equal(path.basename(p.targets[0].folder!), 'llama.cpp-b11749-2-cuda-12.4-x64', "a folder of its own, so a PC set up with ggml-org's unsigned copy gets the signed one");
+  assert.deepEqual(
+    p.downloads.filter((d) => d.unpackTo).map((d) => [d.what, d.url.includes('/Jcollier0120/Manor-releases/') ? 'signed' : 'ggml-org']),
+    [
+      ['llama-b11749-bin-win-cuda-12.4-x64.zip', 'signed'],
+      ['cudart-llama-bin-win-cuda-12.4-x64.zip', 'ggml-org'],
+    ],
+  );
+  // No signed build has what a card needs: said so, and nothing comes from ggml-org instead.
+  const none = await plan([]);
+  assert.deepEqual(none.downloads.filter((d) => d.unpackTo), []);
+  assert.match(none.problems.join('\n'), /no llama\.cpp build signed for the manor \(Jcollier0120\/Manor-releases\) has cuda-12\.4-x64 \(looked at 0\)/);
+  // ggml-org's own (KIT_LLAMA_UNSIGNED=1, to try a build): its folder is named by its build, as before.
+  assert.equal(path.basename((await plan(RELEASES)).targets[0].folder!), 'b11749-cuda-12.4-x64');
+});
