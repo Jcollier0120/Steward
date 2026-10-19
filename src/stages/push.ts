@@ -4,7 +4,7 @@ import { aheadOf, branchExists, commitOf, fetchBranch, git, gitMaybe, removeWork
 import { TOOL } from '../kitsource.ts';
 import type { Employee } from '../settings.ts';
 import { readVersion } from '../versions.ts';
-import { bumpBranch, bumpDirOf, checkoutOf, forgetGlance, NOT_ON_KIT, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
 import { readPin } from './staff.ts';
 import { noteOpened } from '../strangers.ts';
 import { hostFor, must } from '../hosts/index.ts';
@@ -75,8 +75,7 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
     if (!o.merge || !n) return '';
     const why = await mergeOwn(ctx, e, { number: n, head: localSha });
     if (why) return `; it is open still (${why}): the next build tries again`;
-    // Its branch has moved: read afresh from here on, not from the glance. And the bump's worktree and branch are done with.
-    forgetGlance(ctx, e);
+    // Its branch has moved, and mergeOwn had the glance forgotten. The bump's worktree and branch are done with.
     try {
       for (const line of await removeWorktree(run, repo, bumpDirOf(ctx.settings, e), branch)) ctx.log(`[${e.id}] ${line}`);
     } catch (err) {

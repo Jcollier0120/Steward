@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.160
+
+**A build now releases each repository's main as it is after the build's own stamp, so the release carries the version and changelog entry that stamp just wrote.**
+
+### What changed
+
+- **Releases after a stamp.** When a build writes a repository's unstamped changelog entries into its version (the stamp) and merges that, it then releases main. The release used to take main's head from the build's first look at GitHub, which was from before the stamp, and so released the commit before it. On 2026-10-19 this happened twice to Manor:
+  - At the 19:00 build, Manor 0.17.2 was stamped, but the release still read 0.17.1, said it was already released, and released nothing.
+  - At the owner's build that evening, 0.17.2 was stamped again to bring in the Seneschal's entry. Then 0.17.2 was released from the commit before that stamp. The code was the same, but its notes said "Brings 2 changes" and left out the Seneschal.
+- Now every merge the Steward makes of its own PRs (a stamp, or a kit PR left open by an earlier build) has the round read that branch from GitHub again before it releases.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.159
 
 **The Steward now hands out kit 2.88.1: a Snapdragon X2 running GenieX 0.9 reads pictures on its NPU, about three times sooner, and no longer crashes on the first one. On GenieX 0.9.1 it also holds about 1.7 GB less memory at rest, and a new X2 is now set up on GenieX 0.9.1.**
