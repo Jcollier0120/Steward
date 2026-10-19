@@ -12,7 +12,7 @@ import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, npuEntry, npuMemoryFit, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
+import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, installedVersion, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -678,6 +678,8 @@ export interface PlanInput {
    * requests and the keeper follow), unless kinds are asked for by name. Left out, or true: every card as before.
    */
   gpuWithNpu?: boolean;
+  /** The version of the NPU route's server installed here (npu-vendors.ts' installedVersion by default): a later one the Smith's Use it left is set up as that version runs. */
+  serverVersion?: (route: NpuRoute) => Promise<string | null>;
 }
 
 /** What setup would do: for which accelerators, which build and models, how much to download. Downloads nothing. */
@@ -713,15 +715,18 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     // Only what fits in this PC's memory beside everything else (npuMemoryFit, at this generation's sizes): the rest
     // goes to the card or the processor.
     // Its generation's own models (a Snapdragon X2: Qwen3-VL-2B), and on a PC with little memory its smallPc ones, where it has any.
+    // At the server's version on this PC: a later GenieX the Smith's Use it left is set up as that version runs.
     const small = smallPc(o.detection.ramBytes);
-    const route = det.vendor ? routeFor(NPU_CATALOG.routes[det.vendor], det.generation, small) : null;
+    const generic = det.vendor ? NPU_CATALOG.routes[det.vendor] : null;
+    const version = generic ? await (o.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: o.home, env: o.env, exists })))(generic) : null;
+    const route = generic ? routeFor(atVersion(generic, version), det.generation, small) : null;
     const fit: { chat: boolean; embed: boolean; why?: string } = route ? npuMemoryFit(route, o.detection.ramBytes) : { chat: true, embed: true };
     if (!fit.chat) {
       npuNote = `${det.label} (npu): not set up: ${fit.why}. The graphics card or the processor takes its work.`;
       npuPlain = npuNoteFor(det.label, 'chat', fit.why!);
       npuLeftOut = 'memory';
     } else {
-      npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed, cards: o.detection.cards, small });
+      npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed, cards: o.detection.cards, small, serverVersion: version });
       if (!fit.embed && route?.embedServer) {
         npuNote = `${det.label} (npu): its embeddings not set up: ${fit.why}. The graphics card or the processor makes them.`;
         npuPlain = npuNoteFor(det.label, 'embed', fit.why!);

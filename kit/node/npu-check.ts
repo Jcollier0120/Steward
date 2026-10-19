@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
-import { calibrate, CALIBRATION, generationOf, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, type Played, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, smallPc, UNKNOWN_GENERATION } from './npu-vendors.ts';
+import { atVersion, calibrate, CALIBRATION, generationOf, installedVersion, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, type Played, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, smallPc, UNKNOWN_GENERATION } from './npu-vendors.ts';
 import { loadFailure, logLength, longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
 import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { npuReportFile, npuReportFromCheck, rememberNpuReport, reporterId } from './npu-report.ts';
@@ -134,6 +134,8 @@ export interface NpuCheckOptions {
     portFree?: (port: number) => Promise<boolean>;
     /** Empties the check's own compile cache before its first start (checkServe). */
     clearCache?: (dir: string) => void;
+    /** The version of the route's server installed here (npu-vendors.ts' installedVersion by default). */
+    serverVersion?: (route: NpuRoute) => Promise<string | null>;
     now?: () => number;
   };
 }
@@ -372,8 +374,12 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   let route: NpuRoute;
   // The models setup runs on this PC's memory (a small PC's own, smallPc), or a small PC's when asked.
   const small = !!o.smallPc || smallPc(d.ramBytes);
+  // At the server's version on this PC (a later GenieX the Smith's Use it left), as setup and the keeper run it; a
+  // rehearsal of another maker's route runs that route's own.
+  const version = rehearsal ? null : await (o.io?.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: o.tools ?? toolsHome(env), env })))(catalog.routes[vendor]);
+  const generic = atVersion(catalog.routes[vendor], version);
   try {
-    route =routeOnDevice(routeFor(catalog.routes[vendor], generation, small), report.device);
+    route = routeOnDevice(routeFor(generic, generation, small), report.device);
     if (small && generationOf(catalog.routes[vendor], generation)?.smallPc) log(`A small PC's models (${o.smallPc ? '--small-pc' : `this PC's ${report.pc.ramGb} GB`}): ${route.models.map((m) => m.id).join(', ')}.`);
     if (played) route = playedRoute(route, played);
   } catch (e: any) {
@@ -480,7 +486,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   }
   // From here on it measures this PC's own NPU (never a rehearsal's device): what it finds is the NPU's report.
   // A small PC's models are what it ran, so the report names them (npu-reports.ts counts them apart from the route's).
-  if (!report.rehearsal) measuring = { route: routeFor(catalog.routes[vendor], generation, small), verified: !!support.verified };
+  if (!report.rehearsal) measuring = { route: routeFor(generic, generation, small), verified: !!support.verified };
   const cacheArg = route.serve.indexOf('--cache_dir');
   if (cacheArg >= 0) (o.io?.clearCache ?? ((p: string) => existsSync(p) && rmSync(p, { recursive: true, force: true })))(route.serve[cacheArg + 1].replace('{tools}', tools));
   const coldMs = route.timeouts.coldLoadMs ?? 180_000;

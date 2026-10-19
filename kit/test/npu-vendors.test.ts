@@ -521,6 +521,77 @@ test("every Snapdragon X2 runs Qwen3-VL-2B, its pictures on the Adreno, whatever
   assert.ok(V.smallPc(16876666880) && !V.smallPc(51127103488) && !V.smallPc(0), "unknown memory isn't small");
 });
 
+test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and embeds through the llama.cpp build that loads 0.9's libraries", async () => {
+  const tools = path.join(home, 'tools-091');
+  const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';
+  const TWO_B = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
+  const q = V.NPU_CATALOG.routes.qualcomm;
+  const tail = (r: typeof q) => V.npuEntry(r, { tools, exe: G }).chat!.startCommand!.slice(7);
+  // The route's own version, and anything before 0.9.0, as before: pictures on the Adreno, embeddings through b11125.
+  for (const version of [undefined, '0.8.0', '0.8.1']) {
+    const r = V.routeFor(V.atVersion(q, version), 'snapdragon-x2');
+    assert.deepEqual(tail(r), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL', '--nctx', '2560'], `${version}`);
+    assert.equal(r.embedServer!.version, 'b11125', `${version}`);
+  }
+  // 0.9.0 on (until a later entry): no --vit-compute, so GenieX reads them on its second HTP session (HTP1).
+  for (const version of ['0.9.0', '0.9.1', '0.10.2']) {
+    const r = V.routeFor(V.atVersion(q, version), 'snapdragon-x2');
+    assert.equal(r.version, version);
+    assert.deepEqual(tail(r), ['--compute', 'npu', '--nctx', '2560'], version);
+    assert.deepEqual(V.npuEntry(r, { tools, exe: G }).vision, { model: TWO_B, pictureTokens: 1024 }, `${version}: still fitted within 1,024 tokens`);
+    assert.equal(r.embedServer!.version, 'b11645', version);
+    assert.equal(r.embedServer!.download!.file, 'llama-b11645-bin-win-opencl-adreno-arm64.zip');
+    assert.deepEqual(r.embedServer!.env, { ADSP_LIBRARY_PATH: '{tools}\\servers\\llama.cpp\\b11645-hexagon' });
+    assert.deepEqual(r.embedServer!.overlay, q.embedServer!.overlay, `${version}: GenieX's same 13 files over it`);
+    assert.deepEqual(r.embedServer!.serve, q.embedServer!.serve, `${version}: its arguments as before`);
+  }
+  // The first-generation X's QAIRT 4B has no arguments of its own in either version.
+  assert.ok(!V.npuEntry(V.routeFor(V.atVersion(q, '0.9.1'), 'snapdragon-x'), { tools, exe: G }).chat!.startCommand!.includes('--compute'));
+  // The Smith's try of 0.9.1 builds its route at the candidate's version (trialRoute), so its entry and Use it's are 0.9's.
+  assert.deepEqual(tail(V.routeFor({ ...structuredClone(q), version: '0.9.1' }, 'snapdragon-x2')), ['--compute', 'npu', '--nctx', '2560']);
+  assert.equal(V.serverVersionOf(q), undefined, "the route's own 0.8.0 takes none");
+  assert.equal(V.atVersion(q, null), q);
+
+  // setup on a PC whose GenieX is 0.9.1 (Use it left it): its command, its embedding server in a folder of its own.
+  const plan = (version: string | null, have: string[] = [G]) => planSetup({ detection: parseDetection(`${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(have), serverVersion: async () => version });
+  const p = (await plan('0.9.1')).npu!;
+  assert.equal(p.route.version, '0.9.1');
+  assert.equal(p.installed, true);
+  assert.equal(p.download, null, "it doesn't put 0.8.0 back");
+  assert.equal(p.embed!.exe, path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon', 'llama-server.exe'));
+  assert.equal(p.embed!.download!.what, 'llama-b11645-bin-win-opencl-adreno-arm64.zip');
+  assert.equal(p.embed!.download!.size, 13263463);
+  assert.equal(p.embed!.download!.sha256, '231e50cdc87ae62b42d4d25c0cc4f937e36df40f8e3593719c23e976ae6eef04');
+  const e = V.npuEntry(p.route, { tools, exe: G, embed: { exe: p.embed!.exe, model: p.embed!.model } });
+  assert.deepEqual(e.chat!.startCommand!.slice(7), ['--compute', 'npu', '--nctx', '2560']);
+  assert.equal(e.embed!.startCommand![0], p.embed!.exe);
+  assert.deepEqual(e.embed!.env, { ADSP_LIBRARY_PATH: path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon') });
+  assert.deepEqual(validateAccelerators({ accelerators: [e] }), []);
+  // GenieX 0.8.0 there, or none (setup installs the route's own): as before.
+  for (const version of ['0.8.0', null]) assert.equal((await plan(version)).npu!.embed!.server.version, 'b11125', `${version}`);
+});
+
+test("installedVersion asks the route's server which version it is", async () => {
+  const q = V.NPU_CATALOG.routes.qualcomm;
+  const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';
+  const ran: string[][] = [];
+  const answer = (code: number | null, out: string) => async (exe: string, args: string[]) => {
+    ran.push([exe, ...args]);
+    return { code, out };
+  };
+  const at = { tools: 'C:\\t', env: ENV, exists: disk([G]) };
+  assert.equal(await V.installedVersion(q, { ...at, run: answer(0, 'GenieX CLI Version: v0.9.1\nQAIRT Version: 2.50\nllama.cpp: e467e5b\n') }), '0.9.1');
+  assert.deepEqual(ran[0], [G, 'version', '--skip-update']);
+  assert.equal(await V.installedVersion(q, { ...at, run: answer(0, 'GenieX CLI Version: v0.8.0\r\n') }), '0.8.0');
+  assert.equal(await V.installedVersion(q, { ...at, run: answer(1, 'GenieX CLI Version: v0.9.1') }), null, 'a failed run says nothing');
+  assert.equal(await V.installedVersion(q, { ...at, run: answer(0, 'something else') }), null);
+  assert.equal(await V.installedVersion(q, { ...at, run: () => { throw Object.assign(new Error('spawn EFTYPE'), { code: 'EFTYPE' }); } }), null, "a file that won't start");
+  ran.length = 0;
+  assert.equal(await V.installedVersion(q, { ...at, exists: disk([]), run: answer(0, 'GenieX CLI Version: v0.9.1') }), null, 'not installed');
+  assert.equal(await V.installedVersion(V.NPU_CATALOG.routes.intel, { ...at, run: answer(0, 'x') }), null, 'a route without a versionCommand');
+  assert.deepEqual(ran, [], 'nothing run for either');
+});
+
 /** A setUpNpu world: what it ran, downloaded and unpacked, and whether its test request answers. */
 function fakeNpuIo(o: { answers?: boolean; installs?: boolean; pullFails?: boolean; downloadFails?: string; embeds?: boolean; overlayFails?: boolean; measured?: { warmMs: number; tokensPerSecond: number; readTokens?: number; readMs?: number } | { problems: string[] } } = {}) {
   const did: string[] = [];

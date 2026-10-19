@@ -2,6 +2,51 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.88.1
+
+**On a Snapdragon X2 running GenieX 0.9, a vision model's pictures go to the NPU's second Hexagon session, about three times sooner than on the Adreno, and its embeddings to a llama.cpp built for 0.9. Every other PC keeps GenieX 0.8.0, unchanged.**
+
+The owner pressed Try twice on the Smith's offer of GenieX 0.9.1 on 2026-10-18, and both tries failed on the first picture. The X2's Qwen3-VL-2B was set to read its pictures on the Adreno (`--vit-compute GPUOpenCL`), and GenieX 0.9.1, asked for that, tries to allocate 9.4 GB in OpenCL and crashes (0xC0000005). GenieX 0.9 reads pictures on the Hexagon's second session (HTP1) by default, so this kit asks a PC's GenieX its version and gives 0.9 its own arguments. The measurements are in spec/NPU-VENDORS.md, "A later GenieX on the PC: 0.9".
+
+On the X2 Elite, 0.9.1 with its pictures on the Hexagon against 0.8.0 with Castellan's build and its pictures on the Adreno:
+
+| | GenieX 0.8.0, pictures on the Adreno | GenieX 0.9.1, pictures on the Hexagon |
+|---|---|---|
+| Screen questions at 1,024 picture tokens | 33 of 35, a median 4.49 s | 34 of 35, a median 1.50 s |
+| Questions about ten photos | 21 of 21, a median 4.42 s | 21 of 21, a median 1.45 s |
+| The first picture after a chat | 2.0 s | 0.55 s |
+| Chat | 73.0 tokens a second | 72.6 |
+| On the Adreno after a picture | 1.54 GB | nothing |
+| After a chat: working set / on the NPU | 1.6 / 1.48 GB | 3.27 / 3.21 GB |
+| The first answer after a start | 3.1 s | 4.7 s |
+
+0.9.1 holds about 1.5 GB more at rest because Castellan's build is for 0.8.0's libraries and doesn't apply to it, so the route keeps 0.8.0 for every PC, and 0.9 is what a PC runs once its owner chose it with the Smith's Use it.
+
+### What's new
+
+- **npu-vendors.ts:** a route can say how to ask its server's version, and what changes from a later one.
+  - `NpuRoute.versionCommand` (`{ args, pattern }`) and `installedVersion(route, { tools, env?, exists?, run? })`, which runs the route's server with those arguments and answers the version the pattern finds, or null (no server, an exit other than 0, no match, or a start that failed).
+  - `NpuRoute.versions` (`NpuServerVersion[]`: `{ version, serve?, embedServer?, basis }`) and `serverVersionOf(route)`, the newest entry at or before `route.version`. `routeFor` applies it after the model's own: each model's `serve` it names, and the embedding server's `version`, `download`, `into`, `exe` and `env`.
+  - `atVersion(route, version)`: the route with the version found on the PC (the route itself when null or the same).
+  - `planNpu` takes `serverVersion`.
+- **spec/npu-vendors.json** (Qualcomm): `versionCommand` is `geniex version --skip-update`, and from 0.9.0:
+  - the X2's Qwen3-VL-2B runs with `--compute npu --nctx 2560`, its pictures on HTP1;
+  - the embedding server is llama.cpp b11645 (e467e5b, the llama.cpp in GenieX 0.9.0 and 0.9.1, and one Metal-only commit), 13 MB with its SHA-256, in its own folder `b11645-hexagon`. b11125's `llama-server` doesn't start over 0.9's libraries (0xC0000139), and b11125's folder, which a PC on 0.8.0 uses, is never copied over.
+
+### What changed
+
+- **npu-refresh.ts, setup.ts, npu-check.ts, npu-bench.ts** ask the PC's GenieX its version (`installedVersion`) and plan with it (`atVersion`). Each takes a `serverVersion` dep or io for tests. npu-check's rehearsal doesn't ask. npu-bench's report names the version it ran (`GenieX 0.9.1`).
+- The Smith's try and Use it already set the route's version to the server they try, so they get 0.9's arguments without asking.
+- With 0.9 on the PC, the keeper's refresh changes the 2B's command and offers the embeddings on b11645 (kit 2.86.0's offer) once its zip is on the PC. Setup downloads it otherwise.
+- Embeddings from b11645 over 0.9.1 match b11125 over 0.8.0 (cosine 0.99936 or more over 206 texts, a median 0.999998). Reeve's search eval answered each of its nine questions at the same rank with either (4 of 9 first, 9 of 9 in the top five). A chunk takes 72 ms in batches of 16 (112), and the server holds 1.10 GB on the NPU (1.41).
+- Castellan's build of the plugin stays for 0.8.0 only; the keeper already leaves GenieX 0.9's own plugin alone (node/geniex/README.md).
+
+### Before you update
+
+- Nothing on a PC running GenieX 0.8.0 (every PC the kit set up): nothing is downloaded or rebuilt, and nothing restarts.
+- On an X2 whose owner moved to GenieX 0.9 with the Smith's Use it, the keeper's next look restarts the 2B with its new command (a few seconds) and moves the embeddings to llama.cpp b11645, a 13 MB download if the Smith's try didn't already bring it. Nothing is indexed again: the vectors are the same.
+- An agent needs no change: the keeper (the Smith, else Reeve) does it on the PC once it runs this kit.
+
 ## 2.88.0
 
 **FFmpeg and making a video smaller are now in the kit: finding FFmpeg, fetching the manor's build once for every agent, choosing the video encoder, and re-encoding one video with its checks. The Miller and the Chronicler each carried their own copy of this, pinned to different builds. Nothing changes for either until it takes the kit's up.**

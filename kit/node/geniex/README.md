@@ -39,4 +39,4 @@ With the encoder freed after a quiet spell (kit 2.82.1, `--nctx 2560`): after a 
 - GenieX's own file is kept beside it as `geniex_plugin.dll.stock`.
 - Set `"npuPatch": false` in the keeper's config.json, and the keeper's next look puts it back.
 - The keeper also puts it back by itself if this build fails its test (a picture and a chat), or a later kit stops patching.
-- A GenieX update replaces the file, and the keeper then leaves it alone.
+- A GenieX update replaces the file, and the keeper then leaves it alone. GenieX 0.9 (which the Smith's try can put in place) runs its own plugin: this build links against 0.8.0's libraries, so it would need building again from 0.9's sources (spec/NPU-VENDORS.md, A later GenieX on the PC).

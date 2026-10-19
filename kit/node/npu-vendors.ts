@@ -28,8 +28,8 @@ export interface NpuModel {
   pull: string[];
   /**
    * Server arguments it needs beside the route's `serve`, added to the server's command when it is the chat model (the
-   * one the server starts with): GenieX's llama.cpp models' `--compute npu --vit-compute GPUOpenCL`, which its QAIRT
-   * models mustn't get.
+   * one the server starts with): GenieX 0.8.0's llama.cpp models' `--compute npu --vit-compute GPUOpenCL`, which its
+   * QAIRT models mustn't get. A later server version may want others (NpuServerVersion's `serve`).
    */
   serve?: string[];
   /**
@@ -69,6 +69,13 @@ export interface NpuRoute {
   runtime?: NpuRuntime;
   download: { file: string; url: string; size: number; sha256: string };
   install: { kind: 'inno'; args: string[]; exe: string } | { kind: 'zip'; into: string; exe: string };
+  /**
+   * How its program says which version of it is installed: its arguments, and a pattern whose first group is the
+   * version (installedVersion). GenieX's `geniex version --skip-update` answers in about 60 ms.
+   */
+  versionCommand?: { args: string[]; pattern: string };
+  /** What later versions of its server change, for a PC that runs one (NpuServerVersion). */
+  versions?: NpuServerVersion[];
   port: number;
   /** Where its OpenAI routes start, when not at the root (OpenVINO Model Server's /v3). */
   baseUrlPath?: string;
@@ -142,8 +149,8 @@ export interface NpuGeneration {
   basis?: string;
   /**
    * The models it runs instead of the route's, on every PC of the generation whatever its memory: the Snapdragon X2's
-   * Qwen3-VL-2B, its pictures on the Adreno, where the first-generation X keeps the route's 4B. routeFor puts them in
-   * the route's place.
+   * Qwen3-VL-2B, its pictures on the Adreno with GenieX 0.8.0 and on the Hexagon with 0.9, where the first-generation X
+   * keeps the route's 4B. routeFor puts them in the route's place.
    */
   models?: NpuModel[];
   /**
@@ -163,6 +170,23 @@ export interface NpuGeneration {
   aiHubChipset?: string;
   /** A build of one of its server's own files the kit carries in its place (npu-patch.ts): the X2's GenieX llama.cpp plugin. */
   pluginPatch?: NpuPluginPatch;
+}
+
+/**
+ * What a later version of a route's server changes, from `version` on until the next one listed. The route's own
+ * `version` is still what setup installs; this is how a PC runs a later one it has: the Smith's try of it, the entry its
+ * Use it writes, and the keeper's refresh, setup and the checks on a PC where it is installed (installedVersion).
+ * routeFor applies the newest at or before the route's version. GenieX 0.9 reads pictures on the Hexagon's second
+ * session, so the X2's Qwen3-VL-2B goes without `--vit-compute GPUOpenCL`, and it carries another llama.cpp, whose
+ * libraries only that build's llama-server loads.
+ */
+export interface NpuServerVersion {
+  version: string;
+  /** Each model's own `serve` in this version, by its id, in place of the model's. */
+  serve?: Record<string, string[]>;
+  /** Its embedding server's fields in this version, over the route's: the llama.cpp build that loads its libraries, and its folder. */
+  embedServer?: Partial<Pick<NpuEmbedServer, 'version' | 'download' | 'into' | 'exe' | 'env'>>;
+  basis: string;
 }
 
 /** A file pinned by its size and SHA-256. */
@@ -598,6 +622,35 @@ export function runsRoute(entry: { chat?: { startCommand?: string[] } } | undefi
   return path.win32.basename(expandRoute(exe, { tools })).toLowerCase() === path.win32.basename(serverExe(route, tools)).toLowerCase();
 }
 
+/**
+ * The version of the route's server installed on this PC, as its own program says (the route's versionCommand); null
+ * when it isn't installed, the route has no such command, or the answer doesn't say. The Smith's Use it can leave a
+ * later version than the route's own in place, which routeFor then runs as that version runs (atVersion).
+ */
+export async function installedVersion(route: NpuRoute, o: { tools: string; env?: Record<string, string | undefined>; exists?: (p: string) => boolean; run?: typeof runProgram }): Promise<string | null> {
+  const vc = route.versionCommand;
+  if (!vc) return null;
+  const exe = serverExe(route, o.tools, o.env);
+  if (!(o.exists ?? existsSync)(exe)) return null;
+  try {
+    const r = await (o.run ?? runProgram)(exe, vc.args, { timeoutMs: 15_000 });
+    return r.code === 0 ? (new RegExp(vc.pattern).exec(r.out)?.[1] ?? null) : null;
+  } catch {
+    // A file Windows can't start (spawn EFTYPE, thrown before execFile calls back): it says nothing.
+    return null;
+  }
+}
+
+/** The route at another version of its server (the PC's own: installedVersion), so routeFor runs it as that version runs; the route itself when none is given. */
+export const atVersion = (route: NpuRoute, version: string | null | undefined): NpuRoute => (version && version !== route.version ? { ...route, version } : route);
+
+/** The entry of the route's `versions` its version runs by: the newest at or before it; none for an earlier version. */
+export function serverVersionOf(route: NpuRoute): NpuServerVersion | undefined {
+  let best: NpuServerVersion | undefined;
+  for (const v of route.versions ?? []) if (compareVersions(v.version, route.version) <= 0 && (!best || compareVersions(v.version, best.version) > 0)) best = v;
+  return best;
+}
+
 // ------------------------------------------------------------------------------------------------
 // Per generation, memory and calibration
 
@@ -616,14 +669,19 @@ function ownModels(route: NpuRoute): boolean {
  * UNKNOWN_GENERATION, the route's most cautious (unknownGeneration). The generation's own models in the route's place
  * (a Snapdragon X2's Qwen3-VL-2B), and on a PC with little memory (`small`: smallPc of its memory) its smallPc models
  * over those. A caller's own models stay (the Smith's try of another model): a generation's go only in place of the
- * route's own, as npu-vendors.json has them (ownModels). The route itself when the generation has none of these, or
- * isn't the route's.
+ * route's own, as npu-vendors.json has them (ownModels). Then what the route's server version changes (`versions`, by
+ * serverVersionOf): a model's own arguments, its embedding server's build. The route itself when none of these apply.
  */
 export function routeFor(route: NpuRoute, generation: string | null | undefined, small = false): NpuRoute {
   const g = generationOf(route, generation);
   const own = ownModels(route);
   if (own && g?.models) route = { ...route, models: g.models };
   if (own && small && g?.smallPc) route = { ...route, models: g.smallPc.models };
+  const v = serverVersionOf(route);
+  if (v) {
+    const models = route.models.map((m) => (v.serve?.[m.id] ? { ...m, serve: [...v.serve[m.id]] } : m));
+    route = { ...route, models, ...(route.embedServer && v.embedServer ? { embedServer: { ...route.embedServer, ...v.embedServer } } : {}) };
+  }
   if (!g || (!g.timeouts && !g.caps && !g.maxContextTokens && !g.args && !g.embedArgs && !g.memoryGb)) return route;
   const replaced = (args: string[], values: Record<string, string> | undefined) => {
     const serve = [...args];
@@ -918,11 +976,13 @@ export function planNpu(o: {
   cards?: readonly GraphicsCard[];
   /** This PC has little memory (smallPc): its generation's smallPc models, where it has any. */
   small?: boolean;
+  /** The version of the route's server this PC has (installedVersion), when it may not be the route's own: run as that version runs. */
+  serverVersion?: string | null;
 }): NpuPlan | null {
   if (!o.support.supported || !o.support.vendor) return null;
   const exists = o.exists ?? existsSync;
-  // The generation's own starting values and models (routeFor); its embedding server left out when asked.
-  const generic = routeFor((o.catalog ?? NPU_CATALOG).routes[o.support.vendor], o.support.generation, o.small);
+  // The generation's own starting values and models, at the server's version on this PC (routeFor); its embedding server left out when asked.
+  const generic = routeFor(atVersion((o.catalog ?? NPU_CATALOG).routes[o.support.vendor], o.serverVersion), o.support.generation, o.small);
   const route: NpuRoute = o.noEmbed ? { ...generic, embedServer: undefined, models: generic.models.filter((m) => !(m.kinds.length === 1 && m.kinds[0] === 'embed')) } : generic;
   const exe = serverExe(route, o.tools, o.env);
   const installed = exists(exe);

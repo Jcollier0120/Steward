@@ -86,7 +86,7 @@ So a person searching while an agent writes is answered at once, and a person ch
 
 ### Embeddings on the Hexagon
 
-GenieX serves no `/v1/embeddings` (its issue #1149), but it carries llama.cpp (build b11125 in GenieX 0.8.0) with llama.cpp's Hexagon backend and Qualcomm's signed HTP libraries (`libggml-htp-v73/v75/v79/v81.so` and their catalogue `libggml-htp.cat`), so nothing needs test-signing. The route's `embedServer` runs llama.cpp's own `llama-server` of that very build (its release zip, pinned) over GenieX's libraries (its `overlay`: GenieX's `ggml*.dll`, `llama.dll`, `llama-common.dll`, `mtmd.dll` and the HTP files, copied whenever they differ), on `--device HTP0`, with Qwen3-Embedding-0.6B Q8_0, the graphics card's model. A llama-server of another build doesn't load GenieX's libraries (a missing entry point), so `embedServer.version` moves with GenieX's. The HTP library is loaded through FastRPC, which finds it by `ADSP_LIBRARY_PATH` (the entry's `env`) or the working folder.
+GenieX serves no `/v1/embeddings` (its issue #1149), but it carries llama.cpp (build b11125 in GenieX 0.8.0) with llama.cpp's Hexagon backend and Qualcomm's signed HTP libraries (`libggml-htp-v73/v75/v79/v81.so` and their catalogue `libggml-htp.cat`), so nothing needs test-signing. The route's `embedServer` runs llama.cpp's own `llama-server` of that very build (its release zip, pinned) over GenieX's libraries (its `overlay`: GenieX's `ggml*.dll`, `llama.dll`, `llama-common.dll`, `mtmd.dll` and the HTP files, copied whenever they differ), on `--device HTP0`, with Qwen3-Embedding-0.6B Q8_0, the graphics card's model. A llama-server of another build doesn't load GenieX's libraries (a missing entry point), so `embedServer.version` moves with GenieX's: GenieX 0.9's libraries (llama.cpp e467e5b) run under b11645's, in a folder of its own (A later GenieX on the PC, below). The HTP library is loaded through FastRPC, which finds it by `ADSP_LIBRARY_PATH` (the entry's `env`) or the working folder.
 
 Measured on the X2 Elite (2026-10-12), Reeve's search eval on GamerNexus (9 questions), against the Adreno's llama.cpp and npu-embed's nomic-embed-text v1.5 on the NPU:
 
@@ -155,8 +155,8 @@ On every Snapdragon X2, whatever its memory, setup runs Qwen3-VL-2B in place of 
 From kit 2.78.0 the 2B was the X2's `smallPc`, for an X2 under 20 GB (`idleStop.smallPcGb`) alone, and a bigger X2 kept the 4B. The benchmark below, on the 48 GB X2 Elite, showed the 2B as accurate and faster there too (the owner, 2026-10-16: "It's faster and just as accurate"), so kit 2.78.8 made it every X2's. `smallPc` stays in the code, the models a generation runs over its own on a PC under 20 GB, and no generation has any now.
 
 - **What it is.** unsloth's Q4_0 GGUF of Qwen3-VL-2B-Instruct (`unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`, 1.9 GB with its F16 vision projector), pulled from Hugging Face by GenieX (`--model-hub hf`) and served by GenieX's llama.cpp plugin: the language model on the Hexagon (`--compute npu`), the pictures' encoder on the Adreno (`--vit-compute GPUOpenCL`). AI Hub has no QAIRT build of the 2B, only this GGUF. Its two files are pinned for the X2.
-- **Why the Adreno.** GenieX 0.8.0's llama.cpp reads every picture as grey on the Hexagon (GELU and IM2COL in its Hexagon backend, fixed in llama.cpp after the commit GenieX pins), and with the encoder on a second Hexagon session it aborts. On the processor it reads them right, but each picture takes about 5.5 s of processor time; on the Adreno 0.8 s, and the picture is read in 0.3 to 0.7 s.
-- **Per-model arguments.** `--compute` and `--vit-compute` are the model's own `serve` (`NpuModel.serve`), which `npuEntry` adds after the route's. The 4B's QAIRT command never gets them.
+- **Why the Adreno.** GenieX 0.8.0's llama.cpp reads every picture as grey on the Hexagon (GELU and IM2COL in its Hexagon backend, fixed in llama.cpp after the commit GenieX pins), and with the encoder on a second Hexagon session it aborts. On the processor it reads them right, but each picture takes about 5.5 s of processor time; on the Adreno 0.8 s, and the picture is read in 0.3 to 0.7 s. GenieX 0.9 reads them right on the Hexagon's second session, and a PC that runs it reads them there (A later GenieX on the PC, below).
+- **Per-model arguments.** `--compute` and `--vit-compute` are the model's own `serve` (`NpuModel.serve`), which `npuEntry` adds after the route's. The 4B's QAIRT command never gets them. A later GenieX may want others: from 0.9.0 the 2B's are `--compute npu --nctx 2560` (the route's `versions`).
 - **Measured** with the full benchmark (`castellan-npu-bench/2`) on the 48 GB X2 Elite, 2026-10-15, against the 4B:
 
   | | Qwen3-VL-2B (Q4_0, llama.cpp, pictures on the Adreno) | Qwen3-VL-4B (W4A16, QAIRT) |
@@ -370,7 +370,7 @@ The keeper (the Smith, else Reeve) starts and restarts each server from its entr
 
 ### A later kit's command
 
-A route's command changes between kits: Intel's NPU 3720 got its 128-token prompt chunks (`--plugin_config`), and a generation its own `--max_prompt_len`. Setup leaves a configured NPU alone, so before this a PC kept the command it was set up with until someone ran setup again. On the 225U the shipped command answered a short question in 3.1 s and the chunked one in 0.5 s, with the same answers. The keeper now brings the entry up to its kit's command once for each kit version, only when nobody is using the NPU and the new command answers its test, and never takes back a newer kit's ([ACCELERATORS.md](ACCELERATORS.md), the keeper). A command that needs a download, such as a new server version or another model, is still left for setup.
+A route's command changes between kits: Intel's NPU 3720 got its 128-token prompt chunks (`--plugin_config`), and a generation its own `--max_prompt_len`. Setup leaves a configured NPU alone, so before this a PC kept the command it was set up with until someone ran setup again. On the 225U the shipped command answered a short question in 3.1 s and the chunked one in 0.5 s, with the same answers. The keeper now brings the entry up to its kit's command once for each kit version, only when nobody is using the NPU and the new command answers its test, and never takes back a newer kit's ([ACCELERATORS.md](ACCELERATORS.md), the keeper). A command that needs a download, such as a new server version or another model, is still left for setup. From kit 2.88.1 the look plans at the server version the PC has, not the route's own (A later GenieX on the PC, above).
 
 Since kit 2.86.0 the same look offers the NPU its own embeddings where its entry has none, with nothing downloaded. The Snapdragon X2 Elite set up before kit 2.63.0 had its chat on the Hexagon and its embeddings on the Adreno: with Manor's `gpuWithNpu` off, Reeve's search used npu-embed's nomic-embed-text v1.5 (every input cut to 128 tokens; 8 of 9 in the eval above) and Chamberlain's and Clerk's embeddings the card. The Hexagon's llama-server (b11125) and Qwen3-Embedding-0.6B were already on it, the model being the card's own file, so the look takes them up after their test: 124 ms a chunk against the card's 265, 9 of 9, the card's own vectors (an index made by either serves both), and the card left to the person. Reeve's indexes, named by their model, are built again once with Qwen3-Embedding (Reeve's settling in).
 
@@ -408,6 +408,44 @@ From kit 2.82.1 the build also frees the vision encoder once no picture has come
 | the encoder is freed | 2.08 GB | 0.67 GB |
 
 What stays above a chat's, 0.3 to 0.4 GB, is the OpenCL backend's own buffers, in GenieX's ggml-opencl.dll, which the kit doesn't build.
+
+### A later GenieX on the PC: 0.9 (kit 2.88.1)
+
+The route pins GenieX 0.8.0, and setup installs that. The Smith offers later versions, and its try installs one in 0.8.0's place; Use it keeps it. So a PC can run a GenieX the route doesn't pin. The route's `versions` (`NpuServerVersion`) say how each later version runs, from its `version` on until the next one listed, and `routeFor` applies the newest at or before the route's version:
+- **The Smith's try** builds its route at the candidate's version (its `trialRoute`), so the try and the entry Use it writes run as that version runs.
+- **The keeper's refresh, setup, the NPU check and the benchmark** ask the PC's own GenieX which version it is (`versionCommand`: `geniex version --skip-update`, about 60 ms; `installedVersion`) and plan at that version (`planNpu`'s `serverVersion`, `atVersion`). Before kit 2.88.1 they planned at 0.8.0 whatever was installed, so after Use it of 0.9.1 the refresh would have tested 0.8.0's arguments, which crash 0.9.1, up to three kits in a row.
+
+GenieX 0.9.0 and 0.9.1 carry llama.cpp e467e5b and read a vision model's pictures on the Hexagon's second session (HTP1) by default (qualcomm/GenieX#1548). Asked for the Adreno (`--vit-compute GPUOpenCL`, the X2's 2B's own `serve` for 0.8.0), 0.9.1 tries to allocate 9.4 GB in OpenCL and crashes (0xC0000005) on the first picture: the Smith's two tries of it on 2026-10-18 failed so. From 0.9.0 the 2B's `serve` is `--compute npu --nctx 2560`.
+
+Measured on the 48 GB X2 Elite, 2026-10-18, each on a private port in the NPU's turn, with the kit's own requests (`chatBody`, `visionBody`, `fitPicture` at 1,024 tokens): GenieX 0.9.1 (its own plugin, no `--vit-compute`) against 0.8.0 as the manor runs it (Castellan's build, pictures on the Adreno).
+
+| | 0.8.0, pictures on the Adreno | 0.9.1, pictures on the Hexagon |
+|---|---|---|
+| Screen questions at 1,024 picture tokens | 33 of 35, a median 4.49 s (4.31–4.79) | 34 of 35, a median 1.50 s (1.37–2.17) |
+| Questions about ten photos (Wikimedia Commons, up to 5388 × 3368) | 21 of 21, a median 4.42 s (1.40–4.91) | 21 of 21, a median 1.45 s (0.55–1.89) |
+| npu-bench's four pictures | 4 of 4, a median 419 ms | 4 of 4, a median 282 ms |
+| The first picture after a chat / the next | 2.0 / 0.18 s | 0.55–0.59 / 0.14–0.19 s |
+| A picture after 75 quiet seconds | 634 ms (its encoder loaded again) | 167 ms |
+| A paragraph | 1.54 s, 73.0 tokens a second | 1.39–1.63 s, 72.5–72.6 |
+| Quality items | 22 of 24 | 21 of 24 (as GenieX's own 0.8.0 plugin: one more wrong, three words asked, five given) |
+| The first answer after a start | 3.1 s | 4.7 s |
+| After a chat: working set / private / on the NPU | 1.6 / 0.22 / 1.48 GB | 3.27 / 0.73 / 3.21 GB |
+| After a picture: private / on the Adreno | 1.97–2.07 / 1.54 GB | 0.74–0.90 GB / none |
+| The PC's available memory: after a picture / 75 s later | 3.2 / 2.1 GB lower | 3.6 / 3.6 GB lower |
+
+Both misread the Smith's tally picture drawn on a whole number of 32 px squares ("Tally 827"), as 0.8.0 always did, and both answered every must-pass quality item right. What 0.9.1 gives a PC that runs it: pictures about three times sooner, the Adreno left free (no 1.5 GB there, no picture work beside the card's own servers), and 1.2 GB less private memory after a picture. What it costs: about 1.5 GB more held at rest, and 1.6 s more to the first answer after a start, because Castellan's build (built against 0.8.0's libraries) doesn't apply to it: 0.9.1 reads the model file into memory and loads its vision encoder at the start. qualcomm/GenieX#1557, the upstream fix, is still open. So the route keeps 0.8.0 for every PC, and 0.9 is how a PC runs it once its owner chose it.
+
+**Its embeddings.** llama.cpp b11125's `llama-server` doesn't start over GenieX 0.9.1's libraries (0xC0000139: an entry point it needs isn't there). From 0.9.0 the embedding server is llama.cpp b11645, which is e467e5b and one Metal-only commit (13 MB, SHA-256 pinned), in a folder of its own (`b11645-hexagon`), so the b11125 folder a PC still running 0.8.0 uses is never copied over. GenieX's same 13 files go over it. Measured the same evening, b11645 over 0.9.1's libraries against b11125 over 0.8.0's, 206 texts (Reeve's nine search-eval questions with their Qwen3 prefix, and Reeve-sized chunks of GamerNexus):
+
+| | b11125 over 0.8.0 | b11645 over 0.9.1 |
+|---|---|---|
+| Healthy after the start | 1.6–1.9 s | 1.6–1.7 s |
+| A query | 12–21 ms | 23–26 ms |
+| A chunk, in Reeve's batches of 16 | 112 ms | 72 ms |
+| A 1,539-character chunk alone, first time | 119–121 ms | 78–110 ms |
+| On the NPU / working set / private | 1.41 / 2.00 / 0.63 GB | 1.10 / 1.39 / 0.33 GB |
+
+The vectors are the same: cosine 0.99936 or more between the two (a median 0.999998), and the top five chunks for each of the nine questions came out in the same order. So an index built with either serves both, and nothing is indexed again. Reeve's search eval (kit 2.86.0's nine questions) gave the same answer to each: an index of GamerNexus and the Maestro docs built with b11125 over 0.8.0, then asked with each server, put the right file first for 4 of 9 and in the top five for 9 of 9, each question at the same rank with both.
 
 ### Resting when unused (kit 2.71.0)
 

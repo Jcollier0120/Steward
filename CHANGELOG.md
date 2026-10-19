@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.159
+
+**The Steward now hands out kit 2.88.1: a Snapdragon X2 running GenieX 0.9 reads pictures on its NPU, about three times sooner, and no longer crashes on the first one.**
+
+### What changed
+
+- **GenieX 0.9 on a Snapdragon X2.** The Smith's two tries of GenieX 0.9.1 on 2026-10-18 failed on the first picture: the kit asked it to read pictures on the graphics card, as GenieX 0.8.0 does, and 0.9.1 crashes when asked that. With kit 2.88.1 the staff ask the PC's GenieX which version it is and give 0.9 its own settings:
+  - pictures on the NPU's second session: a screen question in a median 1.5 s, not 4.5 s, and the graphics card left free;
+  - embeddings for search from a llama.cpp built for 0.9, with the same vectors, so nothing is indexed again.
+- Every other PC keeps GenieX 0.8.0 as it is. 0.9.1 holds about 1.5 GB more memory at rest, so it stays a choice the owner makes with the Smith's Use it. See [kit/CHANGELOG.md](kit/CHANGELOG.md) for the measurements.
+
+### Before you update
+
+- Nothing on a PC running GenieX 0.8.0: it updates itself as usual.
+- On a PC already moved to GenieX 0.9, the keeper restarts its vision model once (a few seconds), and downloads 13 MB for its embeddings if the Smith's try didn't already bring it.
+
 ## 0.36.158
 
 **For a .NET repository it finds on the PC, the Steward now takes the version a project sets for itself, ahead of the one in Directory.Build.props. `claim-version Heiward` now gives the next 1.9.x, not 4.1.x.**
