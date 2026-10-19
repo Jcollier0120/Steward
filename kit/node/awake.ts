@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { sharesConsole } from './console.ts';
 import { locksDir } from './lock.ts';
+import { HELPERS, signedHelper } from './prebuilt.ts';
 import { powershell, psQuote } from './ps.ts';
 
 /**
@@ -29,7 +30,7 @@ import { powershell, psQuote } from './ps.ts';
  */
 
 /** What the helper is compiled as: no console, so no window however it's started. */
-const AWAKE_OUTPUT = 'WindowsApplication';
+const AWAKE_OUTPUT = HELPERS.awake.type;
 
 /** A hold had of Windows: ended once nothing holds the PC awake. */
 export interface WindowsHold {
@@ -117,6 +118,8 @@ export function awakeHelperExe(log: (line: string) => void): Promise<string | nu
   return (building ??= (async () => {
     try {
       const source = awakeSource();
+      const signed = signedHelper('awake', source);
+      if (signed) return signed;
       const exe = awakeExe(source);
       if (existsSync(exe)) return exe;
       mkdirSync(path.dirname(exe), { recursive: true });

@@ -15,6 +15,9 @@ mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
 const { CHECKS_AT_ONCE, CHECKS_AT_ONCE_FULL, CHECKS_SLOWER_ENV, CHECKS_TURN_MS, checksAtOnce, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, checksSlower, paced, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
 const { psPaced } = await import('./fixture/src/kit/ps.ts');
+const { signedHelper } = await import('./fixture/src/kit/prebuilt.ts');
+/** The launcher a paced command starts: the signed one the kit ships, or the one compiled here (kit 2.91.0). */
+const launcher = () => signedHelper('checks-pace', readFileSync(new URL('./fixture/src/kit/checks-pace.cs', import.meta.url), 'utf8')) ?? checksPaceExe();
 const { AGENTS_AT_ONCE, CEILING_CAP, CEILING_ENV, PACE_CEILING, ceilingCap } = await import('./fixture/src/kit/pace.ts');
 // The launchers these tests run share a job of the test's own, never setting the PC's real check runs' job's limits.
 process.env.KIT_CHECKS_JOB_NAME = `kit-test-checks-${process.pid}`;
@@ -142,7 +145,7 @@ test('on Windows, a paced command: through the launcher, its arguments and outpu
   const logged: string[] = [];
   const p = await pacedCommand(process.execPath, ['x'], { env: { KIT_CHECKS_PACE: '50' }, home: path.join(home, 'no-manor'), log: (l) => logged.push(l) });
   assert.deepEqual(logged, [], 'the launcher was built');
-  assert.equal(p.file, checksPaceExe());
+  assert.equal(p.file, launcher());
   assert.deepEqual(p.args, [checksLimits(5000), process.execPath, 'x']);
   assert.deepEqual([p.slower, p.waitMs], [4, CHECKS_TURN_MS], 'half the processor: four times its time, and the wait for a turn');
   assert.equal(p.env.MSBUILDDISABLENODEREUSE, '1', ".NET's build servers don't stay behind in the job");

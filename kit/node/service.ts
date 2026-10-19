@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, renameSync, statSync } from 'node:fs';
+import path from 'node:path';
 import { APP, dataDir, devCheckout, pageUrl, port } from '../app.ts';
+import { blockedIn } from './app-control.ts';
 import { ago } from './page.ts';
 import { duty, setDuty, type Duty } from './duty.ts';
 import { licenseNow, licensePing, TRIAL_ENDED_TEXT } from './license-check.ts';
@@ -103,25 +105,32 @@ export async function open(cliFile: string, opts: { quiet?: boolean } = {}): Pro
   // so its command line says so (Pinder and the Surveyor know the manor's own agents by it).
   const entry = cliFile.endsWith('.js') && existsSync(`${cliFile.slice(0, -3)}.ts`) ? `${cliFile.slice(0, -3)}.ts` : cliFile;
   // Under the agent's name in Task Manager once the page has built its launcher (named.ts); a checkout's job is its own.
+  // When Windows blocked that launcher (Smart App Control: a program it hasn't seen, unsigned; kit 2.91.0), as node.
   const exe = namedBuilt(APP);
-  const how = pageLaunch(process.execPath, entry, { named: exe ? { exe, id: devCheckout ? `${APP.id}-dev` : APP.id } : null });
-  const child = spawn(how.file, how.args, {
-    ...how.options,
-    stdio: ['ignore', log, log],
-    // The data folder, not the program's: Windows won't move a folder that is a process's current folder
-    // (or its children's, like PowerShell's), and an install swaps the program's folder.
-    cwd: dataDir,
-    // The launcher puts the page in the manor's ceiling (kit 2.78.7; named.cs), and gentle.ts an agent it didn't
-    // start; Manor's own page stays out of it (gentle.ts keepResponsive()).
-    env: { ...process.env, [CEILING_ENV]: String(APP.id === 'manor' ? 0 : ceilingCap()) },
-  });
-  child.unref();
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 250));
-    if (await ping()) {
-      if (!opts.quiet) console.log(`${APP.name}'s page is up: ${pageUrl}`);
-      return 0;
+  for (const named of exe ? [{ exe, id: devCheckout ? `${APP.id}-dev` : APP.id }, null] : [null]) {
+    const how = pageLaunch(process.execPath, entry, { named });
+    const child = spawn(how.file, how.args, {
+      ...how.options,
+      stdio: ['ignore', log, log],
+      // The data folder, not the program's: Windows won't move a folder that is a process's current folder
+      // (or its children's, like PowerShell's), and an install swaps the program's folder.
+      cwd: dataDir,
+      // The launcher puts the page in the manor's ceiling (kit 2.78.7; named.cs), and gentle.ts an agent it didn't
+      // start; Manor's own page stays out of it (gentle.ts keepResponsive()).
+      env: { ...process.env, [CEILING_ENV]: String(APP.id === 'manor' ? 0 : ceilingCap()) },
+    });
+    child.unref();
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      if (await ping()) {
+        if (!opts.quiet) console.log(`${APP.name}'s page is up: ${pageUrl}`);
+        return 0;
+      }
     }
+    if (!named) break;
+    const name = path.win32.basename(named.exe).toLowerCase();
+    if (!(await blockedIn(path.dirname(named.exe), 15_000)).some((b) => path.win32.basename(b.file).toLowerCase() === name)) break;
+    console.error(`Windows blocked ${path.win32.basename(named.exe)}, which shows ${APP.name} by name in Task Manager: its page starts without it`);
   }
   console.error(`${APP.name}'s page didn't start within 10 s; see ${logFile}`);
   return 1;

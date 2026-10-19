@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { locksDir } from './lock.ts';
+import { signedHelper } from './prebuilt.ts';
 import { powershell, psQuote } from './ps.ts';
 
 /**
@@ -64,7 +65,7 @@ export async function trimWorkingSet(pid: number, env: NodeJS.ProcessEnv = proce
   if (process.platform !== 'win32' || env.KIT_SERVER_TRIM === '0') return null;
   try {
     const source = workingSetSource();
-    const dll = workingSetDll(source);
+    const dll = signedHelper('working-set', source) ?? workingSetDll(source);
     let first: string | null = null;
     if (!existsSync(dll)) {
       mkdirSync(path.dirname(dll), { recursive: true });
