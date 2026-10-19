@@ -21,6 +21,9 @@ const { currentWork, inWork, resetWorkTasks, startWork, withWork, workTasks } = 
 const { PASS_STANDS_MS, RESULTS_SHOWN, codeAt, passFor, pcLines, pcLoad, peerResult, recentResults, recordResult, resetResults, resultFor, resultKey, taskView, toolchainHere, whyNotPass, workStatus } = await import('./fixture/src/kit/work-status.ts');
 const { passOnOtherPcs } = await import('./fixture/src/kit/manor.ts');
 const { CHECKS_RUNS_ENV, CHECKS_WHO_ENV, checksLimits, checksMemory, checksPaceExe, checksRuns, checksRunsDir, checksWho, pacedCommand, parseChecksRun } = await import('./fixture/src/kit/checks-pace.ts');
+const { signedHelper } = await import('./fixture/src/kit/prebuilt.ts');
+/** The launcher a paced command starts: the signed one the kit ships, or the one compiled here (kit 2.91.0). */
+const launcher = () => signedHelper('checks-pace', readFileSync(new URL('./fixture/src/kit/checks-pace.cs', import.meta.url), 'utf8')) ?? checksPaceExe();
 const { inWorkTurn, workLockDir } = await import('./fixture/src/kit/pace.ts');
 const { withAcceleratorTurn } = await import('./fixture/src/kit/npu-queue.ts');
 const { every } = await import('./fixture/src/kit/schedule.ts');
@@ -400,7 +403,7 @@ test('a paced command names its agent and task, and where its launcher says so',
 
 test('on Windows, a launcher says where it stands while it runs (a turn, since when, who), its programs say nothing, and its file goes when it ends', { skip: process.platform !== 'win32' }, async () => {
   const p = await pacedCommand(process.execPath, ['x'], { env: { KIT_CHECKS_PACE: '50' }, home: path.join(home, 'no-manor') });
-  assert.equal(p.file, checksPaceExe());
+  assert.equal(p.file, launcher());
   const dir = path.join(home, 'launcher-runs');
   const env: NodeJS.ProcessEnv = { ...process.env, KIT_CHECKS_TURN_NAME: `kit-test-runs-${process.pid}`, [CHECKS_RUNS_ENV]: dir, [CHECKS_WHO_ENV]: `${APP.id}\tw1\tits checks` };
   delete env.KIT_CHECKS_TURN;

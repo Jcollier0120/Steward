@@ -3,7 +3,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync
 import os from 'node:os';
 import path from 'node:path';
 import { alive, startApart } from './apart.ts';
-import { blockedIn, blockedSay, cpuVariants, keepCpuVariant, loadedCpuVariant } from './app-control.ts';
+import { blockedIn, blockedSay, cpuVariants, keepCpuVariant, loadedCpuVariant, type ReadLog } from './app-control.ts';
 import * as core from './core/index.js';
 import { acceleratorsDir, lockDirFor } from './lock.ts';
 import { lineState, queueDirFor, readLine, slotDirs, type Lane } from './npu-queue.ts';
@@ -779,7 +779,7 @@ export interface ServerReady {
  * `onWaking` is told, before any waiting, that the server is being started (it wasn't running: the keeper stopped it
  * when nobody used it) or is busy loading: the request will wait for its model to load. A throw from it is ignored.
  */
-export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv; onWaking?: (how: 'starting' | 'loading') => void } = {}): Promise<ServerReady> {
+export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv; onWaking?: (how: 'starting' | 'loading') => void; readBlocks?: ReadLog } = {}): Promise<ServerReady> {
   const readyMs = opts.readyMs ?? READY_WAIT_MS;
   const lists = { listsWhenLoaded: listsWhenLoaded(ep.startCommand) };
   const state = await probe(ep.baseUrl, PROBE_MS, lists);
@@ -817,7 +817,41 @@ async function untilReady(baseUrl: string, ms: number, o: { listsWhenLoaded?: bo
   }
 }
 
-async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile?: string; env?: NodeJS.ProcessEnv } = {}): Promise<ServerReady> {
+/** How a server is started: where its output goes, its environment, and (for tests) the log its blocks are read from. */
+interface StartOptions {
+  logFile?: string;
+  env?: NodeJS.ProcessEnv;
+  readBlocks?: ReadLog;
+}
+
+/** A start that Smart App Control (or another application control policy) blocked part of. */
+class BlockedStart extends AcceleratorDown {}
+
+/** How long a start that was blocked waits before its one more try. */
+export const BLOCKED_AGAIN_MS = 2_000;
+
+/**
+ * Starts a server, once more when Smart App Control blocked part of it (kit 2.91.0): on the PC where its blocks were
+ * seen, each was a one-off, the same file running when it was started again, so a second try costs a few seconds and
+ * can spare the asker a failure. When it's blocked again, that's said as before.
+ */
+async function start(ep: Endpoint, waitMs: number, readyMs: number, o: StartOptions = {}): Promise<ServerReady> {
+  try {
+    return await startOnce(ep, waitMs, readyMs, o);
+  } catch (e) {
+    if (!(e instanceof BlockedStart)) throw e;
+    const line = `${new Date().toISOString()} kit: ${e.message} It's started once more in ${BLOCKED_AGAIN_MS / 1000} s.`;
+    try {
+      if (o.logFile) appendFileSync(o.logFile, `${line}
+`);
+      else console.error(line);
+    } catch {}
+    await new Promise((r) => setTimeout(r, BLOCKED_AGAIN_MS));
+    return startOnce(ep, waitMs, readyMs, o);
+  }
+}
+
+async function startOnce(ep: Endpoint, waitMs: number, readyMs: number, o: StartOptions): Promise<ServerReady> {
   const [cmd, ...args] = ep.startCommand!.map((a) => expandEnv(a));
   const program = path.win32.basename(cmd);
   const startedAt = Date.now();
@@ -862,7 +896,7 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
   };
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 250));
-    if (spawnError) throw new AcceleratorDown(await blockedFirst(cmd, startedAt, core.say.couldNotStart(cmd, spawnError.message)));
+    if (spawnError) throw await blockedFirst(cmd, startedAt, core.say.couldNotStart(cmd, spawnError.message), o.readBlocks);
     const state = await probe(ep.baseUrl, 2000, lists);
     if (state === 'ready') {
       loaded();
@@ -875,18 +909,19 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
     }
     // GenieX exits at once (code 0) when another server holds its port: it is down only if nothing answers.
     if (apart && exited === undefined && !alive(apart)) exited = null;
-    if (exited !== undefined) throw new AcceleratorDown(await blockedFirst(cmd, startedAt, core.say.exitedWhileStarting(program, exited, ep.baseUrl)));
+    if (exited !== undefined) throw await blockedFirst(cmd, startedAt, core.say.exitedWhileStarting(program, exited, ep.baseUrl), o.readBlocks);
   }
   throw new AcceleratorDown(core.say.didNotAnswer(program, ep.baseUrl, Math.round(waitMs / 1000)));
 }
 
 /**
  * A server that couldn't start, with what Windows' Smart App Control (or another application control policy) blocked of
- * it said first, when its log names a file in the server's folder since the start (app-control.ts, kit 2.88.4).
+ * it said first, when its log names a file in the server's folder since the start (app-control.ts, kit 2.88.4): then a
+ * BlockedStart, which start() tries once more.
  */
-async function blockedFirst(cmd: string, since: number, said: string): Promise<string> {
-  const why = blockedSay(await blockedIn(path.dirname(cmd), Date.now() - since + 5_000), path.win32.basename(cmd));
-  return why ? `${why}. ${said}` : said;
+async function blockedFirst(cmd: string, since: number, said: string, read?: ReadLog): Promise<AcceleratorDown> {
+  const why = blockedSay(await blockedIn(path.dirname(cmd), Date.now() - since + 5_000, read), path.win32.basename(cmd));
+  return why ? new BlockedStart(`${why}. ${said}`) : new AcceleratorDown(said);
 }
 
 /**

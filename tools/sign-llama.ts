@@ -116,7 +116,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const tarExe = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
 
 /** Each file's Authenticode signature, all in one PowerShell (Arm64's own can read signatures; only signing needs x64). */
-function signatures(files: string[], work: string): Signature[] {
+export function signatures(files: string[], work: string): Signature[] {
   if (!files.length) return [];
   const list = path.join(work, 'files.txt');
   writeFileSync(list, files.join('\n'));
@@ -127,7 +127,7 @@ function signatures(files: string[], work: string): Signature[] {
 }
 
 /** Signs the files, the first alone, so a SimplySign that isn't connected stops it at once. */
-function sign(files: string[]): void {
+export function sign(files: string[]): void {
   if (!existsSync(SIGNTOOL)) throw new Error(`no x64 signtool at ${SIGNTOOL} (the Windows SDK's signing tools)`);
   for (const batch of [files.slice(0, 1), ...batches(files.slice(1))].filter((b) => b.length)) {
     const r = spawnSync(SIGNTOOL, ['sign', '/sha1', THUMBPRINT, '/fd', 'SHA256', '/tr', TIMESTAMP, '/td', 'SHA256', '/q', ...batch], { encoding: 'utf8', windowsHide: true });

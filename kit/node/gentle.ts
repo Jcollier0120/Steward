@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { locksDir } from './lock.ts';
 import { CEILING_CAP, ceilingCap, pace, setPriorityFor, type Pace } from './pace.ts';
+import { signedHelper } from './prebuilt.ts';
 import { powershell, psQuote } from './ps.ts';
 
 /**
@@ -144,7 +145,7 @@ function applyPace(): Promise<void> {
     applied = want;
     try {
       const source = gentleSource();
-      const dll = gentleDll(source);
+      const dll = signedHelper('gentle', source) ?? gentleDll(source);
       let first: string | null = null;
       if (!existsSync(dll)) {
         mkdirSync(path.dirname(dll), { recursive: true });

@@ -2,6 +2,29 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.91.0
+
+**The kit's own helper programs are signed, and a start that Smart App Control blocked gets one more try.**
+
+- **Signed helpers:** the small programs the kit runs beside an agent (the checks' pace launcher, the one that keeps the PC awake during work, and the two that set the gentle pace and hand a model server's memory back) used to be compiled on each PC. On a PC with Smart App Control on, Windows blocks a program it has never seen unless it's signed, and a program each PC compiles itself is one it has never seen. On 2026-10-19 the gaming desktop blocked the checks' pace launcher eight times in two seconds, so a check failed to start (`spawn UNKNOWN`). The kit now ships them compiled and signed with Castellan's certificate. A PC compiles one itself only when its source has changed since it was last signed.
+- **One more try after a block:** when a local AI server couldn't start and Windows' log shows it blocked a file of it, the server is started once more, 2 seconds later. On the desktop where they were seen, each block was a one-off. If it's blocked again, the message says so as before.
+- **An agent's page starts even if its name launcher is blocked:** the launcher that shows an agent by name in Task Manager is compiled for each agent, so it can't be signed in advance. When Windows blocked it, the page now starts as plain node instead of not at all.
+
+### What changed
+
+- **prebuilt.ts (new):** `HELPERS` lists the four helpers (checks-pace, awake, gentle, working-set), with each one's output type. `prebuilt\` holds each one signed, named for its source (`prebuiltName`). The hash is taken with plain line ends, so a checkout's CRLF names the same file. This kit's are `checks-pace-b01ccaf308fc.exe`, `awake-84217c865cad.exe`, `gentle-049b3ec19d1a.dll` and `working-set-73c38b5f495c.dll`. `signedHelper` copies it into the shared kit folder as `<name>.signed.<ext>` and returns that path. It returns null when the kit has no prebuilt copy for this source, and the caller then compiles as before. It never throws.
+- **checks-pace.ts, awake.ts, gentle.ts, working-set.ts:** each takes `signedHelper(...)` first, then its own compiled file. awake.ts takes its output type from `HELPERS`.
+- **accelerators.ts:**
+  - `start` tries once more after `BLOCKED_AGAIN_MS` (2 s) when `blockedFirst` found a block (a `BlockedStart`). The retry is noted in the server's log.
+  - `ensureServer`'s `readBlocks` gives tests their own Code Integrity log.
+- **service.ts:** when an agent's page didn't come up through its named launcher, and Windows' log shows that launcher blocked in the last 15 s, the page is started again without it.
+- **The Steward's `tools/sign-helpers.ts`** compiles each helper as a PC would (Windows PowerShell's Add-Type), signs it (Certum, timestamped), checks it, and puts it in `kit\node\prebuilt\`. It removes any copy there whose source has changed. A kit test fails when a prebuilt helper no longer matches its source: sign it again, or remove it.
+
+### Before you update
+
+- Nothing in an agent's code. The prebuilt helpers come with the kit's node part, about 70 KB in `src\kit\prebuilt\`.
+- A helper already compiled on a PC stays in its folder, unused once the signed one is there.
+
 ## 2.90.0
 
 **Local AI's llama.cpp builds are now signed, so Windows' Smart App Control lets them run.**

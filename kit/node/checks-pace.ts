@@ -5,6 +5,7 @@ import path from 'node:path';
 import { locksDir } from './lock.ts';
 import { manorHome } from './manor.ts';
 import { pidAlive } from './npu-queue.ts';
+import { signedHelper } from './prebuilt.ts';
 import { AGENTS_AT_ONCE, CEILING_CAP, CEILING_ENV, ceilingCap } from './pace.ts';
 import { powershell, psQuote } from './ps.ts';
 import { currentWork } from './work-tasks.ts';
@@ -215,6 +216,8 @@ export function checksPaceLauncher(log: (line: string) => void = console.log): P
   return (building ??= (async () => {
     try {
       const source = checksPaceSource();
+      const signed = signedHelper('checks-pace', source);
+      if (signed) return signed;
       const exe = checksPaceExe(source);
       if (existsSync(exe)) return exe;
       mkdirSync(path.dirname(exe), { recursive: true });
