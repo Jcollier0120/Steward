@@ -7,6 +7,7 @@ import { APP, appRoot } from '../app.ts';
 import { SETTINGS_SPEC } from '../settings.ts';
 import { checkValues, schemaGaps, type Field } from './settings-kit.ts';
 import { onboardingProblems, type Onboarding } from './onboarding.ts';
+import { ownRouteClashes } from './kit-routes.ts';
 
 /**
  * The kit's checks of the agent it sits in: that the agent gives the kit what it needs (the agent
@@ -39,6 +40,12 @@ const onboardingFile = path.join(appRoot, 'src', 'onboarding.ts');
 test('its onboarding: at most three day-one settings, each in its schema and none advanced, and a tour of named parts', { skip: !existsSync(onboardingFile) && 'no src/onboarding.ts' }, async () => {
   const { ONBOARDING } = (await import(pathToFileURL(onboardingFile).href)) as { ONBOARDING: Onboarding };
   assert.deepEqual(onboardingProblems(ONBOARDING, SETTINGS_SPEC.schema as Field[]), []);
+});
+
+// serve() refuses them at start (kit-routes.ts): found here first, in the source, without starting the page.
+test("its own routes leave the kit's alone (POST /api/stop ends the page, for shutdown and an update)", () => {
+  const lines = ownRouteClashes(appRoot).map((c) => `${c.file}:${c.line} has its own '${c.route}', which is the kit's: give it a name of its own`);
+  assert.deepEqual(lines, []);
 });
 
 test('its icon is art/icon.svg', () => {
