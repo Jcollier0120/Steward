@@ -113,8 +113,9 @@ details.sf-advanced { margin: 12px 0 14px; border: 1px dashed var(--line); borde
 details.sf-advanced > summary { color: var(--muted); font-weight: 600; cursor: pointer; }
 details.sf-advanced[open] > summary { margin-bottom: 4px; }
 
-/* The tour (tour.tsx): a card in the middle for its first steps, docked at the bottom while it walks the page. */
+/* The tour (tour.tsx): a card in the middle for its first steps, docked at the bottom while it walks the page. It holds the page on every step, as Manor's welcome does: the backdrop catches clicks, lighter while it walks the page so the part it names shows. */
 .tour-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .45); }
+.tour-backdrop-light { background: rgba(0, 0, 0, .12); }
 .tour-card { display: flex; flex-direction: column; gap: 8px; padding: 18px 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
 .tour-card p { margin: 0; }
 .tour-center { width: min(520px, 100%); max-height: calc(100vh - 48px); overflow: auto; }

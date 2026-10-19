@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { alertDialog } from './modal.tsx';
 import type { Onboarding, PageShell } from './page-data.ts';
 import { SettingsForm } from './settings-form.tsx';
@@ -19,6 +19,10 @@ import { Button, LinkButton, Text } from './ui.tsx';
  * Its required settings (onboarding's `required`, the node part's required.ts) are marked in step 2, which holds until
  * they're filled in and saved: the agent does nothing without them. Skip still leaves; the page then says what it's
  * waiting for, with a link back to this step (#/tour?step=settings).
+ *
+ * Like Manor's welcome, it holds the page while it shows (useHoldPage): the page under it is dimmed and inert, so each
+ * step is answered, or the tour skipped, before the person goes on. Walking the page's parts, the card docks in the
+ * corner over a light dim, so the part it names shows.
  *
  * Opened as #/tour?from=<url> (the URL encoded), its last step also offers "Back to <manor>" (the manor's name, as the
  * title bar says it, else Castellan): to that URL, which must be this PC's (tourFrom()), so the hire flow that opened
@@ -46,6 +50,27 @@ function useSpotlight(name: string | null) {
     requestAnimationFrame(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }));
     return () => el.classList.remove('tour-target');
   }, [name]);
+}
+
+/**
+ * While the tour shows, the page under it can't be clicked or tabbed to: everything but the tour's layer and the
+ * elements it sits in is inert, as Manor's welcome holds its page. The kit's own dialogs (modal.tsx's host) stay
+ * usable, for the settings step's questions. Let go when the tour ends.
+ */
+function useHoldPage(layer: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const held: HTMLElement[] = [];
+    for (let at = layer.current; at && at.parentElement && at !== document.body; at = at.parentElement) {
+      for (const other of Array.from(at.parentElement.children)) {
+        if (other === at || !(other instanceof HTMLElement) || other.inert || other.matches('[data-kit-dialogs], script, style')) continue;
+        other.inert = true;
+        held.push(other);
+      }
+    }
+    return () => {
+      for (const h of held) h.inert = false;
+    };
+  });
 }
 
 /**
@@ -139,9 +164,11 @@ export function Tour({ onboarding, app, needs = null, onSettingsSaved, start = t
   };
   const part = step === 'tour' ? parts[at] : null;
   useSpotlight(part?.tour ?? null);
+  const layer = useRef<HTMLDivElement>(null);
+  useHoldPage(layer);
   if (step === 'intro')
     return (
-      <div className="tour-backdrop">
+      <div className="tour-backdrop" ref={layer}>
         <TourCard place={place} title={onboarding.intro.title} next={() => go(1)} appId={app.id}>
           <Text as="p">{onboarding.intro.text}</Text>
         </TourCard>
@@ -149,7 +176,7 @@ export function Tour({ onboarding, app, needs = null, onSettingsSaved, start = t
     );
   if (step === 'settings')
     return (
-      <div className="tour-backdrop">
+      <div className="tour-backdrop" ref={layer}>
         <TourCard wide place={place} title="Your settings" back={() => go(-1)} next={() => (dirty ? void alertDialog('Save your changes first, or Cancel them.') : needs ? void alertDialog(`${app.name} can't start without ${needs.text}: fill it in and Save first.`) : go(1))} last={steps.length === 2} appId={app.id} from={from} manorName={manorName}>
           <Text variant="muted" as="p">
             {onboarding.settings.length ? `Only what ${app.name} can't choose for you. Everything else has a default that works, and is in Settings.` : `${app.name} needs nothing from you to start.`}
@@ -165,8 +192,10 @@ export function Tour({ onboarding, app, needs = null, onSettingsSaved, start = t
     );
   const last = at >= parts.length - 1;
   return (
-    <TourCard docked place={`${place} · ${at + 1} of ${parts.length}`} title={part?.title ?? app.name} back={() => (at ? setAt(at - 1) : go(-1))} next={() => (last ? go(1) : setAt(at + 1))} last={last} appId={app.id} from={from} manorName={manorName}>
-      <Text as="p">{part?.text}</Text>
-    </TourCard>
+    <div className="tour-backdrop tour-backdrop-light" ref={layer}>
+      <TourCard docked place={`${place} · ${at + 1} of ${parts.length}`} title={part?.title ?? app.name} back={() => (at ? setAt(at - 1) : go(-1))} next={() => (last ? go(1) : setAt(at + 1))} last={last} appId={app.id} from={from} manorName={manorName}>
+        <Text as="p">{part?.text}</Text>
+      </TourCard>
+    </div>
   );
 }

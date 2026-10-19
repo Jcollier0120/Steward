@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.88.3
+
+**The tour holds the page on every step, as Castellan's own welcome does: the person answers it or skips it before going on.**
+
+The owner asked on 2026-10-19 that each staff member's onboarding disable the rest of its page, as Manor's welcome does. The tour's first two steps had a backdrop, but its third, walking the page's parts, had none: the page stayed clickable under it, and nothing stopped Tab reaching the page under any step.
+
+### What changed
+
+- `react/tour.tsx`: `useHoldPage` makes everything but the tour's layer inert while the tour shows (no clicks, no Tab), and lets it go when it ends. The kit's dialogs (`modal.tsx`'s host) stay usable.
+- The steps that walk the page now sit on a backdrop too, `.tour-backdrop-light` (`react/styles.ts`), a light dim so the outlined part still shows.
+
+### Before you update
+
+- Nothing in an agent's code: its tour holds its page once it takes this kit up.
+
 ## 2.88.2
 
 **The helper that keeps the PC awake for the staff's work no longer opens a terminal. Before, the wake task before each of the Steward's builds put a terminal window on the desktop for up to 65 minutes. Where kit 2.88.1 wasn't released before it, this release brings it too.**
