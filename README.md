@@ -79,6 +79,7 @@ What the kit needs from the agent it sits in, kept small:
 - **`src/cli.ts`** is the entry point: install's sign-in task runs `src\cli.ts open`, and `serve` runs the page.
 - **`art/icon.svg`**, which the page serves as `/favicon.svg` and Manor shows.
 - **`package.json`**: its `name` is `APP.id` and its `version` is `APP.version` (release.ts checks it); and **`kit.json`**.
+- **Its own routes** (`serve()`'s `get` and `post`) leave the kit's alone, `KIT_ROUTES` in kit-routes.ts: `serve()` refuses one named as the kit's, so the kit's `POST /api/stop` always ends the page.
 
 `agent-checks.ts` checks all of it: each agent's `test/agent.test.ts` is one line, `import '../src/kit/agent-checks.ts';`, and fails when the agent and the kit disagree (its schema and defaults too, as each hire's settings-kit.test.ts used to check).
 

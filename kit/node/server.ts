@@ -15,6 +15,7 @@ import { needsSettings, watchRequired } from './required.ts';
 import { rounds, roundTimes } from './schedule.ts';
 import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
 import { demoAnswer, demoDir, DEMO_NO } from './demo.ts';
+import { shadowedRoutes } from './kit-routes.ts';
 import { dataFile, writeJson } from './store.ts';
 import { repair, repairKinds } from './repair.ts';
 import { peerResult, workStatus, type WorkExtra } from './work-status.ts';
@@ -99,6 +100,7 @@ export interface ServeOptions {
   port: number;
   /** The agent's icon: /favicon.svg, which Manor shows next to its name. */
   icon: string;
+  /** The agent's own routes, beside the kit's (kit-routes.ts KIT_ROUTES): one named as one of the kit's is refused at start. */
   get?: Record<string, Handler>;
   post?: Record<string, Handler>;
   /** Extra fields for /api/ping, e.g. whether a run is under way, or `settingUp` (SettingUp). Keep it cheap: Manor polls it. */
@@ -186,6 +188,13 @@ export function alsoOnV6Loopback(server: http.Server, port: number): net.Server 
 }
 
 export async function serve(opts: ServeOptions): Promise<{ server: http.Server; token: string; close: () => Promise<void> }> {
+  // An own route named as one of the kit's would take its place without a word (kit-routes.ts): refused
+  // before anything starts. agent-checks.ts finds it in the agent's source first.
+  const shadowed = shadowedRoutes(opts, !!opts.settings);
+  if (shadowed.length) {
+    const one = shadowed.length === 1;
+    throw new Error(`${APP.name}'s own ${shadowed.join(', ')} would take the kit's place: the kit answers ${one ? 'it' : 'them'} for every agent (its POST /api/stop ends the page, for shutdown and an update). Give ${one ? 'it a name' : 'each a name'} of its own.`);
+  }
   const token = randomBytes(24).toString('hex');
   const hosts = allowedHosts(opts.port);
   const tour = hasTour();

@@ -2,6 +2,31 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased (its version needs claiming on the main laptop)
+
+**An agent's own route can't take one of the kit's any more. serve() refuses it as the page starts, and agent-checks finds it in the agent's source before that. The Chronicler's shrinking card had its own `POST /api/stop`, so `chronicler shutdown` and an update's install couldn't end its page.**
+
+The kit's server answers some routes itself for every agent, and spreads the agent's own `get` and `post` over them. So an own route of the same name took the kit's place without a word. The Chronicler's Stop for the copy being made smaller was `POST /api/stop` from its 0.1.0 until its 0.4.17 (Jcollier0120/Chronicler#28, merged). The kit's `shutdown()`, which an update's install calls, posts `/api/stop` and waits. For the Chronicler that only stopped the shrinking: the page stayed up, the install said "page is still running, so nothing was changed", and `shutdown` said the page didn't stop.
+
+The Chronicler's main has its 0.4.17 now, whose card's Stop is `POST /api/shrink/stop`, so it can take this kit. A Chronicler before 0.4.17 fails its agent-checks on this kit, and its page wouldn't start. No other agent is affected: no route named as one of the kit's was found in the source of the 34 repositories with a kit.json on the owner's PC. Manor's `src/demo.ts` names `/api/ping` and `/favicon.svg`, but as answers in its demo data, not routes; Manor runs neither agent-checks nor the kit's server.
+
+### What changed
+
+- **kit-routes.ts** (new): the kit's own routes, and the guards that keep an agent's routes off them.
+  - `KIT_ROUTES` lists them. GET: `/api/ping`, `/favicon.svg`, `/manor-icon.svg`, `/settings.js`, `/settings.css`, `/page.js`, `/api/peer/work` and `/api/peer/result`. POST: `/api/stop`, `/api/duty` and `/api/repair`.
+  - `SETTINGS_ROUTE` is `/api/settings`, GET and POST: the kit's when serve() is given the agent's `settings`.
+  - `shadowedRoutes(own, settings)` names the agent's own routes that would take one of the kit's, as `POST /api/stop`.
+  - `ownRouteClashes(root)` finds them in an agent's source by reading it, without starting anything.
+    - It reads `src`, but not `src/kit` or `src/web`.
+    - It looks for a property named as a kit route (`'/api/stop': …`). A fetch of the route, or a ternary naming it, isn't one.
+- **server.ts**: `serve()` throws when the agent's own `get` or `post` names one of the kit's routes. It names each one and says to give it a name of its own. It throws before anything starts: nothing listens and no `server.json` is written.
+- **agent-checks.ts**: a new check, "its own routes leave the kit's alone". It fails with each place in the agent's source (file and line) that names a kit route as its own.
+- A kit test keeps `KIT_ROUTES` the same as the tables server.ts builds, so a new built-in can't be left out.
+
+### What an agent must do
+
+Nothing, unless its agent-checks fail on this kit: then give the route they name a name of its own, and change whatever posts it (its page, usually).
+
 ## 2.88.1
 
 **On a Snapdragon X2 running GenieX 0.9, a vision model's pictures go to the NPU's second Hexagon session, about three times sooner than on the Adreno, and its embeddings to a llama.cpp built for 0.9. On GenieX 0.9.1, Castellan's build of its plugin holds no more memory at rest than 0.8.0 with its build. Setup now puts GenieX 0.9.1 on a new X2. An X2 set up before keeps 0.8.0 until its owner moves it with the Smith's Use it, and every other PC keeps 0.8.0, unchanged.**
