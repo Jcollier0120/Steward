@@ -56,3 +56,24 @@ test('blockedSay names the files and Smart App Control in plain words; an unname
   assert.equal(blockedSay([{ file: 'C:\\s\\geniex.exe', policy: 'Contoso Allow List' }], 'geniex.exe'), "Windows' application control (the policy Contoso Allow List) blocked geniex.exe, part of geniex.exe");
   assert.equal(blockedSay([], 'llama.cpp'), null);
 });
+
+test("the processor variant a running llama-server loaded, from tasklist, where the build doesn't say it (kit 2.90.0)", async () => {
+  const { cpuVariants, loadedCpuVariant, parseLoadedVariant } = await import('./fixture/src/kit/app-control.ts');
+  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = (await import('node:path')).default;
+  // As `tasklist /m ggml-cpu-* /fi "PID eq 8124" /fo csv /nh` says it on the gaming desktop, and for a process with none.
+  assert.equal(parseLoadedVariant('"llama-server.exe","8124","ggml-cpu-alderlake.dll"\r\n'), 'ggml-cpu-alderlake.dll');
+  assert.equal(parseLoadedVariant('INFO: No tasks are running which match the specified criteria.\r\n'), null);
+  assert.equal(parseLoadedVariant('"llama-server.exe","8124","N/A"\r\n'), null);
+  if (process.platform === 'win32') assert.equal(await loadedCpuVariant(process.pid), null, 'node loads no ggml');
+  const dir = mkdtempSync(path.join(tmpdir(), 'cpu-variants-'));
+  try {
+    assert.equal(cpuVariants(dir), 0);
+    for (const f of ['ggml-cpu-alderlake.dll', 'ggml-cpu-haswell.dll', 'ggml-cuda.dll']) writeFileSync(path.join(dir, f), 'x');
+    assert.equal(cpuVariants(dir), 2);
+    assert.equal(cpuVariants(path.join(dir, 'gone')), 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -6,7 +6,8 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 **Local AI's llama.cpp builds are now signed, so Windows' Smart App Control lets them run.**
 
-- **No more Smart App Control blocks:** ggml-org signs none of its llama.cpp builds, and on a PC with Smart App Control on, Windows blocks unsigned files it doesn't know. On 2026-10-19 the gaming desktop's blocked one of b11734's processor variants. Setup now downloads llama.cpp only from the manor's signed copies: each build is ggml-org's own, unchanged, and every .exe and .dll in it that ggml-org left unsigned carries Castellan's signature.
+- **Signed for Smart App Control:** ggml-org signs none of its llama.cpp builds, and on a PC with Smart App Control on, Windows blocks unsigned files it doesn't know. On 2026-10-19 the gaming desktop's blocked one of b11734's processor variants. Setup now downloads llama.cpp only from the manor's signed copies: each build is ggml-org's own, unchanged, and every .exe and .dll in it that ggml-org left unsigned carries Castellan's signature, which Smart App Control trusts whatever its cloud knows of the file. On that desktop, with Smart App Control on, the signed b11734 served Qwen3-VL-2B on its RTX 4080 SUPER and on its processor with no block.
+- **Fewer files loaded at each start:** once a llama-server is ready, the processor variants its build holds beside the one it chose are removed, as kit 2.88.4 meant to do at setup.
 - **Builds that were checked first:** a new llama.cpp build reaches the PCs only once it's signed, after the Smith's checks have passed on it, so a build that answers wrongly (as b11511 did on the Adreno) never reaches them.
 
 ### What changed
@@ -16,6 +17,8 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - A signed build unpacks into a folder named by its signed tag (`servers\llama.cpp\llama.cpp-b11734-cuda-12.4-x64`), so a PC set up with ggml-org's copy gets the signed one in full.
   - When no signed build has the files a card needs, setup says so (`no llama.cpp build signed for the manor … has cuda-12.4-x64`) and downloads none.
   - `LLAMA_VARIANTS` lists the builds `variantFor` names, which are the ones the manor signs.
+  - `cpuVariantLoaded` and `keepCpuVariant` move to `app-control.ts`; setup.ts still exports them.
+- **accelerators.ts, app-control.ts:** the x64 builds of b11734 never print `loaded CPU backend from …` with their output redirected, so 2.88.4's setup kept all 14 processor variants there. Once a llama-server whose folder holds more than one is ready, `keepLoadedVariant` reads the variant the process loaded (`loadedCpuVariant`: `tasklist /m ggml-cpu-*`, ggml-cpu-alderlake.dll on the desktop's Intel processor) and removes the others (`keepCpuVariant`). The server's log says so. A folder is asked once: after that it holds one.
 - **The Steward's `tools/sign-llama.ts`** signs a build and drafts its release. It downloads ggml-org's zip for each of `LLAMA_VARIANTS`, checks it against GitHub's digest, signs each unsigned .exe and .dll (Certum, timestamped), checks every one, and zips it again under its own name. llama.cpp's MIT license goes beside the zips, as ggml-org's carry none. Its release is a draft until a PC with Smart App Control on has run it.
 
 ### Before you update

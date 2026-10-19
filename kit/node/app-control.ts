@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -93,4 +94,64 @@ export function blockedSay(blocks: Block[], program: string): string | null {
     return `Windows' Smart App Control blocked ${list}, part of ${program}: its maker doesn't sign it, and Smart App Control blocks unsigned files it doesn't know`;
   if (!policy) return `Windows blocked ${list}, part of ${program}, because its maker doesn't sign it (Smart App Control, or a policy like it)`;
   return `Windows' application control (the policy ${policy}) blocked ${list}, part of ${program}`;
+}
+
+/**
+ * The processor variant ggml chose as it started (`load_backend: loaded CPU backend from …\ggml-cpu-haswell.dll`), its
+ * file name; null when it didn't say (a build with one ggml-cpu.dll, or output lost). x64's b11734 never says it, with
+ * its output redirected as setup runs it (the gaming desktop, 2026-10-19): there the running server's modules tell
+ * (loadedCpuVariant).
+ */
+export function cpuVariantLoaded(text: string): string | null {
+  const m = /loaded CPU backend from (.*?ggml-cpu-[^\\/\s]+\.dll)/i.exec(text);
+  return m ? path.win32.basename(m[1]) : null;
+}
+
+/**
+ * Keeps only the processor variant ggml chose in a llama.cpp build's folder (kit 2.88.4), and returns the files
+ * removed. ggml loads every ggml-cpu-*.dll at each start to choose the best for this processor, so one that Smart App
+ * Control blocks (app-control.ts) is blocked again, and its notice shown again, at every start. The one chosen is the
+ * one it would choose again, so nothing changes but that, and a quicker start. Nothing is removed when `chosen` isn't
+ * there, nor a variant that can't be removed now.
+ */
+export function keepCpuVariant(folder: string, chosen: string | null): string[] {
+  if (!chosen || !existsSync(path.join(folder, chosen))) return [];
+  const removed: string[] = [];
+  for (const f of readdirSync(folder)) {
+    if (!/^ggml-cpu-.+\.dll$/i.test(f) || f.toLowerCase() === chosen.toLowerCase()) continue;
+    try {
+      rmSync(path.join(folder, f));
+      removed.push(f);
+    } catch { /* in use: kept, and asked of again by the next setup */ }
+  }
+  return removed;
+}
+
+/** How many processor variants a llama.cpp build's folder holds. */
+export function cpuVariants(folder: string): number {
+  try {
+    return readdirSync(folder).filter((f) => /^ggml-cpu-.+\.dll$/i.test(f)).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** The ggml-cpu variant in `tasklist /m ggml-cpu-* /fo csv /nh`'s line for a process; null when it has none loaded. */
+export function parseLoadedVariant(csv: string): string | null {
+  const m = /"ggml-cpu-[^",\s]+\.dll/i.exec(csv);
+  return m ? m[0].slice(1) : null;
+}
+
+const TASKLIST = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tasklist.exe');
+
+/**
+ * The processor variant a running llama-server loaded (kit 2.90.0): ggml loads every variant at the start, keeps the
+ * best for this processor, and lets the others go, so once the server is ready its one ggml-cpu-*.dll is the choice
+ * (ggml-cpu-alderlake.dll on the gaming desktop's Intel processor). Null off Windows, or when tasklist can't say.
+ */
+export function loadedCpuVariant(pid: number): Promise<string | null> {
+  if (process.platform !== 'win32') return Promise.resolve(null);
+  return new Promise((resolve) =>
+    execFile(TASKLIST, ['/m', 'ggml-cpu-*', '/fi', `PID eq ${pid}`, '/fo', 'csv', '/nh'], { windowsHide: true, timeout: 15_000 }, (e, stdout) => resolve(e ? null : parseLoadedVariant(stdout))),
+  );
 }

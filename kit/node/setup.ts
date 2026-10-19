@@ -5,7 +5,8 @@ import { homedir, totalmem } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { type Block, blockedIn, blockedSay } from './app-control.ts';
+import { type Block, blockedIn, blockedSay, cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
+export { cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
 import { chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
@@ -1031,35 +1032,6 @@ export async function listDevices(server: string): Promise<string> {
   // same build and the same backends, logs each backend's devices to stderr unbuffered.
   const bench = path.join(path.dirname(exe), 'llama-bench.exe');
   return existsSync(bench) ? `${text}\n${await run(bench)}` : text;
-}
-
-/**
- * The processor variant ggml chose as it started (`load_backend: loaded CPU backend from …\ggml-cpu-haswell.dll`), its
- * file name; null when it didn't say (a build with one ggml-cpu.dll, or output lost).
- */
-export function cpuVariantLoaded(text: string): string | null {
-  const m = /loaded CPU backend from (.*?ggml-cpu-[^\\/\s]+\.dll)/i.exec(text);
-  return m ? path.win32.basename(m[1]) : null;
-}
-
-/**
- * Keeps only the processor variant ggml chose in a llama.cpp build's folder (kit 2.88.4), and returns the files
- * removed. ggml loads every ggml-cpu-*.dll at each start to choose the best for this processor, so one that Smart App
- * Control blocks (app-control.ts) is blocked again, and its notice shown again, at every start. The one chosen is the
- * one it would choose again, so nothing changes but that, and a quicker start. Nothing is removed when `chosen` isn't
- * there, nor a variant that can't be removed now.
- */
-export function keepCpuVariant(folder: string, chosen: string | null): string[] {
-  if (!chosen || !existsSync(path.join(folder, chosen))) return [];
-  const removed: string[] = [];
-  for (const f of readdirSync(folder)) {
-    if (!/^ggml-cpu-.+\.dll$/i.test(f) || f.toLowerCase() === chosen.toLowerCase()) continue;
-    try {
-      rmSync(path.join(folder, f));
-      removed.push(f);
-    } catch { /* in use: kept, and asked of again by the next setup */ }
-  }
-  return removed;
 }
 
 export interface SetupIo extends NpuIo {
