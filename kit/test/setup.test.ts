@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -14,6 +14,7 @@ const { autoOrder, readAccelerators, validateAccelerators } = await import('./fi
 const { detectedAccelerators, hardwareOf, keyCards, noNpu, npuName, parseAdapters, parseDetection, recommendedCard } = await import('./fixture/src/kit/detect.ts');
 const { acceleratorEntry, cardNeedGb, DESKTOP_GB, describePlan, findModels, matchDevice, mergeEntries, parseHfFiles, parseListDevices, parseReleases, pickRelease, planSetup, portablePath, runSetup, sizing, SMALL_SPEC, variantFor, withoutNpu } = await import('./fixture/src/kit/setup.ts');
 const { genieXConfig, isInstallDefaultNpu } = await import('./fixture/src/kit/setup.ts');
+const { cpuVariantLoaded, keepCpuVariant } = await import('./fixture/src/kit/setup.ts');
 const { setupCommand } = await import('./fixture/src/kit/setup.ts');
 const { acceleratorConfigFile } = await import('./fixture/src/kit/accelerator-config.ts');
 // Intel's model files are pinned (npu-vendors.test.ts tests that): these tests' pulls are fakes that leave none.
@@ -391,6 +392,51 @@ test("no NPU, for certain: Windows answered and listed no Hexagon driver; a fail
   // PowerShell ended after the graphics cards, before the NPU's query (no processor line after it).
   assert.equal(noNpu(parseDetection(DESKTOP_NO_NPU.split('\ncpu|')[0])), false);
   assert.equal(noNpu(parseDetection(DESKTOP_NO_NPU.replace(/^cpu\|.*\nram\|.*$/m, 'problem|processor: Invalid class'))), true, 'the NPU query answered; the processor one failed after it');
+});
+
+test("setup keeps only the processor variant ggml chose, so a variant Smart App Control blocks isn't loaded at every start (kit 2.88.4)", async () => {
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'cpu-variant-'));
+  const plan = await planSetup({ detection: parseDetection(DESKTOP_NO_NPU), ids: ['gpu-nvidia-geforce-rtx-4090'], kinds: ['chat'], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  const folder = plan.targets[0].folder!;
+  const fill = () => {
+    mkdirSync(folder, { recursive: true });
+    for (const f of ['ggml-base.dll', 'ggml-cuda.dll', 'ggml-cpu-alderlake.dll', 'ggml-cpu-haswell.dll', 'ggml-cpu-ivybridge.dll', 'ggml-cpu-x64.dll', 'llama-server.exe']) writeFileSync(path.join(folder, f), 'x');
+  };
+  fill();
+  // As a build's start logs it (stderr): every backend it loaded, the processor's the best of its variants that loaded.
+  const listing = [
+    `load_backend: loaded RPC backend from ${folder}\\ggml-rpc.dll`,
+    `load_backend: loaded CUDA backend from ${folder}\\ggml-cuda.dll`,
+    `load_backend: loaded CPU backend from ${folder}\\ggml-cpu-alderlake.dll`,
+    'Available devices:',
+    RTX,
+  ].join('\n');
+  assert.equal(cpuVariantLoaded(listing), 'ggml-cpu-alderlake.dll');
+  const lines: string[] = [];
+  const r = await runSetup(plan, {}, { ...fakeIo, log: (l: string) => lines.push(l), listDevices: async () => listing });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(readdirSync(folder).sort(), ['ggml-base.dll', 'ggml-cpu-alderlake.dll', 'ggml-cuda.dll', 'llama-server.exe'], 'the CUDA backend and the rest stay');
+  assert.ok(lines.some((l) => /llama\.cpp runs ggml-cpu-alderlake\.dll on this processor; its 3 other processor variants are removed/.test(l)), lines.join('\n'));
+
+  // A build that doesn't say which it chose (one ggml-cpu.dll, or its output lost), or names one that isn't there: all stay.
+  rmSync(folder, { recursive: true, force: true });
+  fill();
+  assert.equal(cpuVariantLoaded(RTX), null);
+  assert.deepEqual(keepCpuVariant(folder, null), []);
+  assert.deepEqual(keepCpuVariant(folder, 'ggml-cpu-zen4.dll'), []);
+  await runSetup(plan, {}, fakeIo);
+  assert.equal(readdirSync(folder).filter((f) => f.startsWith('ggml-cpu-')).length, 4);
+
+  // No device listed, and Windows' log names a block in the build's folder: the problem says so first, in plain words.
+  const none = async () => 'Available devices:\n';
+  const blocked = await runSetup(plan, {}, {
+    ...fakeIo,
+    listDevices: none,
+    blockedIn: async (f: string) => [{ file: `\\Device\\HarddiskVolume3${f.slice(2)}\\ggml-cuda.dll`, policy: 'VerifiedAndReputableDesktop' }],
+  });
+  assert.match(blocked.problems[0], /^gpu-nvidia-geforce-rtx-4090: Windows' Smart App Control blocked ggml-cuda\.dll, part of llama\.cpp: its maker doesn't sign it, and Smart App Control blocks unsigned files it doesn't know\. llama-server --list-devices names no device for/);
+  const unblocked = await runSetup(plan, {}, { ...fakeIo, listDevices: none, blockedIn: async () => [] });
+  assert.match(unblocked.problems[0], /^gpu-nvidia-geforce-rtx-4090: llama-server --list-devices names no device for/);
 });
 
 test('on a PC with no NPU, setup drops the npu install wrote by default, says so in its plan, and keeps everything else', async () => {
