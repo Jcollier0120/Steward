@@ -1,9 +1,10 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { type AcceleratorEntry, readConfigFile, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { expandEnv } from './accelerators.ts';
 import type { Detection } from './detect.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
-import { atVersion, compareVersions, expandRoute, installedVersion, NPU_CATALOG, type NpuCatalog, npuEntry, npuMemoryFit, type NpuRoute, planNpu, routeFor, runsRoute, smallPc } from './npu-vendors.ts';
+import { atVersion, compareVersions, expandRoute, installedVersion, NPU_CATALOG, type NpuCatalog, npuEntry, npuMemoryFit, type NpuRoute, pinnedRoute, planNpu, routeFor, runsRoute, serverExe, smallPc } from './npu-vendors.ts';
 import { mergeEntries, type NpuEmbedOffer, type NpuRefreshRecord, overlayFiles, portablePath, readNpuRefresh, rememberNpuRefresh } from './setup.ts';
 
 /**
@@ -54,8 +55,8 @@ export const stillAnswered = (base: string, what: string) => `${base} still answ
 export const serverFailed = (problems: string[]) =>
   problems.length > 0 && problems.every((p) => /refused the connection|exited \(code [^)]*\) and .* isn't answering|still answered \d+ s after its server was stopped/.test(p));
 
-/** What a look did: written to `npu-refresh.json` (setup's `set-up` included), except `looked`, `newer-kit`, `busy` and `unreadable`. */
-export type NpuRefreshDid = NpuRefreshRecord['did'] | 'looked' | 'newer-kit' | 'busy' | 'unreadable';
+/** What a look did: written to `npu-refresh.json` (setup's `set-up` included), except `looked`, `newer-kit`, `busy`, `unreadable` and `unknown-version` (a server that can't say which of its generation's two versions it is). */
+export type NpuRefreshDid = NpuRefreshRecord['did'] | 'looked' | 'newer-kit' | 'busy' | 'unreadable' | 'unknown-version';
 
 export interface NpuRefreshOutcome {
   did: NpuRefreshDid;
@@ -222,7 +223,11 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   // embedding server is the llama.cpp build that loads its libraries.
   const small = smallPc(detected.ramBytes);
   const version = await (d.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: d.tools, env: d.env, exists: d.exists })))(route);
-  const generation = routeFor(atVersion(route, version), npu.generation, small);
+  // A generation whose pin isn't the route's version (the X2's GenieX 0.9.1, from kit 2.88.1) may run either: the route's
+  // where an older kit set it up, the pin's where this one did. A server that is there but can't say which keeps its
+  // command, not written, so a later look asks again.
+  if (version === null && pinnedRoute(route, npu.generation).version !== route.version && (d.exists ?? existsSync)(serverExe(route, d.tools, d.env))) return { did: 'unknown-version' };
+  const generation =routeFor(atVersion(pinnedRoute(route, npu.generation), version), npu.generation, small);
   const own = generation.embedServer ? `${generation.embedServer.server} ${generation.embedServer.version}` : null;
   const hadEmbed = !!entry.embed?.startCommand?.length;
   const refusedTries = own && embedOffer?.server === own ? embedOffer.tries : 0;

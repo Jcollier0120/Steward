@@ -85,8 +85,8 @@ function fakePc(o: { plugin?: string | null; stockCopy?: string; needs?: Record<
     now: () => now,
     detect: async () => (did.push('detect'), { npu: o.npu ?? x2, cards: [], ramBytes: 47.6 * 1024 ** 3 } as any),
     catalog: catalogFor(folder),
-    // GenieX's version as it says it: unknown (the route's pinned 0.8.0) unless the PC has another.
-    serverVersion: async () => o.version ?? null,
+    // GenieX's version as it says it: 0.8.0's, as its files are, unless the PC has another (null: it can't say).
+    serverVersion: async () => ('version' in o ? (o.version ?? null) : '0.8.0'),
     kitDir,
     idle: () => o.idle ?? true,
     withTurn: async (fn) => {
@@ -249,6 +249,17 @@ test("0.9.1's build only on 0.9.1: a later GenieX with the same plugin, or 0.9.1
   // A 0.9.2 with a plugin of its own: left alone.
   const updated = fakePc({ plugin: "GenieX 0.9.2's plugin", needs: NEEDS_091, version: '0.9.2' });
   assert.deepEqual(await patchNpu(updated.deps), { did: 'hands-off' });
+});
+
+test("an X2 whose GenieX can't say its version runs the X2's pin, 0.9.1 (what setup installs there): 0.9.1's build over 0.9.1's own", async () => {
+  const pc = fakePc({ plugin: STOCK_091, needs: NEEDS_091, version: null });
+  assert.deepEqual(await patchNpu(pc.deps), { did: 'patched' });
+  assert.equal(pc.plugin(), BUILD_091);
+  assert.equal(pc.stock(), STOCK_091);
+  // 0.8.0's files there, its version unsaid: nothing put in over a plugin that isn't 0.9.1's.
+  const older = fakePc({ version: null });
+  assert.deepEqual(await patchNpu(older.deps), { did: 'hands-off' });
+  assert.equal(older.plugin(), STOCK);
 });
 
 test("a GenieX whose other files aren't 0.8.0's: its own plugin kept, nothing stopped", async () => {

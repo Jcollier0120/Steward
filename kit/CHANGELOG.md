@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.88.1
 
-**On a Snapdragon X2 running GenieX 0.9, a vision model's pictures go to the NPU's second Hexagon session, about three times sooner than on the Adreno, and its embeddings to a llama.cpp built for 0.9. On GenieX 0.9.1, Castellan's build of its plugin holds no more memory at rest than 0.8.0 with its build. Every other PC keeps GenieX 0.8.0, unchanged.**
+**On a Snapdragon X2 running GenieX 0.9, a vision model's pictures go to the NPU's second Hexagon session, about three times sooner than on the Adreno, and its embeddings to a llama.cpp built for 0.9. On GenieX 0.9.1, Castellan's build of its plugin holds no more memory at rest than 0.8.0 with its build. Setup now puts GenieX 0.9.1 on a new X2. An X2 set up before keeps 0.8.0 until its owner moves it with the Smith's Use it, and every other PC keeps 0.8.0, unchanged.**
 
 The owner pressed Try twice on the Smith's offer of GenieX 0.9.1 on 2026-10-18, and both tries failed on the first picture. The X2's Qwen3-VL-2B was set to read its pictures on the Adreno (`--vit-compute GPUOpenCL`), and GenieX 0.9.1, asked for that, tries to allocate 9.4 GB in OpenCL and crashes (0xC0000005). GenieX 0.9 reads pictures on the Hexagon's second session (HTP1) by default, so this kit asks a PC's GenieX its version and gives 0.9 its own arguments. The measurements are in spec/NPU-VENDORS.md, "A later GenieX on the PC: 0.9".
 
@@ -32,7 +32,7 @@ With its own plugin, 0.9.1 holds about 1.5 GB more at rest, because Castellan's 
 | Screen questions / photos / npu-bench's pictures | 33 of 35, 4.49 s / 21 of 21, 4.42 s / 419 ms | 34 of 35, 1.50 s / 21 of 21, 1.45 s / 282 ms | the same as 0.9.1's own / 278 ms |
 | Chat / quality items | 73.0 t/s, 22 of 24 | 72.6 t/s, 21 of 24 | 72.5 t/s, 21 of 24 |
 
-The route still keeps 0.8.0 for every PC, since its version is the same for every generation and 0.9.1 hasn't been measured on the first X. 0.9 is what a PC runs once its owner chose it with the Smith's Use it.
+With 0.9.1 and its build ahead on every count but the first picture after a quiet spell, the X2 now pins GenieX 0.9.1 of its own, and setup installs it on a new X2. The route keeps 0.8.0 for the first-generation X, where 0.9.1 hasn't been measured. An X2 already set up keeps its 0.8.0, since setup never replaces an installed server: the Smith offers it 0.9.1, and its Use it moves it.
 
 ### What's new
 
@@ -42,11 +42,14 @@ The route still keeps 0.8.0 for every PC, since its version is the same for ever
   - `atVersion(route, version)`: the route with the version found on the PC (the route itself when null or the same).
   - `planNpu` takes `serverVersion`.
   - `NpuServerVersion.pluginPatch` (by generation) and `pluginPatchOf(route, generation)`: the kit's build of a server file for the route's version, its `versions` entry's when one applies, else the generation's own `pluginPatch` (now the pinned version's alone).
+  - `NpuGeneration.serverPin` (`{ version, download, basis }`): a generation's own server version and installer, in place of the route's. `pinnedRoute(route, generation)` gives the route with it, the route itself where the generation pins none. Use it before `atVersion`, so the PC's own version still wins where its server says one.
+  - `planNpu` pins only when given `serverVersion` (even null). A route a caller passes at its own version, such as a try of a later server with its own installer, is planned as given.
 - **node/geniex/0.9.1/** (new): Castellan's build of GenieX 0.9.1's llama.cpp plugin (370,768 bytes, signed), its patch against v0.9.1 and its build script. The same switches as 0.8.0's build; the port keeps 0.9.1's pictures on HTP1 (the encoder, loaded later, goes there too) and loads the encoder for a `decide` with a picture. node/geniex/README.md says what changed.
 - **spec/npu-vendors.json** (Qualcomm): `versionCommand` is `geniex version --skip-update`, and from 0.9.0:
   - the X2's Qwen3-VL-2B runs with `--compute npu --nctx 2560`, its pictures on HTP1;
   - the X2's `pluginPatch` is that build, over GenieX 0.9.1's own plugin and while its six libraries are 0.9.1's;
   - the embedding server is llama.cpp b11645 (e467e5b, the llama.cpp in GenieX 0.9.0 and 0.9.1, and one Metal-only commit), 13 MB with its SHA-256, in its own folder `b11645-hexagon`. b11125's `llama-server` doesn't start over 0.9's libraries (0xC0000139), and b11125's folder, which a PC on 0.8.0 uses, is never copied over.
+  - the X2's `serverPin` is GenieX 0.9.1: `geniex-cli-setup-windows-arm64-v0.9.1.exe`, 70,519,444 bytes, with the SHA-256 GitHub and GenieX's own `.sha256` publish, checked on a download.
 
 ### What changed
 
@@ -56,10 +59,13 @@ The route still keeps 0.8.0 for every PC, since its version is the same for ever
 - Embeddings from b11645 over 0.9.1 match b11125 over 0.8.0 (cosine 0.99936 or more over 206 texts, a median 0.999998). Reeve's search eval answered each of its nine questions at the same rank with either (4 of 9 first, 9 of 9 in the top five). A chunk takes 72 ms in batches of 16 (112), and the server holds 1.10 GB on the NPU (1.41).
 - **npu-patch.ts:** the keeper asks the PC's GenieX its version (`installedVersion`, its `serverVersion` dep for tests) and puts in the build for that version (`pluginPatchOf`): 0.8.0's over 0.8.0, 0.9.1's over 0.9.1, each with the same care (the NPU's turn, a picture and a chat as its test, GenieX's own kept as `.stock`). A PC moved between the two gets the other build, with that version's own kept in place of the other's. GenieX 0.9.0, 0.9.2 or any other keeps its own plugin.
 - Its message when the build doesn't fit the version is now `the patch is for GenieX 0.9.1, and this PC's is 0.9.2`.
+- **setup.ts, npu-refresh.ts, npu-check.ts, npu-bench.ts, npu-patch.ts, npu-reports.ts** plan an X2 at its pin (`pinnedRoute`), then at the version its GenieX says. So setup installs 0.9.1 on a new X2. An X2 whose GenieX can't say its version is checked, benchmarked and patched as 0.9.1, and the reports count an X2's speeds only at 0.9.1.
+- **npu-refresh.ts:** on a generation that pins a version other than the route's, a server that is there but can't say its version keeps its command (`unknown-version`, not written, so a later look asks again). An X2 may run 0.8.0, whose pictures need `--vit-compute GPUOpenCL`, or 0.9.1, which crashes when asked for it.
 
 ### Before you update
 
-- Nothing on a PC running GenieX 0.8.0 (every PC the kit set up): nothing is downloaded or rebuilt, and nothing restarts.
+- Setting up a new Snapdragon X2 downloads GenieX 0.9.1's installer (71 MB) in place of 0.8.0's (65 MB), and llama.cpp b11645 for its embeddings (13 MB) in place of b11125.
+- Nothing on any other PC running GenieX 0.8.0 (every PC an older kit set up, X2s included): nothing is downloaded or rebuilt, and nothing restarts. An X2 moves to 0.9.1 only when its owner takes the Smith's offer (Use it).
 - On an X2 whose owner moved to GenieX 0.9 with the Smith's Use it, the keeper's next look restarts the 2B with its new command (a few seconds) and moves the embeddings to llama.cpp b11645, a 13 MB download if the Smith's try didn't already bring it. Nothing is indexed again: the vectors are the same.
 - On an X2 running GenieX 0.9.1, the keeper then puts Castellan's build for 0.9.1 in, in the NPU's turn: GenieX stops, the build is tested with a picture and a chat, a few seconds in all. The kit carries the build, so nothing more is downloaded. Set `"npuPatch": false` in the keeper's config.json to keep GenieX's own.
 - An agent needs no change: the keeper (the Smith, else Reeve) does it on the PC once it runs this kit.

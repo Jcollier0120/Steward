@@ -99,7 +99,7 @@ async function scene(o: { cap?: number; dieOverCap?: boolean; answer?: string; e
     io: {
       setup: { run: async (_exe: string, args: string[]) => (ran.push(args), { code: 0, out: '' }) },
       // The route's own version installed: no server of this PC's is asked which it is.
-      serverVersion: async () => null,
+      serverVersion: async (r: any) => r.version,
       start: async () => {
         fake.starts++;
         await fake.start();

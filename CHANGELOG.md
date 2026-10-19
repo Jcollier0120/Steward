@@ -4,7 +4,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.159
 
-**The Steward now hands out kit 2.88.1: a Snapdragon X2 running GenieX 0.9 reads pictures on its NPU, about three times sooner, and no longer crashes on the first one. On GenieX 0.9.1 it also holds about 1.7 GB less memory at rest.**
+**The Steward now hands out kit 2.88.1: a Snapdragon X2 running GenieX 0.9 reads pictures on its NPU, about three times sooner, and no longer crashes on the first one. On GenieX 0.9.1 it also holds about 1.7 GB less memory at rest, and a new X2 is now set up on GenieX 0.9.1.**
 
 ### What changed
 
@@ -12,10 +12,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
   - pictures on the NPU's second session: a screen question in a median 1.5 s, not 4.5 s, and the graphics card left free;
   - embeddings for search from a llama.cpp built for 0.9, with the same vectors, so nothing is indexed again.
 - **Less memory on GenieX 0.9.1.** Castellan's build of GenieX's plugin, which saves the X2 about 2 GB on GenieX 0.8.0, is now built for 0.9.1 too, and the staff put it in on an X2 running 0.9.1. With it, 0.9.1 holds 1.6 GB after a chat, as 0.8.0 does, rather than 3.3 GB, and gives its first answer after a start in 3.5 s rather than 4.7 s. Its pictures are as quick and as right.
-- Every other PC keeps GenieX 0.8.0 as it is. GenieX 0.9.1 stays a choice the owner makes with the Smith's Use it. See [kit/CHANGELOG.md](kit/CHANGELOG.md) for the measurements.
+- **GenieX 0.9.1 for the X2.** With those numbers, setting up local AI on a new Snapdragon X2 now installs GenieX 0.9.1 rather than 0.8.0. An X2 set up before keeps 0.8.0 until the owner moves it with the Smith's Use it, and if its GenieX ever can't say which version it is, the staff leave its settings as they are. The first-generation Snapdragon X and every other PC keep GenieX 0.8.0 as it is. See [kit/CHANGELOG.md](kit/CHANGELOG.md) for the measurements.
 
 ### Before you update
 
+- Setting up a new Snapdragon X2 downloads GenieX 0.9.1 (71 MB) instead of 0.8.0 (65 MB).
 - Nothing on a PC running GenieX 0.8.0: it updates itself as usual.
 - On a PC already moved to GenieX 0.9, the keeper restarts its vision model once (a few seconds), and downloads 13 MB for its embeddings if the Smith's try didn't already bring it. On GenieX 0.9.1 the staff then put Castellan's build of its plugin in, a few seconds while GenieX restarts; nothing more is downloaded.
 

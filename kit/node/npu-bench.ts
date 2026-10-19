@@ -8,7 +8,7 @@ import { type Detection, detect, runPowerShell } from './detect.ts';
 import { checkSchema } from './json-schema.ts';
 import { routeOnDevice } from './npu-check.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
-import { atVersion, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
+import { atVersion, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, pinnedRoute, planNpu, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
 import { mb, type NpuIo, saysReady } from './setup.ts';
 import { mixSummary, readTally } from './token-tally.ts';
 
@@ -642,7 +642,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     // served as the route's own model is (AI Hub's build on a Snapdragon), whatever the generation runs. At the server's
     // version on this PC (a later GenieX the Smith's Use it left), as setup and the keeper run it.
     const version = await (o.io?.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: o.tools ?? toolsHome(env), env })))(catalog.routes[vendor]);
-    const generic = atVersion(catalog.routes[vendor], version);
+    const generic = atVersion(pinnedRoute(catalog.routes[vendor], generation), version);
     const g = generationOf(generic, generation);
     const runs = routeFor(generic, generation, !!o.smallPc || smallPc(d.ramBytes));
     const offered = [...runs.models, ...(g?.models ?? []), ...(g?.smallPc?.models ?? []), ...generic.models].filter((m, i, all) => all.findIndex((x) => x.id === m.id) === i);

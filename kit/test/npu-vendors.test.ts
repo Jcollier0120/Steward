@@ -262,6 +262,15 @@ test('every route in npu-vendors.json is whole: a pinned https download, an inst
     const e = V.npuEntry(r, { tools: 'C:\\t', exe: 'C:\\t\\s.exe' });
     assert.deepEqual(validateAccelerators({ accelerators: [e] }), [], vendor);
     assert.deepEqual(validateKeeperConfig({ accelerators: [e] }), [], vendor);
+    // A generation's own pinned server (serverPin): a pinned https download from the same releases, of the same installer.
+    for (const [id, g] of Object.entries(r.generations)) {
+      if (!g.serverPin) continue;
+      const d = g.serverPin.download;
+      assert.match(d.sha256, /^[0-9a-f]{64}$/, id);
+      assert.ok(d.size > 1e6 && d.url.endsWith(d.file) && d.url.startsWith(r.download.url.slice(0, r.download.url.indexOf('/releases/') + 10)), id);
+      assert.equal(d.file, r.download.file.split(r.version).join(g.serverPin.version), `${id}: the route's installer, at its version`);
+      assert.ok(V.compareVersions(g.serverPin.version, r.version) > 0 && g.serverPin.basis, id);
+    }
     // A generation's own models, and a small PC's (a generation's smallPc), as whole as the route's.
     for (const [id, g] of Object.entries(r.generations)) {
       if (!g.models && !g.smallPc) continue;
@@ -426,14 +435,14 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
   const snap = await planSetup({ detection: parseDetection(`${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([G, M]) });
   assert.equal(snap.npu?.installed, true);
   assert.deepEqual(snap.npu?.kinds, ['chat', 'vision', 'embed']);
-  assert.equal(snap.npu?.downloadBytes, 12848190 + 639150592, "only its embedding server: llama.cpp's b11125 zip and Qwen3-Embedding");
+  assert.equal(snap.npu?.downloadBytes, 13263463 + 639150592, "only its embedding server: llama.cpp's b11645 zip (for the X2's GenieX 0.9.1) and Qwen3-Embedding");
   assert.deepEqual(snap.targets.map((t) => [t.id, t.kinds]), [], 'the NPU makes the embeddings too: nothing for the processor');
   assert.deepEqual(describePlan(snap).slice(2, 5), [
     '  have unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0 (1.9 GB)',
-    '  get  llama.cpp b11125 for embeddings on 18182 (13 MB, SHA-256 pinned)',
+    '  get  llama.cpp b11645 for embeddings on 18182 (13 MB, SHA-256 pinned)',
     '  get  Qwen3-Embedding-0.6B-Q8_0.gguf (639 MB)',
   ]);
-  const E = path.join(tools, 'servers', 'llama.cpp', 'b11125-hexagon', 'llama-server.exe');
+  const E = path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon', 'llama-server.exe');
   const EM = path.join(tools, 'models', 'Qwen3-Embedding-0.6B-Q8_0.gguf');
   const whole = await planSetup({ detection: parseDetection(`${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([G, M, E, EM]) });
   assert.equal(whole.npu?.downloadBytes, 0, 'everything here: nothing to download');
@@ -450,26 +459,29 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
   assert.match(kept.npuNote!, /already set up in config\.json; left as it is/);
 });
 
-test("every Snapdragon X2 runs Qwen3-VL-2B, its pictures on the Adreno, whatever its memory; the X Elite keeps the 4B", async () => {
+test("every Snapdragon X2 runs Qwen3-VL-2B whatever its memory, its pictures on the Hexagon with its GenieX 0.9.1 (on the Adreno with 0.8.0); the X Elite keeps the 4B", async () => {
   const tools = path.join(home, 'tools');
   const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';
   const TWO_B = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
   const FOUR_B = 'qualcomm/Qwen3-VL-4B-Instruct:W4A16';
   // As Windows shows a 16 GB PC: 15.7 GB, under idleStop's smallPcGb (20); ARM's is the 47.6 GB X2 Elite.
   const ARM16 = ARM.replace(/^ram\|\d+$/m, 'ram|16876666880');
-  const plan = (npu: string, arm: string, have: string[] = [G]) => planSetup({ detection: parseDetection(`${npu}\n${arm}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(have) });
+  const plan = (npu: string, arm: string, have: string[] = [G], version: string | null = null) => planSetup({ detection: parseDetection(`${npu}\n${arm}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(have), serverVersion: async () => version });
 
   for (const [what, arm] of [['a 16 GB X2', ARM16], ['a 47.6 GB X2', ARM]] as const) {
     const x2 = await plan(NPU.x2, arm);
     assert.deepEqual(x2.npu?.models.map((m) => m.id), [TWO_B], what);
     assert.deepEqual(x2.npu?.kinds, ['chat', 'vision', 'embed'], `${what}: chat and pictures from the one model, the embeddings on their own server as before`);
     assert.deepEqual(x2.npu?.models[0].pull, ['pull', TWO_B, '--model-hub', 'hf', '--model-type', 'vlm', '--skip-update'], `${what}: from Hugging Face: AI Hub has no QAIRT build of it`);
-    assert.equal(x2.npu?.downloadBytes, 1876179296 + 12848190 + 639150592, `${what}: the 2B (1.9 GB, not the 4B's 4.4) and the embedding server`);
-    assert.match(describePlan(x2)[0], /\(npu\): GenieX 0\.8\.0, chat and vision and embed on 18181; unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0$/, what);
+    assert.equal(x2.npu?.downloadBytes, 1876179296 + 13263463 + 639150592, `${what}: the 2B (1.9 GB, not the 4B's 4.4) and the embedding server`);
+    assert.match(describePlan(x2)[0], /\(npu\): GenieX 0\.9\.1, chat and vision and embed on 18181; unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0$/, what);
     const e = V.npuEntry(x2.npu!.route, { tools, exe: G });
     assert.equal(e.chat!.model, TWO_B, what);
     assert.deepEqual(e.vision, { model: TWO_B, pictureTokens: 1024 }, `${what}: GenieX's llama.cpp reads a picture at its own size, so the kit fits it within 1,024 tokens and counts it so`);
-    assert.deepEqual(e.chat!.startCommand, [G, 'serve', '--skip-update', '--host', '127.0.0.1:18181', '--keepalive', '3600', '--compute', 'npu', '--vit-compute', 'GPUOpenCL', '--nctx', '2560'], `${what}: its language model on the Hexagon, its pictures' encoder on the Adreno (GenieX 0.8.0's llama.cpp reads every picture as grey on the Hexagon), a 2,560-token window`);
+    assert.deepEqual(e.chat!.startCommand, [G, 'serve', '--skip-update', '--host', '127.0.0.1:18181', '--keepalive', '3600', '--compute', 'npu', '--nctx', '2560'], `${what}: its language model on the Hexagon and its pictures' encoder on the Hexagon's second session (GenieX 0.9.1), a 2,560-token window`);
+    // An X2 set up before with GenieX 0.8.0, whose llama.cpp reads every picture as grey on the Hexagon: its encoder on the Adreno.
+    const older = V.npuEntry((await plan(NPU.x2, arm, [G], '0.8.0')).npu!.route, { tools, exe: G });
+    assert.deepEqual(older.chat!.startCommand!.slice(7), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL', '--nctx', '2560'], what);
     assert.deepEqual(validateAccelerators({ accelerators: [e] }), [], what);
     assert.deepEqual(validateKeeperConfig({ accelerators: [e] }), [], what);
     // Its window holds whatever the kit lets through: a request at the route's cap, and a picture at its count with room
@@ -555,6 +567,20 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
   assert.equal(V.pluginPatchOf(q, 'snapdragon-x2')!.serverVersion, '0.8.0');
   for (const version of ['0.9.0', '0.9.1', '0.10.2']) assert.equal(V.pluginPatchOf(V.atVersion(q, version), 'snapdragon-x2')!.serverVersion, '0.9.1', version);
   for (const version of [null, '0.9.1']) for (const g of ['snapdragon-x', null]) assert.equal(V.pluginPatchOf(V.atVersion(q, version), g), undefined, `${version} ${g}`);
+  // The X2 pins GenieX 0.9.1 of its own (serverPin): what setup installs there, and runs where GenieX can't say.
+  const pinned = V.pinnedRoute(q, 'snapdragon-x2');
+  assert.equal(pinned.version, '0.9.1');
+  assert.deepEqual(pinned.download, { file: 'geniex-cli-setup-windows-arm64-v0.9.1.exe', url: 'https://github.com/qualcomm/GenieX/releases/download/v0.9.1/geniex-cli-setup-windows-arm64-v0.9.1.exe', size: 70519444, sha256: '0cffc8532c1d48cdfac757667025b7fd2f2e8a8184026944410a764337ad67c0' });
+  assert.equal(q.version, '0.8.0', "the route's own stays 0.8.0");
+  assert.deepEqual(tail(V.routeFor(pinned, 'snapdragon-x2')), ['--compute', 'npu', '--nctx', '2560']);
+  assert.equal(V.routeFor(pinned, 'snapdragon-x2').embedServer!.version, 'b11645');
+  assert.equal(V.pluginPatchOf(pinned, 'snapdragon-x2')!.serverVersion, '0.9.1');
+  // Then atVersion: an X2 that has 0.8.0 runs it as 0.8.0 runs, with 0.8.0's build.
+  const had = V.atVersion(pinned, '0.8.0');
+  assert.deepEqual(tail(V.routeFor(had, 'snapdragon-x2')), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL', '--nctx', '2560']);
+  assert.equal(V.pluginPatchOf(had, 'snapdragon-x2')!.serverVersion, '0.8.0');
+  // The first X, a Snapdragon setup doesn't know, none: the route's own 0.8.0.
+  for (const g of ['snapdragon-x', V.UNKNOWN_GENERATION, null]) assert.equal(V.pinnedRoute(q, g), q, `${g}`);
 
   // setup on a PC whose GenieX is 0.9.1 (Use it left it): its command, its embedding server in a folder of its own.
   const plan = (version: string | null, have: string[] = [G]) => planSetup({ detection: parseDetection(`${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(have), serverVersion: async () => version });
@@ -571,8 +597,23 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
   assert.equal(e.embed!.startCommand![0], p.embed!.exe);
   assert.deepEqual(e.embed!.env, { ADSP_LIBRARY_PATH: path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon') });
   assert.deepEqual(validateAccelerators({ accelerators: [e] }), []);
-  // GenieX 0.8.0 there, or none (setup installs the route's own): as before.
-  for (const version of ['0.8.0', null]) assert.equal((await plan(version)).npu!.embed!.server.version, 'b11125', `${version}`);
+  // GenieX 0.8.0 there: as before. None there, or one that can't say: the X2's pin, 0.9.1 (pinnedRoute).
+  assert.equal((await plan('0.8.0')).npu!.embed!.server.version, 'b11125');
+  for (const have of [[G], []]) assert.equal((await plan(null, have)).npu!.embed!.server.version, 'b11645', `${have.length}`);
+  // A new X2, nothing installed: GenieX 0.9.1's installer, pinned. A new X Elite: the route's 0.8.0.
+  const fresh = (await plan(null, [])).npu!;
+  assert.equal(fresh.installed, false);
+  assert.equal(fresh.route.version, '0.9.1');
+  assert.deepEqual([fresh.download!.what, fresh.download!.size, fresh.download!.sha256], ['geniex-cli-setup-windows-arm64-v0.9.1.exe', 70519444, '0cffc8532c1d48cdfac757667025b7fd2f2e8a8184026944410a764337ad67c0']);
+  assert.match(describePlan(await plan(null, []))[1], /get  GenieX 0\.9\.1 \(\d+ MB, SHA-256 pinned\)$/);
+  const elite = (await planSetup({ detection: parseDetection(`${NPU.x1}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([]), serverVersion: async () => null })).npu!;
+  assert.equal(elite.route.version, '0.8.0');
+  assert.equal(elite.download!.what, 'geniex-cli-setup-windows-arm64-v0.8.0.exe');
+  // A caller's own route is planned as given, never pinned over: the Smith's try of a later GenieX keeps its own installer.
+  const tryRoute = { ...structuredClone(q), version: '0.9.2', download: { file: 'geniex-cli-setup-windows-arm64-v0.9.2.exe', url: 'https://github.com/qualcomm/GenieX/releases/download/v0.9.2/geniex-cli-setup-windows-arm64-v0.9.2.exe', size: 1, sha256: 'a'.repeat(64) } };
+  const tried = V.planNpu({ support: parseNpus(NPU.x2, 'arm64')[0], tools, downloadsDir: path.join(tools, 'servers', 'downloads'), catalog: { ...V.NPU_CATALOG, routes: { ...V.NPU_CATALOG.routes, qualcomm: tryRoute } }, exists: () => false })!;
+  assert.equal(tried.route.version, '0.9.2');
+  assert.equal(tried.download!.what, 'geniex-cli-setup-windows-arm64-v0.9.2.exe');
 });
 
 test("installedVersion asks the route's server which version it is", async () => {

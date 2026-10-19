@@ -5,7 +5,7 @@ import { type AcceleratorEntry, readConfigFile } from './accelerator-config.ts';
 import type { Detection } from './detect.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { NPU_REFRESH_RETRY_MS, NPU_REFRESH_TRIES, serverFailed, servers, stillAnswering } from './npu-refresh.ts';
-import { atVersion, compareVersions, expandRoute, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuPluginPatch, type NpuRoute, pluginPatchOf, runsRoute, sha256File } from './npu-vendors.ts';
+import { atVersion, compareVersions, expandRoute, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuPluginPatch, type NpuRoute, pinnedRoute, pluginPatchOf, runsRoute, sha256File } from './npu-vendors.ts';
 
 /**
  * A file of the NPU's server replaced with the kit's own build of it (npu-vendors.ts' NpuPluginPatch): on the Snapdragon
@@ -194,7 +194,7 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
   const generic = npu?.supported && npu.vendor ? catalog.routes[npu.vendor] : undefined;
   // The build is the one for the version on the PC: GenieX 0.9.1's once the Smith's Use it put it in place.
   const version = generic ? await (d.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: d.tools, env: d.env })))(generic) : null;
-  const route = generic ? atVersion(generic, version) : undefined;
+  const route = generic ? atVersion(pinnedRoute(generic, npu!.generation), version) : undefined;
   const patch = route ? pluginPatchOf(route, npu!.generation) : undefined;
   // This PC's file: this kit's patch's, else the one an older kit's look patched (which this kit may have to put back).
   const target = patch ? patchTarget(patch, d.tools, d.env) : had?.path;

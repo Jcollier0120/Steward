@@ -2,7 +2,7 @@
 
 `geniex_plugin.dll` here is GenieX's llama.cpp plugin, built by Castellan with the changes in `geniex-castellan-memory.patch`. It goes in place of the plugin GenieX 0.8.0 installs (`%LOCALAPPDATA%\GenieX CLI\llama_cpp\geniex_plugin.dll`), on the Snapdragon X2 only. The keeper does it (`../npu-patch.ts`, `spec/npu-vendors.json`'s `pluginPatch`), until Qualcomm ships these fixes (qualcomm/GenieX#1557).
 
-`0.9.1/` holds the same changes built for GenieX 0.9.1, which the keeper puts in on an X2 whose GenieX is 0.9.1 (the Smith's Use it): below, "GenieX 0.9.1".
+`0.9.1/` holds the same changes built for GenieX 0.9.1, which the keeper puts in on an X2 whose GenieX is 0.9.1: one set up by kit 2.88.1 or later, which installs 0.9.1 on an X2, or one the Smith's Use it moved (below, "GenieX 0.9.1"). An X2 set up before keeps GenieX 0.8.0 and the build above.
 
 GenieX is Qualcomm's, under the BSD 3-Clause license in `LICENSE` beside this file. These binaries are modified builds of it, not Qualcomm's release.
 

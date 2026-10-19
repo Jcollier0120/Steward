@@ -188,7 +188,7 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
     io: {
       setup: { run: async () => ({ code: 0, out: '' }) },
       // The route's own version installed: no server of this PC's is asked which it is.
-      serverVersion: async () => null,
+      serverVersion: async (r: any) => r.version,
       start: async (e: any) => {
         fake.starts++;
         fake.commands.push(e.chat.startCommand);

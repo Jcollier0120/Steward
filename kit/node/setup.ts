@@ -12,7 +12,7 @@ import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, installedVersion, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
+import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, installedVersion, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -719,7 +719,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     const small = smallPc(o.detection.ramBytes);
     const generic = det.vendor ? NPU_CATALOG.routes[det.vendor] : null;
     const version = generic ? await (o.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: o.home, env: o.env, exists })))(generic) : null;
-    const route = generic ? routeFor(atVersion(generic, version), det.generation, small) : null;
+    const route = generic ? routeFor(atVersion(pinnedRoute(generic, det.generation), version), det.generation, small) : null;
     const fit: { chat: boolean; embed: boolean; why?: string } = route ? npuMemoryFit(route, o.detection.ramBytes) : { chat: true, embed: true };
     if (!fit.chat) {
       npuNote = `${det.label} (npu): not set up: ${fit.why}. The graphics card or the processor takes its work.`;

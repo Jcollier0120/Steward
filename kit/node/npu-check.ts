@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
-import { atVersion, calibrate, CALIBRATION, generationOf, installedVersion, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, type Played, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, smallPc, UNKNOWN_GENERATION } from './npu-vendors.ts';
+import { atVersion, calibrate, CALIBRATION, generationOf, installedVersion, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, pinnedRoute, planNpu, type Played, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, smallPc, UNKNOWN_GENERATION } from './npu-vendors.ts';
 import { loadFailure, logLength, longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
 import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { npuReportFile, npuReportFromCheck, rememberNpuReport, reporterId } from './npu-report.ts';
@@ -377,7 +377,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   // At the server's version on this PC (a later GenieX the Smith's Use it left), as setup and the keeper run it; a
   // rehearsal of another maker's route runs that route's own.
   const version = rehearsal ? null : await (o.io?.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: o.tools ?? toolsHome(env), env })))(catalog.routes[vendor]);
-  const generic = atVersion(catalog.routes[vendor], version);
+  const generic = atVersion(pinnedRoute(catalog.routes[vendor], generation), version);
   try {
     route = routeOnDevice(routeFor(generic, generation, small), report.device);
     if (small && generationOf(catalog.routes[vendor], generation)?.smallPc) log(`A small PC's models (${o.smallPc ? '--small-pc' : `this PC's ${report.pc.ramGb} GB`}): ${route.models.map((m) => m.id).join(', ')}.`);
