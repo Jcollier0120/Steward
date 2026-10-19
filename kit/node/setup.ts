@@ -5,6 +5,7 @@ import { homedir, totalmem } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { type Block, blockedIn, blockedSay } from './app-control.ts';
 import { chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
@@ -993,11 +994,42 @@ export async function listDevices(server: string): Promise<string> {
   return existsSync(bench) ? `${text}\n${await run(bench)}` : text;
 }
 
+/**
+ * The processor variant ggml chose as it started (`load_backend: loaded CPU backend from …\ggml-cpu-haswell.dll`), its
+ * file name; null when it didn't say (a build with one ggml-cpu.dll, or output lost).
+ */
+export function cpuVariantLoaded(text: string): string | null {
+  const m = /loaded CPU backend from (.*?ggml-cpu-[^\\/\s]+\.dll)/i.exec(text);
+  return m ? path.win32.basename(m[1]) : null;
+}
+
+/**
+ * Keeps only the processor variant ggml chose in a llama.cpp build's folder (kit 2.88.4), and returns the files
+ * removed. ggml loads every ggml-cpu-*.dll at each start to choose the best for this processor, so one that Smart App
+ * Control blocks (app-control.ts) is blocked again, and its notice shown again, at every start. The one chosen is the
+ * one it would choose again, so nothing changes but that, and a quicker start. Nothing is removed when `chosen` isn't
+ * there, nor a variant that can't be removed now.
+ */
+export function keepCpuVariant(folder: string, chosen: string | null): string[] {
+  if (!chosen || !existsSync(path.join(folder, chosen))) return [];
+  const removed: string[] = [];
+  for (const f of readdirSync(folder)) {
+    if (!/^ggml-cpu-.+\.dll$/i.test(f) || f.toLowerCase() === chosen.toLowerCase()) continue;
+    try {
+      rmSync(path.join(folder, f));
+      removed.push(f);
+    } catch { /* in use: kept, and asked of again by the next setup */ }
+  }
+  return removed;
+}
+
 export interface SetupIo extends NpuIo {
   log: (line: string) => void;
   download?: (d: Download, progress: (done: number, total: number) => void) => Promise<void>;
   unpack?: (zip: string, into: string) => void;
   listDevices?: (server: string) => Promise<string>;
+  /** Windows' application control's blocks in a folder (app-control.ts blockedIn). */
+  blockedIn?: (folder: string, withinMs: number) => Promise<Block[]>;
 }
 
 /**
@@ -1033,11 +1065,18 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
     }
     const server = path.join(t.folder, 'llama-server.exe');
     let device: string | null = null;
+    // Each build is asked once: its devices, and the processor variant ggml chose, the only one it keeps.
+    const asked = Date.now();
+    const listing = await (io.listDevices ?? listDevices)(server);
+    const removed = keepCpuVariant(t.folder, cpuVariantLoaded(listing));
+    if (removed.length) io.log(`${t.name}: llama.cpp runs ${cpuVariantLoaded(listing)} on this processor; its ${removed.length} other processor variants are removed, so no start loads them again`);
     if (t.variant.backend) {
-      const devices = parseListDevices(await (io.listDevices ?? listDevices)(server));
+      const devices = parseListDevices(listing);
       device = matchDevice({ name: t.name }, devices, t.variant.backend);
       if (!device) {
-        problems.push(`${t.id}: llama-server --list-devices names no device for ${t.name} (it lists ${devices.map((d) => `${d.name}: ${d.description}`).join('; ') || 'none'})`);
+        // Windows' Smart App Control may have blocked part of it (app-control.ts): said first, when its log says so.
+        const blocked = blockedSay(await (io.blockedIn ?? blockedIn)(t.folder, Date.now() - asked + 60_000), 'llama.cpp');
+        problems.push(`${t.id}: ${blocked ? `${blocked}. ` : ''}llama-server --list-devices names no device for ${t.name} (it lists ${devices.map((d) => `${d.name}: ${d.description}`).join('; ') || 'none'})`);
         continue;
       }
       t.device = device;
