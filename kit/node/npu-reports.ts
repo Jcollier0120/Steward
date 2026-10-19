@@ -2,7 +2,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exchequerUrl, publisherKey, withoutKey } from './exchequer.ts';
-import { calibrate, CALIBRATION, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuGeneration, type NpuMeasuredSpeeds, type NpuRoute, type NpuVendor, NPU_VENDORS, routeFor, UNKNOWN_GENERATION } from './npu-vendors.ts';
+import { calibrate, CALIBRATION, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuGeneration, type NpuMeasuredSpeeds, type NpuRoute, type NpuVendor, NPU_VENDORS, pinnedRoute, routeFor, UNKNOWN_GENERATION } from './npu-vendors.ts';
 
 /**
  * The owners' NPU reports into npu-vendors.json (spec/NPU-REPORTS.md): the Exchequer's summary of them, read against
@@ -150,11 +150,13 @@ export function reportsPatch(summary: NpuSummary, catalog: NpuCatalog = NPU_CATA
     // models where it has them, the 2B on an X2). A report without a route (the NPU left out) says nothing of how the
     // route runs.
     if (!g.server) continue;
-    const run = routeFor(route, g.generation);
-    if (g.server !== route.server || g.version !== route.version || g.model !== chatModel(run)) {
+    // Its server at the version the generation runs: its own pin where it has one (pinnedRoute: GenieX 0.9.1 on an X2).
+    const pinned = pinnedRoute(route, g.generation);
+    const run = routeFor(pinned, g.generation);
+    if (g.server !== route.server || g.version !== pinned.version || g.model !== chatModel(run)) {
       // A small PC's own models (smallPc), run in the route's place: listed apart, never counted toward the route's.
-      const small = route.generations[g.generation].smallPc ? chatModel(routeFor(route, g.generation, true)) : null;
-      if (small && g.server === route.server && g.version === route.version && g.model === small) {
+      const small = route.generations[g.generation].smallPc ? chatModel(routeFor(pinned, g.generation, true)) : null;
+      if (small && g.server === route.server && g.version === pinned.version && g.model === small) {
         smallPcs.push({ vendor: g.vendor, generation: g.generation, model: small, pcs: g.pcs, passedPcs: g.passedPcs, failedPcs: g.failedPcs });
       } else stale += g.reports;
       continue;

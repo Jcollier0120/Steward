@@ -82,10 +82,15 @@ test("a generation's own models are the route as it runs there: an X2's reports 
   const own = (r: any) => (r.models.find((m: any) => m.kinds.includes('chat')) ?? r.models[0]).id;
   const twoB = own(V.routeFor(qualcomm, 'snapdragon-x2'));
   assert.notEqual(twoB, own(qualcomm), "the X2 runs its own models (the 2B), not the route's");
-  const onX2 = (model: string) => group({ vendor: 'qualcomm', generation: 'snapdragon-x2', server: qualcomm.server, version: qualcomm.version, model, reports: 2, pcs: 2, passedPcs: 2 });
+  // At the X2's own pin, GenieX 0.9.1 (pinnedRoute), not the route's 0.8.0.
+  const pinned = V.pinnedRoute(qualcomm, 'snapdragon-x2').version;
+  assert.equal(pinned, '0.9.1');
+  const onX2 = (model: string, version = pinned) => group({ vendor: 'qualcomm', generation: 'snapdragon-x2', server: qualcomm.server, version, model, reports: 2, pcs: 2, passedPcs: 2 });
   const r = P.reportsPatch({ ...summary, groups: [onX2(twoB), onX2(own(qualcomm))] } as any);
   assert.equal(r.stale, 2, 'only the reports on the 4B, which the X2 no longer runs');
   assert.ok(r.lines.some((l) => /2 of 2 PCs passed/.test(l)), r.lines.join('\n'));
+  // Its 2B on GenieX 0.8.0, which an X2 set up before kit 2.88.1 runs: stale, as the route runs 0.9.1 there now.
+  assert.equal(P.reportsPatch({ ...summary, groups: [onX2(twoB, qualcomm.version)] } as any).stale, 2);
 });
 
 test("a small PC's own models (smallPc) are listed on their own: never counted toward the route's model, and not stale", () => {
@@ -98,7 +103,7 @@ test("a small PC's own models (smallPc) are listed on their own: never counted t
   const run = V.routeFor(qualcomm, gen, true);
   const small = (run.models.find((m: any) => m.kinds.includes('chat')) ?? run.models[0]).id;
   assert.equal(small, tiny.id);
-  const r = P.reportsPatch({ ...summary, groups: [group({ vendor: 'qualcomm', generation: gen, server: qualcomm.server, version: qualcomm.version, model: small, reports: 4, pcs: 4, passedPcs: 3, failedPcs: 1, failures: { 'test-timeout': 1 } })] } as any, catalog);
+  const r = P.reportsPatch({ ...summary, groups: [group({ vendor: 'qualcomm', generation: gen, server: qualcomm.server, version: V.pinnedRoute(qualcomm, gen).version, model: small, reports: 4, pcs: 4, passedPcs: 3, failedPcs: 1, failures: { 'test-timeout': 1 } })] } as any, catalog);
   assert.deepEqual(r.smallPc, [{ vendor: 'qualcomm', generation: gen, model: small, pcs: 4, passedPcs: 3, failedPcs: 1 }]);
   assert.equal(r.stale, 0);
   assert.equal(r.patch, null, "nothing proposed for the route's model from a small PC's");
