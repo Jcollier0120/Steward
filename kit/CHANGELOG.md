@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.88.2
+
+**The helper that keeps the PC awake for the staff's work no longer opens a terminal. Before, the wake task before each of the Steward's builds put a terminal window on the desktop for up to 65 minutes. Where kit 2.88.1 wasn't released before it, this release brings it too.**
+
+The owner found a Windows Terminal window titled `…\.npu-agent\kit\awake-b333ef6686d2.exe` open over Manor on 2026-10-19. The awake helper (awake.cs) was compiled as a console program, so `\Steward\Wake`, the Task Scheduler task that wakes the PC for the Steward's builds and runs the helper with `--for 3900`, opened a console for it on the desktop. Windows 11 shows that console in Windows Terminal, where it stayed up for the whole hold, and then remained as an exited tab. It was the only scheduled task of the manor's on this PC that started a console program without a hidden console.
+
+### What changed
+
+- **awake.ts:** the helper is compiled as a Windows application (`-OutputType WindowsApplication`, `AWAKE_OUTPUT`), so it has no console and nothing that starts it shows a window: neither the wake task nor an agent's hold. Its input pipe works as before. An agent still ends its hold by closing the helper's input, and kills it 10 seconds later if it hasn't ended. The wake task still ends after its `--for` hold, or when the agent ends it once the work is done.
+- **awakeExe:** the helper's name now hashes what it's built as together with its source. A PC that built the console helper builds the new one beside it on first use, and the wake task's XML, and so its key, changes, so `keepWakeTask` registers it again with the new helper.
+- **awake.test.ts:** the real compile test checks that the built exe is for the Windows subsystem (2), not the console (3), and still holds while its input is open and ends once it closes.
+
+### Before you update
+
+- Nothing in an agent's code. Each agent builds the new helper (a few seconds, once per PC) the first time it holds the PC awake, and the Steward re-registers its wake task. A terminal the old helper already opened closes when its hold ends, or you can close it: closing it ends nothing but that hold.
+- The old `awake-*.exe` stays in `%USERPROFILE%\.npu-agent\kit` (a few KB). Nothing uses it once the wake task has moved.
+
 ## Unreleased (its version needs claiming on the main laptop)
 
 **An agent's own route can't take one of the kit's any more. serve() refuses it as the page starts, and agent-checks finds it in the agent's source before that. The Chronicler's shrinking card had its own `POST /api/stop`, so `chronicler shutdown` and an update's install couldn't end its page.**
