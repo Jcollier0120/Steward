@@ -2,6 +2,27 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.90.0
+
+**Local AI's llama.cpp builds are now signed, so Windows' Smart App Control lets them run.**
+
+- **No more Smart App Control blocks:** ggml-org signs none of its llama.cpp builds, and on a PC with Smart App Control on, Windows blocks unsigned files it doesn't know. On 2026-10-19 the gaming desktop's blocked one of b11734's processor variants. Setup now downloads llama.cpp only from the manor's signed copies: each build is ggml-org's own, unchanged, and every .exe and .dll in it that ggml-org left unsigned carries Castellan's signature.
+- **Builds that were checked first:** a new llama.cpp build reaches the PCs only once it's signed, after the Smith's checks have passed on it, so a build that answers wrongly (as b11511 did on the Adreno) never reaches them.
+
+### What changed
+
+- **setup.ts:**
+  - `llamaReleases` reads the signed builds, the releases repository's `llama.cpp-<build>` releases (`SIGNED_LLAMA_REPO`, `parseSignedReleases`), newest first. It adds NVIDIA's CUDA runtime (`CUDART_ZIP`) from ggml-org's release of the same build: NVIDIA's files, unchanged and not ours to sign, as ggml-org ships them. It never falls back to ggml-org's unsigned builds. `KIT_LLAMA_UNSIGNED=1` takes ggml-org's newest instead, to try a build before it's signed.
+  - A signed build unpacks into a folder named by its signed tag (`servers\llama.cpp\llama.cpp-b11734-cuda-12.4-x64`), so a PC set up with ggml-org's copy gets the signed one in full.
+  - When no signed build has the files a card needs, setup says so (`no llama.cpp build signed for the manor … has cuda-12.4-x64`) and downloads none.
+  - `LLAMA_VARIANTS` lists the builds `variantFor` names, which are the ones the manor signs.
+- **The Steward's `tools/sign-llama.ts`** signs a build and drafts its release. It downloads ggml-org's zip for each of `LLAMA_VARIANTS`, checks it against GitHub's digest, signs each unsigned .exe and .dll (Certum, timestamped), checks every one, and zips it again under its own name. llama.cpp's MIT license goes beside the zips, as ggml-org's carry none. Its release is a draft until a PC with Smart App Control on has run it.
+
+### Before you update
+
+- Nothing in an agent's code.
+- A PC set up before keeps its unsigned build until its local AI is set up again. Setting it up again downloads the signed build once: about 0.6 GB for an NVIDIA card (its build and CUDA runtime), and under 35 MB for the others. The old build's folder stays.
+
 ## 2.89.0
 
 **Graphics cards with memory of their own now chat and see with one Qwen3-VL-2B server, as integrated graphics and the processor already do, in place of Qwen3-4B beside Qwen3-VL-4B.**
