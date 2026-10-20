@@ -17,7 +17,8 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
  * override, Build now (POST /api/pipeline/build, or `steward build` at a console), begins one at once: for some
  * repositories, or all, and, ticked, lets its releases out to customers at once too. An urgent fix (a commit on main whose
  * changelog entry has a line starting "**Urgent fix:", stages/urgent.ts) begins one at once too, for its repository
- * alone, without the kit.
+ * alone, without the kit; and so do releases that waited until this PC could sign, once a round between builds finds it
+ * can (signing.ts's signedBetween, Steward 0.36.161), rather than waiting for the next build time.
  *
  * pipeline.json keeps the build that is open, and the last builds, each with what it merged itself and released.
  */
@@ -91,12 +92,15 @@ export function normalizePipeline(raw: unknown): BuildPipeline {
 
 /** One build: when it was due, who began it, and what it did. */
 export interface BuildRun {
-  /** The build time it is for (ISO); for the owner's Build now, when it was pressed; for an urgent fix, when it was found. */
+  /**
+   * The build time it is for (ISO); for the owner's Build now, when it was pressed; for an urgent fix, when it was found;
+   * for releases that waited until this PC could sign (`signing`, Steward 0.36.161), when a round found it could.
+   */
   due: string;
-  by: 'schedule' | 'owner' | 'urgent';
+  by: 'schedule' | 'owner' | 'urgent' | 'signing';
   started: string;
   finished?: string | null;
-  /** The owner's Build now, or an urgent fix's build, for some repositories only (ids); none: all. */
+  /** The owner's Build now, an urgent fix's build or a signing build, for some repositories only (ids); none: all. */
   employees?: string[] | null;
   /**
    * An urgent fix's build: "<id> <head>" for each main head that began it, which builds once (stages/urgent.ts); "<id>
@@ -210,7 +214,7 @@ export const boardedUrgent = (state: PipelineState): Set<string> => new Set([...
  * A build time's build that begins after the PC woke from standby past it (`wokeAt`, fresh-start.ts' lastWoke) is
  * `late`. Pure; the round saves the build it changes (endRound).
  */
-export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, o: { buildNow?: BuildNow | null; employees?: string[] | null; urgent?: UrgentPr[] | null; wokeAt?: number | null } = {}): PipelineMode {
+export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, o: { buildNow?: BuildNow | null; employees?: string[] | null; urgent?: UrgentPr[] | null; signed?: string[] | null; wokeAt?: number | null } = {}): PipelineMode {
   const open = state.open;
   if (open && !open.finished) {
     const over = now.getTime() - Date.parse(open.started) >= p.windowMinutes * 60_000;
@@ -227,6 +231,8 @@ export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, 
   }
   // An urgent fix between builds: a build of its own, for its repository, at once.
   if (o.urgent?.length) return fresh(now.toISOString(), 'urgent', { employees: [...new Set(o.urgent.map((u) => u.id))], urgent: o.urgent.map(urgentKey) });
+  // Releases that waited until this PC could sign, and now it can (signing.ts's signedBetween): a build of their own, at once.
+  if (o.signed?.length) return fresh(now.toISOString(), 'signing', { employees: [...new Set(o.signed)] });
   const next = nextBuildTime(p, now);
   return { kind: 'between', next, line: `between builds: PRs are merged by whoever wrote them once vouched, and the next build${next ? `, at ${buildWhen(next, now)},` : " (Settings name no build time to come: Build pipeline)"} releases each repository's main` };
 }
@@ -238,11 +244,11 @@ export function lateLine(run: BuildRun | null | undefined, now: Date): string | 
 }
 
 /**
- * Whether the newest kit goes into this build: every build, or only the day's first scheduled one. Never an urgent fix's:
- * a kit PR would hold its release until the kit's checks pass, and the next build takes the kit.
+ * Whether the newest kit goes into this build: every build, or only the day's first scheduled one. Never an urgent fix's,
+ * nor a signing build's: a kit PR would hold its release until the kit's checks pass, and the next build takes the kit.
  */
 export function kitRides(p: BuildPipeline, state: PipelineState, run: BuildRun): boolean {
-  if (run.by === 'urgent') return false;
+  if (run.by === 'urgent' || run.by === 'signing') return false;
   if (p.kit === 'every' || run.by === 'owner') return true;
   const day = new Date(run.due).toDateString();
   return !state.builds.some((b) => b.by === 'schedule' && b !== run && new Date(b.due).toDateString() === day && Date.parse(b.due) < Date.parse(run.due));

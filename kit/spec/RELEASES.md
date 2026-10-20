@@ -64,10 +64,11 @@ Some agents need a program that isn't Node, such as Envoy's media host (`envoy-m
 - **`out`:** the folder it builds into. It must be git-ignored; the release refuses one that isn't, so a build never makes the tree look changed.
 - **`arch`:** which processors to build (default `["arm64", "x64"]`).
 - **`notices`:** files in the repository that go with the native files, into `<out>\notices\`. Use it for the licenses of the runtimes they carry (ONNX Runtime's MIT license, .NET's).
+- **`inputs`** (kit 2.92.0): files or folders outside the build script's folder that the build reads, such as a vendored runtime or a shared project. With the script's folder they are the **native sources**: a change to them makes a release dirty, and builds and signs its native files afresh (below). List every one: a change to a file the build reads that isn't listed would ship the files signed before it.
 - **`thumbprint`:** the code-signing certificate's SHA-1 thumbprint, in `Cert:\CurrentUser\My`.
   - **`timestamp`** is its RFC 3161 server; the default is Certum's, `http://time.certum.pl`.
   - A release with native files is **never published unsigned**. Without a thumbprint, `--publish` is refused before anything is built, and so is it when this PC can't sign now.
-  - The signer check is a trial signature, so a cloud key that isn't connected is found before minutes of building, not after.
+  - The signer check is a real signature of a test file, timestamped as the release's will be (kit 2.92.0), so a cloud key that isn't connected, or a timestamp server that doesn't answer, is found before minutes of building, not after. A key signtool can't reach ("No certificates were found", "The specified CSP could not be found", "Keyset does not exist") is said at once; anything else is tried once more after 15 seconds.
 
 **Signing** (`node/sign.ts`, as Manor signs its setup):
 
@@ -75,6 +76,14 @@ Some agents need a program that isn't Node, such as Envoy's media host (`envoy-m
 - It signs each `.exe` and `.dll` whose Authenticode signature isn't Valid already, and timestamps it. A runtime's own DLLs keep their maker's signature.
 - It then checks every one is Valid, the certificate's, and timestamped.
 - Only a published release is signed: a local build or `--install` isn't. `release.json` says which (`"native": {"out", "arch", "signed"}`).
+
+**Signed files kept** (`node/signed-native.ts`, kit 2.92.0):
+
+- Once a published release has signed a processor's files, it keeps a copy in the agent's checkout data folder (`<ID>_HOME`, else `%USERPROFILE%\.<id>-dev`), under `signed-native\<key>\`, the newest two per processor.
+- The key is the native sources as git has them at the commit released (each one's object id), the processor, the certificate, and the `build` and `out` kit.json names.
+- A later published release with the same key takes that copy instead of building and signing that processor, once each file's SHA-256 is the one kept and `signtool verify /pa` still accepts them. It needs neither the build nor the signing key: when every processor's copy is kept, the signer check isn't made at all.
+- A copy whose files don't match is let go; one whose signatures don't check out now is kept, and the release builds and signs as before. A dirty tree takes and keeps none.
+- The Steward reads the same keys, so it doesn't hold a release that won't sign while this PC can't.
 
 **One zip, both processors:**
 

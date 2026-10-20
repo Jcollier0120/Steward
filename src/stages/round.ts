@@ -3,9 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import { TAG_RELEASE, type Employee } from '../settings.ts';
-import { checkoutOf, mapLimit, networkFailure, releaseDirOf, result, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, glanceOf, mapLimit, networkFailure, releasedOf, releaseDirOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseOne } from './release.ts';
-import { keptSigningDown, noteSigningWaits, signsWith } from '../signing.ts';
+import { keptSigningDown, loadSigningAhead, loadSigningWaits, needsSigning, noteSigningAhead, noteSigningWaits, signingProblem, signsWith, type SigningAhead, type SigningWait } from '../signing.ts';
+import type { BuildRun } from '../pipeline.ts';
+import { commitOf, fetchBranch, showFile } from '../git.ts';
+import { agreedVersion } from '../versions.ts';
 import { clearTastingHold } from '../tasting.ts';
 import { takeFreshStart } from '../fresh-start.ts';
 import { withRepo } from './slots.ts';
@@ -35,9 +38,9 @@ export const roundFailuresFile = () => dataFile('round-failed.json');
  */
 export const buildReleaseLimit = (parallel: number, cpus = os.availableParallelism()): number => Math.max(1, parallel, Math.min(6, Math.floor(cpus / 3)));
 
-/** Whether a release signs what it builds (signing.ts's signsWith), as its checkout's kit.json and tools/sign.ts say now. */
-export function signsHere(e: Employee): boolean {
-  if (e.release === TAG_RELEASE) return false;
+/** The certificate a release signs what it builds with (signing.ts's signsWith), as its checkout's kit.json and tools/sign.ts say now; null: none. */
+export function signerHere(e: Employee): string | null {
+  if (e.release === TAG_RELEASE) return null;
   const dir = checkoutOf(e);
   const read = (f: string) => {
     try {
@@ -46,7 +49,62 @@ export function signsHere(e: Employee): boolean {
       return null;
     }
   };
-  return !!signsWith({ kitJson: read('kit.json'), signTs: read(path.join('tools', 'sign.ts')), release: e.release });
+  return signsWith({ kitJson: read('kit.json'), signTs: read(path.join('tools', 'sign.ts')), release: e.release });
+}
+
+/** Whether a release signs what it builds, as its checkout says now (signerHere). */
+export const signsHere = (e: Employee): boolean => !!signerHere(e);
+
+/** How long after a signing build began its releases wait for another: one that met the key gone again waits this long. */
+export const SIGNED_AGAIN_MS = 15 * 60_000;
+
+/**
+ * Between builds, the releases that wait until this PC can sign (signing.ts), looked at again (Steward 0.36.161): the
+ * ids of those that can be released now, for a build of their own at once (pipeline.ts's `signed`), rather than at the
+ * next build time. A waiting version released since (by a person, or another PC) is forgotten, and so is one of an
+ * employee Settings no longer have. For the rest, one look per certificate, the timestamped test signature that
+ * signingProblem shares within a minute: nothing is built to find out. A wait whose reason changed keeps the new one, for
+ * the alarm. Not one whose signing build began within SIGNED_AGAIN_MS. Never throws for one employee.
+ */
+export async function signedBetween(ctx: Ctx, employees: Employee[], builds: BuildRun[], now = new Date()): Promise<string[]> {
+  const waits = loadSigningWaits();
+  if (!Object.keys(waits).length) return [];
+  const changed: Record<string, Omit<SigningWait, 'since'> | null> = {};
+  const byCert = new Map<string, Employee[]>();
+  for (const [id, w] of Object.entries(waits)) {
+    const e = ctx.settings.employees.find((x) => x.id === id);
+    if (!e) {
+      changed[id] = null;
+      continue;
+    }
+    if (!employees.includes(e)) continue;
+    try {
+      if ((await releasedOf(ctx, e)).some((r) => r.version === w.version)) {
+        ctx.log(`[${e.id}] v${w.version} no longer waits until this PC can sign: it is released`);
+        changed[id] = null;
+        continue;
+      }
+    } catch (err) {
+      ctx.log(`[${e.id}] couldn't read its releases: ${(err as Error).message}`);
+      continue;
+    }
+    if (builds.some((b) => b.by === 'signing' && (b.employees ?? []).includes(id) && now.getTime() - Date.parse(b.started) < SIGNED_AGAIN_MS)) continue;
+    // Its checkout signs nothing now: a build of its own releases it as any other.
+    const cert = signerHere(e) ?? '';
+    byCert.set(cert, [...(byCert.get(cert) ?? []), e]);
+  }
+  const ready: Employee[] = [];
+  for (const [cert, who] of byCert) {
+    const down = cert ? await signingProblem(ctx.run, cert, { now: now.getTime() }) : null;
+    if (!down) {
+      ready.push(...who);
+      continue;
+    }
+    for (const e of who) if (waits[e.id].why !== down) changed[e.id] = { version: waits[e.id].version, commit: waits[e.id].commit, why: down };
+  }
+  if (Object.keys(changed).length) noteSigningWaits(changed, now);
+  if (ready.length) ctx.log(`${ready.map((e) => `${e.name} v${waits[e.id].version}`).join(', ')} waited until this PC could sign, and it can now: ${ready.length === 1 ? 'it builds' : 'they build'} at once, a build of ${ready.length === 1 ? 'its' : 'their'} own`);
+  return ready.map((e) => e.id);
 }
 
 /**
@@ -62,6 +120,62 @@ export async function buildReleases<R>(employees: Employee[], parallel: number, 
   const limit = buildReleaseLimit(parallel, cpus);
   const [a, b] = await Promise.all([mapLimit(signers, 1, one), mapLimit(rest, Math.max(1, limit - (signers.length ? 1 : 0)), one)]);
   return employees.map((e) => (signers.includes(e) ? a[signers.indexOf(e)] : b[rest.indexOf(e)]));
+}
+
+/** How long before a build its releases that sign are looked at, so the person can reconnect SimplySign Desktop in time. */
+export const AHEAD_MS = 60 * 60_000;
+
+/** "<build> <id>@<head>" for each head looked at before a build and found to sign nothing, or to sign while this PC can. */
+const aheadFine = new Set<string>();
+
+/** Forgets the heads looked at before builds (for a test). */
+export const forgetSigningAhead = () => aheadFine.clear();
+
+/**
+ * Within AHEAD_MS of the next build (Steward 0.36.161): the releases it would make that sign (an unreleased version at
+ * the head of a branch whose release signs, needsSigning), and whether this PC can sign now (signingProblem, a
+ * timestamped test signature). What it found is kept for an alarm (noteSigningAhead) while it can't, so the person
+ * reconnects SimplySign Desktop before the build rather than after; nothing otherwise, and nothing further from the
+ * build. One already waiting (signedBetween's) has its own alarm. A head found fine is not looked at again for that
+ * build. Never throws.
+ */
+export async function signingAhead(ctx: Ctx, employees: Employee[], next: Date | null, now = new Date()): Promise<SigningAhead | null> {
+  const keep = (a: SigningAhead | null) => {
+    noteSigningAhead(a);
+    return a;
+  };
+  if (!next || next.getTime() - now.getTime() > AHEAD_MS) return keep(null);
+  const build = next.toISOString();
+  const waits = loadSigningWaits();
+  const due: { e: Employee; version: string; cert: string; memo: string }[] = [];
+  for (const e of employees) {
+    const cert = e.release && e.versionFiles.length ? signerHere(e) : null;
+    const head = cert && !waits[e.id] ? glanceOf(ctx, e)?.head : null;
+    if (!cert || !head) continue;
+    const memo = `${build} ${e.id}@${head}`;
+    if (aheadFine.has(memo)) continue;
+    try {
+      const repo = checkoutOf(e);
+      if (!(await commitOf(ctx.run, repo, head))) await fetchBranch(ctx.run, repo, e.branch);
+      const v = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(ctx.run, repo, head, f)] as [string, string | null])));
+      const signs = 'version' in v && !(await releasedOf(ctx, e)).some((r) => r.version === v.version) && (await needsSigning(ctx.run, { id: e.id, repo, commit: head, kitJson: await showFile(ctx.run, repo, head, 'kit.json') }));
+      if (signs) due.push({ e, version: (v as { version: string }).version, cert, memo });
+      else aheadFine.add(memo);
+    } catch (err) {
+      ctx.log(`[${e.id}] couldn't look at its release's signing ahead of the build: ${(err as Error).message}`);
+    }
+  }
+  let why: string | null = null;
+  for (const cert of new Set(due.map((d) => d.cert))) {
+    const down = await signingProblem(ctx.run, cert, { now: now.getTime() });
+    if (down) why ??= down;
+    else for (const d of due) if (d.cert === cert) aheadFine.add(d.memo);
+  }
+  const held = due.filter((d) => !aheadFine.has(d.memo));
+  if (!held.length || !why) return keep(null);
+  const was = loadSigningAhead();
+  ctx.log(`this PC can't sign now, and the next build would sign ${held.map((d) => `${d.e.name} v${d.version}`).join(', ')}: ${why}`);
+  return keep({ build, names: held.map((d) => `${d.e.name} ${d.version}`), why, since: was?.build === build ? was.since : now.toISOString() });
 }
 
 /**

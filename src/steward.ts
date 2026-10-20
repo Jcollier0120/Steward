@@ -24,7 +24,7 @@ import { loadRefreshFailures, loadRefreshPending, refreshAfterReleases, refreshP
 import { loadInstallHolds } from './installscripts.ts';
 import { finishPending, release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
-import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
+import { releaseUnreleased, roundDidSomething, roundFailuresFile, signedBetween, signingAhead } from './stages/round.ts';
 import { clearRolloutHolds, loadRolloutFailures, rollout, takeRolloutResults } from './stages/rollout.ts';
 import { loadSelfFailures, releaseSelf, selfFactsAlone, selfToFinish, trialAhead } from './stages/self.ts';
 import { heldKit, kitTrialsFile, TRIAL_GOING, type KitTrial } from './stages/trial.ts';
@@ -34,7 +34,7 @@ import { settleWholeSuite } from './stages/wholesuite.ts';
 import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
-import { loadSigningWaits } from './signing.ts';
+import { loadSigningAhead, loadSigningWaits, noteSigningAhead } from './signing.ts';
 import { loadExchequerPending } from './stages/exchequer.ts';
 import { loadTending, tend, type OpenAgent, type StartManor } from './tend.ts';
 import { loadUnstick, manorDryRun, unstick, type DryRun, type ManorUpdates, type AllowAgain, type PressUpdate, type RolledBack } from './unstick.ts';
@@ -414,6 +414,21 @@ async function urgentBetween(ctx: Ctx, o: StageOptions, ask: StageAsk, pipeline:
 }
 
 /**
+ * The releases that waited until this PC could sign and can now (stages/round.ts's signedBetween), among the repositories
+ * the round asks about. None without a glance at GitHub. Never throws: the round goes on between builds.
+ */
+async function signedFor(ctx: Ctx, ask: StageAsk, pipeline: PipelineState, now: Date, log: (line: string) => void): Promise<string[]> {
+  if (!ctx.glance) return [];
+  try {
+    const asked = ask.employees?.length ? ask.employees.map((x) => x.trim().toLowerCase()) : null;
+    return await signedBetween(ctx, ctx.settings.employees.filter((e) => !asked || asked.includes(e.id)), [...pipeline.builds, ...(pipeline.open ? [pipeline.open] : [])], now);
+  } catch (e) {
+    log(`couldn't look at the releases that wait until this PC can sign: ${(e as Error).message}`);
+    return [];
+  }
+}
+
+/**
  * The turns this stage takes (lease.ts): StageOptions' own, else this PC's, their refs read through GitHub's API where
  * they're on GitHub (githubTurnRefs); none under node --test unless given.
  */
@@ -619,7 +634,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // An urgent fix on main between builds (stages/urgent.ts): a build of its own for its repository, at once.
       const urgent = pipeline && planned.kind === 'between' ? await urgentBetween(ctx, o, ask, pipeline, log) : [];
       lap('urgent fixes');
-      const mode: PipelineMode = pipeline && urgent.length ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { urgent }) : planned;
+      // Releases that waited until this PC could sign, and now it can (stages/round.ts): a build of their own, at once.
+      const signed = pipeline && planned.kind === 'between' && !urgent.length ? await signedFor(ctx, ask, pipeline, at(), log) : [];
+      lap('signing');
+      const mode: PipelineMode = pipeline && urgent.length ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { urgent }) : pipeline && signed.length ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { signed }) : planned;
       /** This round ends its build: it released each repository's main. */
       let buildCloses = false;
       /** "<id> #<n>" for each PR of its own this round merged (a rollout's, a stamp's), for the build's record. */
@@ -651,6 +669,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Between builds: nothing released or rolled out. Main's new kit is tried on the agents ahead of the next build.
           out.build = { between: true, next: mode.next?.toISOString() ?? null };
           log(mode.line);
+          // Within the hour before the next build: can this PC sign the releases it would sign (stages/round.ts)?
+          try {
+            const asked = ask.employees?.length ? ask.employees.map((x) => x.trim().toLowerCase()) : null;
+            await signingAhead(ctx, ctx.settings.employees.filter((e) => !asked || asked.includes(e.id)), mode.next, at());
+          } catch (e) {
+            log(`couldn't look at signing ahead of the build: ${(e as Error).message}`);
+          }
+          lap('signing ahead');
           if (!only?.length) {
             const ahead = await kitAhead(ctx, o);
             lap("the kit's trial");
@@ -666,7 +692,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
                 ? "the owner's Build now"
                 : mode.run.by === 'urgent'
                   ? `the urgent fix's build (${(mode.run.urgent ?? []).map((k) => k.split(' ').map((w, i) => (i === 1 && !w.startsWith('#') ? w.slice(0, 7) : w)).slice(0, 2).join(' ')).join(', ')})`
-                  : `the ${buildWhen(new Date(mode.run.due), at())} build`;
+                  : mode.run.by === 'signing'
+                    ? `the build for the releases that waited to sign (${(mode.run.employees ?? []).join(', ')})`
+                    : `the ${buildWhen(new Date(mode.run.due), at())} build`;
             log(
               mode.fresh
                 ? `${when} begins${mode.run.employees?.length ? ` for ${mode.run.employees.join(', ')}` : ''}: each repository's main tested once (unless a vouch covers it) and released once it has all settled${mode.run.late ? ` (${lateLine(mode.run, at())})` : ''}`
@@ -676,6 +704,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             );
             ctx.build = { due: mode.run.due, name: when };
             out.build = { due: mode.run.due, by: mode.run.by, round: mode.run.rounds + 1 };
+            // The look ahead of it is done with (a release that can't sign now waits, with its own alarm).
+            noteSigningAhead(null);
             // Under way from its first round's start, not its end: GET /api/pipeline says building (Manor holds its installs)
             // and the page shows the build through what is often its longest round. The round's end saves it again.
             if (mode.fresh && pipeline) {
@@ -755,7 +785,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             // time has run out. A kit main carries that is still being tried (stages/trial.ts) keeps the build open,
             // rather than sending every agent the kit before it to be bumped again at the next build.
             const rolled: { beside: boolean; waits?: string } = !kitRides(ctx.settings.buildPipeline, pipeline!, mode.run)
-              ? (log(mode.run.by === 'urgent' ? 'the newest kit waits for the next build: this one is for an urgent fix' : "the newest kit waits for the day's first build (Settings: Build pipeline)"), { beside: false })
+              ? (log(mode.run.by === 'urgent' ? 'the newest kit waits for the next build: this one is for an urgent fix' : mode.run.by === 'signing' ? 'the newest kit waits for the next build: this one is for the releases that waited to sign' : "the newest kit waits for the day's first build (Settings: Build pipeline)"), { beside: false })
               : kitWaits && !mode.closing
                 ? (log(`rollout: waits for kit ${kitWaits}, which is being tried`), { beside: false, waits: `kit ${kitWaits} is being tried` })
                 : await rollOut();
@@ -918,7 +948,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
           const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
           lap('ports');
-          await watchAlarms({ settings: ctx.settings, round: out, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, heldKit: heldKit(readJson<Record<string, KitTrial>>(kitTrialsFile(), {}), ctx.kit.released), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), exchequerPending: loadExchequerPending(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir, glance: quiet || out.error ? null : ctx.glance }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, heldKit: heldKit(readJson<Record<string, KitTrial>>(kitTrialsFile(), {}), ctx.kit.released), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), signingAhead: loadSigningAhead(), exchequerPending: loadExchequerPending(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir, glance: quiet || out.error ? null : ctx.glance }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }

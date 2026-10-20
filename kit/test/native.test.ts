@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,10 +17,11 @@ process.env[`${ENV}_PORT`] = String(await freePort());
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot } = await import('./fixture/src/app.ts');
-const { ARCHES, archOf, buildNative, keepOwnArch, nativeFolder, nativeOf, nativeRelease, signable, stageNative } = await import('./fixture/src/kit/native.ts');
+const { ARCHES, archOf, buildNative, keepOwnArch, nativeFolder, nativeOf, nativeRelease, nativeSources, signable, stageNative } = await import('./fixture/src/kit/native.ts');
 const { appFolder, install, readRelease } = await import('./fixture/src/kit/install.ts');
-const { nativeFor } = await import('./fixture/src/kit/release.ts');
-const { findSignTool, signArgs, signFiles, signProblem, trialProblem, TRIAL_MS } = await import('./fixture/src/kit/sign.ts');
+const { nativeFor, signingFor } = await import('./fixture/src/kit/release.ts');
+const { AGAIN_MS, findSignTool, signArgs, signFiles, signProblem, TRIAL_FAILED, TRIAL_TRIES, trialProblem, TRIAL_MS, verifySigned } = await import('./fixture/src/kit/sign.ts');
+const { KEEP_PER_ARCH, keepSigned, keptSigned, signedKey, signedStoreOf, sourcesAt, takeSigned } = await import('./fixture/src/kit/signed-native.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 type Native = import('./fixture/src/kit/native.ts').Native;
 
@@ -34,7 +36,10 @@ const fresh = (name: string) => {
 test('kit.json\'s "native": none is none; its paths stay in the repository; both processors unless it says', () => {
   assert.equal(nativeOf({ kit: '2.62.0' }), null);
   const ok = nativeOf({ native: { build: 'native\\build.ps1', out: 'native/build/', thumbprint: THUMB.toLowerCase() } });
-  assert.deepEqual(ok, { build: 'native/build.ps1', out: 'native/build', arch: ['arm64', 'x64'], notices: [], thumbprint: THUMB, timestamp: 'http://time.certum.pl' });
+  assert.deepEqual(ok, { build: 'native/build.ps1', out: 'native/build', arch: ['arm64', 'x64'], notices: [], inputs: [], thumbprint: THUMB, timestamp: 'http://time.certum.pl' });
+  const fed = nativeOf({ native: { build: 'native/build.ps1', out: 'native/build', inputs: ['vendor\\media\\', 'native/host.json'] } }) as Native;
+  assert.deepEqual(fed.inputs, ['vendor/media', 'native/host.json']);
+  assert.deepEqual(nativeSources(fed), ['native', 'vendor/media', 'native/host.json'], "the build script's folder, then its inputs");
   assert.deepEqual((nativeOf({ native: { build: 'b.ps1', out: 'o', arch: ['x64'], notices: ['N.txt'], timestamp: 'http://ts.example' } }) as Native).arch, ['x64']);
   const wrong = (native: unknown) => {
     const r = nativeOf({ native });
@@ -49,6 +54,8 @@ test('kit.json\'s "native": none is none; its paths stay in the repository; both
   assert.match(wrong({ build: 'b.ps1', out: 'o', arch: ['ia32'] }), /"arch"/);
   assert.match(wrong({ build: 'b.ps1', out: 'o', arch: [] }), /"arch"/);
   assert.match(wrong({ build: 'b.ps1', out: 'o', notices: ['/etc/x'] }), /"notices"/);
+  assert.match(wrong({ build: 'b.ps1', out: 'o', inputs: ['../vendor'] }), /"inputs"/);
+  assert.match(wrong({ build: 'b.ps1', out: 'o', inputs: 'vendor' }), /"inputs"/);
   assert.match(wrong({ build: 'b.ps1', out: 'o', thumbprint: 'abc' }), /thumbprint/);
   assert.deepEqual(ARCHES, ['arm64', 'x64']);
   assert.equal(archOf('arm64'), 'arm64');
@@ -241,6 +248,9 @@ test('signing: the x64 signtool of the newest SDK, timestamped, and a cloud key 
   assert.equal(findSignTool({ 'ProgramFiles(x86)': 'C:\\PF86' }, () => { throw new Error('none'); }), null);
   assert.deepEqual(signArgs(['a.exe', 'b.dll'], THUMB, 'http://time.certum.pl'), ['sign', '/sha1', THUMB, '/fd', 'SHA256', '/tr', 'http://time.certum.pl', '/td', 'SHA256', 'a.exe', 'b.dll']);
   assert.match(signProblem('SignTool Error: No certificates were found that met all the given criteria.', THUMB)!, /connect SimplySign Desktop/);
+  // Kit 2.92.0: SimplySign Desktop's session had dropped, and signtool said so in words the kit didn't know (2026-10-20).
+  assert.match(signProblem('SignTool Error: The specified CSP could not be found.\r\nSignTool Error: An error occurred while attempting to sign: C:\\a.exe', THUMB)!, /^signtool can't reach the signing certificate's key \(6B654D9C.*\)\. If its key is in Certum's cloud, connect SimplySign Desktop/);
+  assert.match(signProblem('SignTool Error: Keyset does not exist', THUMB)!, /connect SimplySign Desktop/);
   assert.equal(signProblem('SignTool Error: The specified timestamp server could not be reached.', THUMB), null);
 });
 
@@ -248,22 +258,225 @@ test('signing: the x64 signtool of the newest SDK, timestamped, and a cloud key 
 // answers. A trial that timed out counted as "can sign", and signFiles then waited ten minutes a batch.
 test("signing: a trial signature that doesn't answer in a minute is can't sign, and signFiles tries one before it signs", () => {
   const calls: { args: string[]; timeout: number }[] = [];
-  const answering = (trial: { ok: boolean; timedOut: boolean; text: string }) => (tool: string, args: string[], timeout: number) => {
-    calls.push({ args, timeout });
-    return args.includes('/tr') ? { ok: true, timedOut: false, text: 'Successfully signed' } : trial;
-  };
+  const paused: number[] = [];
+  const pause = (ms: number) => void paused.push(ms);
+  // The trial signs a throwaway trial.ps1; anything else is the release's own files.
+  const answering =
+    (...trials: { ok: boolean; timedOut: boolean; text: string }[]) =>
+    (tool: string, args: string[], timeout: number) => {
+      calls.push({ args, timeout });
+      return args.some((a) => a.endsWith('trial.ps1')) ? (trials.length > 1 ? trials.shift()! : trials[0]) : { ok: true, timedOut: false, text: 'Successfully signed' };
+    };
   const hung = answering({ ok: false, timedOut: true, text: '' });
-  assert.match(trialProblem('signtool.exe', THUMB, { run: hung })!, /^signtool didn't answer within 60 seconds with the signing certificate's key \(6B654D9C.*\): SimplySign Desktop may be waiting for you to sign in/);
-  assert.deepEqual(calls.map((c) => [c.args.slice(0, 5), c.timeout]), [[['sign', '/sha1', THUMB, '/fd', 'SHA256'], TRIAL_MS]], 'a trial signature, no timestamp, a minute');
-  assert.match(trialProblem('signtool.exe', THUMB, { run: answering({ ok: false, timedOut: false, text: 'SignTool Error: No certificates were found that met all the given criteria.' }) })!, /connect SimplySign Desktop/);
-  assert.equal(trialProblem('signtool.exe', THUMB, { run: answering({ ok: false, timedOut: false, text: 'SignTool Error: something else' }) }), null, 'anything else is left to the real signing');
-  assert.equal(trialProblem('signtool.exe', THUMB, { run: answering({ ok: true, timedOut: false, text: '' }) }), null);
+  assert.match(trialProblem('signtool.exe', THUMB, { run: hung, pause })!, /^signtool didn't answer within 60 seconds with the signing certificate's key \(6B654D9C.*\): SimplySign Desktop may be waiting for you to sign in/);
+  assert.deepEqual(
+    calls.map((c) => [c.args.slice(0, 9), c.timeout]),
+    [[['sign', '/sha1', THUMB, '/fd', 'SHA256', '/tr', 'http://time.certum.pl', '/td', 'SHA256'], TRIAL_MS]],
+    "a real trial signature (kit 2.92.0), timestamped as the release's, a minute",
+  );
+  assert.deepEqual(paused, [], "a sign-in that's waiting isn't waited on again");
+
+  // The key can't be reached: said at once, as signProblem says it, with no second try.
+  for (const text of ['SignTool Error: No certificates were found that met all the given criteria.', 'SignTool Error: The specified CSP could not be found.']) {
+    calls.length = 0;
+    assert.match(trialProblem('signtool.exe', THUMB, { run: answering({ ok: false, timedOut: false, text }), pause })!, /^signtool can't reach the signing certificate's key .*connect SimplySign Desktop/, text);
+    assert.equal(calls.length, 1, text);
+  }
+  assert.deepEqual(paused, []);
+
+  // Anything else (a timestamp server that didn't answer) is tried again after AGAIN_MS, then said as signtool said it.
+  calls.length = 0;
+  const other = { ok: false, timedOut: false, text: 'Number of errors: 1\r\nSignTool Error: The specified timestamp server could not be reached.' };
+  assert.equal(
+    trialProblem('signtool.exe', THUMB, { run: answering(other), pause }),
+    `${TRIAL_FAILED} with the signing certificate (${THUMB}), ${TRIAL_TRIES} tries: Number of errors: 1 SignTool Error: The specified timestamp server could not be reached.`,
+  );
+  assert.equal(calls.length, TRIAL_TRIES);
+  assert.deepEqual(paused, Array(TRIAL_TRIES - 1).fill(AGAIN_MS));
+  paused.length = 0;
+  assert.equal(trialProblem('signtool.exe', THUMB, { run: answering(other, { ok: true, timedOut: false, text: 'Successfully signed' }), pause }), null, 'it signed on the second try');
+  assert.deepEqual(paused, [AGAIN_MS]);
+  assert.equal(trialProblem('signtool.exe', THUMB, { run: answering({ ok: true, timedOut: false, text: '' }), pause }), null);
+  calls.length = 0;
+  trialProblem('signtool.exe', THUMB, { run: answering({ ok: true, timedOut: false, text: '' }), timestamp: 'http://ts.example' });
+  assert.deepEqual(calls[0].args.slice(5, 7), ['/tr', 'http://ts.example'], "kit.json's own timestamp server");
 
   // The key's sign-in started waiting while the release built: signFiles gives up after the trial's minute, signing nothing.
   calls.length = 0;
   const signer = { signtool: 'signtool.exe', thumbprint: THUMB, timestamp: 'http://time.certum.pl' };
-  assert.throws(() => signFiles(signer, ['a.exe', 'b.dll'], () => {}, { run: hung }), /^Error: couldn't sign the native files: signtool didn't answer within 60 seconds .*SimplySign Desktop may be waiting for you to sign in/);
+  assert.throws(() => signFiles(signer, ['a.exe', 'b.dll'], () => {}, { run: hung, pause }), /^Error: couldn't sign the native files: signtool didn't answer within 60 seconds .*SimplySign Desktop may be waiting for you to sign in/);
   assert.deepEqual(calls.map((c) => c.timeout), [TRIAL_MS], 'only the trial ran');
+  // The session dropped between the trial and the files (Envoy 0.1.25): said in words, not tried three times.
+  calls.length = 0;
+  const dropped = (tool: string, args: string[], timeout: number) => {
+    calls.push({ args, timeout });
+    return args.some((a) => a.endsWith('trial.ps1')) ? { ok: true, timedOut: false, text: 'Successfully signed' } : { ok: false, timedOut: false, text: 'SignTool Error: The specified CSP could not be found.' };
+  };
+  assert.throws(() => signFiles(signer, ['a.exe'], () => {}, { run: dropped, pause }), /^Error: couldn't sign the native files: signtool can't reach the signing certificate's key/);
+  assert.equal(calls.length, 2, 'the trial, then one try of the files');
+});
+
+test('verifySigned: signtool verify /pa takes every program kept, a batch at a time, and those signed here are the certificate\'s', () => {
+  const calls: string[][] = [];
+  const verifying = (ok: boolean) => (tool: string, args: string[]) => {
+    calls.push([tool, ...args]);
+    return { ok, timedOut: false, text: ok ? 'Successfully verified' : 'SignTool Error: A certificate chain processed, but terminated in a root certificate which is not trusted.\r\nNumber of errors: 1' };
+  };
+  const programs = Array.from({ length: 45 }, (_, i) => `C:\\kept\\p${i}.dll`);
+  const asked: string[][] = [];
+  const fine = (files: string[]) => (asked.push(files), '');
+  assert.equal(verifySigned('signtool.exe', programs, ['C:\\kept\\p0.dll'], THUMB, { run: verifying(true), wrong: fine }), null);
+  assert.deepEqual(calls.map((c) => [c[0], c[1], c[2], c.length - 3]), [['signtool.exe', 'verify', '/pa', 40], ['signtool.exe', 'verify', '/pa', 5]]);
+  assert.deepEqual(asked, [['C:\\kept\\p0.dll']], 'only those signed here are checked for the certificate and a timestamp');
+
+  assert.match(verifySigned('signtool.exe', programs, [], THUMB, { run: verifying(false), wrong: fine })!, /^signtool verify \/pa refused them: .*not trusted\. Number of errors: 1$/);
+  assert.match(verifySigned('signtool.exe', programs, ['C:\\kept\\p0.dll'], THUMB, { run: verifying(true), wrong: () => 'C:\\kept\\p0.dll|HashMismatch' })!, /^their signatures aren't all 6B654D9C.*'s and timestamped: C:\\kept\\p0\.dll\|HashMismatch$/);
+  assert.match(verifySigned(null, programs, [], THUMB)!, /signtool isn't installed/);
+  assert.equal(verifySigned(null, [], [], THUMB), null, 'nothing to verify needs no signtool');
+});
+
+// Kit 2.92.0: a processor's signed files are kept by what they were built from, and a release with the same native
+// sources takes them instead of building and signing (signed-native.ts). Never the real thumbprint: nothing signs here.
+const FAKE = 'AB'.repeat(20);
+const kitNative = (o: Record<string, unknown> = {}) => nativeOf({ native: { build: 'native/build.ps1', out: 'native/build', thumbprint: FAKE, ...o } }) as Native;
+const objectIds = (seed: string) => (p: string) => createHash('sha1').update(`${seed}:${p}`).digest('hex');
+const builtFiles = (dir: string, what: string) => {
+  mkdirSync(path.join(dir, 'sub'), { recursive: true });
+  writeFileSync(path.join(dir, 'host.exe'), `host ${what}`);
+  writeFileSync(path.join(dir, 'sub', 'model.json'), '{}');
+};
+
+test('signed native files are kept by their native sources, processor and certificate, two a processor', () => {
+  const n = kitNative({ inputs: ['vendor/media'] });
+  const sources = sourcesAt(n, objectIds('one'))!;
+  assert.deepEqual(Object.keys(sources), ['native', 'vendor/media']);
+  assert.equal(sourcesAt(n, (p) => (p === 'vendor/media' ? null : objectIds('one')(p))), null, "a source git can't name keys nothing");
+  assert.equal(sourcesAt(n, () => 'fatal: not a tree'), null);
+
+  const key = signedKey(n, 'arm64', sources);
+  assert.match(key, /^[0-9a-f]{32}$/);
+  assert.equal(signedKey(kitNative({ inputs: ['vendor/media'] }), 'arm64', { ...sources }), key, 'the same sources, the same key');
+  for (const [why, other] of [
+    ['another processor', signedKey(n, 'x64', sources)],
+    ['another certificate', signedKey(kitNative({ inputs: ['vendor/media'], thumbprint: 'CD'.repeat(20) }), 'arm64', sources)],
+    ['a source changed', signedKey(n, 'arm64', sourcesAt(n, objectIds('two'))!)],
+    ['another out folder', signedKey(kitNative({ inputs: ['vendor/media'], out: 'native/out' }), 'arm64', sources)],
+  ]) assert.notEqual(other, key, why);
+
+  assert.equal(signedStoreOf('envoy', { ENVOY_HOME: 'D:\\envoy-home' }, 'C:\\Users\\me'), path.join('D:\\envoy-home', 'signed-native'));
+  assert.equal(signedStoreOf('media-host', {}, 'C:\\Users\\me'), path.join('C:\\Users\\me', '.media-host-dev', 'signed-native'));
+
+  const store = fresh('store');
+  const built = fresh('built');
+  builtFiles(built, 'one');
+  assert.equal(keptSigned(store, key), null);
+  keepSigned(store, key, built, { arch: 'arm64', thumbprint: FAKE, sources, version: '0.1.24', commit: 'abc1234', signed: [path.join(built, 'host.exe')], now: new Date('2026-10-19T10:00:00Z') });
+  const kept = keptSigned(store, key)!;
+  assert.deepEqual([kept.version, kept.commit, kept.arch, kept.signed, Object.keys(kept.files).sort()], ['0.1.24', 'abc1234', 'arm64', ['host.exe'], ['host.exe', 'sub/model.json']]);
+  assert.equal(kept.files['host.exe'], createHash('sha256').update('host one').digest('hex'));
+  assert.deepEqual(readdirSync(store), [key], 'nothing half-written is left beside it');
+
+  // Taken back into a release's own folder, checked, and verified with what signtool would be given.
+  const into = path.join(fresh('release'), 'native', 'build', 'arm64');
+  const verified: string[][][] = [];
+  const took = takeSigned(store, key, into, (programs, here) => (verified.push([programs, here]), null));
+  assert.ok(took && 'kept' in took, JSON.stringify(took));
+  assert.equal(readFileSync(path.join(into, 'host.exe'), 'utf8'), 'host one');
+  assert.deepEqual(verified, [[[path.join(into, 'host.exe')], [path.join(into, 'host.exe')]]]);
+  assert.equal(takeSigned(store, 'f'.repeat(32), into, () => null), null, 'none kept by that key');
+
+  // Signatures that don't check out now: refused, the folder emptied, the copy kept for a later look.
+  const refused = takeSigned(store, key, into, () => 'signtool verify /pa refused them: not trusted');
+  assert.deepEqual(refused, { why: 'signtool verify /pa refused them: not trusted' });
+  assert.ok(!existsSync(into));
+  assert.ok(keptSigned(store, key));
+
+  // A kept file that isn't the one kept: refused, and the copy let go.
+  writeFileSync(path.join(store, key, 'files', 'host.exe'), 'someone else');
+  const tampered = takeSigned(store, key, into, () => null);
+  assert.deepEqual(tampered, { why: "host.exe isn't the file kept" });
+  assert.equal(keptSigned(store, key), null);
+  keepSigned(store, key, built, { arch: 'arm64', thumbprint: FAKE, sources, version: '0.1.24', commit: 'abc1234', signed: [], now: new Date('2026-10-19T10:00:00Z') });
+  rmSync(path.join(store, key, 'files', 'sub'), { recursive: true });
+  assert.match((takeSigned(store, key, into, () => null) as { why: string }).why, /has 1 files, not the 2 it should/);
+
+  // The newest KEEP_PER_ARCH copies of each processor stay; the other processor's aren't counted with them.
+  const x64 = signedKey(n, 'x64', sources);
+  keepSigned(store, x64, built, { arch: 'x64', thumbprint: FAKE, sources, version: '0.1.20', commit: 'aaa', signed: [], now: new Date('2026-10-01T10:00:00Z') });
+  const keys = ['one', 'two', 'three'].map((seed, i) => {
+    const k = signedKey(n, 'arm64', sourcesAt(n, objectIds(seed))!);
+    keepSigned(store, k, built, { arch: 'arm64', thumbprint: FAKE, sources: sourcesAt(n, objectIds(seed))!, version: `0.2.${i}`, commit: 'bbb', signed: [], now: new Date(Date.UTC(2026, 9, 10 + i)) });
+    return k;
+  });
+  assert.equal(KEEP_PER_ARCH, 2);
+  assert.deepEqual(readdirSync(store).sort(), [keys[1], keys[2], x64].sort(), "arm64's oldest is let go; x64's one stays");
+});
+
+test("a release takes a processor's kept signed files instead of building and signing it, and keeps those it signs", () => {
+  const r = repo();
+  const kept: string[] = [];
+  const from = new Map<string, { from: string; signed: number } | null>([['arm64', { from: 'v0.1.24', signed: 1 }], ['x64', null]]);
+  const lines: string[] = [];
+  const steps = {
+    ...r.steps,
+    log: (l: string) => void lines.push(l),
+    reuse: (arch: 'arm64' | 'x64', dir: string) => {
+      const took = from.get(arch) ?? null;
+      if (took) builtFiles(dir, `kept ${arch}`);
+      return took;
+    },
+    keep: (arch: 'arm64' | 'x64', dir: string, signed: string[]) => void kept.push(`${arch}: ${signed.map((f) => path.relative(dir, f)).join(',')}`),
+  };
+  const b = buildNative(r.root, r.n, true, steps);
+  assert.deepEqual(r.asked, ['native/build.ps1 x64'], 'only the processor with nothing kept is built');
+  assert.deepEqual(r.signed, [['native/build/x64/host.exe']], 'and only it is signed');
+  assert.deepEqual(kept, ['x64: host.exe'], 'what it signed is kept for the releases after it');
+  assert.deepEqual(b.arch.map((a) => [a.arch, a.signed, a.reused]), [['arm64', 1, 'v0.1.24'], ['x64', 1, undefined]]);
+  assert.equal(readFileSync(path.join(r.root, 'native', 'build', 'arm64', 'host.exe'), 'utf8'), 'host kept arm64');
+  assert.match(lines.join('\n'), /native files for arm64: the signed ones v0\.1\.24 kept, from the same native sources/);
+
+  // A copy that couldn't be kept is said, and the release goes on.
+  const k = repo();
+  const said: string[] = [];
+  buildNative(k.root, k.n, true, { ...k.steps, log: (l: string) => void said.push(l), keep: () => { throw new Error('the disk is full'); } });
+  assert.match(said.join('\n'), /couldn't keep the signed files for arm64, so the next release signs them again: the disk is full/);
+  assert.equal(k.signed.length, 2);
+
+  // A release that isn't published neither takes nor keeps any.
+  const u = repo();
+  let asked = 0;
+  buildNative(u.root, u.n, false, { ...u.steps, reuse: () => (asked++, { from: 'v0.1.24', signed: 1 }), keep: () => void asked++ });
+  assert.equal(asked, 0);
+  assert.deepEqual(u.asked, ['native/build.ps1 arm64', 'native/build.ps1 x64']);
+});
+
+test("signingFor: the key is asked for before building only when a processor's signed files aren't kept", () => {
+  const n = kitNative({ inputs: ['vendor/media'] });
+  const store = fresh('signing-store');
+  const ids = objectIds('same');
+  // This PC has no certificate FAKE names, so asking for the key always fails, in words, before anything is built.
+  const cantSign = /^Error: Not published: its native files can't be signed: /;
+  assert.throws(() => signingFor(n, { dirty: false, version: '0.1.25', commit: 'd644e5c', store, objectOf: ids, log: () => {} }), cantSign, 'nothing kept');
+  assert.throws(() => signingFor(n, { dirty: true, version: '0.1.25', commit: 'd644e5c', store, objectOf: ids, log: () => {} }), cantSign, 'a dirty tree takes none');
+
+  const sources = sourcesAt(n, ids)!;
+  const built = fresh('signing-built');
+  mkdirSync(built, { recursive: true });
+  writeFileSync(path.join(built, 'host.json'), '{"host": 1}');
+  keepSigned(store, signedKey(n, 'arm64', sources), built, { arch: 'arm64', thumbprint: FAKE, sources, version: '0.1.24', commit: 'c0ffee1', signed: [] });
+  assert.throws(() => signingFor(n, { dirty: false, version: '0.1.25', commit: 'd644e5c', store, objectOf: ids, log: () => {} }), cantSign, "x64's aren't kept");
+  keepSigned(store, signedKey(n, 'x64', sources), built, { arch: 'x64', thumbprint: FAKE, sources, version: '0.1.24', commit: 'c0ffee1', signed: [] });
+
+  // Every processor's kept: no key needed, and each is taken from the store.
+  const lines: string[] = [];
+  const s = signingFor(n, { dirty: false, version: '0.1.25', commit: 'd644e5c', store, objectOf: ids, log: (l) => void lines.push(l) });
+  const into = path.join(fresh('signing-into'), 'x64');
+  assert.deepEqual(s.reuse!('x64', into), { from: 'v0.1.24', signed: 0 });
+  assert.equal(readFileSync(path.join(into, 'host.json'), 'utf8'), '{"host": 1}');
+  assert.throws(() => s.signer(), cantSign, 'still asked for, should a copy not check out');
+
+  // A changed source keys afresh: the key is asked for again.
+  assert.throws(() => signingFor(n, { dirty: false, version: '0.1.26', commit: 'e1', store, objectOf: (p) => (p === 'native' ? objectIds('changed')(p) : ids(p)), log: () => {} }), cantSign);
 });
 
 test('npm run release carries both processors\' native files and their notices; publishing them unsigned is refused', { skip: process.platform !== 'win32' && 'needs Windows tar.exe and PowerShell' }, () => {

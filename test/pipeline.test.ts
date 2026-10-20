@@ -177,6 +177,25 @@ test("the kit goes into every build, or only the day's first", () => {
   assert.equal(kitRides(first, { open: null, builds: [] }, run(8)), true);
   assert.equal(kitRides(first, state, { ...run(13), by: 'owner' }), true, "the owner's build takes it");
   assert.equal(kitRides(THREE, state, { ...run(10), by: 'urgent' }), false, "an urgent fix's doesn't: the next build takes it");
+  assert.equal(kitRides(THREE, state, { ...run(10), by: 'signing' }), false, "nor the build for releases that waited to sign");
+});
+
+// Steward 0.36.161: releases that waited until this PC could sign build as soon as it can, not at the next build time.
+test('releases that waited to sign, and now can, begin a build of their own between builds; an urgent fix or a build time comes first', () => {
+  const done: PipelineState = { open: null, builds: [{ due: at(8).toISOString(), by: 'schedule', started: at(8).toISOString(), finished: at(8, 40).toISOString(), rounds: 3, merged: [], released: [], failed: [] }] };
+  const m = pipelineMode(THREE, done, at(10), { signed: ['envoy', 'envoy', 'porter'] });
+  assert.equal(m.kind, 'build');
+  if (m.kind !== 'build') return;
+  assert.deepEqual([m.fresh, m.run.by, m.run.due, m.run.employees, m.run.urgent], [true, 'signing', at(10).toISOString(), ['envoy', 'porter'], undefined]);
+  assert.equal(pipelineMode(THREE, done, at(10), { signed: [] }).kind, 'between');
+  const both = pipelineMode(THREE, done, at(10), { urgent: [{ id: 'reeve', head: 'a1' }], signed: ['envoy'] });
+  assert.equal(both.kind === 'build' && both.run.by, 'urgent', 'an urgent fix first: the round after it looks again');
+  const due = pipelineMode(THREE, done, at(13, 1), { signed: ['envoy'] });
+  assert.equal(due.kind === 'build' && due.run.by === 'schedule' && !due.run.employees, true, 'a build time takes them with the rest');
+  // It doesn't stand for the schedule's: the 13:00 build still comes.
+  const state = endRound(done, m.run, { merged: [], released: ['envoy v0.1.25'], failed: [], closed: true, now: at(10, 20) });
+  assert.equal(pipelineMode(THREE, state, at(10, 30)).kind, 'between');
+  assert.equal(pipelineMode(THREE, state, at(13, 1)).kind, 'build');
 });
 
 test("an urgent fix on main between builds begins a build of its own, for its repository; once at its head; a build time's takes it with the rest", () => {

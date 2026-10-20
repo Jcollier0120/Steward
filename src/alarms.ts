@@ -9,7 +9,8 @@ import { failureDetail, keptFailure } from './failure.ts';
 import { allowedInstallScripts, installHoldConditions, type InstallHold } from './installscripts.ts';
 import { agentPages, reeveInstalled, seneschalInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
-import type { SigningWait } from './signing.ts';
+import type { SigningAhead, SigningWait } from './signing.ts';
+import { buildWhen } from './pipeline.ts';
 import type { ExchequerPending } from './stages/exchequer.ts';
 import type { Migration } from './migrate.ts';
 import { bumpDirOf, releaseDirOf, type StageResult } from './stages/common.ts';
@@ -228,6 +229,8 @@ export function roundConditions(o: {
   tastingHolds?: Record<string, TastingHold>;
   /** Releases that wait until this PC can sign (signing.ts's signing-waits.json), by employee. */
   signingWaits?: Record<string, SigningWait>;
+  /** What the look ahead of the next build found: it would sign, and this PC can't now (signing.ts's signing-ahead.json). */
+  signingAhead?: SigningAhead | null;
   /** Releases on GitHub that didn't reach the Exchequer (stages/exchequer.ts's exchequer-pending.json), by employee. */
   exchequerPending?: Record<string, ExchequerPending>;
   /** Versions of the Steward its install rolled back (safeinstall.ts's unsafe-updates.json), by version. */
@@ -285,7 +288,8 @@ export function roundConditions(o: {
     });
   }
   // Releases that wait until this PC can sign (SimplySign Desktop not connected): one alarm for them all, raised at once,
-  // so the person connects it; it clears by itself once the round after releases them.
+  // so the person connects it; it clears by itself once a round's test signature works and the build of their own
+  // releases them (Steward 0.36.161: between builds too, not only at the next build time).
   const signing = Object.entries(o.signingWaits ?? {}).flatMap(([id, w]) => {
     const e = o.employees.find((x) => x.id === id);
     return e ? [{ name: e.name, ...w }] : [];
@@ -296,8 +300,29 @@ export function roundConditions(o: {
       id: 'signing:waits',
       who: 'steward',
       title: `${signing.map((w) => `${w.name} ${w.version}`).join(', ')} ${signing.length === 1 ? 'waits' : 'wait'} to be released until this PC can sign`,
-      detail: [`Why: ${first.why}`, `Nothing failed and nothing was built: the first round after it can sign releases ${signing.length === 1 ? 'it' : 'them'} by itself.`],
+      detail: [
+        `Why: ${first.why}`,
+        'Reconnect SimplySign Desktop (your SimplySign ID and the one-time code from the phone app), or fix what the line above says.',
+        `Nothing failed, and nothing needs a click or a new commit: each round signs a test file, and once that works the Steward releases ${signing.length === 1 ? 'it' : 'them'} by itself, between builds too, and this alarm clears.`,
+      ],
       since: first.since,
+      afterMs: 0,
+    });
+  }
+  // Within the hour before a build that would sign a release, this PC can't sign (stages/round.ts's signingAhead): raised
+  // at once, so the person reconnects before the build; it clears once a round's test signature works, or the build begins.
+  if (o.signingAhead) {
+    const a = o.signingAhead;
+    out.push({
+      id: `signing:ahead:${a.build}`,
+      who: 'steward',
+      title: `This PC can't sign now, and the ${buildWhen(new Date(a.build), new Date())} build would sign ${a.names.join(', ')}: reconnect SimplySign Desktop before it`,
+      detail: [
+        `Why: ${a.why}`,
+        'Reconnect SimplySign Desktop (your SimplySign ID and the one-time code from the phone app), or fix what the line above says: this alarm clears once a round signs a test file.',
+        "If it still can't sign at the build, nothing fails: the release waits, and the Steward releases it by itself once it can.",
+      ],
+      since: a.since,
       afterMs: 0,
     });
   }

@@ -2,6 +2,44 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.92.0
+
+**A release now proves it can sign before it builds, and reuses the signed native files of a release before whose native sources haven't changed, so most releases don't need SimplySign Desktop at all.**
+
+### What's new
+
+- **A real test signature first:** before a published release builds its native files, it signs a throwaway file with its own certificate and timestamp server.
+  - On 2026-10-20 the old check passed while SimplySign Desktop's session had dropped. The build ran for minutes, then every file failed with "The specified CSP could not be found".
+  - Now a key that can't be reached is said at once, before anything is built, in plain words: connect SimplySign Desktop.
+  - Any other error (a timestamp server that didn't answer) is tried once more after 15 seconds, then said as signtool said it.
+- **Signed native files kept and reused:** once a release has signed a processor's native files, a copy is kept, keyed by what they were built from. A later release with the same key takes that copy instead of building and signing that processor. It does so only once each file is the one kept and `signtool verify /pa` still accepts it.
+  - The key: the native sources at the commit released, the processor, the certificate, and kit.json's `build` and `out`. The native sources are the build script's folder plus the new `"inputs"`.
+  - A release whose native sources haven't changed needs neither the build nor the signing key, and doesn't check the key at all.
+- **A dropped session said in words:** "The specified CSP could not be found" and "Keyset does not exist" now mean the key can't be reached. Signing stops at once instead of trying a batch three times.
+
+### What changed
+
+- **sign.ts:**
+  - `trialProblem` signs with `signArgs`, timestamped, `TRIAL_TRIES` (2) tries `AGAIN_MS` (15 s) apart. Anything but a key it can't reach or a hang ends in `TRIAL_FAILED` ("signtool couldn't sign a test file …") with signtool's last two lines. It takes `timestamp` and `pause`.
+  - `KEY_GONE` holds signtool's words for a key it can't reach; `signProblem` uses it.
+  - `verifySigned` runs `signtool verify /pa` on the kept programs, 40 at a time. Then it checks that those signed here are Valid, the certificate's and timestamped.
+  - `signFiles` takes `pause`.
+- **signed-native.ts (new):** `signedStoreOf`, `sourcesAt`, `signedKey`, `keptSigned`, `takeSigned` and `keepSigned`.
+  - Copies are kept in the agent's checkout data folder (`<ID>_HOME`, else `%USERPROFILE%\.<id>-dev`), under `signed-native\<key>\`, the newest two per processor.
+  - A copy whose files don't match what was kept is let go. One whose signatures don't check out now is kept, and the release signs afresh.
+- **native.ts:**
+  - kit.json's `"native"` takes `"inputs"`: files or folders outside the build script's folder that the build reads.
+  - `nativeSources` lists the native sources, and `filesUnder` is exported.
+  - `NativeSteps` takes optional `reuse` and `keep`. `buildNative` takes a processor's kept copy when `reuse` gives one, and keeps the files it signs.
+- **release.ts:**
+  - `signingFor` asks for the signer before building only when some processor has no kept copy, or the tree is dirty. Otherwise it asks only if a kept copy fails its check.
+  - The native sources count toward a dirty tree. A reused processor's line in the release's output names the release its files came from.
+
+### Before you update
+
+- Nothing in an agent's code. If an agent's native build reads files outside its build script's folder, list them in kit.json's `"native"` as `"inputs"`. Otherwise a change to them alone ships the files signed before it.
+- The first release on this kit builds and signs as before, and keeps its signed files: up to two copies of each processor's native files.
+
 ## 2.91.0
 
 **The kit's own helper programs are signed, and a start that Smart App Control blocked gets one more try.**

@@ -2,6 +2,28 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.161
+
+**A release that can't be signed because SimplySign Desktop's session dropped now waits instead of failing, and goes out by itself once this PC can sign again. Most releases with native files no longer need SimplySign at all. The Steward now hands out kit 2.92.0.**
+
+### What's new
+
+- **Released by itself once it can sign.** A release waiting until this PC can sign used to wait for the next build time. Now each round between builds signs a small test file, and once that works, the waiting release builds at once, in a build of its own, and its alarm clears. Nothing waits for a click or a new commit.
+- **An alarm an hour ahead.** In the hour before a build that would sign a release, the Steward checks that this PC can sign. If it can't, it raises an alarm at once, "reconnect SimplySign Desktop before it", so you can reconnect in time. If it still can't at the build, nothing fails: the release waits.
+- **Signed native files reused (kit 2.92.0).** An agent's release keeps its signed native files. The next release whose native sources haven't changed takes them again, after checking each file and its signature, instead of building and signing. Such a release doesn't need SimplySign Desktop, and the Steward doesn't hold it while this PC can't sign. Today only Envoy has native files.
+
+### What changed
+
+- **A dropped SimplySign session is recognised.** On 2026-10-20, Envoy 0.1.25's release passed the check before building. Then every file failed to sign with "The specified CSP could not be found", and the alarm said the rounds wouldn't try it again. Those words, and "Keyset does not exist", now mean the key can't be reached: the release waits instead of failing.
+- **The check before a release is a real signature.** It signs a test file with the timestamp server a release uses. A failure other than the key is tried once more after 15 seconds before it holds the release. Before, an error the check didn't recognise let the release build, then fail at signing.
+- **The waiting alarm** now says what to do: reconnect SimplySign Desktop with your SimplySign ID and the one-time code from the phone app. It also says the release goes out by itself.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+- Agents take kit 2.92.0 through the usual kit rollout. Until an agent is on it, its releases sign every time, as before.
+- A release that failed earlier only because the key couldn't be reached is tried again at the next build, unless it has been released since.
+
 ## 0.36.160
 
 **A build now releases each repository's main as it is after the build's own stamp, so the release carries the version and changelog entry that stamp just wrote.**
