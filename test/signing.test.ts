@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
 import type { Ran, Runner } from '../src/run.ts';
 import type { Employee } from '../src/settings.ts';
+import type { Ctx } from '../src/stages/common.ts';
 
 // Steward 0.36.30: a release that signs waits while this PC can't sign (SimplySign Desktop not connected), rather than
 // failing for good. On 2026-10-14 Manor's, Envoy's and Heiward's releases each failed for it, an alarm and a Wright
@@ -21,9 +22,15 @@ mkdirSync(sdk, { recursive: true });
 writeFileSync(path.join(sdk, 'signtool.exe'), '');
 process.env['ProgramFiles(x86)'] = kits;
 
-const { forgetSigningLooks, HUNG_MS, loadSigningWaits, noteSigningWaits, signingDown, signingHung, signingProblem, signsWith, TRIAL_MS } = await import('../src/signing.ts');
+const { forgetSigningLooks, HUNG_MS, keptSigningDown, loadSigningAhead, loadSigningWaits, needsSigning, noteSigningAhead, noteSigningWaits, signingDown, signingHung, signingProblem, signsWith, TRIAL_MS } = await import('../src/signing.ts');
 const { releaseOne } = await import('../src/stages/release.ts');
-const { releaseUnreleased, roundFailuresFile } = await import('../src/stages/round.ts');
+const { AHEAD_MS, forgetSigningAhead, releaseUnreleased, roundFailuresFile, SIGNED_AGAIN_MS, signedBetween, signingAhead } = await import('../src/stages/round.ts');
+const { AGAIN_MS, TRIAL_FAILED } = await import('../src/kit/sign.ts');
+const { nativeOf } = await import('../src/kit/native.ts');
+const { keepSigned, signedKey, signedStoreOf, sourcesAt } = await import('../src/kit/signed-native.ts');
+const { run: realRun } = await import('../src/run.ts');
+type Native = import('../src/kit/native.ts').Native;
+type BuildRun = import('../src/pipeline.ts').BuildRun;
 const { releaseDirOf } = await import('../src/stages/common.ts');
 const { checksLogOf } = await import('../src/stages/bump.ts');
 const { roundConditions } = await import('../src/alarms.ts');
@@ -64,6 +71,30 @@ test("signingDown: the line that says the key couldn't be reached, in signtool's
   assert.equal(signingHung(NO_KEY), false, 'the key gone is not a hang');
 });
 
+// Steward 0.36.161: on 2026-10-20 SimplySign Desktop's session dropped while Envoy 0.1.25 built, and signtool said so in
+// words neither the kit nor the Steward knew: a failed release the rounds wouldn't try again.
+test("signingDown: the words a dropped SimplySign session gives signtool, and kit 2.92.0's test signature that failed", () => {
+  // Kit 2.91.0's release, as Envoy 0.1.25's said it: its files tried three times, then their last lines.
+  const old = [
+    '  signing failed (try 2 of 3), trying again in 15 s: SignTool Error: The specified CSP could not be found.',
+    "Error: couldn't sign the native files: Done Adding Additional Store",
+    'SignTool Error: The specified CSP could not be found.',
+    'SignTool Error: An error occurred while attempting to sign: D:\\envoy\\native\\build\\x64\\media-host.exe',
+  ].join('\r\n');
+  assert.equal(signingDown(`building…\r\n${old}\r\n`), 'SignTool Error: The specified CSP could not be found.');
+  assert.equal(signingDown('SignTool Error: Keyset does not exist'), 'SignTool Error: Keyset does not exist');
+  const trial = `Not published: its native files can't be signed: ${TRIAL_FAILED} with the signing certificate (${PRINT}), 2 tries: SignTool Error: The specified timestamp server either could not be reached or returned an invalid response.`;
+  assert.equal(signingDown(`building…\n${trial}\n`), trial);
+  assert.equal(signingHung(trial), false);
+  const noTool = "Not published: its native files can't be signed: the Windows SDK's signtool isn't installed (winget install Microsoft.WindowsSDK.10.0.26100)";
+  assert.equal(signingDown(noTool), noTool, "any signer the kit couldn't have");
+  // The output a round kept of such a release: it waits, rather than standing failed.
+  const dir = path.join(tmp, 'kept-csp');
+  mkdirSync(path.dirname(checksLogOf(dir)), { recursive: true });
+  writeFileSync(checksLogOf(dir), `npm run release -- --publish (exit 1)\n\n${old}\n`);
+  assert.equal(keptSigningDown(dir), true);
+});
+
 /** A runner for the look: the certificate store says `store`, a trial signature exits `sign`. */
 function looking(store: string, sign: Ran): { run: Runner; asked: string[] } {
   const asked: string[] = [];
@@ -88,12 +119,105 @@ test('signingProblem: the certificate and its key, then a trial signature; one l
   assert.match((await signingProblem(looking('none', ok('')).run, PRINT, { signtool }))!, /isn't in Cert:\\CurrentUser\\My: .*SimplySign/);
   forgetSigningLooks();
   assert.match((await signingProblem(looking('ok', ok('')).run, PRINT, { signtool: null }))!, /signtool isn't installed/);
+
+  // Anything else (Steward 0.36.161): tried again after AGAIN_MS, as the kit's trial is, then said as signtool said it.
   forgetSigningLooks();
-  assert.equal(await signingProblem(looking('ok', { code: 1, out: '', err: 'SignTool Error: something else' }).run, PRINT, { signtool }), null, 'anything else is left to the release, which says it better');
+  const paused: number[] = [];
+  const pause = async (ms: number) => void paused.push(ms);
+  const blip = looking('ok', { code: 1, out: '', err: 'SignTool Error: The specified timestamp server either could not be reached or returned an invalid response.' });
+  assert.equal(await signingProblem(blip.run, PRINT, { signtool, pause }), `${TRIAL_FAILED} with the code-signing key (${PRINT}): SignTool Error: The specified timestamp server either could not be reached or returned an invalid response.`);
+  assert.deepEqual([blip.asked, paused], [['powershell.exe', 'signtool.exe', 'signtool.exe'], [AGAIN_MS]], 'two tries, a pause between');
+  forgetSigningLooks();
+  let tries = 0;
+  const second: Runner = async (cmd) => (cmd === 'powershell.exe' ? ok('ok\r\n') : ++tries === 1 ? { code: 1, out: '', err: 'SignTool Error: timestamp' } : ok('Successfully signed'));
+  assert.equal(await signingProblem(second, PRINT, { signtool, pause }), null, 'it signed the second time');
+  // A dropped session's words (2026-10-20): the key gone, said at once.
+  forgetSigningLooks();
+  paused.length = 0;
+  const csp = looking('ok', { code: 1, out: 'Done Adding Additional Store\r\n', err: 'SignTool Error: The specified CSP could not be found.' });
+  assert.match((await signingProblem(csp.run, PRINT, { signtool, pause }))!, /^signtool can't reach the code-signing key \(6B654D9C.*\): connect SimplySign Desktop/);
+  assert.deepEqual([csp.asked, paused], [['powershell.exe', 'signtool.exe'], []]);
+  // The trial is a real signature, timestamped as a release's (kit 2.92.0).
+  forgetSigningLooks();
+  const args: string[][] = [];
+  const recording: Runner = async (cmd, a) => (cmd === 'powershell.exe' ? ok('ok\r\n') : (args.push(a), ok('Successfully signed')));
+  assert.equal(await signingProblem(recording, PRINT, { signtool, timestamp: 'http://ts.example' }), null);
+  assert.deepEqual(args[0].slice(0, 9), ['sign', '/sha1', PRINT, '/fd', 'SHA256', '/tr', 'http://ts.example', '/td', 'SHA256']);
+  assert.match(args[0][9], /trial\.ps1$/);
+});
+
+/** A repository with native sources (native\, vendor\), committed: its folder, and a commit of more files in it. */
+function nativeRepo(name: string) {
+  const repo = path.join(tmp, name);
+  sh(tmp, 'init', '--quiet', '-b', 'main', repo);
+  for (const [k, v] of Object.entries({ 'user.name': 'Test', 'user.email': 'test@example.invalid', 'core.autocrlf': 'false' })) sh(repo, 'config', k, v);
+  const commit = (files: Record<string, string>) => {
+    for (const [f, t] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(repo, f)), { recursive: true });
+      writeFileSync(path.join(repo, f), t);
+    }
+    sh(repo, 'add', '-A');
+    sh(repo, 'commit', '--quiet', '-m', Object.keys(files).join(', '));
+    return sh(repo, 'rev-parse', 'HEAD');
+  };
+  return { repo, commit };
+}
+
+/** Keeps signed files for each processor, as the kit's release does once it has signed them (signed-native.ts). */
+function keepBoth(store: string, n: Native, repo: string, commit: string, arches = n.arch) {
+  const sources = sourcesAt(n, (p) => sh(repo, 'rev-parse', `${commit}:${p}`))!;
+  const built = mkdtempSync(path.join(tmp, 'built-'));
+  writeFileSync(path.join(built, 'media-host.exe'), 'signed here');
+  for (const arch of arches) keepSigned(store, signedKey(n, arch, sources), built, { arch, thumbprint: n.thumbprint!, sources, version: '0.1.24', commit: commit.slice(0, 7), signed: [path.join(built, 'media-host.exe')] });
+}
+
+test("needsSigning: a release with kit 2.92.0 signs nothing once every processor's signed files are kept for its native sources", async () => {
+  const { repo, commit } = nativeRepo('needs-signing');
+  const first = commit({ 'native/build.ps1': 'param($Arch)\n', 'vendor/media.txt': 'v1\n', 'README.md': 'one\n' });
+  const kitJson = (kit: string) => JSON.stringify({ kit, native: { build: 'native/build.ps1', out: 'native/build', inputs: ['vendor'], thumbprint: PRINT } });
+  const env = { ENVOY_HOME: path.join(tmp, 'envoy-home') };
+  const ask = (o: { commit?: string; kitJson?: string | null } = {}) => needsSigning(realRun, { id: 'envoy', repo, commit: o.commit ?? first, kitJson: o.kitJson === undefined ? kitJson('2.92.0') : o.kitJson, env });
+  assert.equal(await ask(), true, 'nothing kept yet');
+  const n = nativeOf(JSON.parse(kitJson('2.92.0'))) as Native;
+  const store = signedStoreOf('envoy', env);
+  assert.equal(store, path.join(tmp, 'envoy-home', 'signed-native'));
+  keepBoth(store, n, repo, first, ['arm64']);
+  assert.equal(await ask(), true, "x64's aren't kept");
+  keepBoth(store, n, repo, first);
+  assert.equal(await ask(), false, 'both kept: it signs nothing');
+  assert.equal(await ask({ kitJson: kitJson('2.91.0') }), true, 'a kit before 2.92.0 signs every time');
+  assert.equal(await ask({ kitJson: '{"kit":"2.92.0"}' }), true, "Manor's setup (tools/sign.ts) signs every time");
+  assert.equal(await ask({ kitJson: 'not json' }), true);
+  assert.equal(await ask({ kitJson: null }), true);
+  assert.equal(await ask({ commit: 'f'.repeat(40) }), true, "a commit git doesn't have");
+  const elsewhere = commit({ 'README.md': 'two\n' });
+  assert.equal(await ask({ commit: elsewhere }), false, 'a change outside the native sources keeps them');
+  const media = commit({ 'vendor/media.txt': 'v2\n' });
+  assert.equal(await ask({ commit: media }), true, 'a change to an input builds and signs afresh');
+});
+
+test("a release whose signed native files are kept from the same sources doesn't wait while this PC can't sign: it signs nothing", async () => {
+  const native = { kit: '2.92.0', parts: ['node'], native: { build: 'native/build.ps1', out: 'native/build', thumbprint: PRINT } };
+  const e = signer('Kept', native, { 'native/build.ps1': 'param($Arch)\n' });
+  const head = sh(e.checkout!, 'rev-parse', 'HEAD');
+  const home = path.join(tmp, 'porter-home');
+  process.env.PORTER_HOME = home;
+  try {
+    keepBoth(signedStoreOf(e.id), nativeOf(native) as Native, e.checkout!, head);
+    const r = releasing({ npm: ok('') });
+    const w = watched(r.run);
+    const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-kept'), run: w.run, neutralDir: tmp });
+    const out = await releaseOne(ctx, e, { kit: null });
+    assert.equal(out.outcome, 'done', out.message);
+    assert.equal(r.npm.length, 1, 'its release ran');
+    assert.deepEqual(w.looked, [], "no look at signing: SimplySign Desktop isn't needed");
+  } finally {
+    delete process.env.PORTER_HOME;
+  }
 });
 
 /** A repository whose release signs (kit.json's native), pushed to its origin; an employee for it. */
-function signer(name: string, kitJson: object): Employee {
+function signer(name: string, kitJson: object, files: Record<string, string> = {}): Employee {
   const origin = path.join(tmp, `${name}-origin.git`);
   const checkout = path.join(tmp, name);
   sh(tmp, 'init', '--quiet', '--bare', '-b', 'main', origin);
@@ -101,6 +225,10 @@ function signer(name: string, kitJson: object): Employee {
   for (const [k, v] of Object.entries({ 'user.name': 'Test', 'user.email': 'test@example.invalid', 'core.autocrlf': 'false' })) sh(checkout, 'config', k, v);
   writeFileSync(path.join(checkout, 'package.json'), `{\n  "name": "${name.toLowerCase()}",\n  "version": "0.2.3",\n  "scripts": { "release": "node tools/kit.ts && node src/kit/release.ts" }\n}\n`);
   writeFileSync(path.join(checkout, 'kit.json'), JSON.stringify(kitJson));
+  for (const [f, t] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(checkout, f)), { recursive: true });
+    writeFileSync(path.join(checkout, f), t);
+  }
   sh(checkout, 'add', '-A');
   sh(checkout, 'commit', '--quiet', '-m', `${name} 0.2.3`);
   sh(checkout, 'push', '--quiet', 'origin', 'main');
@@ -238,6 +366,8 @@ test('the alarm: one for every release that waits until this PC can sign, raised
   assert.deepEqual(c.map((x) => [x.id, x.who, x.afterMs, x.since]), [['signing:waits', 'steward', 0, '2026-10-14T17:00:00.000Z']]);
   assert.equal(c[0].title, `${porter.name} 0.5.51, ${clerk.name} 0.3.5 wait to be released until this PC can sign`);
   assert.equal(c[0].detail[0], 'Why: the reason');
+  assert.match(c[0].detail[1], /^Reconnect SimplySign Desktop \(your SimplySign ID and the one-time code from the phone app\)/);
+  assert.match(c[0].detail[2], /^Nothing failed, and nothing needs a click or a new commit: .*releases them by itself, between builds too, and this alarm clears\.$/);
   assert.equal(roundConditions({ round, failedReleases: {}, signingWaits: {}, employees: STAFF, settings }).some((x) => x.id.startsWith('signing')), false);
 });
 
@@ -249,4 +379,117 @@ test('noteSigningWaits: a wait keeps its first time while its version waits; one
   assert.equal(loadSigningWaits().a.since, '2026-10-14T12:00:00.000Z', 'a new version waits afresh');
   noteSigningWaits({ a: null });
   assert.deepEqual(loadSigningWaits(), {});
+});
+
+/** A runner that notes each look at signing (the certificate store, signtool) before `run` answers it. */
+function watched(run: Runner): { run: Runner; looked: string[] } {
+  const looked: string[] = [];
+  return {
+    looked,
+    run: (cmd, args, opts) => {
+      if (cmd === 'powershell.exe' || /signtool\.exe$/i.test(cmd)) looked.push(path.basename(cmd));
+      return run(cmd, args, opts);
+    },
+  };
+}
+
+const nativeKit = (kit: string) => ({ kit, parts: ['node'], native: { build: 'native/build.ps1', out: 'native/build', thumbprint: PRINT } });
+
+// Steward 0.36.161: a release that waited until this PC could sign was released only at the next build time, after a
+// person reconnected SimplySign Desktop. Now each round between builds signs a test file, and builds it once it can.
+test('signedBetween: between builds, each release that waits is looked at with a test signature, and those that can sign build at once', async () => {
+  const e = signer('Between', nativeKit('2.91.0'));
+  const commit = sh(e.checkout!, 'rev-parse', 'HEAD').slice(0, 7);
+  noteSigningWaits({ [e.id]: { version: '0.2.3', commit, why: 'SignTool Error: The specified CSP could not be found.' } }, new Date('2026-10-20T13:55:00Z'));
+  const now = new Date('2026-10-20T14:30:00Z');
+  const workRoot = path.join(tmp, 'work-between');
+
+  // Still can't sign: no build, and the wait says why as the look found it, waiting since it began.
+  const down = releasing({ npm: ok('') });
+  const ctx = ctxFor({ employees: [e], workRoot, run: down.run, neutralDir: tmp });
+  assert.deepEqual(await signedBetween(ctx, [e], [], now), []);
+  assert.match(loadSigningWaits()[e.id].why, /^signtool can't reach the code-signing key \(6B654D9C.*\): connect SimplySign Desktop/);
+  assert.equal(loadSigningWaits()[e.id].since, '2026-10-20T13:55:00.000Z');
+  assert.deepEqual(down.npm, [], 'nothing built to find out');
+  assert.deepEqual(await signedBetween(ctxFor({ employees: [e], workRoot, run: down.run, neutralDir: tmp }), [], [], now), [], 'not among the repositories asked about');
+
+  // SimplySign Desktop reconnected: a build of its own, at once.
+  forgetSigningLooks();
+  const up = watched(releasing({ npm: ok(''), sign: ok('Successfully signed') }).run);
+  const back = ctxFor({ employees: [e], workRoot, run: up.run, neutralDir: tmp });
+  assert.deepEqual(await signedBetween(back, [e], [], now), [e.id]);
+  assert.match(back.lines.join('\n'), new RegExp(`${e.name} v0\\.2\\.3 waited until this PC could sign, and it can now: it builds at once, a build of its own`));
+  assert.deepEqual(up.looked, ['powershell.exe', 'signtool.exe'], 'one test signature');
+
+  // Its build met the key gone again: not another while that build is under SIGNED_AGAIN_MS old.
+  forgetSigningLooks();
+  up.looked.length = 0;
+  const build: BuildRun = { due: now.toISOString(), by: 'signing', started: now.toISOString(), rounds: 1, merged: [], released: [], failed: [], employees: [e.id] };
+  assert.deepEqual(await signedBetween(back, [e], [build], new Date(now.getTime() + SIGNED_AGAIN_MS - 60_000)), []);
+  assert.deepEqual(up.looked, [], 'not looked at meanwhile');
+  assert.deepEqual(await signedBetween(back, [e], [{ ...build, by: 'urgent' }], new Date(now.getTime() + 60_000)), [e.id], "another kind of build doesn't count");
+  assert.deepEqual(await signedBetween(back, [e], [build], new Date(now.getTime() + SIGNED_AGAIN_MS)), [e.id], 'a quarter of an hour on, it builds again');
+
+  // Released since (by hand, or on another PC): forgotten, and nothing builds.
+  const released = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.2.3', isDraft: false }]) : undefined));
+  const gone = ctxFor({ employees: [e], workRoot, run: released.run, neutralDir: tmp });
+  assert.deepEqual(await signedBetween(gone, [e], [], now), []);
+  assert.match(gone.lines.join('\n'), /v0\.2\.3 no longer waits until this PC can sign: it is released/);
+  assert.deepEqual(loadSigningWaits(), {});
+  // One of an employee Settings no longer have: forgotten too.
+  noteSigningWaits({ dropped: { version: '1.0.0', commit: 'abc1234', why: 'x' } });
+  assert.deepEqual(await signedBetween(back, [e], [], now), []);
+  assert.deepEqual(loadSigningWaits(), {});
+});
+
+test("signingAhead: within the hour before a build that would sign, a test signature, and an alarm at once while this PC can't sign", async () => {
+  forgetSigningLooks();
+  forgetSigningAhead();
+  const e = signer('Ahead', nativeKit('2.91.0'));
+  const head = sh(e.checkout!, 'rev-parse', 'HEAD');
+  const glance = (releases: string[]) => ({ at: '', stewardReleases: null, repos: { [e.id]: { head, prs: [], releases: releases.map((tagName) => ({ tagName, isDraft: false, publishedAt: null, commit: null })) } }, errors: {} }) as unknown as Ctx['glance'];
+  const down = watched(releasing({ npm: ok('') }).run);
+  const ctx: Ctx = { ...ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-ahead'), run: down.run, neutralDir: tmp }), glance: glance(['v0.2.2']) };
+  const next = new Date('2026-10-20T16:00:00Z');
+
+  // More than an hour before it: nothing looked at.
+  assert.equal(await signingAhead(ctx, [e], next, new Date(next.getTime() - AHEAD_MS - 60_000)), null);
+  assert.equal(await signingAhead(ctx, [e], null, new Date(next.getTime() - 60_000)), null, 'no build to come');
+  assert.deepEqual(down.looked, []);
+
+  // Within the hour, it can't sign, and the build would sign v0.2.3: kept for the alarm.
+  const at = new Date(next.getTime() - 50 * 60_000);
+  const a = await signingAhead(ctx, [e], next, at);
+  assert.deepEqual(a && [a.build, a.names, a.since], [next.toISOString(), [`${e.name} 0.2.3`], at.toISOString()]);
+  assert.match(a!.why, /^signtool can't reach the code-signing key/);
+  assert.deepEqual(loadSigningAhead(), a);
+  const round = { stage: 'round' as const, started: '', finished: '', kit: null, asked: {}, results: [], log: [] };
+  const settings = { ...DEFAULT_SETTINGS, employees: [e] };
+  const c = roundConditions({ round, failedReleases: {}, signingWaits: {}, signingAhead: a, employees: [e], settings }).filter((x) => x.id.startsWith('signing'));
+  assert.deepEqual(c.map((x) => [x.id, x.who, x.afterMs, x.since]), [[`signing:ahead:${next.toISOString()}`, 'steward', 0, at.toISOString()]]);
+  assert.match(c[0].title, new RegExp(`^This PC can't sign now, and the .+ build would sign ${e.name} 0\\.2\\.3: reconnect SimplySign Desktop before it$`));
+  assert.equal(c[0].detail[0], `Why: ${a!.why}`);
+
+  // Ten minutes on, still not: the same alarm, since it began.
+  forgetSigningLooks();
+  assert.equal((await signingAhead(ctx, [e], next, new Date(at.getTime() + 10 * 60_000)))!.since, at.toISOString());
+
+  // Reconnected: the test signature works, and the alarm clears. That head isn't looked at again for this build.
+  forgetSigningLooks();
+  const up = watched(releasing({ npm: ok(''), sign: ok('Successfully signed') }).run);
+  assert.equal(await signingAhead({ ...ctx, run: up.run }, [e], next, new Date(at.getTime() + 20 * 60_000)), null);
+  assert.equal(loadSigningAhead(), null);
+  forgetSigningLooks();
+  down.looked.length = 0;
+  assert.equal(await signingAhead(ctx, [e], next, new Date(at.getTime() + 30 * 60_000)), null);
+  assert.deepEqual(down.looked, [], 'found fine for this build');
+
+  // Released already, or one that waits (with its own alarm): nothing looked at.
+  forgetSigningAhead();
+  assert.equal(await signingAhead({ ...ctx, glance: glance(['v0.2.3', 'v0.2.2']) }, [e], next, at), null);
+  noteSigningWaits({ [e.id]: { version: '0.2.3', commit: head.slice(0, 7), why: 'x' } });
+  assert.equal(await signingAhead(ctx, [e], next, at), null);
+  noteSigningWaits({ [e.id]: null });
+  assert.deepEqual(down.looked, []);
+  noteSigningAhead(null);
 });

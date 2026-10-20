@@ -12,7 +12,7 @@ import { releasedHere, releasesRepoEnv, TAG_RELEASE, type Employee } from '../se
 import { tasteFirst } from '../tasting.ts';
 import { agreedVersion } from '../versions.ts';
 import { keepFailure } from '../failure.ts';
-import { noteSigningDown, signingDown, signingProblem, signsWith } from '../signing.ts';
+import { needsSigning, noteSigningDown, signingDown, signingProblem, signsWith } from '../signing.ts';
 import { checksLogOf, needsNpmCi } from './bump.ts';
 import { recordTested } from '../tested.ts';
 import { guardPackages, installPackages } from './modules.ts';
@@ -189,9 +189,10 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   const untested = o.gate && !o.hire ? await o.gate(commit, since) : null;
   if (untested) return result(e, 'failed', `v${version} wasn't released: ${untested}`, { version, commit: commit.slice(0, 7) });
   // A release that signs waits while this PC can't (SimplySign Desktop not connected): nothing is built, nothing fails,
-  // and the next round looks again (signing.ts). Before the tasting, which it would only have to do again.
+  // and the next round looks again (signing.ts). Before the tasting, which it would only have to do again. Not one whose
+  // kit takes the signed native files a release before kept from the same sources: it signs nothing (needsSigning).
   const signs = e.release === TAG_RELEASE ? null : signsWith({ kitJson: pinText, signTs: await showFile(run, repo, remote, 'tools/sign.ts'), release: e.release });
-  if (signs) {
+  if (signs && (await needsSigning(run, { id: e.id, repo, commit, kitJson: pinText }))) {
     const down = await signingProblem(run, signs);
     if (down) {
       ctx.log(`[${e.id}] v${version} waits until this PC can sign: ${down}`);

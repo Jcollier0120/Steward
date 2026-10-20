@@ -17,6 +17,9 @@ import { realPath } from './real-path.ts';
  * - `arch`: which processors (default both, ["arm64", "x64"]).
  * - `notices`: files in the repository that go with them, into `<out>\notices\` (the licenses of runtimes they carry,
  *   which an MIT or similar license asks to keep with the copies).
+ * - `inputs`: files or folders in the repository, outside the build script's folder, that the build reads (kit 2.92.0).
+ *   With that folder they are the native sources: a change in them makes a release dirty, and a release whose native
+ *   sources are a signed release's before takes that release's signed files instead of building (signed-native.ts).
  * - `thumbprint`: the code-signing certificate (SHA-1, Cert:\CurrentUser\My) a published release's files are signed
  *   with; `timestamp` its RFC 3161 server (default Certum's). A release is never published unsigned: Smart App Control
  *   won't run an unsigned program, and the person deserves to know whose it is.
@@ -34,6 +37,8 @@ export interface Native {
   out: string;
   arch: Arch[];
   notices: string[];
+  /** The build's inputs outside its script's folder (kit 2.92.0); none unless kit.json says. */
+  inputs: string[];
   thumbprint: string | null;
   timestamp: string;
 }
@@ -55,6 +60,8 @@ export function nativeOf(pin: unknown): Native | null | { error: string } {
   if (!Array.isArray(arch) || !arch.length || !arch.every((a) => ARCHES.includes(a)) || new Set(arch).size !== arch.length) return bad(`"arch" should list processors from ${ARCHES.join(' and ')}`);
   const notices = o.notices === undefined ? [] : o.notices;
   if (!Array.isArray(notices) || !notices.every(inside)) return bad('"notices" should list files in the repository');
+  const inputs = o.inputs === undefined ? [] : o.inputs;
+  if (!Array.isArray(inputs) || !inputs.every(inside)) return bad('"inputs" should list files or folders in the repository');
   if (o.thumbprint !== undefined && !(typeof o.thumbprint === 'string' && /^[0-9a-f]{40}$/i.test(o.thumbprint))) return bad('"thumbprint" should be a certificate\'s SHA-1 thumbprint (40 hex digits)');
   if (o.timestamp !== undefined && !(typeof o.timestamp === 'string' && /^https?:\/\/\S+$/.test(o.timestamp))) return bad('"timestamp" should be a timestamp server\'s URL');
   return {
@@ -62,6 +69,7 @@ export function nativeOf(pin: unknown): Native | null | { error: string } {
     out: tidy(o.out),
     arch: arch as Arch[],
     notices: (notices as string[]).map(tidy),
+    inputs: (inputs as string[]).map(tidy),
     thumbprint: typeof o.thumbprint === 'string' ? o.thumbprint.toUpperCase() : null,
     timestamp: typeof o.timestamp === 'string' ? o.timestamp : CERTUM_TIMESTAMP,
   };
@@ -91,8 +99,11 @@ export function nativeFolder(root: string, arch: string = process.arch, exists: 
   return exists(dir) ? dir : null;
 }
 
+/** The native sources: the build script's folder, then kit.json's "inputs". A change in them makes a release dirty. */
+export const nativeSources = (n: Native): string[] => [...new Set([path.posix.dirname(n.build), ...n.inputs])];
+
 /** The files under a folder, relative to it, forward slashes. */
-function filesUnder(dir: string, rel = ''): string[] {
+export function filesUnder(dir: string, rel = ''): string[] {
   return readdirSync(path.join(dir, rel), { withFileTypes: true }).flatMap((e) => {
     const r = rel ? `${rel}/${e.name}` : e.name;
     return e.isDirectory() ? filesUnder(dir, r) : e.isFile() ? [r] : [];
@@ -110,18 +121,28 @@ export interface NativeSteps {
   /** Signs and timestamps these files, and checks each verifies: throws with why when it can't. */
   sign(files: string[]): void;
   log(line: string): void;
+  /**
+   * For a release that signs (signed-native.ts): puts the signed files a release before kept for this processor's native
+   * sources into `dir`, checked, and says which release they came from and how many it signed; null when none are kept
+   * or they don't check out (it says why), and the processor is built and signed as usual.
+   */
+  reuse?(arch: Arch, dir: string): { from: string; signed: number } | null;
+  /** Keeps a processor's files once they are signed, for the releases after it while its native sources stay the same. */
+  keep?(arch: Arch, dir: string, signed: string[]): void;
 }
 
 export interface NativeBuilt {
-  /** Per processor, its files (relative to the repository) and their size. */
-  arch: { arch: Arch; files: string[]; bytes: number; signed: number }[];
+  /** Per processor, its files (relative to the repository) and their size; `reused`, the release whose signed files it took. */
+  arch: { arch: Arch; files: string[]; bytes: number; signed: number; reused?: string }[];
   notices: string[];
 }
 
 /**
  * Builds each processor's files afresh (`<out>\<arch>` is emptied first, so nothing stale rides along), checks they are
  * there, and, for a release that is published, signs the programs and libraries that aren't signed already (a
- * runtime's own DLLs keep their maker's signature). Throws with why when a build fails or leaves nothing.
+ * runtime's own DLLs keep their maker's signature). Throws with why when a build fails or leaves nothing. A release that
+ * signs first takes a processor's signed files from a release before with the same native sources (steps.reuse): then
+ * that processor is neither built nor signed. Those it signs are kept for the releases after it (steps.keep).
  */
 export function buildNative(root: string, n: Native, sign: boolean, s: NativeSteps): NativeBuilt {
   for (const f of [n.build, ...n.notices]) if (!existsSync(path.join(root, f))) throw new Error(`kit.json's "native" names ${f}, which isn't in the repository.`);
@@ -129,19 +150,30 @@ export function buildNative(root: string, n: Native, sign: boolean, s: NativeSte
   for (const arch of n.arch) {
     const dir = path.join(root, ...n.out.split('/'), arch);
     rmSync(dir, { recursive: true, force: true });
-    s.log(`  native files for ${arch}: ${n.build} -Arch ${arch}`);
-    const r = s.build(n.build, arch);
-    if (r.code !== 0) throw new Error(`${n.build} -Arch ${arch} failed (exit ${r.code}):\n${r.out.trim().split(/\r?\n/).slice(-15).join('\n')}`);
+    const took = sign && s.reuse ? s.reuse(arch, dir) : null;
+    let signed = took?.signed ?? 0;
+    if (took) s.log(`  native files for ${arch}: the signed ones ${took.from} kept, from the same native sources`);
+    else {
+      rmSync(dir, { recursive: true, force: true });
+      s.log(`  native files for ${arch}: ${n.build} -Arch ${arch}`);
+      const r = s.build(n.build, arch);
+      if (r.code !== 0) throw new Error(`${n.build} -Arch ${arch} failed (exit ${r.code}):\n${r.out.trim().split(/\r?\n/).slice(-15).join('\n')}`);
+    }
     const files = existsSync(dir) ? filesUnder(dir) : [];
     if (!files.length) throw new Error(`${n.build} -Arch ${arch} left nothing in ${n.out}/${arch}: it should build there.`);
-    let signed = 0;
-    if (sign) {
+    if (sign && !took) {
       const todo = s.unsigned(signable(files).map((f) => path.join(dir, f)));
       if (todo.length) s.sign(todo);
       signed = todo.length;
+      // Kept for the releases after it; a release isn't held for a copy that couldn't be kept.
+      try {
+        s.keep?.(arch, dir, todo);
+      } catch (e) {
+        s.log(`  couldn't keep the signed files for ${arch}, so the next release signs them again: ${(e as Error).message}`);
+      }
     }
     const bytes = files.reduce((t, f) => t + statSync(path.join(dir, f)).size, 0);
-    built.push({ arch, files: files.map((f) => `${n.out}/${arch}/${f}`), bytes, signed });
+    built.push({ arch, files: files.map((f) => `${n.out}/${arch}/${f}`), bytes, signed, ...(took ? { reused: took.from } : {}) });
   }
   return { arch: built, notices: n.notices.map((f) => `${n.out}/notices/${path.posix.basename(f)}`) };
 }

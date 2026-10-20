@@ -49,7 +49,8 @@
  *
  * An agent with a program of its own that isn't Node says so in kit.json's "native" (native.ts, kit 2.62.0): the
  * release builds it for each processor, carries both builds in the zip at the paths the checkout has them, and, when it
- * is published, signs the programs and libraries that aren't signed already (sign.ts); install keeps this PC's.
+ * is published, signs the programs and libraries that aren't signed already (sign.ts), or takes the ones a release
+ * before signed from the same native sources (signed-native.ts, kit 2.92.0); install keeps this PC's.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -61,10 +62,11 @@ import { APP } from '../app.ts';
 import type { Release } from './install.ts';
 import { isUrgent, letOut, NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, type ExchequerOutcome } from './exchequer.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
-import { buildNative, nativeOf, runBuild, stageNative, type Native, type NativeBuilt } from './native.ts';
+import { buildNative, nativeOf, nativeSources, runBuild, stageNative, type Arch, type Native, type NativeBuilt } from './native.ts';
 import { releaseNotes, type Notes } from './notes.ts';
 import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
-import { readySigner, signFiles, unsignedOf } from './sign.ts';
+import { findSignTool, readySigner, signFiles, unsignedOf, verifySigned, type Signer } from './sign.ts';
+import { keepSigned, keptSigned, signedKey, signedStoreOf, sourcesAt, takeSigned } from './signed-native.ts';
 
 /** Where a Steward from before 0.19.0 published Castellan's releases, before it had a setting for it. */
 const LEGACY_RELEASES_REPO = 'Jcollier0120/Manor-releases';
@@ -262,6 +264,53 @@ export function nativeFor(dir: string, publishing: boolean, ignored: (p: string)
   return n;
 }
 
+/**
+ * How a published release signs its native files (kit 2.92.0): each processor's signed files kept from a release before
+ * with the same native sources are taken (signed-native.ts), and those it signs are kept; the signer (readySigner) is
+ * asked for at once, before anything is built, only when a processor has no copy kept, else only if one turns out not to
+ * check out. A dirty tree takes and keeps none: its native sources may not be its commit's. The signer that can't be had
+ * throws "Not published: its native files can't be signed: ...", the words the Steward waits on (its signing.ts).
+ */
+export function signingFor(native: Native, o: { dirty: boolean; version: string; commit: string; store?: string; objectOf?: (p: string) => string | null; log?: (line: string) => void }) {
+  const thumbprint = native.thumbprint!;
+  const store = o.store ?? signedStoreOf(APP.id);
+  const log = o.log ?? ((l: string) => console.log(l));
+  const objectOf =
+    o.objectOf ??
+    ((p: string) => {
+      try {
+        return git('rev-parse', `HEAD:${p}`);
+      } catch {
+        return null;
+      }
+    });
+  const sources = o.dirty ? null : sourcesAt(native, objectOf);
+  const keys = sources ? (Object.fromEntries(native.arch.map((a) => [a, signedKey(native, a, sources)])) as Record<Arch, string>) : null;
+  let ready: Signer | null = null;
+  const signer = (): Signer => {
+    if (ready) return ready;
+    const s = readySigner(thumbprint, native.timestamp);
+    if ('problem' in s) throw new Error(`Not published: its native files can't be signed: ${s.problem}.`);
+    return (ready = s);
+  };
+  if (!keys || native.arch.some((a) => !keptSigned(store, keys[a]))) signer();
+  return {
+    signer,
+    reuse: keys
+      ? (arch: Arch, dir: string) => {
+          const got = takeSigned(store, keys[arch], dir, (programs, here) => verifySigned(findSignTool(), programs, here, thumbprint));
+          if (!got) return null;
+          if ('why' in got) {
+            log(`  native files for ${arch}: the signed ones kept from a release before can't be used (${got.why}), so they're built and signed`);
+            return null;
+          }
+          return { from: `v${got.kept.version}`, signed: got.kept.signed.length };
+        }
+      : undefined,
+    keep: keys && sources ? (arch: Arch, dir: string, signed: string[]) => keepSigned(store, keys[arch], dir, { arch, thumbprint, sources, version: o.version, commit: o.commit, signed }) : undefined,
+  };
+}
+
 /** Stages the release in a temporary folder, builds it (unless `readable`), zips it, and writes its SHA256SUMS.txt (manor-agent.json's line too, when there is one). */
 async function build(readable = false, publishing = false): Promise<Built> {
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -271,26 +320,29 @@ async function build(readable = false, publishing = false): Promise<Built> {
   const announced = announcementOf(root, APP.id, originRepo());
   if (announced && 'error' in announced) throw new Error(announced.error);
   const native = nativeFor(root, publishing, (p) => spawnSync('git', ['check-ignore', '-q', `${p}/x`], { cwd: root, windowsHide: true }).status === 0);
-  // A release that will be published signs its native files: whether this PC can is known before minutes of building.
-  const signer = native && publishing ? readySigner(native.thumbprint!, native.timestamp) : null;
-  if (signer && 'problem' in signer) throw new Error(`Not published: its native files can't be signed: ${signer.problem}.`);
   const commit = git('rev-parse', '--short', 'HEAD');
   // Dirty means what goes into the zip isn't the commit's: a change or a new file there (src\kit\ is
   // git-ignored, and kit.json says what it is). Other untracked things in the checkout (a .claude folder,
   // scratch files) don't count. manor-agent.json, published beside the zip, does.
-  // The native sources (the build script's folder, and the notices) count too.
-  const nativeSources = native ? [path.posix.dirname(native.build), ...native.notices] : [];
-  const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, ANNOUNCEMENT, ...nativeSources) !== '';
+  // The native sources (the build script's folder, kit.json's "inputs", and the notices) count too.
+  const sources = native ? [...nativeSources(native), ...native.notices] : [];
+  const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, ANNOUNCEMENT, ...sources) !== '';
   const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString(), kit: kit.kit, form: readable ? 'readable' : 'minified' };
   let nativeBuilt: NativeBuilt | null = null;
   if (native) {
-    nativeBuilt = buildNative(root, native, !!signer, {
+    // A release that will be published signs its native files, unless a release before kept them signed from the same
+    // native sources (signed-native.ts). Whether this PC can sign is known before minutes of building, and asked only
+    // when a processor has none kept: most releases then need no key at all.
+    const signing = publishing ? signingFor(native, { dirty, version: pkg.version, commit }) : null;
+    nativeBuilt = buildNative(root, native, publishing, {
       build: (script, arch) => runBuild(root, script, arch),
       unsigned: unsignedOf,
-      sign: (files) => signFiles(signer as Exclude<typeof signer, null | { problem: string }>, files, (l) => console.log(l)),
+      sign: (files) => signFiles(signing!.signer(), files, (l) => console.log(l)),
       log: (l) => console.log(l),
+      reuse: signing?.reuse,
+      keep: signing?.keep,
     });
-    release.native = { out: native.out, arch: native.arch, signed: !!signer };
+    release.native = { out: native.out, arch: native.arch, signed: publishing };
   }
   const esbuild = readable ? null : await loadEsbuild(root);
   if (esbuild && 'error' in esbuild) throw new Error(esbuild.error);
@@ -331,7 +383,9 @@ async function build(readable = false, publishing = false): Promise<Built> {
     else console.log('  readable: not built, so it can be looked into here; it is never published');
     if (page) console.log(`  its page, drawn in the browser: ${PAGE_BUNDLE}, ${page.kb} KB with React`);
     for (const a of nativeBuilt?.arch ?? [])
-      console.log(`  native files for ${a.arch}: ${native!.out}/${a.arch}, ${a.files.length} files, ${Math.ceil(a.bytes / 1024)} KB${release.native?.signed ? `, ${a.signed} signed here (the rest by their makers)` : ', not signed (only a published release is)'}`);
+      console.log(
+        `  native files for ${a.arch}: ${native!.out}/${a.arch}, ${a.files.length} files, ${Math.ceil(a.bytes / 1024)} KB${!release.native?.signed ? ', not signed (only a published release is)' : a.reused ? `, signed for ${a.reused} (${a.signed} here, the rest by their makers), from the same native sources` : `, ${a.signed} signed here (the rest by their makers)`}`,
+      );
     if (announced) console.log(`  ${ANNOUNCEMENT}, announcing ${APP.name} to every Manor: sha256 ${listed[1].hash}`);
     const notes = releaseNotes({ root, name: APP.name, version: pkg.version, commit, kit: kit.kit, install: INSTALL_NOTE });
     console.log(`  notes: ${notes.from === 'changelog' ? `CHANGELOG.md's entry for ${pkg.version}` : 'the commits since the release before'}`);
