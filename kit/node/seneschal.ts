@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -39,17 +40,50 @@ import path from 'node:path';
  * processor slot; `line`: a line of the PC's own, Claude Code's). An asker that can come back later (`defer`) is told
  * so (**{ later }**) when its turn doesn't come in its wait, instead of being told to run as before; and a Wright's job
  * is never skipped for a run that finished. An older Seneschal refuses these tasks, and they run as before.
+ *
+ * A repository's own checks (`checks`, Seneschal 0.5.0, kit 2.93.0): the Assayer's, a repository's checks as its files
+ * at a commit set them out, on any git host. The task says where its code is got from (`remote`: the repository's URL,
+ * with no sign-in in it) and the tools its files need (`needs.tools`), so a PC with no clone of it may run it: its
+ * worker says it gets the code itself (`clones`), clones it from the remote with that PC's own sign-in, and reports what
+ * getting the code ready took (`prepMs`). A tree with uncommitted changes goes as its pushed base and a patch on it
+ * (`patch`, Seneschal 0.5.2: the text of git's binary diff from the commit, at most SENESCHAL_MOST_PATCH), handed with
+ * its text only to a worker that says it applies patches (`patches`). A worker that doesn't name `checks` is never
+ * handed one, nor a Steward before this kit, whose workers name their kinds.
  */
 
 export type SeneschalLane = 'person' | 'blocking' | 'normal' | 'background';
-/** The kinds any worker may run, since they name code (a commit), never a command: the Steward's checks. */
-export type SeneschalCheckKind = 'pr-check' | 'kit-trial' | 'full-suite';
+/**
+ * The kinds any worker may run, since they name code (a commit), never a command: the Steward's checks, and a
+ * repository's own checks (`checks`, kit 2.93.0), which a worker gets only when it names the kind.
+ */
+export type SeneschalCheckKind = 'pr-check' | 'kit-trial' | 'full-suite' | 'checks';
 /** The turn kinds (Seneschal 0.3.0): work only its asker can run, named by its job. Never leased to any other worker, never moved to another PC. */
 export type SeneschalTurnKind = 'wright-job' | 'reeve-job';
 export type SeneschalKind = SeneschalCheckKind | SeneschalTurnKind;
 
 /** A line of this PC with a cap of its own, held besides a processor slot (the Seneschal's LINES). */
 export type SeneschalLine = 'claude-code';
+
+/**
+ * The tools a repository's checks may need on the PC they run on (the Seneschal's tasks.ts TOOLS, 0.5.0): a closed list,
+ * so a task can't name anything else to look for. A PC without one of a task's isn't sent it.
+ */
+export const SENESCHAL_TOOLS = ['node', 'npm', 'pnpm', 'yarn', 'bun', 'python', 'uv', 'poetry', 'cargo', 'dotnet', 'go', 'make'] as const;
+export type SeneschalTool = (typeof SENESCHAL_TOOLS)[number];
+
+/**
+ * Uncommitted changes on a pushed base as a worker is handed them (Seneschal 0.5.2, kit 2.93.0): a `checks` task's code
+ * is its commit with this patch applied (git's binary diff from the commit's tree to the tree checked). The text, with
+ * its SHA-256 and size in UTF-8 bytes, checked against both.
+ */
+export interface SeneschalPatch {
+  sha256: string;
+  bytes: number;
+  text: string;
+}
+
+/** The largest patch a task may carry, in UTF-8 bytes (the Seneschal's PATCH_MOST_BYTES): a larger change runs where it is. */
+export const SENESCHAL_MOST_PATCH = 512 * 1024;
 
 /** What a task needs of the room it runs in (the Seneschal's tasks.ts Needs). */
 export interface SeneschalNeeds {
@@ -63,6 +97,8 @@ export interface SeneschalNeeds {
   light?: boolean;
   /** A line of this PC it holds while it runs (a turn kind only): leased only while the line has room. */
   line?: SeneschalLine;
+  /** The tools its checks need (a check only, Seneschal 0.5.0): a PC without one of them isn't sent it. */
+  tools?: SeneschalTool[];
 }
 
 interface SeneschalTaskBase {
@@ -74,6 +110,16 @@ interface SeneschalTaskBase {
   base?: string;
   pr?: number;
   branch?: string;
+  /**
+   * Where its code is got from (a check, Seneschal 0.5.0): its repository's URL as a clone of it knows it, https or ssh,
+   * with no sign-in in it. A PC with no clone of the repository clones it from there, signed in as itself.
+   */
+  remote?: string;
+  /**
+   * Uncommitted changes on the commit (a `checks` task only, Seneschal 0.5.2): the text of `git diff --binary` from it,
+   * at most SENESCHAL_MOST_PATCH. Part of the key; an older Seneschal refuses the task, and it runs as before.
+   */
+  patch?: string;
   /** A kit trial's kit, or the kit a check runs with when it isn't the repository's own: 2.78.1, or 2.78.1-<commit>. */
   kit?: string;
   /** A kit trial's agent, by its id. */
@@ -137,6 +183,11 @@ export interface SeneschalOutcome {
   error?: boolean;
   note?: string;
   commands?: string[];
+  /**
+   * Of the run's time, what went to getting the code ready (a clone or fetch, the checkout, a patch, a package install),
+   * in ms (Seneschal 0.4.0), so it learns what getting a repository's code to this PC takes apart from running it.
+   */
+  prepMs?: number;
 }
 
 /** A turn: the task leased to this agent. */
@@ -431,7 +482,10 @@ function turnOf(d: TurnDeps, id: string, b: any, waitedMs: number): SeneschalTur
   const heartbeatMs = Number(b.lease.heartbeatMs) > 0 ? Number(b.lease.heartbeatMs) : 15_000;
   let retried = false;
   const report = async (out: SeneschalOutcome & { returned?: boolean }, ms: number) => {
-    const r = await d.call('/api/tasks/report', { id, token, ms, ...out, ...(out.note ? { note: out.note.slice(0, 500) } : {}) });
+    const { prepMs, ...rest } = out;
+    // Part of the run's time: never more of it, nor less than none.
+    const prep = typeof prepMs === 'number' && Number.isFinite(prepMs) ? { prepMs: Math.round(Math.min(Math.max(prepMs, 0), ms)) } : {};
+    const r = await d.call('/api/tasks/report', { id, token, ms, ...rest, ...prep, ...(out.note ? { note: out.note.slice(0, 500) } : {}) });
     if (!r || r.status >= 400) d.say(`the Seneschal didn't take the result (${r ? (r.body?.error ?? `HTTP ${r.status}`) : 'no answer'}): it lets the task go in a few minutes`);
     else if (r.body?.retry === 'elsewhere') retried = true;
   };
@@ -515,6 +569,12 @@ export interface SeneschalJob {
   base?: string;
   pr?: number;
   branch?: string;
+  /** Where its code is got from, when this PC has no clone of it (a check): an https or ssh URL with no sign-in in it. */
+  remote?: string;
+  /** The tools its checks need, as its files say (a check). */
+  tools?: SeneschalTool[];
+  /** Uncommitted changes on the commit (a `checks` task, to a worker that said `patches`): apply them before it runs. */
+  patch?: SeneschalPatch;
   /** One part of a whole suite: run only its test files. */
   shard?: SeneschalShard;
   /** A kit trial's kit: a version, or a version and the Steward's commit it's made from (2.78.1-1a2b3c4d5e6f). */
@@ -534,8 +594,15 @@ export interface SeneschalWorkOptions {
   worker: string;
   /** The kinds it runs. */
   kinds: SeneschalKind[];
-  /** The repositories it runs them for, owner/name. */
+  /** The repositories it runs them for, owner/name. With `clones`, a `checks` task of any repository besides. */
   repos: string[];
+  /**
+   * It gets a repository's code itself (Seneschal 0.5.0): with no clone of it on this PC, it clones it from the task's
+   * `remote` into a work folder of its own. So it may be handed a `checks` task of any repository, beyond `repos`.
+   */
+  clones?: boolean;
+  /** It applies a `checks` task's patch on its commit (kit 2.93.0): only such a worker is handed a task with one. */
+  patches?: boolean;
   slot?: string;
   say?: (line: string) => void;
   /** Tests: where the Seneschal is, the environment, the clock, and how its turn's elsewhere() asks. */
@@ -554,11 +621,44 @@ const LANES: readonly SeneschalLane[] = ['person', 'blocking', 'normal', 'backgr
 /** owner/name, neither of them "." or "..". */
 const REPO = /^(?!\.\.?\/)[A-Za-z0-9_.-]{1,100}\/(?!\.\.?$)[A-Za-z0-9_.-]{1,100}$/;
 const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+/** A remote's path: plain characters, never a ".." segment. */
+const REMOTE_PATH = /^(?!(?:.*\/)?\.\.(?:\/|$))[A-Za-z0-9._~%+/-]{1,300}$/;
+const HOST = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
 /** A branch git takes as one: no leading dash or dot, no "..", no "//", not ending in "/" or ".lock". */
 const BRANCH = /^(?![-./])(?!.*\.\.)(?!.*\/\/)(?!.*\/$)(?!.*\.lock$)[A-Za-z0-9_./-]{1,200}$/;
 /** A kit trial's kit: a version, or a version and 12 hex digits of the Steward's commit it's made from. */
 const KIT = /^\d+\.\d+\.\d+(?:-[0-9a-f]{12})?$/;
 const AGENT = /^[a-z][a-z0-9-]{0,40}$/;
+
+/**
+ * A remote URL a worker may clone from, checked again here (it may come from another PC): https, http, ssh or git, or
+ * git's scp-like `user@host:path`, with no password or token in it (an http URL with no user at all), never a path on a
+ * PC, an option (a leading "-") or another transport. The URL as given, or null. Pure.
+ */
+export function remoteOf(v: unknown): string | null {
+  if (typeof v !== 'string' || v.length > 400 || /\s/.test(v)) return null;
+  const url = /^(https?|ssh|git):\/\/(?:([A-Za-z0-9._-]{1,64})@)?([^/:@]+)(?::(\d{1,5}))?\/(.+)$/.exec(v);
+  if (url) {
+    const [, scheme, user, host, port, rest] = url;
+    if (user && scheme !== 'ssh') return null;
+    if (!HOST.test(host) || (port && (Number(port) < 1 || Number(port) > 65535)) || !REMOTE_PATH.test(rest)) return null;
+    return v;
+  }
+  const scp = /^([A-Za-z0-9._-]{1,64})@([^/:@]+):(?!\/)(.+)$/.exec(v);
+  return scp && HOST.test(scp[2]) && REMOTE_PATH.test(scp[3]) ? v : null;
+}
+
+/**
+ * A patch as a lease hands one, checked: git's diff text (a `diff --git` line, no NUL) of at most SENESCHAL_MOST_PATCH
+ * bytes, whose size and SHA-256 are the ones it came with. Pure.
+ */
+export function patchOf(v: any): SeneschalPatch | null {
+  if (!v || typeof v !== 'object' || typeof v.sha256 !== 'string' || !SHA256.test(v.sha256) || typeof v.text !== 'string') return null;
+  const bytes = Buffer.byteLength(v.text, 'utf8');
+  if (bytes < 1 || bytes > SENESCHAL_MOST_PATCH || bytes !== v.bytes || !/^diff --git /m.test(v.text) || v.text.includes('\0')) return null;
+  return createHash('sha256').update(v.text, 'utf8').digest('hex') === v.sha256 ? { sha256: v.sha256, bytes, text: v.text } : null;
+}
 
 /** A shard as the Seneschal names one, checked: whole numbers, 1 <= index <= of <= SENESCHAL_MOST_SHARDS. Pure. */
 export function shardOf(v: any): SeneschalShard | null {
@@ -566,8 +666,12 @@ export function shardOf(v: any): SeneschalShard | null {
   return v.of >= 1 && v.of <= SENESCHAL_MOST_SHARDS && v.index >= 1 && v.index <= v.of ? { index: v.index, of: v.of } : null;
 }
 
-/** The job in a lease's task, checked again here (it may come from another PC); null when any of it isn't as it should be. Pure. */
-export function jobOf(t: any, kinds: readonly SeneschalKind[] = CHECK_KINDS): Omit<SeneschalJob, 'turn'> | null {
+/**
+ * The job in a lease's task, checked again here (it may come from another PC); null when any of it isn't as it should be.
+ * A patch only on a `checks` task, and only for a worker that applies them (`patches`): one that doesn't would run other
+ * code than the task names. Pure.
+ */
+export function jobOf(t: any, kinds: readonly SeneschalKind[] = CHECK_KINDS, o: { patches?: boolean } = {}): Omit<SeneschalJob, 'turn'> | null {
   if (!t || typeof t !== 'object') return null;
   const id = String(t.id ?? '');
   if (!/^[tb]\d{1,12}$/.test(id) || !kinds.includes(t.kind) || !REPO.test(String(t.repo)) || !OID.test(String(t.commit))) return null;
@@ -579,6 +683,13 @@ export function jobOf(t: any, kinds: readonly SeneschalKind[] = CHECK_KINDS): Om
   if (t.shard != null && (!shard || t.kind !== 'full-suite')) return null;
   // A kit trial names its kit and its agent; no other kind names either (a kit would change what runs).
   if (t.kind === 'kit-trial' ? !KIT.test(String(t.kit ?? '')) || !AGENT.test(String(t.agent ?? '')) : t.kit != null || t.agent != null) return null;
+  const remote = t.remote == null ? null : remoteOf(t.remote);
+  if (t.remote != null && !remote) return null;
+  const asked = t.needs && typeof t.needs === 'object' ? t.needs.tools : undefined;
+  if (asked != null && (!Array.isArray(asked) || asked.some((x: unknown) => !(SENESCHAL_TOOLS as readonly unknown[]).includes(x)))) return null;
+  const tools = Array.isArray(asked) ? SENESCHAL_TOOLS.filter((x) => asked.includes(x)) : [];
+  const patch = t.patch == null ? null : patchOf(t.patch);
+  if (t.patch != null && (!patch || t.kind !== 'checks' || !o.patches)) return null;
   const from =t.from && typeof t.from === 'object' && t.from.pc && typeof t.from.pc.name === 'string' ? { pc: { id: String(t.from.pc.id ?? ''), name: String(t.from.pc.name).slice(0, 60) }, id: String(t.from.id ?? '') } : undefined;
   return {
     id,
@@ -589,6 +700,9 @@ export function jobOf(t: any, kinds: readonly SeneschalKind[] = CHECK_KINDS): Om
     ...(t.base ? { base: t.base } : {}),
     ...(t.pr ? { pr: t.pr } : {}),
     ...(t.branch ? { branch: t.branch } : {}),
+    ...(remote ? { remote } : {}),
+    ...(tools.length ? { tools } : {}),
+    ...(patch ? { patch } : {}),
     ...(shard ? { shard } : {}),
     ...(t.kind === 'kit-trial' ? { kit: t.kit, agent: t.agent } : {}),
     lane: LANES.includes(t.lane) ? t.lane : 'normal',
@@ -601,16 +715,24 @@ export function jobOf(t: any, kinds: readonly SeneschalKind[] = CHECK_KINDS): Om
  * A worker's ask (Seneschal 0.2.0): any task of `kinds` for `repos` that waits on this PC, or on another PC on the
  * licence while this one has room, at its turn: the job, to run under its turn's `hold`. Or why there's none, and when to
  * ask again (`retryMs`: soon while the Seneschal has asked another PC for a task, else SENESCHAL_IDLE_MS). Null when
- * there's no Seneschal to ask: none on this PC, under node --test, or inside another's turn. Never throws.
+ * there's no Seneschal to ask: none on this PC, under node --test, or inside another's turn. A worker that gets the code
+ * itself (`clones`, kit 2.93.0) may name no repository: then it asks for `checks` of any. Never throws.
  */
 export async function seneschalWork(o: SeneschalWorkOptions): Promise<{ job: SeneschalJob } | { idle: string; retryMs: number } | null> {
   const env = o.env ?? process.env;
   if (env[TURN_HELD_ENV]) return null;
   const at = seneschalFor(o);
   if (!at) return null;
-  if (!o.kinds.length || !o.repos.length) return { idle: 'it runs no repository now', retryMs: SENESCHAL_IDLE_MS };
+  if (!o.kinds.length || (!o.repos.length && !o.clones)) return { idle: 'it runs no repository now', retryMs: SENESCHAL_IDLE_MS };
   const call = callerOf(at);
-  const r = await call('/api/tasks/lease', { worker: o.worker, kinds: o.kinds, repos: o.repos.slice(0, 200), ...(o.slot ? { slot: o.slot } : {}) });
+  const r = await call('/api/tasks/lease', {
+    worker: o.worker,
+    kinds: o.kinds,
+    ...(o.repos.length ? { repos: o.repos.slice(0, 200) } : {}),
+    ...(o.clones ? { clones: true } : {}),
+    ...(o.patches ? { patches: true } : {}),
+    ...(o.slot ? { slot: o.slot } : {}),
+  });
   if (!r || r.status >= 500) return { idle: "the Seneschal didn't answer", retryMs: SENESCHAL_IDLE_MS };
   if (r.status >= 400 || !r.body) return { idle: `the Seneschal refused the ask: ${r.body?.error ?? `HTTP ${r.status}`}`, retryMs: 10 * SENESCHAL_IDLE_MS };
   const b = r.body;
@@ -624,7 +746,7 @@ export async function seneschalWork(o: SeneschalWorkOptions): Promise<{ job: Sen
     b,
     0,
   );
-  const job = jobOf(b.task, o.kinds);
+  const job = jobOf(b.task, o.kinds, { patches: o.patches });
   if (!job) {
     await turn.giveBack(`${o.worker} couldn't read the task it was handed`);
     return { idle: `the Seneschal handed it a task it couldn't read (${String(b.task.id ?? '?').slice(0, 20)}), given back`, retryMs: SENESCHAL_IDLE_MS };

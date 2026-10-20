@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -494,4 +495,65 @@ test("a worker is never handed the Wright's or Reeve's work unless it names thei
   assert.ok(jobOf({ ...base, kind: 'pr-check' }), 'a check, by default');
   assert.ok(jobOf({ ...base, kind: 'full-suite' }));
   assert.ok(jobOf({ ...base, kind: 'kit-trial', kit: '2.79.0', agent: 'reeve' }));
+});
+
+const { patchOf, remoteOf, SENESCHAL_MOST_PATCH } = await import('./fixture/src/kit/seneschal.ts');
+
+test("a repository's own checks (checks): handed only to a worker that names the kind, with where its code is got from and the tools it needs", () => {
+  const checks = { id: 'b8', kind: 'checks', repo: 'acme/shop', commit: 'c'.repeat(40), branch: 'feature/cart', remote: 'https://git.example.com/acme/shop.git', needs: { tools: ['npm', 'node'] }, lane: 'person', what: "acme/shop's checks", from: { pc: { id: 'pc-a', name: 'LAPTOP' }, id: 't3' } };
+  assert.equal(jobOf(checks), null, "a worker that doesn't say gets the Steward's checks alone");
+  const job = jobOf(checks, ['checks'])!;
+  assert.deepEqual([job.kind, job.remote, job.tools, job.branch, job.from?.pc.name], ['checks', 'https://git.example.com/acme/shop.git', ['node', 'npm'], 'feature/cart', 'LAPTOP']);
+  assert.equal(jobOf({ ...checks, needs: { tools: ['node', 'rm -rf'] } }, ['checks']), null, 'a tool off the list');
+  assert.equal(jobOf({ ...checks, needs: { tools: 'node' } }, ['checks']), null);
+  assert.equal(jobOf({ ...checks, remote: 'C:\\Projects\\shop' }, ['checks']), null, 'never a path on a PC');
+  assert.equal(jobOf({ ...checks, remote: undefined }, ['checks'])!.remote, undefined, 'with no remote, only a PC with a clone runs it');
+});
+
+test('a remote a worker clones from: https, ssh, git or scp-like, with no sign-in in it; never a path, an option or another transport', () => {
+  for (const ok of ['https://github.com/acme/shop.git', 'http://git.local/acme/shop', 'ssh://git@git.example.com:2222/acme/shop.git', 'git://example.com/shop', 'git@gitlab.com:acme/shop.git', 'https://dev.azure.com/acme/Shop/_git/shop', 'https://bitbucket.org/acme/shop'])
+    assert.equal(remoteOf(ok), ok, ok);
+  for (const bad of ['C:\\Projects\\shop','/home/me/shop', 'file:///C:/shop', '../shop', 'ext::sh -c x', '--upload-pack=x', 'https://me:token@github.com/acme/shop', 'https://token@github.com/acme/shop', 'https://github.com/acme/../../x', 'https://github.com/acme/shop x', 'git@host:/etc/passwd', 'https://-x/acme', 'ssh://git@host:99999/x', 12, null])
+    assert.equal(remoteOf(bad), null, String(bad));
+});
+
+test('a patch on its commit: only on a checks task, only to a worker that applies patches, and checked against its hash and size', () => {
+  const lease = (text: string) => ({ sha256: createHash('sha256').update(text, 'utf8').digest('hex'), bytes: Buffer.byteLength(text, 'utf8'), text });
+  const text = 'diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-old\n+néw\n';
+  const patch = lease(text);
+  const checks = { id: 'b9', kind: 'checks', repo: 'acme/shop', commit: 'c'.repeat(40), remote: 'https://git.example.com/acme/shop.git', patch, lane: 'person', what: 'x' };
+  assert.equal(jobOf(checks, ['checks']), null, "a worker that doesn't apply patches would run other code than the task names");
+  assert.deepEqual(jobOf(checks, ['checks'], { patches: true })!.patch, patch);
+  assert.equal(jobOf({ ...checks, kind: 'pr-check' }, ['pr-check', 'checks'], { patches: true }), null, "only a repository's own checks carry one");
+  const big = `diff --git a/x b/x\n${'+'.repeat(SENESCHAL_MOST_PATCH)}\n`;
+  for (const bad of [{ ...patch, sha256: 'b'.repeat(64) }, { ...patch, bytes: patch.bytes - 1 }, { ...patch, text: `${text}+more\n` }, lease('not a diff\n'), lease(`${text}\0`), lease(big), { sha256: patch.sha256, bytes: patch.bytes }, text])
+    assert.equal(jobOf({ ...checks, patch: bad }, ['checks'], { patches: true }), null, JSON.stringify(bad).slice(0, 80));
+  assert.deepEqual(patchOf({ ...patch, extra: 1 }), patch);
+});
+
+test('a worker that gets the code itself asks with clones (and patches), naming no repository; one that names none and no clones asks nothing', async () => {
+  routes['/api/tasks/lease'] = () => ({ json: { task: null, why: 'nothing waits', retryMs: 4000 } });
+  assert.deepEqual(await seneschalWork({ worker: 'assayer', kinds: ['checks'], repos: [], clones: true, patches: true, at: at(), env: {} }), { idle: 'nothing waits', retryMs: 4000 });
+  assert.deepEqual(asked[0].body, { worker: 'assayer', kinds: ['checks'], clones: true, patches: true });
+  asked.length = 0;
+  assert.deepEqual(await seneschalWork({ worker: 'assayer', kinds: ['checks'], repos: [], at: at(), env: {} }), { idle: 'it runs no repository now', retryMs: 30_000 });
+  assert.equal(asked.length, 0);
+});
+
+test('a run reports what getting the code ready took (prepMs), as part of its time: never more of it, nor less than none', async () => {
+  routes['/api/tasks/submit'] = () => ({ status: 201, json: waitingTask() });
+  routes['/api/tasks/lease'] = () => ({ json: leased });
+  routes['/api/tasks/heartbeat'] = () => ({ json: { ok: true, until: '' } });
+  routes['/api/tasks/report'] = () => ({ json: { task: { id: 't7', state: 'done' } } });
+  for (const [prepMs, want] of [[1.4, 1], [-5, 0], [10 * 60_000, null], [Number.NaN, undefined]] as const) {
+    asked.length = 0;
+    let t = 0;
+    const a = await seneschalTurn({ ...task, kind: 'checks', remote: 'https://git.example.com/acme/shop.git', needs: { tools: ['node'] } }, { ...quick, now: () => (t += 5_000) });
+    assert.ok(a && 'turn' in a);
+    assert.deepEqual(asked[0].body.remote, 'https://git.example.com/acme/shop.git');
+    await a.turn.hold(async () => true, () => ({ ok: true, prepMs }));
+    const rep = asked.find((x) => x.route === '/api/tasks/report')!.body;
+    if (want === null) assert.equal(rep.prepMs, rep.ms, 'at most the whole run');
+    else assert.equal(rep.prepMs, want);
+  }
 });
