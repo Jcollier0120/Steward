@@ -19,7 +19,7 @@ writeFileSync(path.join(kits, 'Windows Kits', '10', 'bin', '10.0.26100.0', 'x64'
 process.env['ProgramFiles(x86)'] = kits;
 
 const { loadPipeline, savePipeline } = await import('../src/pipeline.ts');
-const { loadSigningAhead, loadSigningWaits, noteSigningWaits } = await import('../src/signing.ts');
+const { forgetSigningLooks, loadSigningAhead, loadSigningWaits, noteSigningWaits } = await import('../src/signing.ts');
 const { runStage } = await import('../src/steward.ts');
 const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
 const { fakeEmployee, ok, sh } = await import('./helpers.ts');
@@ -117,6 +117,9 @@ test('a release that waited to sign builds by itself once a test signature works
   canSign = false;
   const second = bump('0.4.2');
   now = new Date(2026, 9, 20, 11, 15);
+  // The 10:10 release looked at the certificate on the real clock (stages/release.ts passes no time), so its look is
+  // stamped later than this round's 11:15 and would stand in: an hour on, it's gone.
+  forgetSigningLooks();
   const between = await round();
   assert.equal(between.build?.between, true, JSON.stringify(between.build));
   const ahead = loadSigningAhead();
