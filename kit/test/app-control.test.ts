@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 // Windows' application control (app-control.ts, kit 2.88.4): the Code Integrity log's blocks, read from its XML as
 // wevtutil gives it, never the real log (a test run doesn't ask it).
-const { blockedIn, blockedSay, blocksIn, parseBlocks } = await import('./fixture/src/kit/app-control.ts');
+const { blockedIn, blockedSay, blocksIn, bySmartAppControl, parseBlocks, parseSacState, smartAppControlState } = await import('./fixture/src/kit/app-control.ts');
 
 const FOLDER = 'C:\\Users\\Arnold\\.manor\\accelerators\\servers\\llama.cpp\\b11734-cuda-12.4-x64';
 const event = (id: number, data: Record<string, string>) =>
@@ -46,6 +46,20 @@ test('blockedIn asks the log for 3033 and 3077 since then; a log that can\'t be 
   assert.deepEqual(await blockedIn(FOLDER, 90_000, async () => null), []);
   assert.deepEqual(await blockedIn(FOLDER, 90_000, async () => Promise.reject(new Error('wevtutil: access denied'))), []);
   assert.deepEqual(await blockedIn(FOLDER, 90_000), [], 'no reader: the real log is left alone under node --test');
+});
+
+test("Smart App Control's state from reg query (kit 2.93.1): 1 on, 2 evaluation, 0 off; anything else, or no Windows, unknown", () => {
+  const reg = (v: string) => `\r\nHKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\CI\\Policy\r\n    VerifiedAndReputablePolicyState    REG_DWORD    ${v}\r\n\r\n`;
+  assert.equal(parseSacState(reg('0x1')), 'on');
+  assert.equal(parseSacState(reg('0x2')), 'evaluation');
+  assert.equal(parseSacState(reg('0x0')), 'off');
+  assert.equal(parseSacState(reg('0x3')), null);
+  assert.equal(parseSacState('ERROR: The system was unable to find the specified registry key or value.'), null);
+  assert.equal(smartAppControlState(() => reg('0x1'), 'win32'), 'on');
+  assert.equal(smartAppControlState(() => null, 'win32'), null, "a Windows without it, or a registry it can't read");
+  assert.equal(smartAppControlState(() => reg('0x1'), 'linux'), null);
+  assert.equal(bySmartAppControl([{ file: 'a.exe', policy: null }, { file: 'a.exe', policy: 'VerifiedAndReputableDesktop' }]), true);
+  assert.equal(bySmartAppControl([{ file: 'a.exe', policy: 'Contoso' }, { file: 'b.exe', policy: null }]), false);
 });
 
 test('blockedSay names the files and Smart App Control in plain words; an unnamed policy is said with care, an organization\'s by its name', () => {

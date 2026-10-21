@@ -2,11 +2,11 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, renameSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { APP, dataDir, devCheckout, pageUrl, port } from '../app.ts';
-import { blockedIn } from './app-control.ts';
+import { blockedIn, bySmartAppControl } from './app-control.ts';
 import { ago } from './page.ts';
 import { duty, setDuty, type Duty } from './duty.ts';
 import { licenseNow, licensePing, TRIAL_ENDED_TEXT } from './license-check.ts';
-import { namedBuilt, namedId } from './named.ts';
+import { namedBuilt, namedHold, namedId } from './named.ts';
 import { CEILING_ENV, ceilingCap } from './pace.ts';
 import { dataFile, readJson } from './store.ts';
 
@@ -105,7 +105,8 @@ export async function open(cliFile: string, opts: { quiet?: boolean } = {}): Pro
   // so its command line says so (Pinder and the Surveyor know the manor's own agents by it).
   const entry = cliFile.endsWith('.js') && existsSync(`${cliFile.slice(0, -3)}.ts`) ? `${cliFile.slice(0, -3)}.ts` : cliFile;
   // Under the agent's name in Task Manager once the page has built its launcher (named.ts); a checkout's job is its own.
-  // When Windows blocked that launcher (Smart App Control: a program it hasn't seen, unsigned; kit 2.91.0), as node.
+  // When Windows blocked that launcher (Smart App Control: a program it hasn't seen, unsigned; kit 2.91.0), as node,
+  // and every agent's launcher is held from then on (kit 2.93.1), so the next sign-in meets no block.
   const exe = namedBuilt(APP);
   for (const named of exe ? [{ exe, id: devCheckout ? `${APP.id}-dev` : APP.id }, null] : [null]) {
     const how = pageLaunch(process.execPath, entry, { named });
@@ -129,7 +130,9 @@ export async function open(cliFile: string, opts: { quiet?: boolean } = {}): Pro
     }
     if (!named) break;
     const name = path.win32.basename(named.exe).toLowerCase();
-    if (!(await blockedIn(path.dirname(named.exe), 15_000)).some((b) => path.win32.basename(b.file).toLowerCase() === name)) break;
+    const blocks = (await blockedIn(path.dirname(named.exe), 15_000)).filter((b) => path.win32.basename(b.file).toLowerCase() === name);
+    if (!blocks.length) break;
+    namedHold(bySmartAppControl(blocks) ? 'smart-app-control' : 'blocked', path.dirname(named.exe));
     console.error(`Windows blocked ${path.win32.basename(named.exe)}, which shows ${APP.name} by name in Task Manager: its page starts without it`);
   }
   console.error(`${APP.name}'s page didn't start within 10 s; see ${logFile}`);

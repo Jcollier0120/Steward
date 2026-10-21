@@ -12,7 +12,7 @@ after(() => rmSync(home, { recursive: true, force: true, maxRetries: 20, retryDe
 process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 
-const { NAMED_TITLE, namedBuilt, namedExe, namedId, namedLauncher, namedSource, namedWanted } = await import('./fixture/src/kit/named.ts');
+const { NAMED_TITLE, namedBuilt, namedExe, namedHeld, namedHold, namedHoldFile, namedId, namedLauncher, namedSource, namedWanted } = await import('./fixture/src/kit/named.ts');
 const { pageLaunch } = await import('./fixture/src/kit/service.ts');
 const { powershell } = await import('./fixture/src/kit/ps.ts');
 
@@ -51,7 +51,7 @@ test("an agent's id as the launcher takes it, and who gets one: Windows, and und
 
 test("open's launcher: the agent's once it's been built, else none (the page starts as node.exe)", () => {
   const dir = path.join(home, 'built');
-  const o = { kitDir: dir, platform: 'win32' as const, env: { KIT_NAMED: '1' } };
+  const o = { kitDir: dir, platform: 'win32' as const, env: { KIT_NAMED: '1' }, sac: () => 'off' as const };
   assert.equal(namedBuilt(smith, o), null, 'not built yet');
   const exe = namedExe(smith.id, namedSource(smith.name), dir);
   mkdirSync(dir, { recursive: true });
@@ -60,6 +60,30 @@ test("open's launcher: the agent's once it's been built, else none (the page sta
   assert.equal(namedBuilt({ id: 'reeve', name: 'Reeve' }, o), null, "another agent's isn't this one's");
   assert.equal(namedBuilt(smith, { ...o, platform: 'linux' }), null);
   assert.equal(namedBuilt(smith, { kitDir: dir, platform: 'win32', env: { NODE_TEST_CONTEXT: 'child' } }), null);
+});
+
+test('Smart App Control on, or Windows weighing it: no launcher, held for every agent until it is off (kit 2.93.1)', () => {
+  const dir = path.join(home, 'held');
+  const at = (sac: 'on' | 'evaluation' | 'off' | null) => ({ kitDir: dir, platform: 'win32' as const, env: { KIT_NAMED: '1' }, sac: () => sac });
+  const exe = namedExe(smith.id, namedSource(smith.name), dir);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(exe, '');
+  assert.equal(namedBuilt(smith, at('off')), exe);
+  assert.ok(!existsSync(namedHoldFile(dir)), 'nothing held while it is off');
+
+  for (const sac of ['on', 'evaluation'] as const) {
+    assert.equal(namedBuilt(smith, at(sac)), null, sac);
+    assert.equal(readFileSync(namedHoldFile(dir), 'utf8'), 'smart-app-control');
+  }
+  assert.equal(namedBuilt(smith, at(null)), null, "held while its state can't be read");
+  assert.equal(namedBuilt(smith, at('off')), exe, 'let go once it is off');
+  assert.ok(!existsSync(namedHoldFile(dir)));
+
+  // A block another policy made (an organization's) stays held, whatever Smart App Control's state.
+  namedHold('blocked', dir);
+  assert.equal(namedHeld(at('off')), true);
+  assert.equal(namedBuilt(smith, at('off')), null);
+  rmSync(namedHoldFile(dir));
 });
 
 test("pageLaunch with the launcher: start runs it, and it the page; an id or path it can't pass, as before", () => {
@@ -85,7 +109,7 @@ test("pageLaunch with the launcher: start runs it, and it the page; an id or pat
 test("on Windows the launcher compiles with the agent's name, runs the page as it was in the agent's job, and what the page starts detached outlives it", { skip: process.platform !== 'win32' }, async () => {
   const logged: string[] = [];
   const agent = { id: 'kit-named-test', name: 'Kit Named Test' };
-  const exe = await namedLauncher(agent, { kitDir, env: { ...process.env, KIT_NAMED: '1' }, log: (l) => logged.push(l) });
+  const exe = await namedLauncher(agent, { kitDir, env: { ...process.env, KIT_NAMED: '1' }, sac: () => 'off', log: (l) => logged.push(l) });
   assert.deepEqual(logged, [], 'built');
   assert.ok(exe);
   const info = (await powershell(`$v = (Get-Item -LiteralPath '${exe.replace(/'/g, "''")}').VersionInfo; $v.FileDescription + '|' + $v.ProductName`, { timeoutMs: paced(60_000) })).trim();
@@ -167,7 +191,7 @@ public static class NamedTestJob {
 // launcher lets go of cmd's, whose host ends with cmd.
 test("on Windows the page started through the launcher has a console of its own: cmd's ends with cmd, and the page's git still starts", { skip: process.platform !== 'win32' }, async () => {
   const agent = { id: 'kit-named-test', name: 'Kit Named Test' };
-  const exe = await namedLauncher(agent, { kitDir, env: { ...process.env, KIT_NAMED: '1' } });
+  const exe = await namedLauncher(agent, { kitDir, env: { ...process.env, KIT_NAMED: '1' }, sac: () => 'off' });
   assert.ok(exe);
   const ready = path.join(home, 'console-ready');
   const go = path.join(home, 'console-go');

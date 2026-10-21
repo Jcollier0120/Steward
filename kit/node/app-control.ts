@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
@@ -80,6 +80,48 @@ export async function blockedIn(folder: string, withinMs: number, read?: ReadLog
 
 /** Smart App Control's policy, by the name the log gives it (VerifiedAndReputableDesktop, and its evaluation's). */
 const smartAppControl = (policy: string | null) => !!policy && /VerifiedAndReputable/i.test(policy);
+
+/** Whether Smart App Control blocked any of `blocks`, by the policy the log names. */
+export const bySmartAppControl = (blocks: Block[]) => blocks.some((b) => smartAppControl(b.policy));
+
+/**
+ * Smart App Control's state on this PC (kit 2.93.1): on, evaluation (Windows is weighing whether to turn it on, and may
+ * at any time), or off. Windows keeps it in the registry, readable without elevation: VerifiedAndReputablePolicyState
+ * under CI\Policy, 1 on, 2 evaluation, 0 off.
+ */
+export type SacState = 'on' | 'evaluation' | 'off';
+
+/** reg query's answer for VerifiedAndReputablePolicyState, as a state; null when it gives none Windows defines. */
+export function parseSacState(out: string): SacState | null {
+  const m = /VerifiedAndReputablePolicyState\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(out);
+  const v = m ? parseInt(m[1], 16) : -1;
+  return v === 1 ? 'on' : v === 2 ? 'evaluation' : v === 0 ? 'off' : null;
+}
+
+const REG = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'reg.exe');
+
+const readSac = (): string | null => {
+  try {
+    return execFileSync(REG, ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\CI\\Policy', '/v', 'VerifiedAndReputablePolicyState'], {
+      windowsHide: true,
+      timeout: 5000,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Smart App Control's state; null off Windows, on a Windows without it, or when it can't be read. One reg.exe, about
+ * 20 ms: asked where something compiled on this PC (unsigned, so Smart App Control would block it) is about to run.
+ */
+export function smartAppControlState(read: () => string | null = readSac, platform: NodeJS.Platform = process.platform): SacState | null {
+  if (platform !== 'win32') return null;
+  const out = read();
+  return out ? parseSacState(out) : null;
+}
 
 /**
  * Why `program` couldn't run, in the person's words, when Windows blocked part of it; null when it blocked nothing. Smart
