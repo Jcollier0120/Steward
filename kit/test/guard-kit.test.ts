@@ -222,8 +222,17 @@ Set-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
 $r.whatIf = @($script:GuardLines)
 $r.markedUnderWhatIf = Test-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
 Initialize-GuardKit
+# icacls, which only an administrator may run so: what it was asked, never run here.
+$global:native = @()
+function Invoke-Native([string]$File, [string[]]$Arguments) { $global:native += ((Split-Path -Leaf $File) + ' ' + ($Arguments -join ' ')); return @{ code = 0; out = '' } }
 Set-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
 $r.marked = Test-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
+$r.owned = @($global:native)
+function Invoke-Native([string]$File, [string[]]$Arguments) { return @{ code = 5; out = 'Access is denied.' } }
+try { Set-LetGo ${q(root)} 'S-1-5-21-1-2-3-1004'; $r.failed = 'no' } catch { $r.failed = $_.Exception.Message }
+$r.leftAfterFail = Test-LetGo ${q(root)} 'S-1-5-21-1-2-3-1004'
+try { Set-LetGo ${q(root)} 'S-1-5-21-1\\..\\x'; $r.badSid = 'no' } catch { $r.badSid = $_.Exception.Message }
+$r.badSidTested = Test-LetGo ${q(root)} '..\\let-go'
 $after = Get-OtherHolders ${q(root)} 'lamplighter' ${q(me)}
 $r.after = @($after | ForEach-Object { $_.account })
 Clear-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
@@ -238,6 +247,11 @@ $r | ConvertTo-Json -Compress`);
   assert.deepEqual(r.whatIf, [`WhatIf: Mark that this account lets go of the guard: ${path.join(root, 'let-go', 'S-1-5-21-1-2-3-1002')}`]);
   assert.equal(r.markedUnderWhatIf, false);
   assert.equal(r.marked, true);
+  assert.deepEqual(r.owned, [`icacls.exe ${path.join(root, 'let-go')} /setowner *S-1-5-32-544 /t /c /q`], "owned by Administrators, as everything in the guard's folder is, whatever owner Windows gave it");
+  assert.equal(r.failed, 'icacls /setowner: Access is denied.');
+  assert.equal(r.leftAfterFail, false, "a mark that couldn't be made the guard's own is taken away again");
+  assert.match(r.badSid, /isn't an account's SID/);
+  assert.equal(r.badSidTested, false);
   assert.deepEqual(r.after, ['bob'], 'an account that let go no longer holds it');
   assert.deepEqual([r.cleared, r.empty], [false, false]);
   assert.ok(existsSync(path.join(root, 'let-go')), 'the folder stays, empty');

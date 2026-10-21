@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { get as httpGet } from 'node:http';
 import type http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,8 +24,10 @@ const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '
  *
  * Signed in is a GET with the token (`x-token`, as Manor, the CLI and another staff member send it, read from
  * server.json: staffHeaders) or the cookie (the browser: the page's own fetches, images, links and event streams send
- * it by themselves). Strict (strictPages), a GET that is neither gets only what OPEN_GETS names; GET / gets
- * lockedPage, never the token; anything else 401. Not strict (until Manor and every staff member that reads another's
+ * it by themselves). Strict (strictPages), a GET that is neither gets only what OPEN_GETS names. A browser opening
+ * the page is sent to Manor (manorOpenUrl), which opens that same address signed in; while Manor isn't answering it
+ * gets lockedPage, with a button to open it there. A program's GET / gets lockedPage too, never the token; anything
+ * else 401. Not strict (until Manor and every staff member that reads another's
  * data send the token), every GET is answered as before, and a launch URL still signs the browser in, so pages are
  * ready when it is. POSTs are as before: the token, from the page's own origin or none; a cookie alone never presses a
  * button.
@@ -154,15 +157,68 @@ export function withLaunch(at: string, code: string): string {
   return url.pathname + url.search;
 }
 
+// ---------------------------------------------------------------- a browser that isn't signed in
+
 /**
- * What GET / shows a browser that isn't signed in, strict: no token, none of the agent's data; a 200, so an update's
- * probation and Manor's look at the page see it answer. It says to open the page from Castellan, which signs the
- * browser in, and links there when Manor is on this PC.
+ * Where a browser that isn't signed in is sent, strict (kit 2.96.0): Manor's `GET /open/<id>?at=<path and query>`,
+ * which asks this page for a launch URL (POST /api/page-launch, with the token from its server.json, `{"path": at}`)
+ * and sends the browser on to it, so a bookmark opens the same page signed in. The browser keeps the address's hash
+ * through each redirect.
  */
-export function lockedPage(o: { name: string; manor: { name: string; url: string } | null }): string {
+export const manorOpenUrl = (manorUrl: string, id: string, at: string) => `${new URL(`open/${encodeURIComponent(id)}`, manorUrl).href}?at=${encodeURIComponent(at)}`;
+
+/** A browser opening the page (a link, a bookmark, the address bar), not a script's fetch: Sec-Fetch-Mode: navigate. */
+export const isNavigation = (headers: http.IncomingHttpHeaders) => String(headers['sec-fetch-mode'] ?? '').trim().toLowerCase() === 'navigate';
+
+/** How long whether Manor answers is kept: up, a little while; not, only a moment, so a bookmark opened as Manor starts goes there. */
+const MANOR_UP_MS = 15_000;
+const MANOR_DOWN_MS = 3_000;
+let manorAsked: { port: number; at: number; up: boolean } | null = null;
+
+/** Whether Manor answers on its port, as Manor (its /api/ping), asked at most every few seconds. */
+export async function manorAnswers(port: number, o: { timeoutMs?: number; now?: number } = {}): Promise<boolean> {
+  const now = o.now ?? Date.now();
+  if (manorAsked && manorAsked.port === port && now - manorAsked.at < (manorAsked.up ? MANOR_UP_MS : MANOR_DOWN_MS)) return manorAsked.up;
+  const up = await new Promise<boolean>((resolve) => {
+    const req = httpGet({ host: '127.0.0.1', port, path: '/api/ping', timeout: o.timeoutMs ?? 800, headers: { host: `manor.localhost:${port}` } }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c: string) => {
+        body += c;
+        if (body.length > 64 * 1024) req.destroy();
+      });
+      res.on('end', () => {
+        try {
+          resolve(res.statusCode === 200 && JSON.parse(body)?.app === 'manor');
+        } catch {
+          resolve(false);
+        }
+      });
+      res.on('error', () => resolve(false));
+    });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(false));
+  });
+  manorAsked = { port, at: now, up };
+  return up;
+}
+
+/** For tests: forget whether Manor answered. */
+export const forgetManorAnswer = () => {
+  manorAsked = null;
+};
+
+/**
+ * What a browser that isn't signed in is shown, strict, when Manor isn't answering (or isn't on this PC), and what GET
+ * / gives a program that isn't signed in: no token, none of the agent's data; a 200, so an update's probation and
+ * Manor's look at the page see it answer. It says the page opens from Castellan, and its button (`open`, Manor's
+ * /open route for this address) opens it there, signed in, once Manor is running.
+ */
+export function lockedPage(o: { name: string; manor: { name: string; url: string } | null; open?: string | null }): string {
   const manor = o.manor ? esc(o.manor.name) : 'Castellan';
-  const open = o.manor ? `<p><a href="${esc(o.manor.url)}">Open ${manor}</a></p>` : '';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(o.name)}</title><link rel="icon" href="/favicon.svg"><style>body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:15vh 16px;text-align:center;color:#1f2328;background:#fff}@media (prefers-color-scheme:dark){body{color:#e6edf3;background:#0d1117}a{color:#58a6ff}}h1{font-size:1.4em;font-weight:600}</style></head><body><h1>${esc(o.name)} opens from ${manor}</h1><p>This browser isn't signed in to ${esc(o.name)}'s page yet. Open it from ${manor}, and it opens here signed in, bookmarks too.</p>${open}</body></html>`;
+  const button = o.manor ? `<p><a class="button" href="${esc(o.open ?? o.manor.url)}">Open ${esc(o.name)} from ${manor}</a></p>` : '';
+  const say = o.manor ? `${manor} signs it in, and isn't answering just now: start ${manor}, then press the button. Bookmarks open signed in after that.` : `Open it from ${manor}, and it opens here signed in, bookmarks too.`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(o.name)}</title><link rel="icon" href="/favicon.svg"><style>:root{--fg:#1f2328;--bg:#fff;--accent:#0969da;--on-accent:#fff}@media (prefers-color-scheme:dark){:root{--fg:#e6edf3;--bg:#0d1117;--accent:#2f81f7;--on-accent:#fff}}body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:15vh 16px;text-align:center;color:var(--fg);background:var(--bg)}h1{font-size:1.4em;font-weight:600}.button{display:inline-block;padding:.5em 1.1em;border-radius:6px;background:var(--accent);color:var(--on-accent);text-decoration:none;font-weight:600}</style></head><body><h1>${esc(o.name)} opens from ${manor}</h1><p>This browser isn't signed in to ${esc(o.name)}'s page. ${say}</p>${button}</body></html>`;
 }
 
 // ---------------------------------------------------------------- calling another staff member

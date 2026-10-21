@@ -165,7 +165,8 @@ function Get-AccountSid([string]$Account) {
 
 # Whether an account has let go of the guard: its mark in <Root>\let-go.
 function Test-LetGo([string]$Root, [string]$Sid) {
-  return [bool]($Sid -and (Test-Path -LiteralPath (Join-Path $Root "let-go\$Sid") -PathType Leaf))
+  if ($Sid -notmatch '^S-1-[0-9-]+\z') { return $false }
+  return [bool](Test-Path -LiteralPath (Join-Path $Root "let-go\$Sid") -PathType Leaf)
 }
 
 # The other accounts on this PC that still hold the guard: @(@{ sid; account }), each with the agent installed
@@ -183,17 +184,28 @@ function Get-OtherHolders([string]$Root, [string]$Id, [string]$Sid) {
   return , $held
 }
 
-# This account lets go of the guard, which other accounts still hold: its mark in <Root>\let-go.
+# This account lets go of the guard, which other accounts still hold: its mark in <Root>\let-go, owned by
+# Administrators as everything there is (whatever owner Windows gives an elevated file), so Test-Trusted still trusts
+# the folder when the guard is turned on again. Call it only for a folder Test-Trusted trusts: one it doesn't is no
+# guard to share, and is turned off for every account as before.
 function Set-LetGo([string]$Root, [string]$Sid) {
-  $f = Join-Path $Root "let-go\$Sid"
+  if ($Sid -notmatch '^S-1-[0-9-]+\z') { throw "$Sid isn't an account's SID." }
+  $dir = Join-Path $Root 'let-go'
+  $f = Join-Path $dir $Sid
   Invoke-Do "Mark that this account lets go of the guard: $f" {
-    New-Item -ItemType Directory -Path (Join-Path $Root 'let-go') -Force | Out-Null
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
     [IO.File]::WriteAllText($f, [DateTime]::UtcNow.ToString('o'))
+    $r = Invoke-Native (Join-Path $env:SystemRoot 'System32\icacls.exe') @($dir, '/setowner', '*S-1-5-32-544', '/t', '/c', '/q')
+    if ($r.code -ne 0) {
+      Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+      throw "icacls /setowner: $($r.out)"
+    }
   }
 }
 
 # This account holds the guard again (it turns it on): its mark, if it let go before, removed.
 function Clear-LetGo([string]$Root, [string]$Sid) {
+  if ($Sid -notmatch '^S-1-[0-9-]+\z') { return }
   $f = Join-Path $Root "let-go\$Sid"
   if (-not (Test-Path -LiteralPath $f)) { return }
   Invoke-Do "Remove ${f}: this account holds the guard again" { Remove-Item -LiteralPath $f -Force }

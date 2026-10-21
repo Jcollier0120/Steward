@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.167
+
+**It hands out the kit 2.96.1. Once staff pages open only for you, a bookmark to one goes through Castellan, which opens it signed in.**
+
+### What changed
+
+- **Bookmarks to a staff member's page, ready for when pages open only for you.** Once a later update turns this on, opening a staff member's page from a bookmark or a link, in a browser that isn't signed in to it yet, sends you to Castellan, which opens that same page signed in. While Castellan isn't running, the page instead says so, with a button to open it once Castellan is back. For now every page answers as before.
+- This release also brings 0.36.166 and kit 2.96.0, which weren't released on their own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.166
 
 **It hands out the kit 2.96.0, which gets the staff ready for a PC that several people share. A guard stays on while anyone else on the PC still has it, and each staff member's page is ready to open only for the person it belongs to.**
