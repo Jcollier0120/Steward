@@ -8,7 +8,7 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { redact, trimmed } from './redact.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
-import { checksLogOf } from './stages/bump.ts';
+import { checksLogOf, ON_ORIGIN } from './stages/bump.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, installedRelease, releaseDirOf, type StageResult } from './stages/common.ts';
 import { roundFailuresFile } from './stages/round.ts';
 import { showFile } from './git.ts';
@@ -107,12 +107,43 @@ function outputBeside(dir: string, file = checksLogOf(dir)): string | null {
 /** A release command as a person tries it without publishing: `npm run release -- --publish` is `npm run release`. */
 export const withoutPublish = (line: string) => line.replace(/\s+-{1,2}publish\b/i, '').replace(/\s+--\s*$/, '').trim();
 
-/** A failed bump to a kit, as an issue in the employee's repository. */
+/**
+ * A failed bump to a kit, as an issue in the employee's repository. Its words follow what stopped the bump: its checks
+ * (the one case `branch` was never pushed), or another step, such as the Steward refusing a bump branch already on
+ * origin. A hold kept before Steward 0.36.164 has no cause: it reads as the checks, unless its message is that refusal.
+ */
 export function bumpItem(e: Employee, f: FailedRollout, settings: Settings): WorkItem {
   const id = `bump:${e.id}:${f.kit}`;
   const branch = bumpBranch(f.kit);
   const output = outputBeside(bumpDirOf(settings, e));
   const tests = e.test.join(' && ') || '(Settings give it no checks)';
+  const cause = f.cause ?? (f.message.includes(ON_ORIGIN) ? 'refused' : 'checks');
+  const how = `The Steward bumps each employee to a new kit release by itself: a fresh worktree of origin/${e.branch} at ${f.head.slice(0, 7)}, on the branch \`${branch}\`, with kit.json pinned to ${f.kit}, tools/kit.ts the Steward's, and the patch version raised; then its kit filled (\`${e.fill}\`) and its checks run (\`${tests}\`), and run again when they fail`;
+  if (cause !== 'checks') {
+    const onOrigin = f.message.includes(ON_ORIGIN);
+    return {
+      id,
+      condition: `rollout:${e.id}:${f.kit}`,
+      repo: e.repo,
+      title: `${e.name}'s bump to kit ${f.kit} didn't go through`,
+      body: [
+        `${e.name}'s bump to the Steward's kit ${f.kit} stopped in the Steward's round, so the new kit waits for it. Its checks did not fail, so this is not about ${e.name}'s code unless what it says below is.`,
+        '',
+        '**What stopped it**',
+        '',
+        `${how}; then a pull request, merged once it is open. This round it said:`,
+        '',
+        `> ${redact(f.message)}`,
+        '',
+        onOrigin
+          ? `**Where the fix goes:** not in ${e.branch}'s code. \`${branch}\` is on origin already, and the Steward never force-pushes a bump: it opens the PR itself when the branch is its own bump and has none, so what is there is a PR for it (open, closed or merged), a commit that isn't the Steward's bump, or a bump ${e.branch} has moved past. Merge or close its PR, or delete the branch on origin if it is a leftover; the Steward's next bump then makes it afresh.`
+          : `**Where the fix goes:** what stopped it is the step the message above names, not ${e.name}'s checks. If that is something in ${e.branch} (a kit.json it can't read, version files that disagree), a pull request on ${e.branch} fixes it; if it is GitHub or the PC the Steward runs on, there is nothing in ${e.branch} to change.`,
+        '',
+        `**Done means:** the Steward's next bump to kit ${f.kit} goes through (its rounds try again once ${e.branch} moves, or when Bump is pressed on its page), and its PR merges.`,
+        ...footer(id),
+      ].join('\n'),
+    };
+  }
   return {
     id,
     condition: `rollout:${e.id}:${f.kit}`,
@@ -123,7 +154,7 @@ export function bumpItem(e: Employee, f: FailedRollout, settings: Settings): Wor
       '',
       '**What failed**',
       '',
-      `The Steward bumps each employee to a new kit release by itself: a fresh worktree of origin/${e.branch} at ${f.head.slice(0, 7)}, on the branch \`${branch}\`, with kit.json pinned to ${f.kit}, tools/kit.ts the Steward's, and the patch version raised; then its kit filled (\`${e.fill}\`) and its checks run (\`${tests}\`), and run again when they fail. They failed both times:`,
+      `${how}. They failed both times:`,
       '',
       `> ${redact(f.message)}`,
       '',

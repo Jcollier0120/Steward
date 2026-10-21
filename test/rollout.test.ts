@@ -235,6 +235,8 @@ writeFileSync(
 
 let kits = ['1.0.0'];
 let glanceFails = false;
+/** What `gh pr create` says while it fails (the network cut it short), or null while it works. */
+let createFails: string | null = null;
 /** The Steward's open PRs on the fake, as GitHub's GraphQL gives them. */
 let prs: any[] = [];
 let prNumber = 6;
@@ -264,6 +266,7 @@ const run = async (cmd: string, args: string[], opts?: any) => {
     return ok(open.map((p) => ({ ...p, author: { login: p.author.login }, labels: [], files: [], statusCheckRollup: [] })));
   }
   if (args[0] === 'pr' && args[1] === 'create') {
+    if (createFails) return { code: 1, out: '', err: createFails };
     const head = args[args.indexOf('--head') + 1];
     const n = ++prNumber;
     prs.push({ number: n, title: args[args.indexOf('--title') + 1], url: `https://github.com/Jcollier0120/Fake/pull/${n}`, body: '', headRefName: head, headRefOid: sh(f.origin, 'rev-parse', head), baseRefName: 'main', isCrossRepository: false, isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', additions: 8, deletions: 8, author: { __typename: 'User', login: 'Jcollier0120' }, labels: { nodes: [] }, files: { nodes: [] }, commits: { nodes: [] } });
@@ -400,6 +403,33 @@ test("the Steward carrying an older kit, with the new kit's tag in its clone: th
   } finally {
     writeFileSync(file, before);
   }
+});
+
+test('a bump whose PR the network kept from opening is a wait, with no failure, hold or alarm; the next round opens the PR of the branch already on origin, and merges it', async () => {
+  kits = ['1.0.6', ...kits];
+  createFails = 'error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com';
+  const cut = await round();
+  createFails = null;
+  const waited = cut.results.find((x) => x.message.startsWith('rollout: '))!;
+  assert.equal(waited.outcome, 'skipped', `${waited.message}\n${cut.log.join('\n')}`);
+  assert.match(waited.message, /^rollout: steward\/kit-1\.0\.6 waits for the network \(error connecting to api\.github\.com.*\): the next round tries again$/);
+  assert.equal(created().length, 1, 'tried to open it');
+  assert.deepEqual(prs, [], 'and could not');
+  assert.deepEqual(loadRolloutFailures(), {}, 'nothing is held against the bump');
+  assert.deepEqual(openAlarms(), [], 'no alarm');
+  assert.match(sh(f.origin, 'show', 'steward/kit-1.0.6:kit.json'), /"kit": "1\.0\.6"/, 'its branch got to origin');
+
+  // The next round finds the branch on origin with no PR, and the Steward's own bump on it: the PR is opened as the push
+  // would have, and merged, and nothing is bumped or pushed again.
+  const next = await round();
+  const opened = next.results.find((x) => x.message.startsWith('rollout: '))!;
+  assert.equal(opened.outcome, 'done', `${opened.message}\n${next.log.join('\n')}`);
+  assert.match(opened.message, /^rollout: kit 1\.0\.6: steward\/kit-1\.0\.6 \(.{7}\) was on origin with no PR: its PR is opened now; opened "Fake 0\.4\.5: the Steward's kit 1\.0\.6"; merged it$/);
+  assert.equal(created().length, 1);
+  assert.equal(sh(f.origin, 'show', 'main:kit.json'), '{\n  "kit": "1.0.6",\n  "parts": ["node"]\n}');
+  assert.deepEqual(loadRolloutFailures(), {});
+  assert.deepEqual(openAlarms(), []);
+  assert.deepEqual(released().at(-1), '0.4.5', 'released in the same round');
 });
 
 test('a new kit settles: the newest goes once it has gone the quiet hours without a newer one, or the longest wait is up', () => {

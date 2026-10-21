@@ -13,7 +13,7 @@ process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { closeResolved, fileWork, holdForWork, marker, reeveItems, withoutPublish, workFiledFile, workItems } = await import('../src/work.ts');
+const { bumpItem, closeResolved, fileWork, holdForWork, marker, reeveItems, withoutPublish, workFiledFile, workItems } = await import('../src/work.ts');
 const { alarmsFile, watchAlarms } = await import('../src/alarms.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
 const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
@@ -64,6 +64,31 @@ beforeEach(() => {
   rmSync(workFiledFile(), { force: true });
   rmSync(alarmsFile(), { force: true });
   rmSync(roundFailuresFile(), { force: true });
+});
+
+test("a bump that didn't fail its checks is filed for what stopped it: never 'fails its checks', never 'was never pushed' for a branch on origin", () => {
+  const refusal = 'steward/kit-2.12.1 is already on origin: merge or close its PR first (a bump is never force-pushed)';
+  const [onOrigin, claim, legacy, checks] = [
+    { kit: '2.12.1', head: '0123456789abcdef', stage: 'bump' as const, message: refusal, cause: 'refused' as const },
+    { kit: '2.12.1', head: '0123456789abcdef', stage: 'bump' as const, message: "couldn't claim a version for the bump: GitHub said 403", cause: 'step' as const },
+    // Kept before Steward 0.36.164: no cause, but the Steward's own refusal in its words.
+    { kit: '2.12.1', head: '0123456789abcdef', stage: 'bump' as const, message: refusal },
+    { kit: '2.12.1', head: '0123456789abcdef', stage: 'bump' as const, message: 'npm test failed (exit 1), twice', cause: 'checks' as const },
+  ].map((f) => bumpItem(porter, f, settings));
+  for (const item of [onOrigin, claim, legacy]) {
+    assert.equal(item.title, "Porter's bump to kit 2.12.1 didn't go through");
+    assert.equal(item.condition, 'rollout:porter:2.12.1', 'the same alarm waits while it is worked on');
+    assert.match(item.body, /Its checks did not fail/);
+    assert.doesNotMatch(item.body, /fails its checks|failed its checks|was never pushed|They failed both times/);
+  }
+  assert.match(onOrigin.body, /> steward\/kit-2\.12\.1 is already on origin: merge or close its PR first/);
+  assert.match(onOrigin.body, /\*\*Where the fix goes:\*\* not in main's code\. `steward\/kit-2\.12\.1` is on origin already/);
+  assert.equal(legacy.body, onOrigin.body, 'the refusal in its words reads the same without a cause');
+  assert.match(claim.body, /\*\*Where the fix goes:\*\* what stopped it is the step the message above names, not Porter's checks/);
+  assert.doesNotMatch(claim.body, /is on origin already/);
+  // Its checks failed: as it always was.
+  assert.equal(checks.title, "Porter's bump to kit 2.12.1 fails its checks");
+  assert.match(checks.body, /`steward\/kit-2\.12\.1` was never pushed/);
 });
 
 test("a failed bump and a failed release are work, with the output kept beside their worktrees, secrets taken out; a push, or the Steward's own, isn't", () => {

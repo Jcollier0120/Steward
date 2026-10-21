@@ -4,7 +4,7 @@ import { aheadOf, branchExists, commitOf, fetchBranch, git, gitMaybe, removeWork
 import { TOOL } from '../kitsource.ts';
 import type { Employee } from '../settings.ts';
 import { readVersion } from '../versions.ts';
-import { bumpBranch, bumpDirOf, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, networkFailure, NOT_ON_KIT, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
 import { readPin } from './staff.ts';
 import { noteOpened } from '../strangers.ts';
 import { hostFor, must } from '../hosts/index.ts';
@@ -88,7 +88,11 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
     if (ctx.lease && !(await ctx.lease.ok(e))) return result(e, 'skipped', `${branch} is ready here, but another PC publishes ${e.name} now, so it wasn't pushed`);
     // A plain push: if origin's branch has moved on, git refuses, and so does the Steward.
     const r = await run('git', ['push', '--quiet', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], { cwd: repo, timeoutMs: 5 * 60_000 });
-    if (r.code !== 0) return result(e, 'failed', `git push refused (never forced): ${(r.err || r.out).trim().split('\n').slice(-2).join(' ')}`);
+    if (r.code !== 0) {
+      const said = (r.err || r.out).trim().split('\n').slice(-2).join(' ');
+      if (await networkFailure(ctx, said)) return waits(e, branch, said);
+      return result(e, 'failed', `git push refused (never forced): ${said}`);
+    }
     ctx.log(`[${e.id}] pushed ${branch} (${localSha.slice(0, 7)})`);
   }
   // Watched from now on, so a merge that isn't this Steward's is seen (strangers.ts).
@@ -118,14 +122,27 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
   return result(e, 'done', `opened "${title}"${await merged(prNumberOf(url))}`, { url, version });
 }
 
+/**
+ * A push or PR the network cut short (GitHub out of reach, a dropped connection, a 5xx): no failure and no alarm, and no
+ * Wright issue, as nothing in the bump is at fault. The next round bumps and pushes it again. On 2026-10-21 `gh pr create`
+ * met "error connecting to api.github.com" after the branch had been pushed, and the result was a failure.
+ */
+const waits = (e: Employee, branch: string, said: string) => {
+  // What the command said, not the command: "gh pr create --repo … failed (1): error connecting to …".
+  const gist = said.split('\n')[0].replace(/^.*? failed \(\d+\): /, '').slice(0, 200);
+  return result(e, 'skipped', `${branch} waits for the network (${gist}): the next round tries again`, { again: true });
+};
+
 export async function push(ctx: Ctx, employees: Employee[], o: PushOptions): Promise<EmployeeResult[]> {
   const out: EmployeeResult[] = [];
   for (const e of employees) {
     try {
       out.push(await withRepo(ctx.log, e.id, () => pushOne(ctx, e, o)));
     } catch (err) {
-      ctx.log(`[${e.id}] ${(err as Error).message}`);
-      out.push(result(e, 'failed', (err as Error).message));
+      const said = (err as Error).message;
+      ctx.log(`[${e.id}] ${said}`);
+      const fold = o.folds?.[e.id];
+      out.push((await networkFailure(ctx, said)) ? waits(e, fold ? fold.head : bumpBranch(o.kit), said) : result(e, 'failed', said));
     }
   }
   return out;

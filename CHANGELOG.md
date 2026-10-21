@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.164
+
+**A kit bump whose pull request didn't open, because GitHub couldn't be reached, is now opened by the next round by itself. It no longer holds the new kit back, nor sends the Wright after a failure that wasn't there.**
+
+### What changed
+
+- **A bump's branch left without its pull request gets one.** On 2026-10-21 the Steward pushed an agent's bump to the new kit, and then GitHub couldn't be reached to open its pull request. The next round found the branch already on GitHub, refused to bump again ("a bump is never force-pushed"), raised an alarm and filed an issue for the Wright about a failure that wasn't there. Now, when a bump's branch is on GitHub with no pull request at all (open, closed or merged), and it holds only the Steward's own bump (one commit on top of the agent's current main that pins the kit), the Steward opens the pull request itself, and goes on as it would have: it merges it once it is ready. A branch that has a pull request, that main has moved past, or that has anyone else's commit on it is still left alone, as before.
+- **A pull request the network cut short is a wait.** When opening a bump's pull request, or asking GitHub about it, fails because GitHub can't be reached, the round now says the bump waits for the network and tries it again in the next round. It is no longer a failure: no alarm, and nothing for the Wright.
+- **The Wright's issue says what stopped the bump.** An issue for a bump that stopped for a reason other than its checks no longer says the checks failed, nor that the bump's branch "was never pushed" when it is on GitHub. It says what stopped it and where the fix goes. An alarm for such a bump no longer says a worktree was left for a look.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.163
 
 **It hands out the kit 2.94.0: when a staff member turns its guard on or off, Windows' administrator prompt names Castellan instead of Windows PowerShell.**

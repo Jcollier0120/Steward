@@ -35,6 +35,8 @@ export interface EmployeeResult {
   released?: boolean;
   /** A kit's trial ran only the tests the kit's change reaches (kitreach.ts): its rollout's bump runs them all. */
   partial?: boolean;
+  /** A bump that failed because its checks did (bump.ts), not for any other step: a fault of the agent's code, which the Wright's issue is for. */
+  checks?: boolean;
   /** A kit's trial that failed: how its checks failed without the kit too, otherwise (bump.ts's withoutTheKit). */
   without?: string;
   /** A kit's trial that failed: the first distinct lines of the failed step's output that say what went wrong (run.ts's errorLines). */
