@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.93.2
+
+**Urgent fix: the staff's FFmpeg is signed, so Smart App Control lets it run.**
+
+The FFmpeg the staff fetch (the Miller to shrink videos, the Chronicler to record) is the manor's own lean LGPL build, and nothing in it was signed. Smart App Control blocks an unsigned program it doesn't know, which the manor's build is: where it's on, a video wasn't shrunk and a recording didn't start, with a Smart App Control notice for each try.
+
+### What changed
+
+- **ffmpeg.ts:** the pinned build is n8.1.3-6, n8.1.3-5 with every program and library in it signed by the manor, from the public Manor-releases (`ffmpeg-v8.1.3-6`), pinned by SHA-256 for each processor.
+- **ffmpeg.ts:** `olderBuild(dir)` says whether a folder is an older build of the manor's (`<base>\ffmpeg\<version>\<folder>\bin`, a version no longer pinned). `toolDirs` leaves those out (the FFmpeg the agent used last, PATH, `also`), so a PC that used the unsigned build fetches the signed one in its place, once, shared by the staff. A folder the FFmpeg setting names is kept: that's the person's choice.
+
+### Before you update
+
+- Nothing in an agent's code. Each PC fetches the signed build (about 12 MB) the first time an agent looks for FFmpeg after the update. The older build stays on disk, unused.
+
 ## 2.93.1
 
 **Urgent fix: where Smart App Control is on, a sign-in no longer brings a notice for every staff member: their pages start as Node.js, which its maker signs.**
