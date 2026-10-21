@@ -13,7 +13,7 @@ process.env.STEWARD_HOME = path.join(tmp, 'home');
 
 const { bumpBranch } = await import('../src/stages/common.ts');
 const { bumpOne, kitBumpEntry, onlyFlaky, repin, replacingEntry, wholeTestSteps } = await import('../src/stages/bump.ts');
-const { prBody, pushOne } = await import('../src/stages/push.ts');
+const { prBody, push, pushOne } = await import('../src/stages/push.ts');
 const { claimsFile, loadClaims } = await import('../src/claims.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type GhScript = Parameters<typeof runner>[0];
@@ -111,13 +111,146 @@ test('push: the branch goes to origin (never forced) and a PR is opened with the
   assert.ok(!r2.gh.some((a) => a[1] === 'create'));
 });
 
-test('a branch already on origin is never bumped again: its PR comes first', async () => {
+/** GitHub's PRs for a branch, by state (none by default), `create` answering `pr create`; everything else as a bump's claim reads it. */
+const prsGh = (byState: Partial<Record<'open' | 'closed' | 'merged', unknown[]>> = {}, create?: (args: string[]) => ReturnType<typeof ok>): NonNullable<GhScript> => (a) => {
+  if (a[0] === 'pr' && a[1] === 'list' && a.includes('--head')) return ok(byState[a[a.indexOf('--state') + 1] as 'open'] ?? []);
+  if (a[0] === 'pr' && a[1] === 'create' && create) return create(a);
+  return claimGh()(a);
+};
+const cutShort = { code: 1, out: '', err: 'error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com' };
+const asked = (gh: string[][]) => gh.filter((a) => a[0] === 'pr' && a[1] === 'list' && a.includes('--head')).map((a) => a[a.indexOf('--state') + 1]);
+const BRANCH = 'steward/kit-1.0.1';
+
+/** A bump made and pushed to origin, as the push stage left it when `gh pr create` failed: its commit on origin, no PR for it. */
+async function pushedBump(s: ReturnType<typeof setup>): Promise<string> {
+  assert.equal((await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom })).outcome, 'done');
+  sh(s.checkout, 'push', '--quiet', 'origin', BRANCH);
+  return sh(s.checkout, 'rev-parse', BRANCH);
+}
+
+test('a branch on origin whose PR exists, open, closed or merged, is never bumped again: its PR comes first', async () => {
+  for (const state of ['open', 'closed', 'merged'] as const) {
+    const s = setup();
+    const head = await pushedBump(s);
+    const r = runner(prsGh({ [state]: [{ number: 9 }] }));
+    const res = await bumpOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.1', kitFrom });
+    assert.equal(res.outcome, 'refused', state);
+    assert.match(res.message, /already on origin: merge or close its PR first/);
+    assert.ok(!r.gh.some((a) => a[1] === 'create'), state);
+    assert.equal(sh(s.origin, 'rev-parse', `refs/heads/${BRANCH}`), head, 'left as it was');
+  }
+});
+
+test("a bump branch on origin with no PR at all, whose head is the Steward's own bump, gets its PR from the push stage: nothing is made again nor pushed", async () => {
+  const s = setup();
+  const head = await pushedBump(s);
+  const r = runner(prsGh());
+  const bumped = await bumpOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(bumped.outcome, 'done', bumped.message);
+  assert.match(bumped.message, /^steward\/kit-1\.0\.1 \(.{7}\) was on origin with no PR: its PR is opened now$/);
+  assert.equal(bumped.commit, head.slice(0, 7));
+  assert.equal(bumped.version, '0.4.1');
+  assert.deepEqual(asked(r.gh), ['open', 'closed', 'merged'], 'no PR in any state');
+  assert.equal(sh(s.checkout, 'rev-parse', BRANCH), head, 'not made again');
+  // The push stage carries on: its PR opened, its branch as origin has it.
+  const p = runner(prsGh({}, () => ok('https://github.com/Jcollier0120/Fake/pull/7\n')));
+  const pushed = await pushOne({ ...s.ctx, run: p.run }, s.e, { kit: '1.0.1', changelog: null });
+  assert.equal(pushed.outcome, 'done', pushed.message);
+  assert.equal(pushed.url, 'https://github.com/Jcollier0120/Fake/pull/7');
+  assert.equal(p.gh.filter((a) => a[1] === 'create').length, 1);
+  assert.equal(sh(s.origin, 'rev-parse', `refs/heads/${BRANCH}`), head);
+});
+
+test("a bump branch on origin with no PR that this PC no longer has (its work folder cleared, or another PC's) is put back here at origin's commit, and opened", async () => {
+  const s = setup();
+  const head = await pushedBump(s);
+  sh(s.checkout, 'worktree', 'remove', '--force', s.work);
+  sh(s.checkout, 'branch', '-D', BRANCH);
+  const r = runner(prsGh());
+  const bumped = await bumpOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(bumped.outcome, 'done', bumped.message);
+  assert.equal(sh(s.checkout, 'rev-parse', BRANCH), head);
+  const p = runner(prsGh({}, () => ok('https://github.com/Jcollier0120/Fake/pull/8\n')));
+  const pushed = await pushOne({ ...s.ctx, run: p.run }, s.e, { kit: '1.0.1', changelog: null });
+  assert.match(pushed.message, /^opened "Fake 0\.4\.1: the Steward's kit 1\.0\.1"/);
+});
+
+test("a bump branch on origin with no PR that has moved past main, or has a commit that isn't the Steward's bump, is still refused", async () => {
+  const refused = async (s: ReturnType<typeof setup>, why: string) => {
+    const r = runner(prsGh());
+    const res = await bumpOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.1', kitFrom });
+    assert.equal(res.outcome, 'refused', why);
+    assert.match(res.message, /already on origin: merge or close its PR first/, why);
+    assert.deepEqual(asked(r.gh), ['open', 'closed', 'merged'], why);
+    assert.ok(!r.gh.some((a) => a[1] === 'create'), why);
+  };
+  // Main moved on since the bump: the branch isn't on top of it any more.
+  const moved = setup();
+  await pushedBump(moved);
+  sh(moved.checkout, 'commit', '--quiet', '--allow-empty', '-m', "someone's commit on main");
+  sh(moved.checkout, 'push', '--quiet', 'origin', 'main');
+  await refused(moved, 'main moved on');
+  // A commit of someone else's on the bump's (this PC's own branch is as the bump made it).
+  const onTop = setup();
+  const head = await pushedBump(onTop);
+  sh(onTop.work, 'commit', '--quiet', '--allow-empty', '-m', 'a person adds to it');
+  sh(onTop.work, 'push', '--quiet', 'origin', BRANCH);
+  sh(onTop.work, 'reset', '--quiet', '--hard', head);
+  await refused(onTop, "someone else's commit on it");
+  // A commit that isn't a bump: one on top of main, from a person.
+  const foreign = (more: (s: ReturnType<typeof setup>) => void) => {
+    const s = setup();
+    sh(s.checkout, 'switch', '--quiet', '-c', BRANCH, 'origin/main');
+    writeFileSync(path.join(s.checkout, 'extra.txt'), 'a person\n');
+    more(s);
+    sh(s.checkout, 'add', '-A');
+    sh(s.checkout, 'commit', '--quiet', '-m', 'a person');
+    sh(s.checkout, 'push', '--quiet', 'origin', BRANCH);
+    sh(s.checkout, 'switch', '--quiet', 'main');
+    sh(s.checkout, 'branch', '-D', BRANCH);
+    return s;
+  };
+  await refused(
+    foreign(() => {}),
+    "a commit that doesn't pin the kit",
+  );
+  await refused(
+    foreign((s) => writeFileSync(path.join(s.checkout, 'kit.json'), repin(readFileSync(path.join(s.checkout, 'kit.json'), 'utf8'), '1.0.1'))),
+    'a commit that pins the kit and changes more than a bump does',
+  );
+});
+
+test("GitHub out of reach to ask whether a bump branch on origin has a PR is a wait, not a refusal; any other answer it won't give is told", async () => {
+  const s = setup();
+  await pushedBump(s);
+  const down = runner((a) => (a[1] === 'list' && a.includes('--head') ? cutShort : claimGh()(a)));
+  const res = await bumpOne({ ...s.ctx, run: down.run }, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(res.outcome, 'skipped', res.message);
+  assert.equal(res.again, true);
+  assert.match(res.message, /^steward\/kit-1\.0\.1 is on origin, and GitHub couldn't be reached to see whether it has a PR \(.*error connecting to api\.github\.com.*\): the next round looks again$/);
+  const odd = runner((a) => (a[1] === 'list' && a.includes('--head') ? { code: 1, out: '', err: 'HTTP 403: Resource not accessible' } : claimGh()(a)));
+  const refused = await bumpOne({ ...s.ctx, run: odd.run }, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(refused.outcome, 'refused');
+  assert.match(refused.message, /already on origin: merge or close its PR first.*GitHub wouldn't say whether it has one \(.*HTTP 403/);
+});
+
+test('a push the network cuts short is a wait the next round tries again, not a failure; another failure still is one', async () => {
   const s = setup();
   assert.equal((await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom })).outcome, 'done');
-  sh(s.checkout, 'push', '--quiet', 'origin', 'steward/kit-1.0.1');
-  const res = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });
-  assert.equal(res.outcome, 'refused');
-  assert.match(res.message, /already on origin/);
+  // The branch gets to origin, and then gh can't reach GitHub to open its PR: as on 2026-10-21.
+  const down = runner(prsGh({}, () => cutShort));
+  const [cut] = await push({ ...s.ctx, run: down.run }, [s.e], { kit: '1.0.1', changelog: null });
+  assert.equal(cut.outcome, 'skipped', cut.message);
+  assert.equal(cut.again, true);
+  assert.match(cut.message, /^steward\/kit-1\.0\.1 waits for the network \(.*error connecting to api\.github\.com.*\): the next round tries again$/);
+  assert.equal(sh(s.origin, 'rev-parse', `refs/heads/${BRANCH}`), sh(s.checkout, 'rev-parse', BRANCH), 'pushed');
+  // Listing the PRs cut short is the same.
+  const [list] = await push({ ...s.ctx, run: runner((a) => (a[0] === 'pr' && a[1] === 'list' ? cutShort : undefined)).run }, [s.e], { kit: '1.0.1', changelog: null });
+  assert.equal(list.outcome, 'skipped', list.message);
+  // GitHub refusing it is no network: a failure, as before.
+  const [refused] = await push({ ...s.ctx, run: runner(prsGh({}, () => ({ code: 1, out: '', err: 'HTTP 422: Validation Failed' }))).run }, [s.e], { kit: '1.0.1', changelog: null });
+  assert.equal(refused.outcome, 'failed', refused.message);
+  assert.match(refused.message, /HTTP 422/);
 });
 
 test('failing checks leave the worktree for a look, and commit nothing', async () => {

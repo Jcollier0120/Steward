@@ -164,6 +164,8 @@ export interface FailedRollout {
   head: string;
   stage: 'bump' | 'push' | 'build';
   message: string;
+  /** A bump's: its checks failed, the Steward refused it, or another step failed (stages/rollout.ts's RolloutHold). None: kept from before, read as the checks. */
+  cause?: 'checks' | 'refused' | 'step';
 }
 
 /** One of the Steward's own releases that failed in a round (stages/self.ts's self-failed.json), by tag. */
@@ -341,7 +343,7 @@ export function roundConditions(o: {
           f.message,
           ...(f.stage === 'bump' ? failureDetail(keptFailure(bumpDirOf(o.settings, e)), f.message) : []),
           f.stage === 'bump'
-            ? `Its worktree is left in the Steward's work folder for a look. Once it's fixed, push to ${e.branch} (the next round bumps it again), or press Bump on the Steward's page.`
+            ? `${f.cause && f.cause !== 'checks' ? "Its checks didn't fail: what the line above says stopped it." : "Its worktree is left in the Steward's work folder for a look."} Once it's fixed, push to ${e.branch} (the next round bumps it again), or press Bump on the Steward's page.`
             : "The bump is ready on its branch here. Press Push on the Steward's page once GitHub takes it, or push a new commit: the next round bumps again.",
         ],
         afterMs: 0,

@@ -7,13 +7,14 @@ import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, section
 import { unsignedGitVars } from '../kit/unsigned-git.ts';
 import { codeAt, recordResult, toolchainHere, withWork } from '../kit/work-status.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
+import { hostFor, must } from '../hosts/index.ts';
 import { affectedTests, filesIn, globRe, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { errorLines, failedTests, runLine, tail, type Runner } from '../run.ts';
 import type { Employee } from '../settings.ts';
-import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
-import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { agreedVersion, bumpPatch, readVersion, setVersion } from '../versions.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkFailure, networkNote, NOT_ON_KIT, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
 import { installLines } from '../installscripts.ts';
 import { guardPackages, linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
@@ -599,6 +600,53 @@ async function withoutTheKit(ctx: Ctx, e: Employee, dir: string, o: { say: (line
   return runChecks(ctx, e, dir, { ...o, here: true, doing: 'its checks without the kit' });
 }
 
+/** What a bump's refusal says when its branch is on origin with a PR (or a commit that isn't the bump's): the words work.ts reads. */
+export const ON_ORIGIN = 'is already on origin: merge or close its PR first (a bump is never force-pushed)';
+
+/**
+ * A bump branch found on origin that has no PR at all, open, closed or merged: the push stage got it there and then
+ * couldn't open its PR (on 2026-10-21 `gh pr create` met "error connecting to api.github.com"), and the next round
+ * refused the branch for being on origin, held the kit back and filed a Wright issue for checks that had passed.
+ * When its head is the Steward's own bump, it is the push stage's to carry on: the answer is "done", the branch put
+ * back here at origin's commit, so push opens the PR and, in the rollout, merges it. Its head is the Steward's own
+ * when it is the one commit on top of the employee's current branch, and either the very commit the bump made here, or
+ * one that pins kit.json to this kit and changes nothing but what a bump changes. A wait ("skipped", `again`) when
+ * GitHub can't be reached to ask. Null: refuse as before (a PR is there, the branch has moved on, or another's commit is on it).
+ */
+async function unopenedBump(ctx: Ctx, e: Employee, o: { repo: string; branch: string; kit: string; baseCommit: string; say: (line: string) => void }): Promise<EmployeeResult | null> {
+  const { run } = ctx;
+  const { repo, branch, baseCommit, say } = o;
+  const host = hostFor(ctx, e);
+  let head: string | null;
+  try {
+    for (const state of ['open', 'closed', 'merged'] as const) {
+      const found = JSON.parse(must(await host.listPrs(e.repo, { state, head: branch, limit: 1, fields: 'number' }))) as unknown[];
+      if (found.length) return null;
+    }
+    await fetchBranch(run, repo, branch);
+    head = await commitOf(run, repo, `origin/${branch}`);
+  } catch (err) {
+    const why = (err as Error).message.trim().split('\n')[0].slice(0, 300);
+    if (await networkFailure(ctx, why)) return result(e, 'skipped', `${branch} is on origin, and GitHub couldn't be reached to see whether it has a PR (${why}): the next round looks again`, { again: true });
+    return result(e, 'refused', `${branch} ${ON_ORIGIN}; GitHub wouldn't say whether it has one (${why})`);
+  }
+  if (!head) return null;
+  const parents = (await git(run, repo, 'rev-list', '--parents', '-n', '1', head)).split(/\s+/);
+  if (parents.length !== 2 || parents[1] !== baseCommit) return null;
+  const local = await commitOf(run, repo, `refs/heads/${branch}`);
+  if (local !== head) {
+    const allowed = new Set([...e.versionFiles, 'kit.json', CHANGELOG, TOOL].map((f) => f.replace(/\\/g, '/')));
+    const changed = (await git(run, repo, 'diff', '--name-only', baseCommit, head)).split('\n').filter(Boolean);
+    if (readPin(await showFile(run, repo, head, 'kit.json'))?.kit !== o.kit || changed.some((f) => !allowed.has(f))) return null;
+    // Put back here as origin has it, for the push stage: a bump made here before is the worktree and branch it replaces.
+    for (const line of await removeWorktree(run, repo, bumpDirOf(ctx.settings, e), branch)) say(line);
+    await git(run, repo, 'branch', '--no-track', branch, head);
+  }
+  const version = readVersion(e.versionFiles[0], (await showFile(run, repo, head, e.versionFiles[0])) ?? '') ?? undefined;
+  say(`${branch} is on origin at ${head.slice(0, 7)} with no PR, and is the Steward's own bump: its PR is opened as the push would have`);
+  return result(e, 'done', `${branch} (${head.slice(0, 7)}) was on origin with no PR: its PR is opened now`, { commit: head.slice(0, 7), ...(version ? { version } : {}) });
+}
+
 export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<EmployeeResult> {
   const { run } = ctx;
   const say = (line: string) => ctx.log(`[${e.id}] ${line}`);
@@ -635,7 +683,10 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   if (reach && 'none' in reach) say(`no tests for the kit: ${reach.none}`);
 
   const branch = o.trial ? trialBranch(o.kit) : fold ? fold.head : bumpBranch(o.kit);
-  if (!o.trial && !fold && (await onOrigin(run, repo, branch))) return result(e, 'refused', `${branch} is already on origin: merge or close its PR first (a bump is never force-pushed)`);
+  if (!o.trial && !fold && (await onOrigin(run, repo, branch))) {
+    const recovered = o.base ? null : await unopenedBump(ctx, e, { repo, branch, kit: o.kit, baseCommit, say });
+    return recovered ?? result(e, 'refused', `${branch} ${ON_ORIGIN}`);
+  }
   // A bump made here before and not pushed is made again, from scratch.
   const dir = o.trial ? trialDirOf(ctx.settings, e) : bumpDirOf(ctx.settings, e);
   for (const line of await removeWorktree(run, repo, dir, branch)) say(line);
@@ -687,7 +738,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   if (tried) say(`its checks not run again: ${tried}`);
   const task: CheckTask | undefined = o.trial ? { kind: 'kit-trial' } : undefined;
   const first = tried ? null : o.checks ? await o.checks(dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` }) : await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task });
-  if (first && o.checks) return result(e, 'failed', first, { base: baseCommit });
+  if (first && o.checks) return result(e, 'failed', first, { base: baseCommit, checks: true });
   if (first) {
     say(`its checks once more (${first})`);
     const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task });
@@ -698,7 +749,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
     const alone = again && o.trial ? await withoutTheKit(ctx, e, dir, { say, affected: scope }) : null;
     if (alone && alone === again) return result(e, 'skipped', `${WITHOUT_THE_KIT} ${o.kit} too, so not the kit's doing: ${alone}`, { base: baseCommit });
     if (alone) say(`without the kit it fails otherwise (${alone}): the failure stands`);
-    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${kept?.log ?? checksLogOf(dir)}`, { version: next, base: baseCommit, ...(alone ? { without: alone } : {}), ...(kept?.errors.length ? { errors: kept.errors } : {}) });
+    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${kept?.log ?? checksLogOf(dir)}`, { version: next, base: baseCommit, checks: true, ...(alone ? { without: alone } : {}), ...(kept?.errors.length ? { errors: kept.errors } : {}) });
   }
   // Only the tests the kit reaches ran: its rollout's bump runs the same ones, so the trial's pass is kept all the same.
   const partial = !!scope?.chose && scope.chose !== 'the whole suite';

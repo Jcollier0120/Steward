@@ -221,6 +221,12 @@ export interface RolloutHold {
   stage: 'bump' | 'push' | 'build';
   message: string;
   at: string;
+  /**
+   * A bump's: what stopped it. Its checks failed ('checks'), the Steward refused it (a bump branch already on origin that
+   * isn't the bump's to open, say: 'refused'), or another step failed ('step'). A hold kept from before (Steward 0.36.164)
+   * has none, and reads as the checks.
+   */
+  cause?: 'checks' | 'refused' | 'step';
 }
 
 export const loadRolloutFailures = (): Record<string, RolloutHold> => readJson<Record<string, RolloutHold>>(rolloutFailedFile(), {});
@@ -483,7 +489,7 @@ async function bumpAndPush(ctx: Ctx, plan: RolloutPlan, o: { kit: string; change
   for (const r of bumped.filter((x) => x.outcome !== 'done' && x.outcome !== 'skipped')) {
     // One the network cut short (the kit's net.ts) is tried again next round, not held until the branch moves. Held at
     // the commit it was bumped from: a round beside it may have merged into its branch since the plan read its head.
-    if (!(await networkFailure(ctx, r.message))) failed[r.id] = { kit, head: (!folds[r.id] && r.base) || heads.get(r.id)!, stage: 'bump', message: r.message, at };
+    if (!(await networkFailure(ctx, r.message))) failed[r.id] = { kit, head: (!folds[r.id] && r.base) || heads.get(r.id)!, stage: 'bump', message: r.message, at, cause: r.checks ? 'checks' : r.outcome === 'refused' ? 'refused' : 'step' };
     results.push({ ...r, outcome: 'failed', message: `rollout: bump to kit ${kit}: ${r.message}` });
   }
   for (const r of bumped.filter((x) => x.outcome === 'skipped')) results.push({ ...r, message: `rollout: ${r.message}` });
