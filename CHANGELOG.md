@@ -16,6 +16,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.36.163
+
+**It hands out the kit 2.94.0: when a staff member turns its guard on or off, Windows' administrator prompt names Castellan instead of Windows PowerShell.**
+
+### What changed
+
+- The kit 2.94.0: turning a guard on or off asks Windows for an administrator, and the prompt used to name Windows PowerShell, which looked alarming. Where Manor's Castellan (0.17.7 or later) is on the PC, the prompt now names Castellan, signed by its publisher. Where it isn't, or is older, the prompt is as it was. A prompt turned down still leaves everything as it was.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.162
 
 **It hands out the kit 2.93.1: on a PC with Smart App Control on, signing in no longer brings a Smart App Control notice for each staff member.**
