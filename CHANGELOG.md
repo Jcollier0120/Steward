@@ -9,6 +9,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - **Bookmarks to a staff member's page, ready for when pages open only for you.** Once a later update turns this on, opening a staff member's page from a bookmark or a link, in a browser that isn't signed in to it yet, sends you to Castellan, which opens that same page signed in. While Castellan isn't running, the page instead says so, with a button to open it once Castellan is back. For now every page answers as before.
+- This release also brings 0.36.166 and kit 2.96.0, which weren't released on their own.
 
 ### Before you update
 
