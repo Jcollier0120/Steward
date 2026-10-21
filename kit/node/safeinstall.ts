@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { APP, port } from '../app.ts';
 import { flushTree } from './flush.ts';
-import { appFolder, defaultDeps, install, readRelease, replaceContents, TASK_NAME, waitForPage, type InstallDeps } from './install.ts';
+import { appFolder, defaultDeps, install, OLD_TASK_NAME, readRelease, replaceContents, runOwnTask, TASK_NAME, waitForPage, type InstallDeps } from './install.ts';
 import { endProcesses, pagesFrom } from './native.ts';
 import { compareVersions } from './update-hold.ts';
 import { ping } from './service.ts';
@@ -211,7 +211,8 @@ async function rollBack(app: string, prev: string, kept: string, d: SafeDeps): P
     // Something holds app open (a shell in it): its contents are put back instead, and the failed copy is lost.
     replaceContents(prev, app);
   }
-  const ran = await d.schtasks(['/Run', '/TN', TASK_NAME]);
+  // The version before may have been started by its task's old name, this account's, where the new one was never registered.
+  const ran = await runOwnTask([TASK_NAME, OLD_TASK_NAME], d);
   if (ran.code !== 0) return null;
   const was = readRelease(app)?.version;
   // Waited for as an install waits for its page (kit 2.75.2): a busy PC's slow start isn't taken for none.

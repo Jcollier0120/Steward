@@ -1,6 +1,5 @@
-import { execFile } from 'node:child_process';
-import path from 'node:path';
 import { APP } from './app.ts';
+import { runOwnTask, taskDeps, taskName } from './kit/install.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { Condition, GetJson } from './alarms.ts';
 import type { EmployeeResult } from './stages/common.ts';
@@ -76,25 +75,19 @@ export interface TendState {
 /** How long Manor's page may be away before the Steward starts it: an update stops and starts it within this. */
 export const MANOR_GRACE_MS = 90_000;
 
-/** Manor's sign-in task, by the names Manor has had: the Steward runs the first that is there. */
-export const MANOR_TASKS = ['\\Manor\\Home page', '\\Castellan\\Home page'];
+/**
+ * Manor's sign-in task, by the names Manor has had: in its folder for this account (since Manor's Everyone install:
+ * \Manor (Jcoll)\Home page), then the older ones, run only when they're this account's own (the kit's runOwnTask), never
+ * another account's.
+ */
+export const manorTasks = (env: NodeJS.ProcessEnv = process.env) => [taskName('Home page', env, 'Manor'), '\\Manor\\Home page', '\\Castellan\\Home page'];
 
 export type StartManor = () => Promise<{ ok: boolean; said: string }>;
 
 /** Starts Manor's sign-in task (schtasks /Run), as signing in does: Manor's page, in the person's session. */
 export const startManorTask: StartManor = async () => {
-  const schtasks = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'schtasks.exe');
-  let said = 'no task';
-  for (const name of MANOR_TASKS) {
-    const r = await new Promise<{ ok: boolean; said: string }>((resolve) =>
-      execFile(schtasks, ['/Run', '/TN', name], { windowsHide: true, timeout: 30_000, encoding: 'utf8' }, (e, out, err) =>
-        resolve(e ? { ok: false, said: String(err || out || e.message).trim().split('\n')[0] } : { ok: true, said: `started its sign-in task (${name})` }),
-      ),
-    );
-    if (r.ok) return r;
-    said = r.said;
-  }
-  return { ok: false, said: `its sign-in task couldn't be started: ${said}` };
+  const r = await runOwnTask(manorTasks(), taskDeps());
+  return r.code === 0 ? { ok: true, said: `started its sign-in task (${r.name})` } : { ok: false, said: `its sign-in task couldn't be started: ${r.out.trim().split('\n')[0] || 'no task'}` };
 };
 
 /** Whether a page answered: getJson's lone { error } is no answer. */

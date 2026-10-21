@@ -12,7 +12,7 @@ import { pageAt, ping, shutdown } from './service.ts';
 /**
  * Installing from a release, as each of Manor's agents does on its own (Manor's docs/INSTALLING.md):
  * - install copies the release it runs from to <data folder>\app, and registers one task,
- *   \<Name>\Home page, that runs `open`. `open` never changes duty, so an agent stopped in Manor stays
+ *   \<Name> (<account>)\Home page, that runs `open`. `open` never changes duty, so an agent stopped in Manor stays
  *   stopped after a restart. It's the only task: the rounds still run inside the page process, so
  *   Stop in Manor still stops the work. It runs at sign-in only where Manor doesn't start its staff: with Castellan in
  *   Windows' Startup apps (MANOR_STARTUP, kit 2.57.0) Manor starts it, and the task runs only when an install asks.
@@ -21,16 +21,42 @@ import { pageAt, ping, shutdown } from './service.ts';
  * through a release.
  */
 
-/** The sign-in task, in a Task Scheduler folder named after the agent, as Reeve's and Heiward's are. */
-export const TASK_NAME = `\\${APP.name}\\Home page`;
+/**
+ * The account a task folder is named for (kit 2.95.0, as Manor's windows.ts taskAccount): the profile folder's name,
+ * which renaming the account doesn't change, else the user's name, with what Task Scheduler won't take in a name made `_`.
+ */
+export function taskAccount(env: NodeJS.ProcessEnv = process.env): string {
+  const profile = env.USERPROFILE ? path.win32.basename(env.USERPROFILE.replace(/[\\/]+$/, '')) : '';
+  return (profile || env.USERNAME || 'user').replace(/[\\/:*?"<>|]/g, '_');
+}
+
+/**
+ * A task in its program's Task Scheduler folder for this account (kit 2.95.0): taskName('Home page') is
+ * \Porter (Jcoll)\Home page, and `program` names another's (taskName('Home page', env, 'Manor') is Manor's). Task
+ * Scheduler's names are the PC's, not the account's, so two accounts' \Porter\Home page were one task: the second
+ * account's install replaced the first's, or was refused (Castellan for everyone on a PC, Manor's
+ * docs/EVERYONE-INSTALL.md). Each account's folder is made by that account.
+ */
+export const taskName = (task: string, env: NodeJS.ProcessEnv = process.env, program: string = APP.name) => `\\${program} (${taskAccount(env)})\\${task}`;
+
+/** The sign-in task, in the agent's Task Scheduler folder for this account, as Manor's, Reeve's and Heiward's are. */
+export const TASK_NAME = taskName('Home page');
 
 /** The task that wakes the PC for work due at set times (wake.ts, kit 2.78.2), beside it; uninstall deletes it too. */
-export const WAKE_TASK_NAME = `\\${APP.name}\\Wake`;
+export const WAKE_TASK_NAME = taskName('Wake');
+
+/**
+ * Their names before kit 2.95.0, in a folder named after the agent alone. An install or update moves this account's
+ * own off them (dropOldTask), and leaves another account's be.
+ */
+export const OLD_TASK_NAME = `\\${APP.name}\\Home page`;
+export const OLD_WAKE_TASK_NAME = `\\${APP.name}\\Wake`;
 
 /** conhost --headless gives node its console without a window; the task's "Hidden" only hides it in the UI. */
 export const CONHOST = 'C:\\Windows\\System32\\conhost.exe';
 const SCHTASKS = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'schtasks.exe');
 const REG = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'reg.exe');
+const WHOAMI = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'whoami.exe');
 
 /**
  * Manor's entry in Windows' Startup apps (Manor's install.ts STARTUP_KEY and STARTUP_VALUE, from Manor 0.16.120): there,
@@ -75,6 +101,8 @@ export interface InstallDeps {
   node: string;
   /** DOMAIN\user: the task runs at this user's sign-in, as this user. */
   user: string;
+  /** This user's SID (whoami /user), which Task Scheduler keeps a task's principal as; null when it can't be read. Unset: none. */
+  userSid?(): Promise<string | null>;
   pageUrl: string;
   /** Where uninstall goes before removing a folder it is in. */
   home: string;
@@ -117,6 +145,66 @@ export function taskUser(env: Record<string, string | undefined> = process.env):
   const domain = env.USERDOMAIN ?? '';
   return domain ? `${domain}\\${user}` : user;
 }
+
+/** What looking at a task, and running or ending it, needs: Task Scheduler and who this user is. */
+export type TaskDeps = Pick<InstallDeps, 'schtasks' | 'user' | 'userSid'>;
+
+let sidRead: Promise<string | null> | undefined;
+
+/** This user's SID (whoami /user), asked once; null when whoami doesn't answer. */
+export function userSid(): Promise<string | null> {
+  return (sidRead ??= run(WHOAMI, ['/user', '/fo', 'csv', '/nh']).then((r) => (r.code === 0 ? (/"(S-1-[0-9-]+)"/i.exec(r.out)?.[1] ?? null) : null)));
+}
+
+/** Two of Task Scheduler's ways of writing a user (DOMAIN\user, or the name alone) are the same user. */
+function sameUser(a: string, b: string): boolean {
+  const name = (u: string) => u.slice(u.lastIndexOf('\\') + 1).toLowerCase();
+  return a.toLowerCase() === b.toLowerCase() || (!(a.includes('\\') && b.includes('\\')) && name(a) === name(b));
+}
+
+/**
+ * Whether the task is there and this account's own (kit 2.95.0, as Manor's windows.ts isOwnTask): the user its
+ * principal runs as (a SID, as Task Scheduler keeps it, or a name) is this user. Another account's task of the same
+ * name, from before each account had a folder of its own, is never this account's to end or delete.
+ */
+export async function isOwnTask(name: string, d: TaskDeps): Promise<boolean> {
+  const q = await d.schtasks(['/Query', '/TN', name, '/XML']);
+  if (q.code !== 0) return false;
+  // The principal's, not a logon trigger's (which comes first in the XML, and may name someone else).
+  const owner = /<Principal\b[^>]*>[\s\S]*?<UserId>\s*([^<]+?)\s*<\/UserId>/i.exec(q.out)?.[1];
+  if (!owner) return false;
+  return /^S-1-/i.test(owner) ? (await d.userSid?.())?.toLowerCase() === owner.toLowerCase() : sameUser(owner, d.user);
+}
+
+/**
+ * Moves a task off its old name (kit 2.95.0): ends and deletes it, but only when it's this account's own (isOwnTask),
+ * never another account's. True when one was deleted. Task Scheduler leaves the old folder, empty.
+ */
+export async function dropOldTask(old: string, d: TaskDeps): Promise<boolean> {
+  if (!(await isOwnTask(old, d))) return false;
+  await d.schtasks(['/End', '/TN', old]);
+  return (await d.schtasks(['/Delete', '/TN', old, '/F'])).code === 0;
+}
+
+/**
+ * Runs one of this account's tasks (kit 2.95.0): by its name in this account's folder, `names[0]`, else by an older
+ * name, when that task is this account's own (an install from before kit 2.95.0 registered it, and nothing has moved it
+ * yet). Never another account's. The first run's answer when none ran.
+ */
+export async function runOwnTask(names: string[], d: TaskDeps): Promise<Ran & { name: string }> {
+  const [first, ...older] = names;
+  const ran = await d.schtasks(['/Run', '/TN', first]);
+  if (ran.code === 0) return { ...ran, name: first };
+  for (const old of older) {
+    if (!(await isOwnTask(old, d))) continue;
+    const r = await d.schtasks(['/Run', '/TN', old]);
+    if (r.code === 0) return { ...r, name: old };
+  }
+  return { ...ran, name: first };
+}
+
+/** The real Task Scheduler and this user, for runOwnTask, isOwnTask and dropOldTask outside an install. */
+export const taskDeps = (): TaskDeps => ({ schtasks: (args) => run(SCHTASKS, args), user: taskUser(), userSid });
 
 export function taskArguments(node: string, app: string): string {
   return `--headless "${node}" "${cliIn(app)}" open`;
@@ -380,6 +468,7 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     out(`  3. Register the task ${TASK_NAME} for ${d.user}, ${manorStarts ? 'run only when asked: Manor starts it at sign-in (Castellan is in Startup apps)' : 'at sign-in'}: ${SCHTASKS} ${quoted(create)}`);
     out(`     It runs: ${CONHOST} ${taskArguments(d.node, app)}`);
     out(`     In: ${app}`);
+    out(`     Its tasks of the old names (${OLD_TASK_NAME}, ${OLD_WAKE_TASK_NAME}) ended and deleted, where they're this account's own.`);
     out(opts.noStart ? '  4. Leave it stopped (--no-start).' : `  4. ${update ? 'Keep its duty' : 'Put it on duty'}, run the task, and wait for its page at ${d.pageUrl}.`);
     out(`Its data folder: ${d.dataDir}`);
     out('--dry-run: nothing changed.');
@@ -396,7 +485,8 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
   const unchanged = async (why: string): Promise<number> => {
     out(why);
     if (page.wasUp) {
-      const back = await d.schtasks(['/Run', '/TN', TASK_NAME]);
+      // An older install's task may be the one there: this account's, by its old name.
+      const back = await runOwnTask([TASK_NAME, OLD_TASK_NAME], d);
       out(back.code === 0 && (await waitFor(() => d.ping(), 20_000, d)) ? `Its page is up again: ${d.pageUrl}` : `Its page didn't come back: start it with node ${cliIn(app)} open`);
     }
     return 1;
@@ -460,6 +550,10 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     out(`${app} is in place, but schtasks couldn't register ${TASK_NAME}:\n${created.out}`);
     return created.code;
   }
+  // Off the names from before each account had a folder of its own (kit 2.95.0): this account's own, never another's.
+  // The new wake task is registered by the page, as it starts (wake.ts).
+  if (await dropOldTask(OLD_TASK_NAME, d)) out(`Its task ${OLD_TASK_NAME} is ${TASK_NAME} now, in this account's own folder.`);
+  if (await dropOldTask(OLD_WAKE_TASK_NAME, d)) out(`Its task ${OLD_WAKE_TASK_NAME} is gone: its page registers ${WAKE_TASK_NAME} as it starts.`);
 
   // Task Scheduler starts the page, outside whatever started install (the Claude desktop app's container, say).
   let up = false;
@@ -506,7 +600,7 @@ export async function uninstall(opts: { purge?: boolean; dryRun?: boolean } = {}
     return 2;
   }
   if (opts.dryRun) {
-    out(`${APP.name}: would end its page process if it's running, end and delete the task ${TASK_NAME} (and ${WAKE_TASK_NAME}, if it has one), and remove ${app}.`);
+    out(`${APP.name}: would end its page process if it's running, end and delete the task ${TASK_NAME} (and ${WAKE_TASK_NAME}, if it has one, and ${OLD_TASK_NAME} and ${OLD_WAKE_TASK_NAME} where they're this account's), and remove ${app}.`);
     out(opts.purge ? `--purge: would also remove its data folder, ${d.dataDir}.` : `Its data folder would stay: ${d.dataDir}.`);
     out('--dry-run: nothing changed.');
     return 0;
@@ -532,6 +626,8 @@ export async function uninstall(opts: { purge?: boolean; dryRun?: boolean } = {}
       code ||= del.code;
     }
   }
+  // The names from before kit 2.95.0, where an install never moved them: this account's own, never another's.
+  for (const old of [OLD_TASK_NAME, OLD_WAKE_TASK_NAME]) if (await dropOldTask(old, d)) out(`Deleted the task ${old}.`);
 
   if (!(await endPage(d)).ended) {
     out(`${APP.name}'s page is still running, so ${app} was left in place.`);
@@ -583,6 +679,7 @@ export function defaultDeps(): InstallDeps {
     dataDir,
     node: process.execPath,
     user: taskUser(),
+    userSid,
     pageUrl,
     home: os.homedir(),
     schtasks: (args) => run(SCHTASKS, args),

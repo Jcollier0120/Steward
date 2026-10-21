@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.165
+
+**It hands out the kit 2.95.0, ready for Castellan set up for everyone on a PC: each Windows account's staff get a Task Scheduler folder of their own, and the model files are kept once for the whole PC.**
+
+### What's new
+
+- **A Task Scheduler folder for each account.** Each staff member's sign-in task is now `\<Name> (<account>)\Home page`, in a folder named for the Windows account, so two people who use the same PC no longer share one task, where the second one's install replaced the first's. A staff member's tasks of the old name (`\<Name>\Home page` and `\<Name>\Wake`) move into the new folder at its next update. A task that belongs to another account is never touched: that account's staff move their own when they update.
+- **The model files once per PC.** When Castellan is set up for everyone on the PC, the local AI's model files and model servers are kept once, in `%ProgramData%\Castellan\accelerators`, instead of a copy of the same few GB in each account. When two accounts set up at once, the second waits for the first and then finds the files already there. Each account keeps its own settings and logs, and starts its own servers. An account that already had the model files in its own folder keeps using them.
+
+### What changed
+
+- The Steward starts Manor through its sign-in task in the account's own folder, and through the task of the old name until Manor's update moves it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member moves its tasks the next time it updates. Nothing on a PC set up for one person changes.
+
 ## 0.36.164
 
 **A kit bump whose pull request didn't open, because GitHub couldn't be reached, is now opened by the next round by itself. It no longer holds the new kit back, nor sends the Wright after a failure that wasn't there.**

@@ -13,6 +13,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const C = await import('./fixture/src/kit/accelerator-config.ts');
 const kit = await import('./fixture/src/kit/accelerators.ts');
+const E = await import('./fixture/src/kit/everyone.ts');
 
 const NPU = { id: 'npu', kind: 'npu', name: 'Snapdragon X2 Elite NPU', chat: { baseUrl: 'http://127.0.0.1:18181', model: 'qwen', startCommand: ['geniex.exe', 'serve'] }, vision: { model: 'qwen-vl' }, quirks: ['prefix-leak', 'image-path'] };
 const CARD = { id: 'gpu-nvidia-geforce-rtx-4090', kind: 'gpu', name: 'NVIDIA GeForce RTX 4090', memoryGb: 24, slots: 2, maxContextTokens: 16384, chat: { baseUrl: 'http://127.0.0.1:18191', model: 'q' } };
@@ -36,6 +37,60 @@ test("the accelerators' own folder (kit 2.31.0): Manor's, not Reeve's; a PC set 
   assert.equal(C.toolsHome({}, profile), path.join(homedir(), '.manor', 'accelerators'), "the keeper's logs and setup's test image in .reeve aren't a set-up");
   mkdirSync(path.join(profile, '.reeve', 'models', 'q'), { recursive: true });
   assert.equal(C.toolsHome({}, profile), path.join(profile, '.reeve'), 'a PC set up before: its builds and models stay where they are');
+});
+
+test("in an Everyone install the model files are the PC's (%ProgramData%\\Castellan\\accelerators), the logs the account's own", () => {
+  const profile = mkdtempSync(path.join(home, 'everyone-'));
+  const shared = path.join(profile, 'ProgramData', 'Castellan');
+  const sharedTools = path.join(shared, 'accelerators');
+  const file = path.join(profile, '.manor', 'accelerators', 'config.json');
+  const env = { CASTELLAN_SHARED: shared, ACCELERATORS_CONFIG: file, USERPROFILE: profile };
+  const own = C.acceleratorsHome(env);
+  assert.equal(E.sharedRoot({ ProgramData: 'D:\\PD' }), path.join('D:\\PD', 'Castellan'));
+  assert.equal(E.sharedRoot({}), path.join('C:\\ProgramData', 'Castellan'));
+  assert.equal(E.sharedRoot(env), shared);
+
+  // No Everyone install: as ever.
+  assert.equal(C.toolsHome(env, profile), own);
+  mkdirSync(shared, { recursive: true });
+  writeFileSync(path.join(shared, 'removed.json'), '{}');
+  assert.equal(E.hasEveryone(env), false, "removed.json alone: the Everyone install was uninstalled");
+  assert.equal(C.toolsHome(env, profile), own);
+  assert.equal(C.isSharedTools(sharedTools, env), false);
+
+  // everyone.json: the PC's shared folder, its logs this account's own.
+  writeFileSync(path.join(shared, 'everyone.json'), '{}');
+  assert.equal(E.hasEveryone(env), true);
+  assert.equal(C.toolsHome(env, profile), sharedTools);
+  assert.equal(C.isSharedTools(sharedTools.toUpperCase(), env), true, 'however it is spelled');
+  assert.equal(C.isSharedTools(own, env), false);
+  assert.equal(C.serverLogsDir(env, profile), path.join(own, 'servers', 'logs'));
+  assert.equal(C.serverLogsDir({ ...env, CASTELLAN_SHARED: path.join(profile, 'none') }, profile), path.join(own, 'servers', 'logs'), 'and as ever without one');
+
+  // An account set up before the PC was set up for everyone keeps the servers its config runs from; one that runs the
+  // shared ones stays with them.
+  mkdirSync(path.dirname(file), { recursive: true });
+  const ep = (exe: string) => ({ baseUrl: 'http://127.0.0.1:18191', model: 'q', startCommand: [exe, '-m', 'q.gguf'] });
+  writeFileSync(file, JSON.stringify({ accelerators: [{ id: 'cpu', kind: 'cpu', chat: ep(path.join('%USERPROFILE%', '.manor', 'accelerators', 'servers', 'llama.cpp', 'b1-cpu', 'llama-server.exe')) }] }));
+  assert.equal(C.toolsHome(env, profile), own);
+  assert.equal(C.serverLogsDir(env, profile), path.join(own, 'servers', 'logs'));
+  writeFileSync(file, JSON.stringify({ accelerators: [{ id: 'cpu', kind: 'cpu', chat: ep(path.join(sharedTools, 'servers', 'llama.cpp', 'b1-cpu', 'llama-server.exe')) }] }));
+  assert.equal(C.toolsHome(env, profile), sharedTools);
+  writeFileSync(file, JSON.stringify({ accelerators: [{ id: 'npu', kind: 'npu', chat: ep('flm') }] }));
+  assert.equal(C.toolsHome(env, profile), sharedTools, 'no command in any folder of ours');
+
+  // A Manor in a folder of its own shares nothing: another PC, as ever. A test's (with CASTELLAN_SHARED) counts as installed.
+  assert.equal(E.sharesModels({ ...env, MANOR_HOME: 'D:\\m' }), true);
+  assert.equal(C.toolsHome({ ...env, MANOR_HOME: path.join(profile, 'm') }, profile), sharedTools);
+  assert.equal(C.serverLogsDir({ ...env, MANOR_HOME: path.join(profile, 'm') }, profile), path.join(profile, 'm', 'accelerators', 'servers', 'logs'));
+  const { CASTELLAN_SHARED: _, ...installed } = env;
+  assert.equal(E.sharesModels({ ...installed, MANOR_HOME: 'D:\\m' }), false, 'MANOR_HOME without CASTELLAN_SHARED');
+  assert.equal(C.toolsHome({ ...installed, MANOR_HOME: 'D:\\m' }, profile), path.join('D:\\m', 'accelerators'));
+  // Under node --test the PC's own install never decides: only a test's CASTELLAN_SHARED.
+  assert.equal(E.sharesModels({ ProgramData: path.join(profile, 'ProgramData') }), false);
+  // A scratch home, or a folder named for the accelerators, is kept as ever.
+  assert.equal(C.toolsHome({ ...env, REEVE_HOME: 'D:\\r' }, profile), 'D:\\r');
+  assert.equal(C.toolsHome({ ...env, ACCELERATORS_HOME: 'D:\\a' }, profile), 'D:\\a');
 });
 
 test("the tools home is the folder config.json's startCommands are in: the accelerators' folder or .reeve", () => {
