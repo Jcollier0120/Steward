@@ -29,7 +29,8 @@ import { currentWork } from './work-tasks.ts';
  *
  * and, since it is slower so (kit 2.74.2), **room to finish**: a runner stretches its time limit by as much as the cap
  * slows the work (pacedSlower) plus the wait for a turn, and node's test runner runs as many files at once as the cap
- * has room for (pacedTestConcurrency), not one per processor. The command is told how much slower it runs, too
+ * has room for (pacedTestConcurrency), not one per processor, each file ended once its tests are done and stopped past a
+ * limit of its own (withTestGuards, kit 2.93.3), so no file can hold the run for ever. The command is told how much slower it runs, too
  * (CHECKS_SLOWER_ENV, kit 2.74.6), so a test's own waits and timeouts stretch as its run's limit does (paced): at the
  * checks pace a test should take longer, never fail.
  *
@@ -130,15 +131,50 @@ export function pacedTestConcurrency(cap: number, processors = os.availableParal
 }
 
 /**
- * The arguments of `node … --test …` with `--test-concurrency=<n>` after `--test`, when every argument before it is an
- * option of node's (so it is node's own, not a script's) and none names a concurrency already; any other command's as
- * they are. An npm script's node isn't seen here: only a command that is node itself (the Steward's chosen tests are).
+ * Where `--test` is in the arguments of `node … --test …`, when every argument before it is an option of node's (so it
+ * is node's own, not a script's); -1 for any other command. An npm script's node isn't seen here: only a command that is
+ * node itself (the Steward's chosen tests are).
+ */
+function nodeTestAt(file: string, args: string[]): number {
+  if (!/^node(\.exe)?$/i.test(path.basename(file))) return -1;
+  const i = args.indexOf('--test');
+  return i < 0 || args.slice(0, i).some((a) => !a.startsWith('-')) ? -1 : i;
+}
+
+/**
+ * The arguments of `node … --test …` with `--test-concurrency=<n>` after `--test` (nodeTestAt), when none names a
+ * concurrency already; any other command's as they are.
  */
 export function withTestConcurrency(file: string, args: string[], n: number): string[] {
-  if (!/^node(\.exe)?$/i.test(path.basename(file))) return args;
-  const i = args.indexOf('--test');
-  if (i < 0 || args.slice(0, i).some((a) => !a.startsWith('-')) || args.some((a) => a.startsWith('--test-concurrency'))) return args;
+  const i = nodeTestAt(file, args);
+  if (i < 0 || args.some((a) => a.startsWith('--test-concurrency'))) return args;
   return [...args.slice(0, i + 1), `--test-concurrency=${n}`, ...args.slice(i + 1)];
+}
+
+/**
+ * How long one test file may run at full speed before node's runner stops it (withTestGuards, kit 2.93.3): two and a
+ * half minutes, far past any of the manor's, whose whole suites take a few. A paced run stretches it as it stretches its
+ * time limit (pacedSlower): ten minutes at the usual caps, more only at a tighter one.
+ */
+export const TEST_FILE_MS = 150_000;
+
+/**
+ * The arguments of `node … --test …` (nodeTestAt) with node's own guards against a run that never ends (kit 2.93.3); any
+ * other command's as they are. Either one the command gives itself stays as it is.
+ *
+ * - `--test-force-exit`: a file whose tests are all done ends, though it left something running (a timer, a server).
+ *   On 2026-10-21 a kit trial of the Reckoner's waited 52 minutes on one such file: its tests had finished, one failing
+ *   (its port was one Windows keeps for itself), and the schedule that test never got to stop kept its process alive,
+ *   its next round an hour away. Node's runner waits for every file's process to end, so the run waited with it.
+ * - `--test-timeout=<fileMs>`: a file still running after `fileMs` (counted from its start, not its wait for a place) is
+ *   ended and failed, "test timed out" under its name, while the other files run on: a test that never settles costs
+ *   its file, not the whole run and the PC's turn.
+ */
+export function withTestGuards(file: string, args: string[], fileMs: number): string[] {
+  const i = nodeTestAt(file, args);
+  if (i < 0) return args;
+  const guards = [...(args.includes('--test-force-exit') ? [] : ['--test-force-exit']), ...(args.some((a) => a.startsWith('--test-timeout')) ? [] : [`--test-timeout=${Math.round(fileMs)}`])];
+  return [...args.slice(0, i + 1), ...guards, ...args.slice(i + 1)];
 }
 
 /**
@@ -250,8 +286,9 @@ export interface Paced {
  * keeps .NET's build servers from staying behind in the job (the job ends what is left in it once its runs are done),
  * and gives the launcher the manor's ceiling (CEILING_ENV, kit 2.78.7), the job the PC's check runs share with the
  * agents and the model servers.
- * A `node --test` runs as many test files at once as the cap has room for (pacedTestConcurrency), and every command is
- * told how much slower it runs (CHECKS_SLOWER_ENV). Never throws.
+ * A `node --test` runs as many test files at once as the cap has room for (pacedTestConcurrency), each ended once its
+ * tests are done and stopped at TEST_FILE_MS stretched (withTestGuards, kit 2.93.3), and every command is told how much
+ * slower it runs (CHECKS_SLOWER_ENV). Never throws.
  */
 export async function pacedCommand(file: string, args: string[], o: { home?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void; processors?: number; what?: string } = {}): Promise<Paced> {
   const plain: Paced = { file, args, env: {} };
@@ -259,11 +296,11 @@ export async function pacedCommand(file: string, args: string[], o: { home?: str
   const processors = o.processors ?? os.availableParallelism();
   const cap = checksPaceCap(o.home, env);
   if (!cap) return plain;
-  if (process.platform !== 'win32') return { file: 'nice', args: ['-n', '10', file, ...args], env: { [CHECKS_SLOWER_ENV]: String(PACED_SLOWER_MIN) }, slower: PACED_SLOWER_MIN, waitMs: 0 };
+  if (process.platform !== 'win32') return { file: 'nice', args: ['-n', '10', file, ...withTestGuards(file, args, TEST_FILE_MS * PACED_SLOWER_MIN)], env: { [CHECKS_SLOWER_ENV]: String(PACED_SLOWER_MIN) }, slower: PACED_SLOWER_MIN, waitMs: 0 };
   const exe = await checksPaceLauncher(o.log);
   if (!exe) return plain;
-  const testArgs = withTestConcurrency(file, args, pacedTestConcurrency(cap, processors));
   const slower = pacedSlower(cap);
+  const testArgs = withTestGuards(file, withTestConcurrency(file, args, pacedTestConcurrency(cap, processors)), TEST_FILE_MS * slower);
   // The agent's app.ts, read only now: imported at the top it would close a loop (an agent's app.ts reads its config,
   // whose kit imports reach this file through accelerators.ts and apart.ts), and app.ts would run before its config had.
   const { APP } = await import('../app.ts');

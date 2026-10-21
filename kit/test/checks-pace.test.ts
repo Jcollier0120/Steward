@@ -13,7 +13,7 @@ process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
-const { CHECKS_AT_ONCE, CHECKS_AT_ONCE_FULL, CHECKS_SLOWER_ENV, CHECKS_TURN_MS, checksAtOnce, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, checksSlower, paced, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
+const { CHECKS_AT_ONCE, CHECKS_AT_ONCE_FULL, CHECKS_SLOWER_ENV, CHECKS_TURN_MS, checksAtOnce, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, checksSlower, paced, pacedCommand, pacedSlower, pacedTestConcurrency, TEST_FILE_MS, withTestConcurrency, withTestGuards } = await import('./fixture/src/kit/checks-pace.ts');
 const { psPaced } = await import('./fixture/src/kit/ps.ts');
 const { signedHelper } = await import('./fixture/src/kit/prebuilt.ts');
 /** The launcher a paced command starts: the signed one the kit ships, or the one compiled here (kit 2.91.0). */
@@ -100,6 +100,19 @@ test('room to finish at the pace (kit 2.74.2): a time limit stretched as the cap
   assert.deepEqual(withTestConcurrency('C:\\x\\vitest.cmd', ['--test'], 4), ['--test'], 'not node');
 });
 
+test("a test run's guards (kit 2.93.3): each file ended once its tests are done, and stopped past its own limit; only node's own --test, and what it says itself stays", () => {
+  const node = process.execPath;
+  assert.equal(TEST_FILE_MS, 150_000);
+  assert.deepEqual(withTestGuards(node, ['--import=./x.ts', '--test', '--test-concurrency=4', 'a.test.ts'], 600_000), ['--import=./x.ts', '--test', '--test-force-exit', '--test-timeout=600000', '--test-concurrency=4', 'a.test.ts']);
+  assert.deepEqual(withTestGuards('node', ['--test'], 1500.4), ['--test', '--test-force-exit', '--test-timeout=1500']);
+  assert.deepEqual(withTestGuards(node, ['--test', '--test-timeout=5000', 'a'], 600_000), ['--test', '--test-force-exit', '--test-timeout=5000', 'a'], 'its own limit');
+  assert.deepEqual(withTestGuards(node, ['--test-force-exit', '--test', 'a'], 600_000), ['--test-force-exit', '--test', '--test-timeout=600000', 'a'], 'its own force-exit, before --test');
+  assert.deepEqual(withTestGuards(node, ['script.js', '--test'], 600_000), ['script.js', '--test'], "a script's own --test");
+  assert.deepEqual(withTestGuards(node, ['-e', '0'], 600_000), ['-e', '0'], 'no --test');
+  assert.deepEqual(withTestGuards('npm', ['test'], 600_000), ['test'], "an npm script's node isn't seen");
+});
+
+
 test("a test's own waits at the pace (kit 2.74.6): stretched as much as its run's time limit, as the paced command says; as they are unpaced", () => {
   assert.equal(CHECKS_SLOWER_ENV, 'KIT_CHECKS_SLOWER');
   assert.equal(checksSlower({ KIT_CHECKS_SLOWER: '4' }), 4);
@@ -141,6 +154,30 @@ const ran = (file: string, args: string[], env: NodeJS.ProcessEnv = process.env)
     execFile(file, args, { env, windowsHide: true, encoding: 'utf8' }, (e: any, out, err) => resolve({ code: e ? (typeof e.code === 'number' ? e.code : -1) : 0, out, err })),
   );
 
+test("a test run with its guards, as node runs it: a file that left a timer an hour long ends with its tests, one that never settles is failed at its limit, the others run on", { timeout: paced(120_000) }, async () => {
+  const dir = path.join(home, 'guarded');
+  mkdirSync(dir, { recursive: true });
+  const file = (name: string, body: string) => {
+    writeFileSync(path.join(dir, name), `import { test } from 'node:test';\n${body}\n`);
+    return path.join(dir, name);
+  };
+  // As the Reckoner's test left its schedule on 2026-10-21: its tests done, its next round an hour away.
+  const left = file('left.test.mjs', "test('done, an hour-long timer left', () => { setTimeout(() => {}, 3_600_000); });");
+  const stuck = file('stuck.test.mjs', "test('never settles', () => new Promise(() => setInterval(() => {}, 1000)));");
+  const fine = file('fine.test.mjs', "test('fine', () => {});");
+  // Its own run, not this file's: node --test inside a test file's process is told it is a child of the runner.
+  const { NODE_TEST_CONTEXT: _, ...env } = process.env;
+  const started = Date.now();
+  const r = await ran(process.execPath, withTestGuards(process.execPath, ['--test', '--test-reporter=tap', left, stuck, fine], paced(3_000)), env);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /^ok \d+ - done, an hour-long timer left$/m);
+  assert.match(r.out, /^ok \d+ - fine$/m);
+  assert.match(r.out, /^not ok \d+ - .*stuck\.test\.mjs$/m, 'the file that never settles, failed under its name');
+  assert.match(r.out, /test timed out after \d+ms/);
+  assert.match(r.out, /^# pass 2$/m);
+  assert.ok(Date.now() - started < paced(60_000), `ended in ${Date.now() - started} ms, not at the hour-long timer`);
+});
+
 test('on Windows, a paced command: through the launcher, its arguments and output as they were, its exit code, below-normal priority', { skip: process.platform !== 'win32' }, async () => {
   const logged: string[] = [];
   const p = await pacedCommand(process.execPath, ['x'], { env: { KIT_CHECKS_PACE: '50' }, home: path.join(home, 'no-manor'), log: (l) => logged.push(l) });
@@ -152,7 +189,7 @@ test('on Windows, a paced command: through the launcher, its arguments and outpu
   assert.equal(p.env.KIT_CHECKS_SLOWER, '4', 'told how much slower it runs, for its own waits');
   assert.equal(p.env[CEILING_ENV], String(CEILING_CAP), "the launcher is given the manor's ceiling (kit 2.78.7)");
   const tests = await pacedCommand(process.execPath, ['--test', 'a.test.ts'], { env: { KIT_CHECKS_PACE: '25' }, home: path.join(home, 'no-manor'), processors: 16 });
-  assert.deepEqual(tests.args, [checksLimits(2500), process.execPath, '--test', '--test-concurrency=8', 'a.test.ts'], 'a test run: as many files at once as the cap has room for');
+  assert.deepEqual(tests.args, [checksLimits(2500), process.execPath, '--test', '--test-force-exit', '--test-timeout=600000', '--test-concurrency=8', 'a.test.ts'], 'a test run: as many files at once as the cap has room for, each ended with its tests and stopped at two and a half minutes stretched four times');
   const script = 'console.log(JSON.stringify([process.argv.slice(1), require("os").getPriority()])); console.error("e"); process.exit(7)';
   const args = ['a b', '"q"', '', 'C:\\x\\y z\\'];
   const noTurn = checksLimits(5000, checksMemory(), 0);
