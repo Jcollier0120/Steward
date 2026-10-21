@@ -311,6 +311,7 @@ test("uninstall refuses while the guard is on, in each agent's own words, and sa
     '  watchman uninstall',
     'Or both at once: watchman uninstall --guard-off',
     `Without the agent, as an administrator: ${own}`,
+    'Where other accounts on this PC have the Watchman too, turning it off here only lets go of it: it stays on for them.',
   ]);
   assert.deepEqual(G.guardOnWords(root, LAMPLIGHTER), [
     `The guard is still on: it runs as SYSTEM from ${root} and rolls graphics drivers back by itself, so the Lamplighter isn't uninstalled while it is.`,
@@ -319,6 +320,7 @@ test("uninstall refuses while the guard is on, in each agent's own words, and sa
     '  lamplighter uninstall',
     'Or both at once: lamplighter uninstall --guard-off',
     `Without the agent, as an administrator: ${own}`,
+    'Where other accounts on this PC have the Lamplighter too, turning it off here only lets go of it: it stays on for them.',
   ]);
   for (const f of ['state.json', 'config.json']) {
     const only = folder(`only-${f}`);
@@ -352,4 +354,52 @@ test('--guard-off turns the guard off first, and uninstalls only when that worke
   assert.equal(await G.uninstallAgent(['--guard-off', '--dry-run'], dryRun.d), 0, 'a dry run goes on to the dry uninstall, the guard still there');
   assert.equal(dry, true);
   assert.deepEqual(dryRun.done, [['--dry-run']]);
+});
+
+const ME = 'S-1-5-21-1-2-3-1001';
+const letGoOf = (root: string, sid = ME) => (mkdirSync(path.join(root, 'let-go'), { recursive: true }), writeFileSync(G.letGoFile(root, sid), new Date().toISOString()));
+
+test('one guard for the PC: an account that let go of it, which others still hold, uninstalls its agent; one that holds it still may not', async () => {
+  const root = guardDir();
+  letGoOf(root);
+  const gone = deps(root, LAMPLIGHTER);
+  assert.equal(await G.uninstallAgent(['--purge'], { ...gone.d, sid: async () => ME }), 0, 'this account let go: the guard is the others\'');
+  assert.deepEqual([gone.done, gone.lines], [[['--purge']], []]);
+  const other = deps(root, LAMPLIGHTER);
+  assert.equal(await G.uninstallAgent([], { ...other.d, sid: async () => 'S-1-5-21-1-2-3-1002' }), G.GUARD_STILL_ON, "another account's mark isn't this one's");
+  assert.equal(await G.uninstallAgent([], { ...deps(root, LAMPLIGHTER).d, sid: async () => null }), G.GUARD_STILL_ON, 'no SID: it holds the guard, as before');
+  assert.equal(await G.uninstallAgent([], deps(root, LAMPLIGHTER).d), G.GUARD_STILL_ON, 'an agent that passes no SID: as before');
+  assert.deepEqual([G.letGo(root, ME), G.letGo(root, '..\\x'), G.guardHeld(root, ME), G.guardHeld(root, null)], [true, false, false, true]);
+});
+
+test('--guard-off where other accounts still hold the guard: it lets go, the guard stays for them, and the agent is uninstalled here', async () => {
+  const root = guardDir();
+  let sids = 0;
+  const x = deps(root, WATCHMAN, async () => (letGoOf(root), 0));
+  assert.equal(await G.uninstallAgent(['--guard-off'], { ...x.d, sid: async () => (sids++, ME) }), 0);
+  assert.deepEqual(x.done, [[]]);
+  assert.deepEqual(x.lines, ['The guard stays on for the other accounts on this PC that have the Watchman: this account has let go of it.']);
+  assert.equal(sids, 1, 'asked once');
+  const noGuard = deps(path.join(home, 'no-guard-at-all'), WATCHMAN);
+  assert.equal(await G.uninstallAgent([], { ...noGuard.d, sid: async () => assert.fail('no guard: no SID to ask for') }), 0);
+});
+
+test('turning it off says which account, and -Everyone when asked, only to a script that takes them', async () => {
+  const takes = sourceDir();
+  writeFileSync(path.join(takes, 'install-guard.ps1'), 'param([string]$Action, [string]$Account, [switch]$Everyone)\r\n');
+  const r = recorder();
+  await G.guardCommand('uninstall', { ...options({ dryRun: true, source: takes, account: ME, everyone: true }), runner: r.runner });
+  const args = r.calls[0].args;
+  assert.equal(args[args.indexOf('-Account') + 1], ME);
+  assert.ok(args.includes('-Everyone'));
+  const on = recorder();
+  await G.guardCommand('install', { ...options({ dryRun: true, source: takes, account: ME, everyone: true }), runner: on.runner });
+  assert.ok(on.calls[0].args.includes('-Account') && !on.calls[0].args.includes('-Everyone'), '-Everyone is only for turning it off');
+  const old = recorder();
+  await G.guardCommand('uninstall', { ...options({ dryRun: true, account: ME, everyone: true }), runner: old.runner });
+  assert.ok(!old.calls[0].args.includes('-Account') && !old.calls[0].args.includes('-Everyone'), 'an older script has neither: it would refuse the run');
+  const bad = recorder();
+  await G.guardCommand('uninstall', { ...options({ dryRun: true, source: takes, account: 'S-1-5; x' }), runner: bad.runner });
+  assert.ok(!bad.calls[0].args.includes('-Account'), 'only a SID');
+  assert.equal(G.scriptTakes(path.join(home, 'nothing-here.ps1'), 'Account'), false);
 });

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { expandEnv } from './kit/settings-kit.ts';
 import { manorHome, manorLink } from './kit/manor.ts';
+import { staffToken } from './kit/page-access.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { Employee, Settings } from './settings.ts';
 import { pageToken, request, tokenHeaders, type HttpRequest } from './upkeep.ts';
@@ -62,6 +63,11 @@ export interface TastingDeps {
   /** How often to ask about it meanwhile (default 2 s). */
   pollMs?: number;
   now?: () => Date;
+  /**
+   * The Assayer's page token, from its server.json (kit 2.96.0): what a page whose GETs are strict needs, and no page
+   * scraped. Null: read from its page, as before. Unset: its server.json, never under node --test.
+   */
+  token?: () => string | null;
 }
 
 /** Go: release, with a note for its message (null for none). Hold: why, and where to read the check. */
@@ -134,7 +140,8 @@ export async function tasteFirst(e: Employee, a: { commit: string; version: stri
   const pinged = await http(new URL('/api/ping', base), { method: 'GET', timeoutMs });
   if (!('error' in pinged) && pinged.status === 200 && parse(pinged.body)?.developer === false) return decided(without("the Assayer's Developer options are off, so it checks nothing"));
 
-  const t = await pageToken(base, { timeoutMs, http });
+  const own = (d.token ?? (() => (process.env.NODE_TEST_CONTEXT ? null : staffToken('assayer'))))();
+  const t = own ? { token: own } : await pageToken(base, { timeoutMs, http });
   if ('error' in t) return down(t.error);
   if (!('token' in t)) return decided(hold(`its page (HTTP ${t.status}) carries no token, so it can't be asked`));
   const body = JSON.stringify({ repo: e.repo, commit: a.commit, version: a.version, name: e.name, versionFiles: e.versionFiles, checkout: path.resolve(expandEnv(e.checkout)) });
@@ -157,7 +164,7 @@ export async function tasteFirst(e: Employee, a: { commit: string; version: stri
     await sleep(pollMs);
     waited += pollMs;
     const q = typeof answer.id === 'string' ? `id=${encodeURIComponent(answer.id)}` : `repo=${encodeURIComponent(e.repo)}&commit=${a.commit}`;
-    const got = await http(new URL(`/api/taste?${q}`, base), { method: 'GET', timeoutMs });
+    const got = await http(new URL(`/api/taste?${q}`, base), { method: 'GET', headers: { 'x-token': t.token }, timeoutMs });
     if ('error' in got) return down(got.error);
     const next = parse(got.body);
     if (got.status >= 400 || !next || typeof next !== 'object') return decided(hold(String(next?.error ?? `the Assayer answered HTTP ${got.status}`) + '; the next round asks again', answer.id));

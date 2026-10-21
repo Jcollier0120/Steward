@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { APP, pageUrl } from './app.ts';
 import { manorHome } from './kit/manor.ts';
+import { staffHeaders } from './kit/page-access.ts';
 import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { failureDetail, keptFailure } from './failure.ts';
@@ -635,11 +636,25 @@ export function withoutReeveDuplicates(conditions: Condition[], jobs: Set<string
 
 export type GetJson = (url: string) => Promise<unknown>;
 
-/** GET a local page's JSON; { error } when it doesn't answer. Never under node --test: a test must not read the live manor. */
+/** The staff member a page's address names (<id>.localhost), whose token signs the GET in; null for another address. */
+export const staffOf = (url: string): string | null => {
+  try {
+    return /^([a-z][a-z0-9-]*)\.localhost$/i.exec(new URL(url).hostname)?.[1]?.toLowerCase() ?? null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * GET a local page's JSON, with its token from the staff member's server.json where the address names one (kit
+ * 2.96.0: a page whose GETs are strict answers only that); { error } when it doesn't answer. Never under node --test:
+ * a test must not read the live manor.
+ */
 export const getJson: GetJson = async (url) => {
   if (process.env.NODE_TEST_CONTEXT) return { error: 'not read under node --test' };
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const id = staffOf(url);
+    const r = await fetch(url, { headers: id ? staffHeaders(id) : {}, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return { error: `HTTP ${r.status}` };
     return await r.json();
   } catch (e) {

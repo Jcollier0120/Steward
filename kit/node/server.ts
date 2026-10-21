@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -8,8 +8,9 @@ import { isDeveloper } from './developer.ts';
 import { duty, setDuty } from './duty.ts';
 import { licenseNow, licensePing, startLicenseCheck } from './license-check.ts';
 import { dutyStatus } from './service.ts';
-import { manorIcon } from './manor.ts';
+import { manorIcon, manorLink } from './manor.ts';
 import { namedLauncher, namedWanted } from './named.ts';
+import { launchPath, Launches, lockedPage, OPEN_GETS, pageKey, sameSecret, SIGN_IN_FIRST, signedIn, signInCookie, strictPages, withLaunch } from './page-access.ts';
 import { hasTour, pageScript } from './react-page.ts';
 import { needsSettings, watchRequired } from './required.ts';
 import { rounds, roundTimes } from './schedule.ts';
@@ -26,6 +27,9 @@ import { peerResult, workStatus, type WorkExtra } from './work-status.ts';
  *   127.0.0.1 (DNS rebinding) gets 421 and can read nothing.
  * - Every action (POST) needs the token that exists only in the page this server served (and in
  *   server.json, for the CLI's stop), from a page of its own origin, so no other site can press a button.
+ * - Its GETs know who is signed in (page-access.ts, kit 2.96.0): the token, or the cookie a launch URL sets
+ *   (POST /api/page-launch gives one). Strict (KIT_STRICT_PAGES=1), a GET that is neither gets only liveness and
+ *   the page's own files, and GET / a page without the token; otherwise every GET is answered as before.
  * - With `settings`, it serves the Settings panel's API (settings-kit.ts): GET and POST /api/settings,
  *   the POST guarded like every other and read with a small body limit.
  * - In demo mode (KIT_DEMO, demo.ts), its GETs are answered from the demo folder's made-up data where it has them, its
@@ -155,17 +159,16 @@ export function hostAllowed(hosts: Set<string>, host: string | undefined): boole
 /** A POST from the agent's own page (or a client that sends no Origin, like the CLI), with the token. */
 export function postAllowed(hosts: Set<string>, origin: string | undefined, token: string | string[] | undefined, expected: string): boolean {
   if (origin !== undefined && ![...hosts].some((h) => origin.toLowerCase() === `http://${h}`)) return false;
-  if (typeof token !== 'string') return false;
-  const a = Buffer.from(token);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
+  return sameSecret(token, expected);
 }
 
 const HEADERS = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
   'cache-control': 'no-store',
-  'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
+  // Never in another site's frame (kit 2.96.0): a page the cookie signs in mustn't be one another page can lay buttons over.
+  'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
+  'x-frame-options': 'DENY',
 };
 
 /**
@@ -196,6 +199,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     throw new Error(`${APP.name}'s own ${shadowed.join(', ')} would take the kit's place: the kit answers ${one ? 'it' : 'them'} for every agent (its POST /api/stop ends the page, for shutdown and an update). Give ${one ? 'it a name' : 'each a name'} of its own.`);
   }
   const token = randomBytes(24).toString('hex');
+  // The cookie's value, kept across restarts (page-access.ts), and the launch URLs' one-time codes.
+  const key = pageKey();
+  const launches = new Launches();
   const hosts = allowedHosts(opts.port);
   const tour = hasTour();
   // Its required settings (its onboarding's) are read from these: until they're filled in, its rounds wait (required.ts).
@@ -250,6 +256,14 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     '/api/duty': ({ body }) => ({ json: setDuty(body?.onDuty === true) }),
     // A repair another agent asks for (repair.ts, kit 2.51.0): the Surveyor's, for something this agent can put right.
     '/api/repair': async ({ body }) => ({ json: await repair(body) }),
+    // A launch URL for this page (page-access.ts, kit 2.96.0): its one-time code signs a browser in. Manor's Open asks
+    // for one, and the CLI's open; `path` is where on the page it leads ("/" unless said), and a hash may follow it.
+    '/api/page-launch': ({ body }) => {
+      const at = launchPath(body?.path);
+      if (!at) return { json: { error: 'path must be a path on this page, starting with /' }, status: 400 };
+      const { code, expires } = launches.mint();
+      return { json: { url: `http://${HOST_NAME}:${opts.port}${withLaunch(at, code)}`, expires: new Date(expires).toISOString() } };
+    },
     ...opts.post,
   };
   const spec = opts.settings;
@@ -283,6 +297,17 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
       if (!hostAllowed(hosts, req.headers.host)) return send({ json: { error: 'wrong host' }, status: 421 });
       const url = new URL(req.url ?? '/', `http://${HOST_NAME}:${opts.port}`);
       if (req.method === 'GET' || req.method === 'HEAD') {
+        // A launch URL: its code signs this browser in, and the page is given again at the address without it, so no
+        // bookmark or history keeps one. A code that isn't one (used, or too old) is passed over.
+        const code = url.searchParams.get('launch');
+        if (code !== null && launches.take(code)) {
+          url.searchParams.delete('launch');
+          return void res.writeHead(303, { ...HEADERS, location: url.pathname + url.search, 'set-cookie': signInCookie(opts.port, key) }).end();
+        }
+        if (strictPages() && !OPEN_GETS.has(url.pathname) && !signedIn(req.headers, { token, key, port: opts.port })) {
+          const m = manorLink();
+          return url.pathname === '/' ? send({ html: lockedPage({ name: APP.name, manor: m && { name: m.name, url: m.url } }) }) : send({ json: { error: SIGN_IN_FIRST }, status: 401 });
+        }
         const demo = demoDir();
         const made = demo ? demoAnswer(url.pathname, demo) : undefined;
         const h = get[url.pathname];

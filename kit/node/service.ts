@@ -8,6 +8,7 @@ import { duty, setDuty, type Duty } from './duty.ts';
 import { licenseNow, licensePing, TRIAL_ENDED_TEXT } from './license-check.ts';
 import { namedBuilt, namedHold, namedId } from './named.ts';
 import { CEILING_ENV, ceilingCap } from './pace.ts';
+import { strictPages } from './page-access.ts';
 import { dataFile, readJson } from './store.ts';
 
 /**
@@ -91,10 +92,26 @@ export function pageLaunch(
   return { file: o.comspec ?? process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', line], options: { windowsHide: true, windowsVerbatimArguments: true } };
 }
 
+/**
+ * The address to give a person for the page: strict (page-access.ts, kit 2.96.0), a launch URL, whose one-time code
+ * signs their browser in, asked of the page with the token from server.json; otherwise, or when it can't be had, the page's own.
+ */
+export async function pageAddress(): Promise<string> {
+  if (!strictPages()) return pageUrl;
+  try {
+    const info = readJson<{ token?: string } | null>(dataFile('server.json'), null);
+    const r = await fetch(`http://127.0.0.1:${port}/api/page-launch`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': info?.token ?? '' }, body: '{}', signal: AbortSignal.timeout(5000) });
+    const j = (await r.json()) as { url?: unknown };
+    return r.ok && typeof j.url === 'string' ? j.url : pageUrl;
+  } catch {
+    return pageUrl;
+  }
+}
+
 /** Starts `serve` in the background, its output in serve.log, and waits until the page answers. Duty is unchanged. */
 export async function open(cliFile: string, opts: { quiet?: boolean } = {}): Promise<number> {
   if (await ping()) {
-    if (!opts.quiet) console.log(`${APP.name}'s page is up: ${pageUrl}`);
+    if (!opts.quiet) console.log(`${APP.name}'s page is up: ${await pageAddress()}`);
     return 0;
   }
   mkdirSync(dataDir, { recursive: true });
@@ -124,7 +141,7 @@ export async function open(cliFile: string, opts: { quiet?: boolean } = {}): Pro
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 250));
       if (await ping()) {
-        if (!opts.quiet) console.log(`${APP.name}'s page is up: ${pageUrl}`);
+        if (!opts.quiet) console.log(`${APP.name}'s page is up: ${await pageAddress()}`);
         return 0;
       }
     }
