@@ -191,7 +191,9 @@ const quotedPs = (s: string) => `'${s.replace(/'/g, "''")}'`;
 export async function signingProblem(run: Runner, thumbprint: string, o: { now?: number; signtool?: string | null; timestamp?: string; pause?: (ms: number) => Promise<void> } = {}): Promise<string | null> {
   const now = o.now ?? Date.now();
   const was = looks.get(thumbprint);
-  if (was && now - was.at < (await was.forMs)) return was.answer;
+  // A look from what is now the future (the clock set back; a test at a fixed time after a look at the real one) is
+  // stale, not fresh.
+  if (was && now >= was.at && now - was.at < (await was.forMs)) return was.answer;
   const pause = o.pause ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   const seen = look(run, thumbprint, o.signtool === undefined ? findSignTool() : o.signtool, o.timestamp ?? CERTUM_TIMESTAMP, pause).catch(() => ({ why: null, hung: false }));
   const answer = seen.then((s) => s.why);

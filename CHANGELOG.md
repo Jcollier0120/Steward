@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.162
+
+**It hands out the kit 2.93.1: on a PC with Smart App Control on, signing in no longer brings a Smart App Control notice for each staff member.**
+
+### What changed
+
+- The kit 2.93.1: each staff member's page used to start through a small launcher compiled on the PC, which shows it by name in Task Manager. Smart App Control blocks a program compiled on the PC, since no one has signed it, and showed a notice for each one at every sign-in. Where Smart App Control is on, the pages now start without it.
+- The look at whether this PC can sign, kept for a minute, is looked at again when the clock has gone back past it, instead of taken as still fresh.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.161
 
 **A release that can't be signed because SimplySign Desktop's session dropped now waits instead of failing, and goes out by itself once this PC can sign again. Most releases with native files no longer need SimplySign at all. The Steward now hands out kit 2.92.0.**

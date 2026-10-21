@@ -2,6 +2,28 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.93.1
+
+**Urgent fix: where Smart App Control is on, a sign-in no longer brings a notice for every staff member: their pages start as Node.js, which its maker signs.**
+
+On 2026-10-21 the owner's gaming desktop (Smart App Control on) showed a stream of Smart App Control notices at each sign-in, one for each agent's `named-<id>-<hash>.exe`. That is the launcher that shows an agent by name in Task Manager. It's compiled on each PC, so no one has signed it, and Smart App Control blocks a program it doesn't know unless it's signed. Kit 2.91.0 started the page as plain node after the block, but the block and its notice still came first, at every sign-in.
+
+### What changed
+
+- **named.ts:** no launcher is built or used where Smart App Control is on, or where Windows is still weighing whether to turn it on (evaluation: it may turn on at any time). The page starts as node.exe, as it does off Windows; it isn't shown by name in Task Manager there.
+  - `namedHeld` asks Smart App Control's state each time a launcher would be used or built. It holds every agent's launcher on the PC in `named.held`, in the kit folder they share. A hold for Smart App Control is let go once it's off.
+  - `namedBuilt` returns null while held, so `open` starts the page as node at once. `namedLauncher` compiles nothing while held.
+- **service.ts:** a launcher Windows blocked holds every agent's launcher from then on (`namedHold`), whatever policy blocked it. Only the first agent to start after the update can meet a block; the rest start as node.
+- **app-control.ts:**
+  - `smartAppControlState()` reads Smart App Control's state from the registry without elevation (`VerifiedAndReputablePolicyState`: 1 on, 2 evaluation, 0 off), with one reg.exe of about 20 ms. It's null off Windows or where it can't be read.
+  - `parseSacState` reads reg query's answer.
+  - `bySmartAppControl(blocks)` says whether Smart App Control made a block.
+
+### Before you update
+
+- Nothing in an agent's code. An agent whose own code compiles a program or library on the PC (PowerShell's `Add-Type -OutputAssembly`) can ask `smartAppControlState()` and compile in memory instead where it's on or in evaluation, as Smart App Control blocks the compiled file too.
+- On a PC with Smart App Control on, the agents' pages no longer show by name in Task Manager. The launchers already compiled stay in the kit folder, unused.
+
 ## 2.93.0
 
 **A repository's own checks can go through the Seneschal to any of the owner's PCs, even one with no copy of the repository, uncommitted changes included.**
