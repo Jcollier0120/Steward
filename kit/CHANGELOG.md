@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.93.3
+
+**A test file that never ends no longer holds a whole check run, and the PC's turn, until its time limit.**
+
+On 2026-10-21 a kit trial of the Reckoner's sat for 52 minutes on one test file whose tests had finished. One of them had failed (its port was in a range Windows keeps for itself), and the schedule that test never got to stop kept the file's process alive, its next round an hour away. Node's test runner waits for every file's process to end, so the run waited with it, holding one of the PC's check turns, until it was ended by hand. Left alone, the Steward's time limit at the pace would have stopped it at 100 minutes, reported as a run out of time rather than the test that failed.
+
+### What changed
+
+- **checks-pace.ts:** a paced `node --test` (node itself, as the Steward's and the Assayer's runs are) gets node's own guards, beside its `--test-concurrency` (`withTestGuards`):
+  - `--test-force-exit`: a file whose tests are all done ends, though it left a timer or a server running. Its results are reported as they are: the failed test above showed its error in a second, where it had waited.
+  - `--test-timeout`: a file still running past two and a half minutes (`TEST_FILE_MS`), stretched as the pace stretches the run's limit (`pacedSlower`: ten minutes at the usual caps), is ended and failed, "test timed out" under its name, while the other files run on. Its limit counts from the file's start, not its wait for a place.
+- A guard the command gives itself (its own `--test-timeout`, `--test-force-exit`) stays as it is. Commands that aren't node's own `--test` (an npm script, a type check) are as they were.
+
+### Before you update
+
+- Nothing in an agent's code. A test file that took longer than ten minutes at the pace now fails: none of the manor's comes near (their whole suites take a few). A file that keeps its process alive after its tests is still a bug to fix in the agent (stop what it started, even when a test fails before its `finally`), but it no longer stalls the run.
+
 ## 2.93.2
 
 **Urgent fix: the staff's FFmpeg is signed, so Smart App Control lets it run.**
