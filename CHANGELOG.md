@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.166
+
+**It hands out the kit 2.96.0, which gets the staff ready for a PC that several people share. A guard stays on while anyone else on the PC still has it, and each staff member's page is ready to open only for the person it belongs to.**
+
+### What's new
+
+- **A guard shared by everyone on the PC.** The Lamplighter's and the Watchman's guards look after the PC itself (its graphics drivers, its restore points), so there is one guard for the whole PC. With the new kit, someone who turns a guard off while another person on the PC still has that staff member only lets go of it: the guard stays on for the others, and the first person can still remove their staff member. The guard goes once the last person who has it turns it off. The Lamplighter's and the Watchman's own updates bring this.
+- **Pages that open only for you: ready, not yet on.** Each staff member's page can now tell you, opened from Castellan, apart from another program or another person on the PC. Once a later update turns this on, a page opened any other way shows only a short note to open it from Castellan. A bookmark keeps working once you've opened the page from Castellan, even after a restart. For now every page answers as before.
+
+### What changed
+
+- No staff member's page can be shown inside another website's frame any more.
+- When the Steward asks the Assayer to check a release, or reads a staff member's page for its alarms, it now sends that staff member's own token. It keeps working once pages ask for one.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member takes the new kit at its next update.
+
 ## 0.36.165
 
 **It hands out the kit 2.95.0, ready for Castellan set up for everyone on a PC: each Windows account's staff get a Task Scheduler folder of their own, and the model files are kept once for the whole PC.**

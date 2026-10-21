@@ -162,6 +162,30 @@ export const DEV_GUARD = "This is a development checkout. The guard runs from th
  */
 export const guardPresent = (root: string) => ['bin/guard.ps1', 'bin/install-guard.ps1', 'state.json', 'config.json'].some((f) => existsSync(path.join(root, f)));
 
+/**
+ * One guard for the whole PC (kit 2.96.0, guard-kit.ps1's Get-OtherHolders): it acts on the PC itself, so two would
+ * fight over the same driver or restore point, and with Castellan for everyone on a PC each account may have its agent.
+ * Turning it off from an account while another account still has the agent leaves it on, and marks that this account
+ * let go of it: <root>\let-go\<its SID>, written elevated, readable by every account. Its agent may then be
+ * uninstalled, as the guard has an agent elsewhere to show it and turn it off.
+ */
+export const letGoFile = (root: string, sid: string) => path.join(root, 'let-go', sid);
+
+/** Whether this account (its SID, userSid()) has let go of the guard, which other accounts on the PC still hold. */
+export const letGo = (root: string, sid: string | null | undefined) => !!sid && /^S-1-[0-9-]+$/i.test(sid) && existsSync(letGoFile(root, sid));
+
+/** The guard is there and this account still holds it: its agent mustn't be uninstalled alone. */
+export const guardHeld = (root: string, sid?: string | null) => guardPresent(root) && !letGo(root, sid);
+
+/** Whether a script takes a parameter (`-Account`, `-Everyone`): an older guard's own copy, used when the agent's is gone, may not. */
+export function scriptTakes(script: string, param: string): boolean {
+  try {
+    return new RegExp(`\\$${param}\\b`).test(readFileSync(script, 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
 /** This process runs as an administrator (elevated), so the guard can be turned off without asking Windows again. */
 export async function isElevated(runner: Runner = run): Promise<boolean> {
   const r = await runner(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', '([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)'], { timeoutMs: 30_000 });
@@ -232,6 +256,13 @@ export interface GuardCommandOptions {
   timeoutMs?: number;
   /** Manor's Castellan.exe, which the administrator prompt is asked for where it is there and new enough (castellanPath() unless given; null: Windows PowerShell alone, tests). */
   castellan?: string | null;
+  /**
+   * This account's SID (userSid()), passed on as -Account (kit 2.96.0): turning the guard off while other accounts on
+   * the PC have the agent only lets go of it for this account (letGo). Unset: the account the elevated run runs as.
+   */
+  account?: string | null;
+  /** Turning it off for every account on the PC, even while others still have the agent (-Everyone). */
+  everyone?: boolean;
 }
 
 /**
@@ -251,6 +282,9 @@ export async function guardCommand(action: 'install' | 'uninstall', o: GuardComm
   const script = path.join(source, 'install-guard.ps1');
   const args = ['-Action', action, '-Source', source, ...o.args];
   if (o.root) args.push('-Root', o.root);
+  // An older guard's own copy (used when the agent's is gone) takes neither, and turns the guard off for the PC as before.
+  if (o.account && /^S-1-[0-9-]+$/i.test(o.account) && scriptTakes(script, 'Account')) args.push('-Account', o.account);
+  if (action === 'uninstall' && o.everyone && scriptTakes(script, 'Everyone')) args.push('-Everyone');
   if (o.dryRun) {
     const r = await runner(POWERSHELL, psFile(script, [...args, '-WhatIf']), { timeoutMs: 60_000, onLine: o.out });
     if (r.err.trim()) o.out(r.err.trim());
@@ -298,6 +332,7 @@ export function guardOnWords(root: string, w: GuardWords): string[] {
     `  ${w.command} uninstall`,
     `Or both at once: ${w.command} uninstall --guard-off`,
     `Without the agent, as an administrator: powershell -NoProfile -ExecutionPolicy Bypass -File "${path.join(root, 'bin', 'install-guard.ps1')}" -Action uninstall`,
+    `Where other accounts on this PC have ${w.agent} too, turning it off here only lets go of it: it stays on for them.`,
   ];
 }
 
@@ -310,18 +345,23 @@ export interface UninstallDeps {
   /** The guard's folder. */
   root: string;
   words: GuardWords;
+  /** This account's SID (userSid()), for whether it let go of a guard other accounts still hold (kit 2.96.0). Unset: it never did. */
+  sid?: () => Promise<string | null>;
 }
 
 /**
- * `<agent> uninstall`: the agent's own uninstall (the kit's), but never while the guard is on: with the agent gone,
- * nothing would show what it does or turn it off. So while it is there, uninstall refuses (GUARD_STILL_ON) and says
- * how to turn it off first; `--guard-off` turns it off and then uninstalls, only when that worked.
+ * `<agent> uninstall`: the agent's own uninstall (the kit's), but never while the guard is on and this account holds
+ * it: with the agent gone, nothing would show what it does or turn it off. So while it is, uninstall refuses
+ * (GUARD_STILL_ON) and says how to turn it off first; `--guard-off` turns it off and then uninstalls, only when that
+ * worked. A guard other accounts on the PC still hold stays on for them (guard-kit.ps1's Get-OtherHolders): turning it
+ * off here only lets go of it (letGo), and the agent is uninstalled here, theirs still showing the guard.
  */
 export async function uninstallAgent(args: string[], d: UninstallDeps): Promise<number> {
   const root = d.root;
   const dryRun = args.includes('--dry-run');
   const rest = args.filter((a) => a !== '--guard-off');
-  if (guardPresent(root)) {
+  const sid = guardPresent(root) ? ((await d.sid?.()) ?? null) : null;
+  if (guardHeld(root, sid)) {
     if (!args.includes('--guard-off')) {
       for (const l of guardOnWords(root, d.words)) d.out(l);
       return GUARD_STILL_ON;
@@ -331,10 +371,11 @@ export async function uninstallAgent(args: string[], d: UninstallDeps): Promise<
       d.out(`The guard couldn't be turned off (exit ${code}), so ${d.words.agent} isn't uninstalled.`);
       return code;
     }
-    if (!dryRun && guardPresent(root)) {
+    if (!dryRun && guardHeld(root, sid)) {
       d.out(`The guard is still in ${root}, so ${d.words.agent} isn't uninstalled.`);
       return GUARD_STILL_ON;
     }
+    if (!dryRun && guardPresent(root)) d.out(`The guard stays on for the other accounts on this PC that have ${d.words.agent}: this account has let go of it.`);
   }
   return d.uninstall(rest);
 }

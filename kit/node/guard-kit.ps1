@@ -135,6 +135,70 @@ function Set-FolderRights([string]$Path, [string]$Sddl) {
   [IO.Directory]::SetAccessControl($Path, $acl)
 }
 
+# ONE GUARD FOR THE WHOLE PC (kit 2.96.0). A guard acts on the PC itself (its graphics drivers, its System Protection
+# and restore points), so there is one per PC, in one folder under one set of task names, whichever accounts have its
+# agent: two would fight over the same driver and the same restore points. With Castellan for everyone on a PC, each
+# Windows account may have the agent, so turning the guard off from one account mustn't take it from another that still
+# has it. Such an account only lets go of it (a mark, <Root>\let-go\<its SID>, which every account may read: its agent
+# may then be uninstalled), and the guard is turned off once no other account holds it. An account holds it while its
+# agent is installed (<profile>\.<id>\app) and it hasn't let go; turning the guard on again holds it again.
+
+# The user accounts on this PC and their profile folders, from Windows' ProfileList: @(@{ sid; profile }). Local and
+# Microsoft accounts (S-1-5-21-) and work or school ones (S-1-12-1-), not Windows' own. The tests replace this.
+function Get-ProfileList {
+  $key = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+  $list = @()
+  foreach ($k in @(Get-ChildItem -LiteralPath $key -ErrorAction SilentlyContinue)) {
+    $sid = [string]$k.PSChildName
+    if ($sid -notmatch '^S-1-(5-21|12-1)-[0-9-]+\z') { continue }
+    $p = [string](Get-ItemProperty -LiteralPath $k.PSPath -Name ProfileImagePath -ErrorAction SilentlyContinue).ProfileImagePath
+    if ($p) { $list += @{ sid = $sid; profile = [Environment]::ExpandEnvironmentVariables($p) } }
+  }
+  return , $list
+}
+
+# The account the guard is turned on or off for: the SID its agent gave (-Account), else the account this runs as.
+function Get-AccountSid([string]$Account) {
+  if ($Account -match '^S-1-[0-9-]+\z') { return $Account }
+  return [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+}
+
+# Whether an account has let go of the guard: its mark in <Root>\let-go.
+function Test-LetGo([string]$Root, [string]$Sid) {
+  return [bool]($Sid -and (Test-Path -LiteralPath (Join-Path $Root "let-go\$Sid") -PathType Leaf))
+}
+
+# The other accounts on this PC that still hold the guard: @(@{ sid; account }), each with the agent installed
+# (<profile>\.$Id\app) and no mark of having let go. None while the guard isn't there ($Root missing).
+function Get-OtherHolders([string]$Root, [string]$Id, [string]$Sid) {
+  $held = @()
+  if (-not (Test-Path -LiteralPath $Root)) { return , $held }
+  $profiles = Get-ProfileList
+  foreach ($p in $profiles) {
+    if ($p.sid -eq $Sid) { continue }
+    if (-not (Test-Path -LiteralPath (Join-Path $p.profile ".$Id\app") -PathType Container)) { continue }
+    if (Test-LetGo $Root $p.sid) { continue }
+    $held += @{ sid = $p.sid; account = (Split-Path -Leaf $p.profile) }
+  }
+  return , $held
+}
+
+# This account lets go of the guard, which other accounts still hold: its mark in <Root>\let-go.
+function Set-LetGo([string]$Root, [string]$Sid) {
+  $f = Join-Path $Root "let-go\$Sid"
+  Invoke-Do "Mark that this account lets go of the guard: $f" {
+    New-Item -ItemType Directory -Path (Join-Path $Root 'let-go') -Force | Out-Null
+    [IO.File]::WriteAllText($f, [DateTime]::UtcNow.ToString('o'))
+  }
+}
+
+# This account holds the guard again (it turns it on): its mark, if it let go before, removed.
+function Clear-LetGo([string]$Root, [string]$Sid) {
+  $f = Join-Path $Root "let-go\$Sid"
+  if (-not (Test-Path -LiteralPath $f)) { return }
+  Invoke-Do "Remove ${f}: this account holds the guard again" { Remove-Item -LiteralPath $f -Force }
+}
+
 # A task from its XML: written as UTF-16 with a byte-order mark (the XML says UTF-16), then schtasks /Create /XML.
 function Register-Task([string]$Name, [string]$Xml, [string]$File) {
   Invoke-Do "Write $File and register the task $Name from it: schtasks /Create /TN $Name /XML `"$File`" /F" {

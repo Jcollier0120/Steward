@@ -9,7 +9,7 @@ import path from 'node:path';
  */
 export const KIT_ROUTES = {
   get: ['/api/ping', '/favicon.svg', '/manor-icon.svg', '/settings.js', '/settings.css', '/page.js', '/api/peer/work', '/api/peer/result'],
-  post: ['/api/stop', '/api/duty', '/api/repair'],
+  post: ['/api/stop', '/api/duty', '/api/repair', '/api/page-launch'],
 } as const;
 
 /** The Settings panel's API, GET and POST: the kit's when the agent hands serve() its `settings`. */

@@ -95,6 +95,16 @@ test('a check under way is asked about every couple of seconds until it is done'
   assert.deepEqual(g, { go: true, note: 'checked by the Assayer: pass' });
   assert.deepEqual(slept, [2000, 2000]);
   assert.deepEqual(a.asked.filter((x) => x.method === 'GET' && x.path.startsWith('/api/taste')).map((x) => x.path), ['/api/taste?id=9e41c07ab2d3', '/api/taste?id=9e41c07ab2d3']);
+  assert.ok(a.asked.filter((x) => x.path.startsWith('/api/taste')).every((x) => x.headers?.['x-token'] === TOKEN), 'each ask about it carries the token, as a page whose GETs are strict needs');
+});
+
+test("the Assayer's token from its server.json: its page isn't read for it, and every ask carries it", async () => {
+  const own = 'tok_fromServerJson0123456789';
+  const a = assayerHttp({ page: { status: 200, body: '<html>no token here</html>' }, post: { status: 202, body: tasting({ state: 'running', verdict: 'not checked', release: false }) }, gets: [{ status: 200, body: tasting() }] });
+  const g = await ask(porter, deps(a.http, { token: () => own }));
+  assert.deepEqual(g, { go: true, note: 'checked by the Assayer: pass' });
+  assert.equal(a.asked.some((x) => x.method === 'GET' && x.path === '/'), false, 'no page read for a token');
+  assert.deepEqual(a.asked.filter((x) => x.path.startsWith('/api/taste')).map((x) => x.headers?.['x-token']), [own, own]);
 });
 
 test('a check still under way after the wait holds the release until the next round', async () => {

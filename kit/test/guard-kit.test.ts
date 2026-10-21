@@ -45,7 +45,7 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile(${q(KIT)}, [ref
   ascii = -not ([IO.File]::ReadAllText(${q(KIT)}) -match '[^\\x00-\\x7F]')
 } | ConvertTo-Json -Compress`);
   assert.deepEqual([r.errors, r.param, r.exits, r.ascii], [0, false, 0, true]);
-  assert.deepEqual(r.functions, ['Initialize-GuardKit', 'Open-Log', 'Close-Log', 'Write-Out', 'Invoke-Do', 'Invoke-Native', 'Test-Admin', 'ConvertTo-XmlText', 'Get-OwnerSid', 'Test-Trusted', 'Read-ScriptManifest', 'Test-ScriptHashes', 'Set-FolderRights', 'Register-Task']);
+  assert.deepEqual(r.functions, ['Initialize-GuardKit', 'Open-Log', 'Close-Log', 'Write-Out', 'Invoke-Do', 'Invoke-Native', 'Test-Admin', 'ConvertTo-XmlText', 'Get-OwnerSid', 'Test-Trusted', 'Read-ScriptManifest', 'Test-ScriptHashes', 'Set-FolderRights', 'Get-ProfileList', 'Get-AccountSid', 'Test-LetGo', 'Get-OtherHolders', 'Set-LetGo', 'Clear-LetGo', 'Register-Task']);
 });
 
 test('Invoke-Do: nothing before Initialize-GuardKit; under -WhatIf only said; else said and done', windows, async () => {
@@ -195,4 +195,50 @@ $r | ConvertTo-Json -Compress`);
   assert.deepEqual([bytes[0], bytes[1]], [0xff, 0xfe], 'UTF-16 with its byte-order mark');
   assert.equal(bytes.subarray(2).toString('utf16le'), '<Task>é</Task>');
   assert.equal(r.failed, "schtasks couldn't register Kit Test Task: nope");
+});
+
+test('one guard for the PC: the other accounts that hold it have the agent installed and never let go; letting go is a mark, taken back on turning it on', windows, async () => {
+  const root = folder('guard-root');
+  const profiles = folder('profiles');
+  const me = 'S-1-5-21-1-2-3-1001';
+  const has = (name: string) => (mkdirSync(path.join(profiles, name, '.lamplighter', 'app'), { recursive: true }), path.join(profiles, name));
+  const ann = has('ann');
+  const bob = has('bob');
+  const cat = path.join(profiles, 'cat');
+  // Cat's account has only what the Confirm window leaves (seen.json): no Lamplighter of her own.
+  mkdirSync(path.join(cat, '.lamplighter'), { recursive: true });
+  writeFileSync(path.join(cat, '.lamplighter', 'seen.json'), '{}');
+  const r = await ps(`$r = @{}
+function Get-ProfileList { return , @(@{ sid = ${q(me)}; profile = ${q(has('me'))} }, @{ sid = 'S-1-5-21-1-2-3-1002'; profile = ${q(ann)} }, @{ sid = 'S-1-12-1-9-1003'; profile = ${q(bob)} }, @{ sid = 'S-1-5-21-1-2-3-1004'; profile = ${q(cat)} }) }
+$none = Get-OtherHolders ${q(path.join(root, 'missing'))} 'lamplighter' ${q(me)}
+$r.none = $none.Count
+$held = Get-OtherHolders ${q(root)} 'lamplighter' ${q(me)}
+$r.held = @($held | ForEach-Object { $_.account })
+$r.given = Get-AccountSid ${q(me)}
+$r.own = (Get-AccountSid '') -eq [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$r.notASid = (Get-AccountSid 'S-1-5-21-1\\..\\x') -eq [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Initialize-GuardKit -WhatIf
+Set-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
+$r.whatIf = @($script:GuardLines)
+$r.markedUnderWhatIf = Test-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
+Initialize-GuardKit
+Set-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
+$r.marked = Test-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
+$after = Get-OtherHolders ${q(root)} 'lamplighter' ${q(me)}
+$r.after = @($after | ForEach-Object { $_.account })
+Clear-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
+Clear-LetGo ${q(root)} 'S-1-5-21-1-2-3-1009'
+$r.cleared = Test-LetGo ${q(root)} 'S-1-5-21-1-2-3-1002'
+$r.empty = Test-LetGo ${q(root)} ''
+$r | ConvertTo-Json -Compress`);
+  assert.equal(r.none, 0, 'no guard there: no one holds it');
+  assert.deepEqual(r.held, ['ann', 'bob'], "not this account, nor one with only the Confirm window's seen.json");
+  assert.equal(r.given, me);
+  assert.deepEqual([r.own, r.notASid], [true, true], 'unset, or not a SID: the account it runs as');
+  assert.deepEqual(r.whatIf, [`WhatIf: Mark that this account lets go of the guard: ${path.join(root, 'let-go', 'S-1-5-21-1-2-3-1002')}`]);
+  assert.equal(r.markedUnderWhatIf, false);
+  assert.equal(r.marked, true);
+  assert.deepEqual(r.after, ['bob'], 'an account that let go no longer holds it');
+  assert.deepEqual([r.cleared, r.empty], [false, false]);
+  assert.ok(existsSync(path.join(root, 'let-go')), 'the folder stays, empty');
 });

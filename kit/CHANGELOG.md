@@ -2,6 +2,36 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.96.0
+
+**Ready for Castellan for everyone on a PC: a guard is shared by the accounts that have its agent, and an agent's page can ask who is reading it.**
+
+### What's new
+
+- **guard-kit.ps1 and guard.ts: one guard for the PC, shared by its accounts.** A guard (the Lamplighter's, the Watchman's) acts on the PC itself: its graphics drivers, its System Protection and restore points. Two guards would fight over the same driver, so a guard stays one per PC, under one folder and one set of task names, whichever account turned it on. With Castellan for everyone on a PC, each account may have the agent, and turning the guard off from one account must not take it from another. So an account that turns it off while another account still has the agent installed (`<profile>\.<id>\app`) only lets go of it. That leaves a mark, `<Root>\let-go\<its SID>`, written elevated and readable by every account, and the guard stays on. Once no other account holds it, turning it off removes it as before. `-Everyone` removes it for every account at once. Turning it on again holds it again.
+  - guard-kit.ps1 adds `Get-ProfileList` (Windows' ProfileList: local, Microsoft, and work or school accounts; the tests replace it), `Get-AccountSid`, `Test-LetGo`, `Get-OtherHolders`, `Set-LetGo` and `Clear-LetGo`. An agent's install-guard.ps1 takes `[string]$Account` and `[switch]$Everyone`. Its `Uninstall-*` lets go, rather than removing the guard, while `Get-OtherHolders` finds anyone. Its `Install-*` calls `Clear-LetGo`.
+  - guard.ts adds `letGoFile`, `letGo(root, sid)`, `guardHeld(root, sid)` and `scriptTakes(script, param)`. `GuardCommandOptions` takes `account` (this account's SID, `userSid()`) and `everyone`. `guardCommand` passes `-Account` and `-Everyone` only to a script that takes them: the guard's own older copy, used when the agent's is gone, turns it off for the PC as before.
+  - `uninstallAgent` takes `sid?()` and refuses only while this account holds the guard (`guardHeld`). After `--guard-off` it goes on to uninstall when the guard stays on for others, and says so. `guardOnWords` has a last line saying so.
+- **page-access.ts (new): who may read an agent's page.** The page answers on 127.0.0.1, which any process of any Windows account on the PC can reach. Its POSTs needed the token, but `GET /` handed the token to whoever asked, and `GET /api/*` were open. Now a page can tell a signed-in GET from any other:
+  - **The token.** `x-token`, as Manor, the CLI and another staff member send it. `staffToken(id)` and `staffHeaders(id)` read it from that agent's `server.json` in this account's own data folder.
+  - **The cookie.** `castellan_<port>`, holding the page key (`page-key.json`, kept across restarts). It is HttpOnly, SameSite=Lax and lasts 400 days.
+  - **Launch URLs.** `POST /api/page-launch` (a kit route, with the token; `{"path": "/…"}`, `/` unless given) answers `{ url, expires }`: the page's address with a one-time `launch` code that lasts two minutes. A GET with a live code sets the cookie and answers 303 to the same address without the code, so a bookmark never keeps one, and a hash (`#/tour`) is kept.
+  - **Strict pages.** With `KIT_STRICT_PAGES=1`, a GET that has neither the token nor the cookie gets only `OPEN_GETS` (`/api/ping` and the page's own files). `GET /` gets `lockedPage`: no token, no data, a 200 that says to open the page from Castellan and links there. Anything else gets 401 (`SIGN_IN_FIRST`). Strict is off by default for now: until Manor and every staff member that reads another's data send the token, every GET is answered as before, though a launch URL already signs a browser in.
+- **service.ts:** `pageAddress()` is the address the CLI's `open` gives: a launch URL when strict, else the page's own.
+- **repair.ts:** `askRepair` takes `token` (`staffToken(id)`) and then never reads the page for it.
+
+### What changed
+
+- Every page now says it is never to be shown in another site's frame (`frame-ancestors 'none'`, `X-Frame-Options: DENY`), so no page can lay buttons over a signed-in one. No page of the manor's frames another.
+- `postAllowed` compares the token with `sameSecret` (constant time, as before).
+- `KIT_ROUTES.post` has `/api/page-launch`. No agent has a route of that name.
+
+### Before you update
+
+- An agent with a guard should take the shared guard into its own install-guard.ps1, guard.ts and uninstall.ts, as above. Changing install-guard.ps1 makes each PC's guard ask to be updated once.
+- An agent that reads another staff member's GETs (`/api/*`, or `GET /` for its token) should send `staffHeaders(id)` on them, and give `askRepair` `token: staffToken(id)`. Pages will need it once strict is on by default.
+- Nothing else: a page that isn't strict answers as before.
+
 ## 2.95.0
 
 **Ready for Castellan's "Everyone on this PC" install: each Windows account's tasks in a Task Scheduler folder of its own, and the model files once per PC.**
