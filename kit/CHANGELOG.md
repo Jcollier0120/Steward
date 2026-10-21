@@ -24,6 +24,32 @@ On 2026-10-21 the owner's gaming desktop (Smart App Control on) showed a stream 
 - Nothing in an agent's code. An agent whose own code compiles a program or library on the PC (PowerShell's `Add-Type -OutputAssembly`) can ask `smartAppControlState()` and compile in memory instead where it's on or in evaluation, as Smart App Control blocks the compiled file too.
 - On a PC with Smart App Control on, the agents' pages no longer show by name in Task Manager. The launchers already compiled stay in the kit folder, unused.
 
+## 2.93.0
+
+**A repository's own checks can go through the Seneschal to any of the owner's PCs, even one with no copy of the repository, uncommitted changes included.**
+
+### What's new
+
+- **The `checks` kind (Seneschal 0.5.0):** the Assayer's work, a repository's checks as its files at a commit set them out, on any git host.
+  - A task says where its code is got from (`remote`: the repository's URL, https, ssh or scp-like, with no sign-in in it) and the tools its files need (`needs.tools`, from the closed list `SENESCHAL_TOOLS`).
+  - A worker that gets the code itself says `clones`. It may then name no repository and ask for `checks` of any, and clones from the remote with its own PC's sign-in.
+  - A worker is handed a `checks` task only when it names the kind, so the Steward's workers never see one.
+- **Uncommitted changes as a patch (Seneschal 0.5.2):** a `checks` task may carry `patch`, the text of `git diff --binary` from its commit, at most `SENESCHAL_MOST_PATCH` (512 KB). Only a worker that says `patches` is handed one; its lease carries `{ sha256, bytes, text }`, and `patchOf` checks the text against both.
+- **`prepMs` in a report (Seneschal 0.4.0):** of a run's time, what went to getting the code ready (clone or fetch, checkout, patch, install). It is kept between none and the run's whole time.
+
+### What changed
+
+- **seneschal.ts:**
+  - `SeneschalCheckKind` gains `checks`. `CHECK_KINDS`, which `jobOf` takes by default, doesn't, so a worker gets one only by naming it.
+  - `SeneschalTask` gains `remote` and `patch` (text); `SeneschalNeeds` gains `tools`; `SeneschalOutcome` gains `prepMs`.
+  - `SeneschalJob` gains `remote`, `tools` and `patch`. `jobOf(t, kinds, { patches })` checks each again (a remote that isn't a path, an option or another transport; tools off the list; a patch only on `checks`, only for a worker that applies patches).
+  - `SeneschalWorkOptions` gains `clones` and `patches`; `seneschalWork` sends them, and with `clones` asks with no `repos`.
+  - New `remoteOf` and `patchOf`.
+
+### Before you update
+
+- Nothing: an agent that doesn't name `checks` works as before. An older Seneschal refuses a `checks` task, and it runs as before.
+
 ## 2.92.0
 
 **A release now proves it can sign before it builds, and reuses the signed native files of a release before whose native sources haven't changed, so most releases don't need SimplySign Desktop at all.**
