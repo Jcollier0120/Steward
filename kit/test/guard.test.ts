@@ -137,7 +137,8 @@ test('for real, it asks Windows for an administrator (Start-Process -Verb RunAs)
   const o = options();
   await G.guardCommand('uninstall', { ...o, out: (l) => lines.push(l), runner: r.runner, dev: true });
   const command = r.calls[0].args.at(-1)!;
-  assert.match(command, /Start-Process -FilePath '.*powershell\.exe' -Verb RunAs -Wait -PassThru/);
+  assert.match(command, /\$f = '.*powershell\.exe'; \$a = .*-Action uninstall/);
+  assert.match(command, /Start-Process -FilePath \$f -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList \$a/);
   assert.match(command, /-Action uninstall/);
   assert.match(command, /-Countdown 60/);
   assert.ok(command.includes(`-Log ${path.join(o.dataDir, 'guard-uninstall.log')}`) || command.includes(`-Log "${path.join(o.dataDir, 'guard-uninstall.log')}"`), command);
@@ -193,19 +194,74 @@ test("the elevated run's log is made afresh and printed when it ends; 1223 says 
   assert.ok(!existsSync(log));
 });
 
+test("the administrator prompt is asked for Castellan.exe where Manor installs it (MANOR_HOME, or the user's .manor), unless told otherwise", async () => {
+  const r = recorder();
+  await G.guardCommand('install', { ...options(), runner: r.runner });
+  assert.ok(r.calls[0].args.at(-1)!.includes(psQuote(G.castellanPath())), 'by default: where Manor puts it');
+  await G.guardCommand('install', { ...options({ castellan: 'C:\\m\\Castellan.exe' }), runner: r.runner });
+  assert.ok(r.calls[1].args.at(-1)!.includes("$c = 'C:\\m\\Castellan.exe'"));
+  await G.guardCommand('install', { ...options({ castellan: null }), runner: r.runner });
+  assert.ok(!r.calls[2].args.at(-1)!.includes('Castellan'), 'null: PowerShell alone');
+  const viaRun = recorder();
+  await G.runElevated('C:\\x\\install-guard.ps1', [], { log: path.join(home, 'via-run.log'), out: () => {}, runner: viaRun.runner, castellan: 'C:\\m\\Castellan.exe' });
+  await G.runElevated('C:\\x\\install-guard.ps1', [], { log: path.join(home, 'via-run.log'), out: () => {}, runner: viaRun.runner, castellan: null });
+  assert.ok(viaRun.calls[0].args.at(-1)!.includes("$c = 'C:\\m\\Castellan.exe'"));
+  assert.ok(!viaRun.calls[1].args.at(-1)!.includes('Castellan'));
+  assert.equal(G.castellanPath({ MANOR_HOME: 'D:\\m' }, 'C:\\Users\\x'), path.join('D:\\m', 'app', 'bin', 'Castellan.exe'));
+  assert.equal(G.castellanPath({}, 'C:\\Users\\x'), path.join('C:\\Users\\x', '.manor', 'app', 'bin', 'Castellan.exe'));
+  assert.equal(G.castellanPath({ MANOR_HOME: '' }, 'C:\\Users\\x'), path.join('C:\\Users\\x', '.manor', 'app', 'bin', 'Castellan.exe'));
+});
+
+test("given Castellan.exe, the command runs it with '--admin ' in front of the arguments; without, it asks for Windows PowerShell as before", () => {
+  const inner = '-NoProfile -File "C:\\g\\install-guard.ps1" -Action install';
+  const via = G.elevatedCommand(inner, 'C:\\m\\app\\bin\\Castellan.exe');
+  assert.match(via, /^\$c = 'C:\\m\\app\\bin\\Castellan\.exe'; /);
+  assert.ok(via.includes(`[version]'${G.CASTELLAN_ADMIN_FROM}'`), 'only from the first Castellan that takes --admin');
+  assert.equal(G.CASTELLAN_ADMIN_FROM, '0.17.7');
+  assert.ok(via.includes(`$a = ${psQuote(inner)}; if (`), 'the arguments, as they are');
+  assert.ok(via.includes("{ $f = $c; $a = '--admin ' + $a }"), '--admin and a space in front');
+  assert.match(via, /Start-Process -FilePath \$f -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList \$a; exit \$p\.ExitCode } catch { Write-Output \$_\.Exception\.Message; exit 1223 }$/);
+  for (const none of [G.elevatedCommand(inner), G.elevatedCommand(inner, null), G.elevatedCommand(inner, '')]) {
+    assert.ok(!none.includes('Castellan') && !none.includes('--admin') && !none.includes('Get-Item'), none);
+    assert.ok(none.startsWith(`$f = ${psQuote(G.POWERSHELL)}; $a = ${psQuote(inner)}; try { $p = Start-Process -FilePath $f `), none);
+  }
+});
+
+test('which program it asks for, with a stand-in for Start-Process: Castellan.exe only when it is there and new enough, otherwise Windows PowerShell, silently', { skip: process.platform !== 'win32' }, async () => {
+  const stand = 'function Start-Process { param($FilePath, $Verb, [switch]$Wait, [switch]$PassThru, $WindowStyle, $ArgumentList) [Console]::WriteLine("$FilePath|$ArgumentList"); [pscustomobject]@{ ExitCode = 0 } }\n';
+  const inner = '-NoProfile -Command "exit 7"';
+  const asked = async (castellan: string | null, from?: string) => (await powershell(stand + G.elevatedCommand(inner, castellan, from))).trim();
+  const plain = `${G.POWERSHELL}|${inner}`;
+  // node.exe stands in for Castellan.exe: a program with a plain x.y.z FileVersion (22.23.3 here), so the bar can be set either side of it.
+  const fileVersion = (await powershell(`(Get-Item -LiteralPath ${psQuote(process.execPath)}).VersionInfo.FileVersion`)).trim();
+  assert.match(fileVersion, /^\d+\.\d+\.\d+/, 'this node.exe has a plain version');
+  assert.equal(await asked(process.execPath, '0.0.1'), `${process.execPath}|--admin ${inner}`, 'new enough');
+  assert.equal(await asked(process.execPath, fileVersion), `${process.execPath}|--admin ${inner}`, 'exactly the bar');
+  assert.equal(await asked(process.execPath, '9999.0.0'), plain, 'older than the bar: it would not know --admin');
+  assert.equal(await asked(path.join(home, 'no-such', 'Castellan.exe'), '0.0.1'), plain, 'missing');
+  const text = path.join(home, 'Castellan.exe');
+  writeFileSync(text, 'not a program');
+  assert.equal(await asked(text, '0.0.1'), plain, 'no version to read');
+  assert.equal(await asked(home, '0.0.1'), plain, 'a folder');
+  assert.equal(await asked(null), plain);
+});
+
 test('a folder with curly quotes, $( ) or backticks in it stays text in the elevated command: no command of its own', { skip: process.platform !== 'win32' }, async () => {
   for (const source of ['C:\\Users\\O\u2019Brien\\guard', 'C:\\x\u2019; Write-Output INJECTED; \u2019y', "C:\\x'; Write-Output INJECTED; 'y", 'C:\\a $(Write-Output INJECTED) `n b']) {
-    const r = recorder();
-    await G.guardCommand('install', { ...options({ source }), runner: r.runner });
-    const command = r.calls[0].args.at(-1)!;
-    // Parsed, never run: the commands in it, and the text Start-Process is given.
-    const parsed = JSON.parse(await powershell(`$ast = [System.Management.Automation.Language.Parser]::ParseInput(${psQuote(command)}, [ref]$null, [ref]$null)
+    for (const castellan of [null, 'C:\\Users\\O\u2019Brien\\.manor\\app\\bin\\Castellan.exe']) {
+      const r = recorder();
+      await G.guardCommand('install', { ...options({ source, castellan }), runner: r.runner });
+      const command = r.calls[0].args.at(-1)!;
+      // Parsed, never run: the commands in it, and the strings it holds (the arguments are one of them).
+      const parsed = JSON.parse(await powershell(`$ast = [System.Management.Automation.Language.Parser]::ParseInput(${psQuote(command)}, [ref]$null, [ref]$null)
 $cmds = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true))
-$start = $cmds | Where-Object { $_.GetCommandName() -eq 'Start-Process' } | Select-Object -First 1
-$i = [array]::IndexOf(@($start.CommandElements | ForEach-Object { if ($_ -is [System.Management.Automation.Language.CommandParameterAst]) { $_.ParameterName } else { '' } }), 'ArgumentList')
-[pscustomobject]@{ names = @($cmds | ForEach-Object { $_.GetCommandName() }); argumentList = $start.CommandElements[$i + 1].Value } | ConvertTo-Json -Compress`));
-    assert.deepEqual(parsed.names, ['Start-Process', 'Write-Output'], source);
-    assert.ok(parsed.argumentList.includes(`-Source "${source}"`) || parsed.argumentList.includes(`-Source ${source}`), parsed.argumentList);
+$strings = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true) | ForEach-Object { $_.Value })
+[pscustomobject]@{ names = @($cmds | ForEach-Object { $_.GetCommandName() }); strings = $strings } | ConvertTo-Json -Compress`));
+      assert.deepEqual(parsed.names, castellan ? ['Get-Item', 'Start-Process', 'Write-Output'] : ['Start-Process', 'Write-Output'], source);
+      const argumentList = parsed.strings.find((s: string) => s.includes('-Action install'));
+      assert.ok(argumentList.includes(`-Source "${source}"`) || argumentList.includes(`-Source ${source}`), argumentList);
+      if (castellan) assert.ok(parsed.strings.includes(castellan), 'the Castellan.exe path is one string too');
+    }
   }
 });
 
