@@ -10,7 +10,7 @@ import { licenseNow, licensePing, startLicenseCheck } from './license-check.ts';
 import { dutyStatus } from './service.ts';
 import { manorIcon, manorLink } from './manor.ts';
 import { namedLauncher, namedWanted } from './named.ts';
-import { launchPath, Launches, lockedPage, OPEN_GETS, pageKey, sameSecret, SIGN_IN_FIRST, signedIn, signInCookie, strictPages, withLaunch } from './page-access.ts';
+import { isNavigation, launchPath, Launches, lockedPage, manorAnswers, manorOpenUrl, OPEN_GETS, pageKey, sameSecret, SIGN_IN_FIRST, signedIn, signInCookie, strictPages, withLaunch } from './page-access.ts';
 import { hasTour, pageScript } from './react-page.ts';
 import { needsSettings, watchRequired } from './required.ts';
 import { rounds, roundTimes } from './schedule.ts';
@@ -29,7 +29,8 @@ import { peerResult, workStatus, type WorkExtra } from './work-status.ts';
  *   server.json, for the CLI's stop), from a page of its own origin, so no other site can press a button.
  * - Its GETs know who is signed in (page-access.ts, kit 2.96.0): the token, or the cookie a launch URL sets
  *   (POST /api/page-launch gives one). Strict (KIT_STRICT_PAGES=1), a GET that is neither gets only liveness and
- *   the page's own files, and GET / a page without the token; otherwise every GET is answered as before.
+ *   the page's own files; a browser opening the page is sent to Manor's /open, which opens it signed in, and GET / a
+ *   page without the token; otherwise every GET is answered as before.
  * - With `settings`, it serves the Settings panel's API (settings-kit.ts): GET and POST /api/settings,
  *   the POST guarded like every other and read with a small body limit.
  * - In demo mode (KIT_DEMO, demo.ts), its GETs are answered from the demo folder's made-up data where it has them, its
@@ -305,8 +306,13 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
           return void res.writeHead(303, { ...HEADERS, location: url.pathname + url.search, 'set-cookie': signInCookie(opts.port, key) }).end();
         }
         if (strictPages() && !OPEN_GETS.has(url.pathname) && !signedIn(req.headers, { token, key, port: opts.port })) {
+          // A browser opening the page goes to Manor, which opens this same address signed in; while Manor isn't
+          // answering (a bookmark with Castellan stopped), a page that says so, with a button to open it there.
           const m = manorLink();
-          return url.pathname === '/' ? send({ html: lockedPage({ name: APP.name, manor: m && { name: m.name, url: m.url } }) }) : send({ json: { error: SIGN_IN_FIRST }, status: 401 });
+          const open = m ? manorOpenUrl(m.url, APP.id, launchPath(url.pathname + url.search) ?? '/') : null;
+          const locked = () => send({ html: lockedPage({ name: APP.name, manor: m && { name: m.name, url: m.url }, open }) });
+          if (isNavigation(req.headers)) return m && open && (await manorAnswers(m.port)) ? void res.writeHead(303, { ...HEADERS, location: open }).end() : locked();
+          return url.pathname === '/' ? locked() : send({ json: { error: SIGN_IN_FIRST }, status: 401 });
         }
         const demo = demoDir();
         const made = demo ? demoAnswer(url.pathname, demo) : undefined;

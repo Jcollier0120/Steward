@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.96.1
+
+**A strict page sends a browser that isn't signed in to Castellan, which opens that same page signed in.**
+
+### What changed
+
+- **page-access.ts, strict pages (`KIT_STRICT_PAGES=1`, still off by default).** A browser opening a page without the sign-in (a bookmark, a link: `Sec-Fetch-Mode: navigate`, `isNavigation`) is no longer shown a page that says to open it from Castellan. It is sent (303) to Manor's `GET /open/<id>?at=<path and query>` (`manorOpenUrl`). Manor asks the page for a launch URL (`POST /api/page-launch` with the token from its server.json and `{"path": at}`) and sends the browser on to it, so the page opens at the same address, signed in, and its hash is kept. This needs Manor to answer `/open`, which comes with the step that turns strict on.
+- Only while Manor isn't answering (`manorAnswers`: its `/api/ping`, asked at most every few seconds) or isn't on this PC does the browser get `lockedPage`, so a bookmark never lands on a dead page. Its button now opens the page from Manor's `/open`, for the same address. A program's `GET /` still gets `lockedPage` (a 200, no token), and its other GETs a 401: a script's fetch is never redirected.
+- **guard-kit.ps1, the shared guard's let-go mark.** `Set-LetGo` makes `<Root>\let-go` owned by Administrators (`icacls /setowner`), whatever owner Windows gave the elevated file, so `Test-Trusted` still trusts the folder when the guard is turned on again. If that fails, the mark is taken away again and it throws. `Test-LetGo`, `Set-LetGo` and `Clear-LetGo` each check the SID themselves. Call `Set-LetGo` only for a folder `Test-Trusted` trusts: one it doesn't is no guard to share, and is turned off for every account as before (as the Lamplighter's and the Watchman's install-guard.ps1 do).
+
+### Before you update
+
+- Nothing: pages aren't strict unless `KIT_STRICT_PAGES=1`, and an agent with a guard takes the let-go steps into its own install-guard.ps1.
+
 ## 2.96.0
 
 **Ready for Castellan for everyone on a PC: a guard is shared by the accounts that have its agent, and an agent's page can ask who is reading it.**

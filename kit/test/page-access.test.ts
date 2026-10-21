@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, afterEach, test } from 'node:test';
@@ -56,6 +57,23 @@ const local = (url: string) => {
   return u.pathname + u.search;
 };
 const cookieFrom = (r: Response) => /^([^=]+)=([^;]+)/.exec(r.headers.get('set-cookie') ?? '');
+/** A browser opening the page (Sec-Fetch-Mode: navigate), as a bookmark or a link does: not a script's fetch. */
+const nav = (p: string, headers: Record<string, string> = {}) =>
+  new Promise<{ status: number; location?: string; body: string }>((resolve, reject) => {
+    const req = http.get({ host: '127.0.0.1', port, path: p, headers: { 'sec-fetch-mode': 'navigate', connection: 'close', ...headers } }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c: string) => (body += c));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, location: res.headers.location, body }));
+    });
+    req.on('error', reject);
+  });
+/** Manor's settings in the scratch MANOR_HOME, on a port of the test's own (never the real Manor's). */
+const madeUpManor = (name: string, manorPort: number) => {
+  mkdirSync(path.join(process.env.MANOR_HOME!, 'app'), { recursive: true });
+  writeFileSync(path.join(process.env.MANOR_HOME!, 'settings.json'), JSON.stringify({ name, port: manorPort }));
+  A.forgetManorAnswer();
+};
 
 // ---------------------------------------------------------------- the pieces
 
@@ -74,6 +92,10 @@ test('cookies, secrets and where a launch URL may lead', () => {
   assert.equal(A.launchPath('/print?x=1&launch=old'), '/print?x=1', 'never a code of its own');
   for (const bad of ['//evil.example/', '/\\evil.example', 'http://evil.example/', 'evil', '/a\nb', '/#/tour', 7, '/'.repeat(501)]) assert.equal(A.launchPath(bad), null, String(bad));
   assert.equal(A.withLaunch('/print?x=1', 'c0de'), '/print?x=1&launch=c0de');
+  assert.equal(A.manorOpenUrl('http://manor.localhost:18585/', 'developer-herald', '/a?b=1&c=2'), 'http://manor.localhost:18585/open/developer-herald?at=%2Fa%3Fb%3D1%26c%3D2');
+  assert.equal(A.isNavigation({ 'sec-fetch-mode': 'navigate' }), true);
+  assert.equal(A.isNavigation({ 'sec-fetch-mode': 'cors' }), false, "a script's fetch");
+  assert.equal(A.isNavigation({}), false, 'a program');
   assert.deepEqual([A.strictPages({}), A.strictPages({ KIT_STRICT_PAGES: '1' }), A.strictPages({ KIT_STRICT_PAGES: 'yes' })], [false, true, false]);
 });
 
@@ -163,8 +185,8 @@ test('not strict, a launch URL still signs the browser in, so pages are ready fo
 
 test('strict, a GET that is neither the token nor the cookie gets no data and no token: GET / a page that says to open it from Castellan', async () => {
   strict();
-  mkdirSync(path.join(process.env.MANOR_HOME!, 'app'), { recursive: true });
-  writeFileSync(path.join(process.env.MANOR_HOME!, 'settings.json'), JSON.stringify({ name: 'Hall <&>', port: 18585 }));
+  const manorPort = await freePort();
+  madeUpManor('Hall <&>', manorPort);
   const { token, close } = await agentPage();
   try {
     const page = await get('/');
@@ -172,7 +194,7 @@ test('strict, a GET that is neither the token nor the cookie gets no data and no
     const html = await page.text();
     assert.ok(!html.includes(token), 'never the token');
     assert.match(html, new RegExp(`${APP.name} opens from Hall &lt;&amp;&gt;`));
-    assert.ok(html.includes('<a href="http://manor.localhost:18585/">Open Hall &lt;&amp;&gt;</a>'));
+    assert.ok(html.includes(`<a class="button" href="http://manor.localhost:${manorPort}/open/${APP.id}?at=%2F">Open ${APP.name} from Hall &lt;&amp;&gt;</a>`), html);
     const data = await get('/api/data');
     assert.equal(data.status, 401);
     assert.equal(((await data.json()) as { error: string }).error, A.SIGN_IN_FIRST);
@@ -185,6 +207,41 @@ test('strict, a GET that is neither the token nor the cookie gets no data and no
   } finally {
     await close();
     rmSync(process.env.MANOR_HOME!, { recursive: true, force: true });
+  }
+});
+
+test("strict, a browser that isn't signed in goes to Manor, which opens that same page signed in; while Manor isn't answering, a page with a button to open it there", async () => {
+  strict();
+  const manorPort = await freePort();
+  madeUpManor('Hall', manorPort);
+  const { token, close } = await agentPage();
+  const manor = http.createServer((req, res) => (req.url === '/api/ping' ? res.writeHead(200, { 'content-type': 'application/json' }).end('{"app":"manor"}') : res.writeHead(404).end()));
+  try {
+    const openUrl = `http://manor.localhost:${manorPort}/open/${APP.id}?at=%2Fprint%3Fx%3D1`;
+    // Castellan stopped: a bookmark lands on a page that says so, never a dead one, and never a used code's.
+    const down = await nav(`/print?x=1&launch=${'0'.repeat(36)}`);
+    assert.equal(down.status, 200);
+    assert.ok(down.body.includes(`href="${openUrl.replace(/&/g, '&amp;')}"`), down.body);
+    assert.ok(!down.body.includes(token));
+    await new Promise<void>((r) => manor.listen(manorPort, '127.0.0.1', r));
+    A.forgetManorAnswer();
+    // Castellan running: straight there, for the same address.
+    const up = await nav('/print?x=1');
+    assert.equal(up.status, 303);
+    assert.equal(up.location, openUrl);
+    // What Manor's /open does then: a launch URL for that address, with the token from the page's server.json.
+    const at = new URL(up.location!).searchParams.get('at')!;
+    const signIn = await get(local((await launch(token, { path: at })).json.url!));
+    assert.equal(signIn.headers.get('location'), '/print?x=1');
+    const back = await nav('/print?x=1', { cookie: `${cookieName}=${cookieFrom(signIn)![2]}` });
+    assert.deepEqual([back.status, back.body], [200, '<p>print 1</p>'], 'the page, signed in');
+    assert.equal((await get('/print?x=1')).status, 401, "a script's fetch is never sent anywhere");
+  } finally {
+    manor.closeAllConnections();
+    await new Promise((r) => manor.close(r));
+    await close();
+    rmSync(process.env.MANOR_HOME!, { recursive: true, force: true });
+    A.forgetManorAnswer();
   }
 });
 
