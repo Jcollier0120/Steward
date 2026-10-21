@@ -2,6 +2,31 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.95.0
+
+**Ready for Castellan's "Everyone on this PC" install: each Windows account's tasks in a Task Scheduler folder of its own, and the model files once per PC.**
+
+Manor's Everyone install (Manor's docs/EVERYONE-INSTALL.md) gives each Windows account on a PC its own manor and staff. Task Scheduler's names are the PC's, not the account's, so two accounts' `\<Name>\Home page` were one task: the second install replaced the first's, which then started under the wrong account or not at all. And each account downloaded the same few GB of model files again.
+
+### What's new
+
+- **node/install.ts: a task folder per account.** `TASK_NAME` is `\<Name> (<account>)\Home page` and `WAKE_TASK_NAME` `\<Name> (<account>)\Wake`, as Manor's own tasks. `taskAccount(env)` is the account: the last part of `%USERPROFILE%` (else `USERNAME`), each of `\/:*?"<>|` made `_`; `taskName(task, env?, program?)` builds a name (the Steward's tend uses it for Manor's). `OLD_TASK_NAME` and `OLD_WAKE_TASK_NAME` are the names before.
+- **node/install.ts: the old tasks moved, never another account's.** `isOwnTask(name, deps)` reads the task's XML (`schtasks /Query /XML`) and compares its principal's `<UserId>`, a SID or a name, with this account's (`userSid()`: `whoami /user`, read once). `dropOldTask(name, deps)` ends and deletes a task only when it is this account's own. `install` drops both old tasks once the new one is registered, before it starts the page; `uninstall` deletes the new names and the old ones that are this account's. A task of the old name that belongs to another account (a PC where two accounts installed the staff before) is left as it is: that account's own update moves it.
+- **node/install.ts: `runOwnTask(names, deps)`** runs the first task of a list that runs, trying an older name only when it is this account's own; `taskDeps()` gives it the real schtasks. `install` (an unchanged copy) and `safeinstall`'s roll-back start the page through it, so a page still registered under the old name starts until its update moves it.
+- **node/everyone.ts** (new): `sharedRoot()` (`%ProgramData%\Castellan`, or `CASTELLAN_SHARED`), `hasEveryone()` (its `everyone.json`; `removed.json` alone doesn't count), `sharesModels()` (an Everyone install, and not a Manor in a folder of its own: `MANOR_HOME` without `CASTELLAN_SHARED` shares nothing) and `sharedAcceleratorsHome()` (`%ProgramData%\Castellan\accelerators`).
+- **node/accelerator-config.ts: the model files once per PC.** In an Everyone install `toolsHome()` is the shared folder, so the setup puts the model files and the model servers' builds in `%ProgramData%\Castellan\accelerators\models` and `servers`. An account whose config.json already runs servers from its own folder (set up before the PC was set up for everyone) keeps them there, as a PC set up before keeps `.reeve`. Each account keeps its own config.json, and its own server logs: `serverLogsDir()` (the keeper's reaper and NPU logs use it). `isSharedTools(dir)` says whether a folder is the shared one.
+- **node/setup.ts: two accounts setting up at once.** In the shared folder, the steps that put files in place (the downloads, the NPU server's install, runtime and model pulls, the embedding model) run under a lock (`inSharedTools`: `withLock` on `accelerators\locks\setup`, held up to six hours, stale once its holder's process is gone). The second account waits for the first, logging that another account is putting the files in place, then finds them there and downloads nothing. A download still lands as a `.part` renamed into place, and a build's zip now unpacks into a new folder whole, by one rename, so a server is never seen half there. Each account's Smith still starts its own servers.
+
+### What changed
+
+- `InstallDeps` takes `userSid?()` (`TaskDeps` is the part the task helpers need). An agent's own install tests that fake `schtasks` see a `/Query /TN <old> /XML` for each old name after `/Create`, and in `uninstall`.
+- Under `node --test`, sharing is off unless the test sets `CASTELLAN_SHARED`, so a PC with an Everyone install never decides a test.
+
+### Before you update
+
+- An agent that names its task in its own code (`\<Name>\Home page`, or `schtasks /Run` by hand) should use `TASK_NAME`, or `runOwnTask([TASK_NAME, OLD_TASK_NAME], taskDeps())`. One that only shows `TASK_NAME` in its usage text needs nothing.
+- Nothing else: the old tasks move at each agent's next update, with nothing for the person to do.
+
 ## 2.94.0
 
 **The guard's administrator prompt names Castellan, not Windows PowerShell, where Manor can show it.**

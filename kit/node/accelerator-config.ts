@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { acceleratorConfigFile, acceleratorId, acceleratorsHome, expandEnv, type Hardware, legacyConfigFile, readableConfigFile, readHardware, slug } from './accelerators.ts';
 import * as core from './core/index.js';
+import { sharedAcceleratorsHome, sharesModels } from './everyone.ts';
 import { inside, samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
 
@@ -509,16 +510,37 @@ export { acceleratorConfigFile, acceleratorsHome, legacyConfigFile, readableConf
  * folder stays there when something later makes a ~\.reeve\servers (a test image, a log), and the keeper's NPU refresh
  * and setup then use the folder its servers really run from. With no command in either, or as many in each, ~\.reeve
  * is kept when it holds a server build or a model (reeveHoldsTools), not just logs and downloads.
+ *
+ * In an Everyone install (kit 2.95.0, everyone.ts' sharesModels), the PC's shared folder instead,
+ * %ProgramData%\Castellan\accelerators, which every account reads: a second account doesn't download the same few GB
+ * again. An account whose servers already run from its own folder (set up before the PC was set up for everyone) keeps
+ * them there, as a PC set up before keeps ~\.reeve.
  */
 export function toolsHome(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
   if (env.REEVE_HOME) return env.REEVE_HOME;
-  if (env.ACCELERATORS_HOME || env.MANOR_HOME) return acceleratorsHome(env);
+  if (env.ACCELERATORS_HOME) return acceleratorsHome(env);
+  const shared = sharesModels(env) ? sharedAcceleratorsHome(env) : null;
+  if (env.MANOR_HOME && !shared) return acceleratorsHome(env);
   const reeve = path.join(home, '.reeve');
-  const own = path.join(home, '.manor', 'accelerators');
-  const pointed = commandsHome(readableConfigFile(env, home), [own, reeve], env);
+  const own = env.MANOR_HOME ? acceleratorsHome(env) : path.join(home, '.manor', 'accelerators');
+  const pointed = commandsHome(readableConfigFile(env, home), [...(shared ? [shared] : []), own, ...(env.MANOR_HOME ? [] : [reeve])], env);
   if (pointed === reeve) return reeve;
   if (pointed === own) return acceleratorsHome(env);
+  if (shared) return shared;
   return reeveHoldsTools(reeve) ? reeve : acceleratorsHome(env);
+}
+
+/** Whether `tools` is the PC's shared folder for the model files (an Everyone install's: toolsHome), however it is spelled. */
+export const isSharedTools = (tools: string, env: NodeJS.ProcessEnv = process.env) => sharesModels(env) && samePath(tools, sharedAcceleratorsHome(env));
+
+/**
+ * Where the keeper writes its servers' logs, the reaper's and the NPU refresh's: the tools home's servers\logs; where
+ * that is the PC's shared folder (kit 2.95.0), this account's own accelerators' folder's, so what an account's servers
+ * were asked and said stays the account's.
+ */
+export function serverLogsDir(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
+  const tools = toolsHome(env, home);
+  return path.join(isSharedTools(tools, env) ? acceleratorsHome(env) : tools, 'servers', 'logs');
 }
 
 /**

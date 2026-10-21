@@ -17,7 +17,7 @@ process.env[`${ENV}_PORT`] = String(await freePort());
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');
-const { DEV_CHECKOUT, MANOR_STARTUP, PAGE_START_MS, TASK_NAME, WAKE_TASK_NAME, appFolder, homePageTaskXml, install, purgeRefusal, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
+const { DEV_CHECKOUT, MANOR_STARTUP, OLD_TASK_NAME, OLD_WAKE_TASK_NAME, PAGE_START_MS, TASK_NAME, WAKE_TASK_NAME, appFolder, dropOldTask, isOwnTask, runOwnTask, taskAccount, taskName, homePageTaskXml, install, purgeRefusal, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
 const { ANNOUNCEMENT, announcementOf, checkAnnouncement, kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl, sumsText, zipName } = await import('./fixture/src/kit/release.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 
@@ -35,11 +35,31 @@ function place() {
   return { dir, release, data: path.join(dir, `.${APP.id}`) };
 }
 
-/** Stand-ins for Task Scheduler and the page: the task's /Run brings the page up, shutdown ends it. */
+/** This user's SID, as the stand-in whoami gives it, and another account's. */
+const MY_SID = 'S-1-5-21-1111-2222-3333-1001';
+const THEIR_SID = 'S-1-5-21-1111-2222-3333-1002';
+
+/** A task's definition as schtasks /Query /XML prints it: its principal, as Task Scheduler keeps it (a SID). */
+const queriedXml = (name: string, principal: string, trigger = principal) => `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><URI>${name}</URI></RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>${trigger}</UserId></LogonTrigger></Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>${principal}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+    </Principal>
+  </Principals>
+</Task>`;
+
+/**
+ * Stand-ins for Task Scheduler and the page: the task's /Run brings the page up, shutdown ends it. `state.tasks` maps
+ * each task there to the user its principal runs as: this user's SID for the ones the install registers.
+ */
 function fakes(o: { root: string; data: string; dev?: boolean; up?: boolean }) {
   const calls: string[][] = [];
   const lines: string[] = [];
-  const state = { up: o.up ?? false, shutdowns: 0, dutySets: [] as boolean[], tasks: new Set<string>() };
+  const state = { up: o.up ?? false, shutdowns: 0, dutySets: [] as boolean[], tasks: new Map<string, string>() };
   const dutyFile = path.join(o.data, 'duty.json');
   const deps: Deps = {
     root: o.root,
@@ -47,14 +67,16 @@ function fakes(o: { root: string; data: string; dev?: boolean; up?: boolean }) {
     dataDir: o.data,
     node: 'C:\\Program Files\\nodejs\\node.exe',
     user: 'PC\\pat',
+    userSid: async () => MY_SID,
     pageUrl: `http://${APP.id}.localhost:1/`,
     home: path.dirname(o.data),
     schtasks: async (args) => {
       calls.push(args);
       const [verb, , name] = args;
-      if (verb === '/Create') state.tasks.add(name);
+      const missing = { code: 1, out: 'ERROR: The system cannot find the file specified.' };
+      if (verb === '/Create') state.tasks.set(name, MY_SID);
       if (verb === '/Delete') state.tasks.delete(name);
-      if (verb === '/Query') return state.tasks.has(name) ? { code: 0, out: name } : { code: 1, out: 'ERROR: The system cannot find the file specified.' };
+      if (verb === '/Query') return state.tasks.has(name) ? { code: 0, out: args.includes('/XML') ? queriedXml(name, state.tasks.get(name)!) : name } : missing;
       if (verb === '/Run') state.up = true;
       return { code: 0, out: 'SUCCESS' };
     },
@@ -77,6 +99,9 @@ function fakes(o: { root: string; data: string; dev?: boolean; up?: boolean }) {
 }
 
 const verbs = (calls: string[][]) => calls.map((c) => c[0]);
+
+/** An install's looks at the tasks' old names (isOwnTask), when neither is there. */
+const OLD_LOOKS = ['/Query', '/Query'];
 
 // ---------------------------------------------------------------- installed copies and checkouts
 
@@ -109,7 +134,7 @@ test('the sign-in task runs open from app at sign-in, hidden, with no time limit
   const node = 'C:\\Program Files\\nodejs\\node.exe';
   const args = taskArguments(node, app);
   assert.equal(args, `--headless "${node}" "${app}\\src\\cli.ts" open`);
-  assert.equal(TASK_NAME, `\\${APP.name}\\Home page`);
+  assert.equal(TASK_NAME, `\\${APP.name} (${taskAccount()})\\Home page`);
   const xml = homePageTaskXml({ node, app, user: 'PC\\pat', pageUrl: 'http://agent.localhost:1/' });
   assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-16"?>'));
   assert.ok(xml.includes(`<URI>${TASK_NAME}</URI>`));
@@ -135,6 +160,124 @@ test('the sign-in task runs open from app at sign-in, hidden, with no time limit
   assert.equal(bytes.subarray(2).toString('utf16le'), xml);
 });
 
+// ---------------------------------------------------------------- a task folder for each account
+
+test("each account's tasks are in a folder of its own, named after the agent and the profile folder", () => {
+  assert.equal(taskAccount({ USERPROFILE: 'C:\\Users\\Jcoll', USERNAME: 'jeremy' }), 'Jcoll', "the profile folder's name, which renaming the account doesn't change");
+  assert.equal(taskAccount({ USERPROFILE: 'C:\\Users\\Pat Smith\\' }), 'Pat Smith');
+  assert.equal(taskAccount({ USERPROFILE: 'C:\\Users\\a:b*c?"d<e>f|g' }), 'a_b_c__d_e_f_g', "what Task Scheduler won't take in a name");
+  assert.equal(taskAccount({ USERNAME: 'pat' }), 'pat', "the user's name without a profile folder");
+  assert.equal(taskAccount({}), 'user');
+  const env = { USERPROFILE: 'C:\\Users\\Jcoll' };
+  assert.equal(taskName('Home page', env), `\\${APP.name} (Jcoll)\\Home page`);
+  assert.equal(taskName('Wake', env), `\\${APP.name} (Jcoll)\\Wake`);
+  assert.equal(taskName('Home page', env, 'Manor'), '\\Manor (Jcoll)\\Home page', "another program's, as Manor names its own");
+  assert.equal(WAKE_TASK_NAME, taskName('Wake'));
+  assert.equal(OLD_TASK_NAME, `\\${APP.name}\\Home page`, 'the name before kit 2.95.0');
+  assert.equal(OLD_WAKE_TASK_NAME, `\\${APP.name}\\Wake`);
+  assert.ok(homePageTaskXml({ node: 'C:\\node.exe', app: 'C:\\a', user: 'PC\\pat', pageUrl: 'http://a.localhost:1/' }).includes(`<URI>${TASK_NAME}</URI>`));
+});
+
+test("a task is this account's own when its principal is this user: by SID, or by name; not by its logon trigger", async () => {
+  const answer = (out: string | null) => ({ schtasks: async () => (out === null ? { code: 1, out: 'ERROR: The system cannot find the file specified.' } : { code: 0, out }), user: 'PC\\pat', userSid: async () => MY_SID });
+  assert.equal(await isOwnTask(OLD_TASK_NAME, answer(queriedXml(OLD_TASK_NAME, MY_SID))), true);
+  assert.equal(await isOwnTask(OLD_TASK_NAME, answer(queriedXml(OLD_TASK_NAME, MY_SID.toLowerCase()))), true, 'a SID in any case');
+  assert.equal(await isOwnTask(OLD_TASK_NAME, answer(queriedXml(OLD_TASK_NAME, THEIR_SID))), false, "another account's");
+  assert.equal(await isOwnTask(OLD_TASK_NAME, answer(queriedXml(OLD_TASK_NAME, THEIR_SID, MY_SID))), false, "the principal's user decides, not the logon trigger's");
+  assert.equal(await isOwnTask(OLD_TASK_NAME, answer(queriedXml(OLD_TASK_NAME, 'PC\\pat'))), true, 'a name, as Task Scheduler may keep it');
+  assert.equal(await isOwnTask(OLD_TASK_NAME, answer(queriedXml(OLD_TASK_NAME, 'pat'))), true, 'the name alone');
+  assert.equal(await isOwnTask(OLD_TASK_NAME, answer(queriedXml(OLD_TASK_NAME, 'PC\\sam'))), false);
+  assert.equal(await isOwnTask(OLD_TASK_NAME, answer(queriedXml(OLD_TASK_NAME, 'OTHERPC\\pat'))), false, 'another domain\'s user of the same name');
+  assert.equal(await isOwnTask(OLD_TASK_NAME, answer(null)), false, 'no such task');
+  assert.equal(await isOwnTask(OLD_TASK_NAME, answer('<Task></Task>')), false, 'no principal');
+  assert.equal(await isOwnTask(OLD_TASK_NAME, { ...answer(queriedXml(OLD_TASK_NAME, MY_SID)), userSid: async () => null }), false, "this user's SID unknown: never taken for ours");
+});
+
+test("an install moves this account's own tasks off their old names, and leaves another account's be", async () => {
+  // This account's old tasks: the home page by SID, the wake task by name.
+  const p = place();
+  const f = fakes({ root: p.release, data: p.data });
+  f.state.tasks.set(OLD_TASK_NAME, MY_SID).set(OLD_WAKE_TASK_NAME, 'PC\\pat');
+  assert.equal(await install({}, f.deps), 0, f.lines.join('\n'));
+  assert.deepEqual(f.calls.map((c) => c.slice(0, 3)), [
+    ['/Create', '/TN', TASK_NAME],
+    ['/Query', '/TN', OLD_TASK_NAME],
+    ['/End', '/TN', OLD_TASK_NAME],
+    ['/Delete', '/TN', OLD_TASK_NAME],
+    ['/Query', '/TN', OLD_WAKE_TASK_NAME],
+    ['/End', '/TN', OLD_WAKE_TASK_NAME],
+    ['/Delete', '/TN', OLD_WAKE_TASK_NAME],
+    ['/Run', '/TN', TASK_NAME],
+  ]);
+  assert.deepEqual([...f.state.tasks.keys()], [TASK_NAME]);
+  const said = f.lines.join('\n');
+  assert.ok(said.includes(`Its task ${OLD_TASK_NAME} is ${TASK_NAME} now, in this account's own folder.`), said);
+  assert.ok(said.includes(`Its task ${OLD_WAKE_TASK_NAME} is gone: its page registers ${WAKE_TASK_NAME} as it starts.`), said);
+
+  // Another account's, of the same names: never ended, never deleted.
+  const q = place();
+  const g = fakes({ root: q.release, data: q.data });
+  g.state.tasks.set(OLD_TASK_NAME, THEIR_SID).set(OLD_WAKE_TASK_NAME, 'PC\\sam');
+  assert.equal(await install({}, g.deps), 0, g.lines.join('\n'));
+  assert.deepEqual(verbs(g.calls), ['/Create', ...OLD_LOOKS, '/Run']);
+  assert.deepEqual([...g.state.tasks.keys()].sort(), [OLD_TASK_NAME, OLD_WAKE_TASK_NAME, TASK_NAME].sort());
+  assert.doesNotMatch(g.lines.join('\n'), /in this account's own folder|is gone/);
+
+  // A task that couldn't be registered under its new name leaves the old one working.
+  const r = place();
+  const h = fakes({ root: r.release, data: r.data });
+  h.state.tasks.set(OLD_TASK_NAME, MY_SID);
+  const schtasks = h.deps.schtasks;
+  h.deps.schtasks = async (args) => (args[0] === '/Create' ? (h.calls.push(args), { code: 1, out: 'ERROR: Access is denied.' }) : schtasks(args));
+  assert.equal(await install({}, h.deps), 1);
+  assert.deepEqual(verbs(h.calls), ['/Create']);
+  assert.ok(h.state.tasks.has(OLD_TASK_NAME));
+});
+
+test("uninstall deletes the tasks by their new names, and by the old ones only where they're this account's", async () => {
+  const p = place();
+  const f = fakes({ root: p.release, data: p.data });
+  assert.equal(await install({ noStart: true }, f.deps), 0);
+  f.state.tasks.set(OLD_TASK_NAME, MY_SID).set(OLD_WAKE_TASK_NAME, THEIR_SID);
+  f.calls.length = 0;
+  assert.equal(await uninstall({}, f.deps), 0, f.lines.join('\n'));
+  assert.deepEqual(f.calls.filter((c) => c[0] === '/Delete').map((c) => c[2]), [TASK_NAME, OLD_TASK_NAME]);
+  assert.deepEqual([...f.state.tasks.keys()], [OLD_WAKE_TASK_NAME], "another account's task of the old name stays");
+  assert.ok(f.lines.includes(`Deleted the task ${OLD_TASK_NAME}.`));
+});
+
+test("a task is run by its new name, else by its old one only when that's this account's", async () => {
+  const fake = (tasks: Record<string, string>) => {
+    const runs: string[] = [];
+    const d = {
+      user: 'PC\\pat',
+      userSid: async () => MY_SID,
+      schtasks: async (args: string[]) => {
+        const [verb, , name] = args;
+        if (!(name in tasks)) return { code: 1, out: 'ERROR: The system cannot find the file specified.' };
+        if (verb === '/Run') runs.push(name);
+        return { code: 0, out: verb === '/Query' ? queriedXml(name, tasks[name]) : 'SUCCESS' };
+      },
+    };
+    return { d, runs };
+  };
+  const both = fake({ [TASK_NAME]: MY_SID, [OLD_TASK_NAME]: MY_SID });
+  assert.equal((await runOwnTask([TASK_NAME, OLD_TASK_NAME], both.d)).name, TASK_NAME);
+  assert.deepEqual(both.runs, [TASK_NAME], 'the new name first');
+
+  const old = fake({ [OLD_TASK_NAME]: MY_SID });
+  const ran = await runOwnTask([TASK_NAME, OLD_TASK_NAME], old.d);
+  assert.deepEqual([ran.code, ran.name, old.runs], [0, OLD_TASK_NAME, [OLD_TASK_NAME]], 'an older install of this account');
+
+  const theirs = fake({ [OLD_TASK_NAME]: THEIR_SID });
+  const none = await runOwnTask([TASK_NAME, OLD_TASK_NAME], theirs.d);
+  assert.deepEqual([none.code, none.name, theirs.runs], [1, TASK_NAME, []], "another account's is never run");
+  assert.match(none.out, /cannot find/);
+
+  assert.equal(await dropOldTask(OLD_TASK_NAME, theirs.d), false, "and never dropped");
+  assert.equal(await dropOldTask(OLD_TASK_NAME, fake({}).d), false, 'a task that isn\'t there');
+});
+
 // ---------------------------------------------------------------- install
 
 test("with Castellan in Startup apps, Manor starts the staff: the task has no sign-in trigger, and runs only when asked", async () => {
@@ -151,7 +294,7 @@ test("with Castellan in Startup apps, Manor starts the staff: the task has no si
   assert.equal(await install({}, f.deps), 0);
   const registered = readFileSync(taskXmlFile(p.data)).subarray(2).toString('utf16le');
   assert.doesNotMatch(registered, /LogonTrigger/, 'Manor starts it at sign-in');
-  assert.deepEqual(verbs(f.calls), ['/Create', '/Run'], 'the install still starts it through its task');
+  assert.deepEqual(verbs(f.calls), ['/Create', ...OLD_LOOKS, '/Run'], 'the install still starts it through its task');
   assert.ok(f.lines.some((l) => /task: .+ \(open, when asked: Manor starts it at sign-in\)/.test(l)));
 
   // Without Manor's entry: at sign-in, as before.
@@ -172,9 +315,11 @@ test('a fresh install copies the release to app, goes on duty, registers the tas
   assert.ok(existsSync(path.join(app, 'art', 'icon.svg')) && existsSync(path.join(app, 'release.json')));
   assert.ok(!existsSync(`${app}.new`) && !existsSync(`${app}.old`));
   assert.deepEqual(f.state.dutySets, [true]);
-  assert.deepEqual(verbs(f.calls), ['/Create', '/Run']);
+  assert.deepEqual(verbs(f.calls), ['/Create', ...OLD_LOOKS, '/Run']);
   assert.deepEqual(f.calls[0], ['/Create', '/TN', TASK_NAME, '/XML', taskXmlFile(p.data), '/F']);
-  assert.deepEqual(f.calls[1], ['/Run', '/TN', TASK_NAME]);
+  assert.deepEqual(f.calls[1], ['/Query', '/TN', OLD_TASK_NAME, '/XML']);
+  assert.deepEqual(f.calls[2], ['/Query', '/TN', OLD_WAKE_TASK_NAME, '/XML']);
+  assert.deepEqual(f.calls[3], ['/Run', '/TN', TASK_NAME]);
   const xml = readFileSync(taskXmlFile(p.data));
   assert.deepEqual([...xml.subarray(0, 2)], [0xff, 0xfe]);
   assert.ok(xml.subarray(2).toString('utf16le').includes(`${app}\\src\\cli.ts`));
@@ -201,7 +346,7 @@ test('an update ends the running page, replaces app and keeps the duty it had', 
   assert.ok(!existsSync(`${app}.new`) && !existsSync(`${app}.old`));
   assert.deepEqual(f.state.dutySets, [], 'duty is left as it was');
   assert.equal(JSON.parse(readFileSync(f.dutyFile, 'utf8')).onDuty, false);
-  assert.deepEqual(verbs(f.calls), ['/Create', '/Run']);
+  assert.deepEqual(verbs(f.calls), ['/Create', ...OLD_LOOKS, '/Run']);
   assert.match(f.lines.join('\n'), /updated from 1\.0\.0[\s\S]*off duty/);
 });
 
@@ -344,7 +489,7 @@ test('when app can\'t be moved at all (a shell is in it), the release is copied 
   assert.ok(existsSync(path.join(app, 'art', 'icon.svg')));
   assert.ok(!existsSync(path.join(app, 'src', 'gone.ts')) && !existsSync(path.join(app, 'old-folder')), 'nothing of the old release is left');
   assert.ok(!existsSync(`${app}.new`) && !existsSync(`${app}.old`));
-  assert.deepEqual(verbs(f.calls), ['/Create', '/Run']);
+  assert.deepEqual(verbs(f.calls), ['/Create', ...OLD_LOOKS, '/Run']);
   assert.match(f.lines.join('\n'), /held open \(a shell or another program is in it\), so the release was copied into it/);
 });
 
@@ -376,7 +521,7 @@ test('--no-start installs and registers the task, but neither starts it nor chan
   const f = fakes({ root: p.release, data: p.data });
   assert.equal(await install({ noStart: true }, f.deps), 0);
   assert.ok(existsSync(path.join(appFolder(p.data), 'src', 'cli.ts')));
-  assert.deepEqual(verbs(f.calls), ['/Create']);
+  assert.deepEqual(verbs(f.calls), ['/Create', ...OLD_LOOKS]);
   assert.deepEqual(f.state.dutySets, []);
 });
 
@@ -436,9 +581,9 @@ test('uninstall ends the page, deletes the task and removes app, and keeps the d
   writeFileSync(path.join(p.data, 'state.json'), '{}');
   f.calls.length = 0;
   // The agent woke the PC for its work (wake.ts): that task goes too.
-  f.state.tasks.add(WAKE_TASK_NAME);
+  f.state.tasks.set(WAKE_TASK_NAME, MY_SID);
   assert.equal(await uninstall({}, f.deps), 0, f.lines.join('\n'));
-  assert.deepEqual(verbs(f.calls), ['/Query', '/End', '/Delete', '/Query', '/End', '/Delete']);
+  assert.deepEqual(verbs(f.calls), ['/Query', '/End', '/Delete', '/Query', '/End', '/Delete', ...OLD_LOOKS]);
   assert.deepEqual(f.calls[2], ['/Delete', '/TN', TASK_NAME, '/F']);
   assert.deepEqual(f.calls[5], ['/Delete', '/TN', WAKE_TASK_NAME, '/F']);
   assert.deepEqual([...f.state.tasks], []);
@@ -449,7 +594,7 @@ test('uninstall ends the page, deletes the task and removes app, and keeps the d
 
   f.calls.length = 0;
   assert.equal(await uninstall({ purge: true }, f.deps), 0, 'a task that is already gone is fine');
-  assert.deepEqual(verbs(f.calls), ['/Query', '/Query']);
+  assert.deepEqual(verbs(f.calls), ['/Query', '/Query', ...OLD_LOOKS]);
   assert.ok(!existsSync(p.data));
 });
 

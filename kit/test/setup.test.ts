@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
@@ -1129,4 +1130,108 @@ test("setup takes llama.cpp's builds the manor signed, never ggml-org's unsigned
   assert.match(none.problems.join('\n'), /no llama\.cpp build signed for the manor \(Jcollier0120\/Manor-releases\) has cuda-12\.4-x64 \(looked at 0\)/);
   // ggml-org's own (KIT_LLAMA_UNSIGNED=1, to try a build): its folder is named by its build, as before.
   assert.equal(path.basename((await plan(RELEASES)).targets[0].folder!), 'b11749-cuda-12.4-x64');
+});
+
+// ---------------------------------------------------------------- the PC's shared folder (Everyone install, kit 2.95.0)
+
+const { inSharedTools, sharedSetupLock, unpack } = await import('./fixture/src/kit/setup.ts');
+const { sharedAcceleratorsHome } = await import('./fixture/src/kit/everyone.ts');
+const { until } = await import('./until.ts');
+
+/** Runs `fn` with this PC set up for everyone in a shared folder of the test's own (CASTELLAN_SHARED). */
+async function inEveryone<T>(fn: (tools: string) => Promise<T>, o: { everyone?: boolean } = {}): Promise<T> {
+  const shared = mkdtempSync(path.join(process.env.REEVE_HOME!, 'castellan-'));
+  if (o.everyone ?? true) writeFileSync(path.join(shared, 'everyone.json'), '{}');
+  const had = process.env.CASTELLAN_SHARED;
+  process.env.CASTELLAN_SHARED = shared;
+  try {
+    return await fn(sharedAcceleratorsHome());
+  } finally {
+    if (had === undefined) delete process.env.CASTELLAN_SHARED;
+    else process.env.CASTELLAN_SHARED = had;
+  }
+}
+
+test("two accounts' setups at once in the PC's shared folder: one downloads, the other waits and finds it all in place", async () => {
+  await inEveryone(async (tools) => {
+    // The models a few bytes each, so they can be written whole.
+    const small = async (repo: string) => (await hf(repo))?.map((m, i) => ({ ...m, size: 100 + i })) ?? null;
+    const plan = () => planSetup({ detection: parseDetection(DESKTOP_NO_NPU), ids: ['gpu-nvidia-geforce-rtx-4090'], kinds: ['chat'], raw: {}, releases: RELEASES, hfFiles: small, home: tools, localAppData: LOCAL });
+    // Both planned before either has put anything in place: each would download it all.
+    const [first, second] = [await plan(), await plan()];
+    assert.ok(first.downloads.length >= 2 && first.downloads.every((d) => !d.have));
+    assert.ok(first.downloads.filter((d) => d.unpackTo).every((d) => d.marker && path.dirname(d.marker) === d.unpackTo), 'each zip says which file shows it unpacked');
+    const lines = { first: [] as string[], second: [] as string[] };
+    const got = { first: [] as string[], second: [] as string[] };
+    const io = (who: 'first' | 'second') => ({
+      ...fakeIo,
+      log: (l: string) => lines[who].push(l),
+      download: async (d: { what: string; dest: string; size: number; unpackTo?: string }) => {
+        got[who].push(d.what);
+        // The first holds the folder until the second has found it held.
+        if (who === 'first') await until(() => lines.second.some((l) => /waiting for it/.test(l)), 20_000, 'the second setup to wait for the first');
+        mkdirSync(path.dirname(d.dest), { recursive: true });
+        writeFileSync(d.dest, d.unpackTo ? 'zip' : Buffer.alloc(d.size));
+      },
+      // Each zip its own file: the build's llama-server.exe, the CUDA runtime's cudart64_12.dll.
+      unpack: (zip: string, into: string) => {
+        mkdirSync(into, { recursive: true });
+        const marker = first.downloads.find((d) => path.basename(d.dest) === path.basename(zip))?.marker;
+        assert.ok(marker, zip);
+        writeFileSync(path.join(into, path.basename(marker)), 'x');
+      },
+    });
+    const one = runSetup(first, {}, io('first'));
+    await until(() => got.first.length > 0, 10_000, 'the first setup to start downloading');
+    const two = runSetup(second, {}, io('second'));
+    const [a, b] = await Promise.all([one, two]);
+    assert.deepEqual([a.problems, b.problems], [[], []]);
+    assert.deepEqual(got.first, first.downloads.map((d) => d.what), 'the first downloads everything');
+    assert.deepEqual(got.second, [], 'the second downloads nothing again');
+    assert.ok(lines.second.some((l) => l === `another account on this PC is putting the local AI's files in ${tools}: waiting for it`), lines.second.join('\n'));
+    assert.equal(lines.second.filter((l) => /already in place, from another account's setup/.test(l)).length, second.downloads.length);
+    assert.deepEqual(b.entries.map((e) => e.chat?.startCommand?.[0]), a.entries.map((e) => e.chat?.startCommand?.[0]), 'both run the one build');
+    assert.ok(!existsSync(sharedSetupLock(tools)), 'the lock is given back');
+  });
+});
+
+test("setup takes no lock in an account's own folder, nor where the PC has no Everyone install", async () => {
+  const own = mkdtempSync(path.join(process.env.REEVE_HOME!, 'own-tools-'));
+  assert.equal(await inSharedTools(own, () => {}, async (shared) => shared), false);
+  assert.ok(!existsSync(sharedSetupLock(own)));
+  await inEveryone(async (tools) => {
+    assert.equal(await inSharedTools(tools, () => {}, async (shared) => shared), false, 'removed.json alone, or nothing: no Everyone install');
+    assert.ok(!existsSync(sharedSetupLock(tools)));
+  }, { everyone: false });
+  await inEveryone(async (tools) => {
+    assert.equal(await inSharedTools(own, () => {}, async (shared) => shared), false, 'an account whose servers run from its own folder');
+    let held = false;
+    assert.equal(await inSharedTools(tools, () => {}, async (shared) => ((held = existsSync(sharedSetupLock(tools))), shared)), true);
+    assert.ok(held, 'the shared folder is held while files go in');
+    // What fails in it gives the lock back, and says why.
+    await assert.rejects(inSharedTools(tools, () => {}, async () => { throw new Error('the download broke'); }), /the download broke/);
+    assert.ok(!existsSync(sharedSetupLock(tools)));
+  });
+});
+
+test('a new build folder is unpacked whole, in one rename; into a folder that is there, its files are moved in', { skip: process.platform !== 'win32' && 'tar.exe is Windows\'' }, () => {
+  const dir = mkdtempSync(path.join(process.env.REEVE_HOME!, 'unpack-'));
+  const src = path.join(dir, 'src', 'llama-b1-bin');
+  mkdirSync(src, { recursive: true });
+  for (const f of ['llama-server.exe', 'ggml.dll']) writeFileSync(path.join(src, f), f);
+  const zip = path.join(dir, 'llama.zip');
+  const tar = path.join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'tar.exe');
+  execFileSync(tar, ['-a', '-c', '-f', zip, '-C', path.join(dir, 'src'), 'llama-b1-bin']);
+  const into = path.join(dir, 'servers', 'llama.cpp', 'b1-cuda');
+  unpack(zip, into);
+  assert.deepEqual(readdirSync(into).sort(), ['ggml.dll', 'llama-server.exe'], 'its one wrapping folder dropped');
+  assert.deepEqual(readdirSync(path.dirname(into)), ['b1-cuda'], 'nothing half-unpacked is left beside it');
+  // A second zip of the same build (cudart's): its files join what's there.
+  writeFileSync(path.join(into, 'cudart64_12.dll'), 'cudart');
+  writeFileSync(path.join(src, 'ggml.dll'), 'newer');
+  rmSync(zip);
+  execFileSync(tar, ['-a', '-c', '-f', zip, '-C', path.join(dir, 'src'), 'llama-b1-bin']);
+  unpack(zip, into);
+  assert.deepEqual(readdirSync(into).sort(), ['cudart64_12.dll', 'ggml.dll', 'llama-server.exe']);
+  assert.equal(readFileSync(path.join(into, 'ggml.dll'), 'utf8'), 'newer');
 });

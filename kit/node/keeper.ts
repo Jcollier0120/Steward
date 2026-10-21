@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type Accelerator, acceleratorConfigFile, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, kindOfId, readableConfigFile, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serves, toolsHome } from './accelerator-config.ts';
+import { type Accelerator, acceleratorConfigFile, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, kindOfId, readableConfigFile, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverLogsDir, serves, toolsHome } from './accelerator-config.ts';
 import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
 import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
@@ -494,7 +494,7 @@ export function otherTurn(a: Accelerator, kind: EndpointKind, list: Accelerator[
  */
 export function reapedServers(
   accelerators: Accelerator[],
-  logDir = path.join(toolsHome(), 'servers', 'logs'),
+  logDir = serverLogsDir(),
   idle: { npuMs?: number; otherMs?: number; npuMsFor?: (program: string, kind: EndpointKind) => number; otherMsFor?: (a: Accelerator) => number | undefined } = {},
   lockDirs: ((a: Accelerator) => string[]) | string = lockDirsOf,
   o: { keepGpuOut?: boolean } = {},
@@ -717,8 +717,8 @@ export function logLine(file: string, line: string): void {
   } catch {}
 }
 
-/** The keeper's log: %USERPROFILE%\.reeve\servers\logs\reaper.log, where Reeve's reaper always wrote it. */
-export const reaperLog = (env: NodeJS.ProcessEnv = process.env) => path.join(toolsHome(env), 'servers', 'logs', 'reaper.log');
+/** The keeper's log: %USERPROFILE%\.reeve\servers\logs\reaper.log, where Reeve's reaper always wrote it (serverLogsDir's). */
+export const reaperLog = (env: NodeJS.ProcessEnv = process.env) => path.join(serverLogsDir(env), 'reaper.log');
 
 /** The reapers pcReaper made: keeperLook asks the PC itself (hardware, the cards', the NPU's commands) only for these. */
 const pcReapers = new WeakSet<Reaper>();
@@ -929,7 +929,7 @@ export const NPU_REFRESH_QUIET_MS = 2 * 60_000;
  * What the NPU refresh's test servers print (npu-refresh.ts), beside the keeper's log, each test after a line naming
  * its command. A server that passes its test goes on printing there until the keeper next stops it.
  */
-export const npuRefreshLog = (env: NodeJS.ProcessEnv = process.env) => path.join(toolsHome(env), 'servers', 'logs', 'npu-refresh.log');
+export const npuRefreshLog = (env: NodeJS.ProcessEnv = process.env) => path.join(serverLogsDir(env), 'npu-refresh.log');
 
 let npuRefresh: Promise<void> | null = null;
 let npuDetected: Promise<Detection> | null = null;

@@ -8,9 +8,10 @@ import { pipeline } from 'node:stream/promises';
 import { type Block, blockedIn, blockedSay, cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
 export { cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
 import { chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
-import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
+import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, isSharedTools, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
+import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
@@ -653,6 +654,8 @@ export interface Download {
   /** The file it's saved as (a .zip is unpacked into `unpackTo`). */
   dest: string;
   unpackTo?: string;
+  /** The file in `unpackTo` that says it was unpacked there (llama-server.exe, cudart64_12.dll). */
+  marker?: string;
   /** Already here (the file, or its unpacked folder): not downloaded again. */
   have: boolean;
 }
@@ -867,6 +870,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
           sha256: asset.digest?.startsWith('sha256:') ? asset.digest.slice(7) : undefined,
           dest: path.join(serversDir, 'downloads', name.replace(/^cudart-llama-bin/, `cudart-${build}`)),
           unpackTo: t.folder,
+          marker,
           have: exists(marker),
         });
       }
@@ -1000,7 +1004,12 @@ export async function download(d: Download, progress: (done: number, total: numb
 
 const tarExe = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
 
-/** Unpacks a release zip with Windows' own tar.exe into a folder (via a temporary one, so a half-unpacked build never looks whole). */
+/**
+ * Unpacks a release zip with Windows' own tar.exe into a folder (via a temporary one, so a half-unpacked build never
+ * looks whole). A new folder is put in place whole, in one rename (kit 2.95.0): a setup ended halfway, or another
+ * account's looking meanwhile, never finds its program without the files beside it. Into a folder that is there (a
+ * second zip of one build), each file is moved in.
+ */
 export function unpack(zip: string, into: string): void {
   const tmp = `${into}.unpacking`;
   rmSync(tmp, { recursive: true, force: true });
@@ -1010,12 +1019,51 @@ export function unpack(zip: string, into: string): void {
   // Some zips wrap their files in a folder.
   const entries = readdirSync(tmp);
   const from = entries.length === 1 && statSync(path.join(tmp, entries[0])).isDirectory() ? path.join(tmp, entries[0]) : tmp;
-  mkdirSync(into, { recursive: true });
+  if (!existsSync(into)) {
+    mkdirSync(path.dirname(into), { recursive: true });
+    renameSync(from, into);
+    rmSync(tmp, { recursive: true, force: true });
+    return;
+  }
   for (const e of readdirSync(from)) {
     rmSync(path.join(into, e), { recursive: true, force: true });
     renameSync(path.join(from, e), path.join(into, e));
   }
   rmSync(tmp, { recursive: true, force: true });
+}
+
+/**
+ * How long a setup waits for another account's to finish putting files in the PC's shared folder (kit 2.95.0), and
+ * how long that one may hold it before it counts as left behind. A holder whose process has ended is taken over at once.
+ */
+export const SHARED_SETUP_MS = 6 * 3600_000;
+
+/** The lock taken while files go into the PC's shared tools home: one account's setup at a time. */
+export const sharedSetupLock = (tools: string) => path.join(tools, 'locks', 'setup');
+
+/**
+ * Runs `fn` as the only one putting files in `tools`, where that is the PC's shared folder (an Everyone install,
+ * kit 2.95.0: accelerator-config.ts' isSharedTools). Two accounts' setups started at once would otherwise download the
+ * same few GB into one file, and unpack one build over the other. One that finds another's at it says so and waits,
+ * then finds in place what that one put there. In an account's own folder `fn` just runs, as it always did.
+ */
+export async function inSharedTools<T>(tools: string, log: (line: string) => void, fn: (shared: boolean) => Promise<T>, env: NodeJS.ProcessEnv = process.env): Promise<T> {
+  if (!isSharedTools(tools, env)) return fn(false);
+  const dir = sharedSetupLock(tools);
+  let entered = false;
+  try {
+    return await withLock(dir, () => ((entered = true), fn(true)), { waitMs: 0, staleMs: SHARED_SETUP_MS });
+  } catch (e) {
+    if (entered || !(e instanceof LockTimeout)) throw e;
+  }
+  log(`another account on this PC is putting the local AI's files in ${tools}: waiting for it`);
+  return withLock(dir, () => fn(true), { waitMs: SHARED_SETUP_MS, staleMs: SHARED_SETUP_MS });
+}
+
+/** Whether a download's file (or, for a zip, its unpacked folder) is in place whole, as planSetup judges it. */
+function inPlace(d: Download, exists: (p: string) => boolean): boolean {
+  if (d.unpackTo) return !!d.marker && exists(d.marker);
+  return d.size > 0 && exists(d.dest) && statSync(d.dest).size === d.size;
 }
 
 /** `llama-server --list-devices`, stdout and stderr (Windows builds lose stdout when it isn't a console). */
@@ -1057,14 +1105,21 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
     problems.push(...npu.problems);
     if (npu.entry) entries.push({ ...npu.entry, name: core.deviceName(plan.npu.support.label) });
   }
-  for (const d of plan.downloads.filter((d) => !d.have)) {
-    io.log(`downloading ${d.what} (${mb(d.size)})`);
-    await (io.download ?? download)(d, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
-    if (d.unpackTo) {
-      (io.unpack ?? unpack)(d.dest, d.unpackTo);
-      rmSync(d.dest, { force: true });
+  // In the PC's shared folder, one account at a time; what another put in place meanwhile isn't downloaded again.
+  await inSharedTools(path.dirname(plan.modelsDir), io.log, async (shared) => {
+    for (const d of plan.downloads.filter((d) => !d.have)) {
+      if (shared && inPlace(d, io.exists ?? existsSync)) {
+        io.log(`${d.what}: already in place, from another account's setup`);
+        continue;
+      }
+      io.log(`downloading ${d.what} (${mb(d.size)})`);
+      await (io.download ?? download)(d, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
+      if (d.unpackTo) {
+        (io.unpack ?? unpack)(d.dest, d.unpackTo);
+        rmSync(d.dest, { force: true });
+      }
     }
-  }
+  });
   const modelPath = (spec: ModelSpec, role: 'model' | 'mmproj') => {
     const m = plan.models.find((x) => x.model === spec.model && x.role === role);
     return m ? path.join(plan.modelsDir, path.basename(m.file)) : undefined;
@@ -1198,14 +1253,16 @@ export function overlayFiles(from: string, into: string, files: string[]): numbe
  * The NPU's own embedding server (the route's embedServer), set up: its zip downloaded (checked against its pinned
  * SHA-256) and unpacked unless it's there, the route's server's files copied over it, its model downloaded unless it's
  * there (checked the same way), or pulled by the route's program (`env`, its environment) unless it's there and its
- * pinned files checked. Null when it's ready, else what failed.
+ * pinned files checked. Null when it's ready, else what failed. In the PC's shared folder (`shared`, inSharedTools), what
+ * another account put in place meanwhile isn't downloaded again.
  */
-async function setUpNpuEmbed(n: NpuPlan, tools: string, io: NpuIo, env: NodeJS.ProcessEnv): Promise<string | null> {
+async function setUpNpuEmbed(n: NpuPlan, tools: string, io: NpuIo, env: NodeJS.ProcessEnv, shared = false): Promise<string | null> {
   const e = n.embed!;
   const es = e.server;
   const progress = (what: string) => (done: number, total: number) => io.log(`  ${what}: ${mb(done)} of ${mb(total)}`);
+  const here = (p: string) => shared && (io.exists ?? existsSync)(p);
   try {
-    if (e.download) {
+    if (e.download && !here(e.exe)) {
       io.log(`downloading ${es.server} ${es.version} for the NPU's embeddings (${mb(e.download.size)})`);
       await (io.download ?? download)(e.download, progress(e.download.what));
       (io.unpack ?? unpack)(e.download.dest, e.folder);
@@ -1216,7 +1273,7 @@ async function setUpNpuEmbed(n: NpuPlan, tools: string, io: NpuIo, env: NodeJS.P
       const copied = (io.overlay ?? overlayFiles)(expandRoute(es.overlay.from, { tools }), e.folder, es.overlay.files);
       if (copied) io.log(`copied ${copied} of the NPU server's files into ${e.folder}`);
     }
-    if (e.modelDownload && !isPulled(es.model)) {
+    if (e.modelDownload && !isPulled(es.model) && !here(e.modelDownload.dest)) {
       io.log(`downloading ${es.model.file} (${mb(e.modelDownload.size)})`);
       mkdirSync(path.dirname(e.modelDownload.dest), { recursive: true });
       await (io.download ?? download)(e.modelDownload, progress(e.modelDownload.what));
@@ -1350,54 +1407,60 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
     note: npuNoteFor(label, 'chat', reason),
     failed: step,
   });
-  if (!n.installed && n.download) {
-    const d: Download = { what: n.download.what, url: n.download.url, size: n.download.size, sha256: n.download.sha256, dest: n.download.dest, have: false };
-    io.log(`downloading ${n.route.server} ${n.route.version} (${mb(d.size)})`);
-    try {
-      await (io.download ?? download)(d, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
-    } catch (e: any) {
-      return fail(`${n.route.server}'s download failed: ${e?.message ?? e}`, 'download');
-    }
-    const inst = n.route.install;
-    if (inst.kind === 'inno') {
-      io.log(`installing ${n.route.server} for this user (no administrator)`);
-      // An Inno Setup installer prints nothing: its log is the only place it says why it stopped.
-      const log = installerLogFile(tools);
-      mkdirSync(tools, { recursive: true });
-      rmSync(log, { force: true });
-      const r = await run(d.dest, [...inst.args, `/LOG=${log}`], { timeoutMs: 15 * 60_000 });
-      if (r.code !== 0) {
-        const said = r.out.trim() ? tail(r.out) : installerSaid(readText(log));
-        return fail(`${n.route.server}'s installer ended with ${r.code}${said ? `: ${said}` : ''} (its log: ${log})`, 'install');
-      }
-      rmSync(log, { force: true });
-    } else {
-      const into = expandRoute(inst.into, { tools });
-      io.log(`unpacking ${n.route.server} into ${into}`);
-      try {
-        (io.unpack ?? unpack)(d.dest, into);
-      } catch (e: any) {
-        return fail(`${n.route.server} couldn't be unpacked: ${e?.message ?? e}`, 'install');
-      }
-    }
-    rmSync(d.dest, { force: true });
-    if (!exists(n.exe)) return fail(`${n.route.server} was installed, but ${n.exe} isn't there`, 'install');
-  }
-  // Before the pull: the server's own program pulls its models, and it needs the runtime to start.
-  if (n.runtime) {
-    const why = await installRuntime(n.runtime, io);
-    if (why) return fail(why, 'runtime');
-  }
   const env = serverEnv({ env: routeEnv(n.route, tools) });
-  for (const m of n.models) {
-    if (!m.have) {
-      io.log(`downloading ${m.id} (${mb(m.size)}) with ${n.route.server}; this takes a while`);
-      const r = await run(n.exe, m.pull, { timeoutMs: 3 * 3600_000, env });
-      if (r.code !== 0) return fail(`${n.route.server} couldn't download ${m.id} (exit ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''})`, 'pull', "its model couldn't be downloaded");
+  // Its files put in place, in the PC's shared folder one account at a time (inSharedTools): a server another account
+  // installed meanwhile isn't installed again.
+  const placed = await inSharedTools(tools, io.log, async (shared): Promise<NpuSetup | null> => {
+    if (!n.installed && n.download && !(shared && exists(n.exe))) {
+      const d: Download = { what: n.download.what, url: n.download.url, size: n.download.size, sha256: n.download.sha256, dest: n.download.dest, have: false };
+      io.log(`downloading ${n.route.server} ${n.route.version} (${mb(d.size)})`);
+      try {
+        await (io.download ?? download)(d, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
+      } catch (e: any) {
+        return fail(`${n.route.server}'s download failed: ${e?.message ?? e}`, 'download');
+      }
+      const inst = n.route.install;
+      if (inst.kind === 'inno') {
+        io.log(`installing ${n.route.server} for this user (no administrator)`);
+        // An Inno Setup installer prints nothing: its log is the only place it says why it stopped.
+        const log = installerLogFile(tools);
+        mkdirSync(tools, { recursive: true });
+        rmSync(log, { force: true });
+        const r = await run(d.dest, [...inst.args, `/LOG=${log}`], { timeoutMs: 15 * 60_000 });
+        if (r.code !== 0) {
+          const said = r.out.trim() ? tail(r.out) : installerSaid(readText(log));
+          return fail(`${n.route.server}'s installer ended with ${r.code}${said ? `: ${said}` : ''} (its log: ${log})`, 'install');
+        }
+        rmSync(log, { force: true });
+      } else {
+        const into = expandRoute(inst.into, { tools });
+        io.log(`unpacking ${n.route.server} into ${into}`);
+        try {
+          (io.unpack ?? unpack)(d.dest, into);
+        } catch (e: any) {
+          return fail(`${n.route.server} couldn't be unpacked: ${e?.message ?? e}`, 'install');
+        }
+      }
+      rmSync(d.dest, { force: true });
+      if (!exists(n.exe)) return fail(`${n.route.server} was installed, but ${n.exe} isn't there`, 'install');
     }
-    const bad = await checkPinned(m, n.support.generation, { tools, hash: io.hash });
-    if (bad.length) return fail(`${m.id} isn't the build that was checked: ${bad.join('; ')}`, 'checksum', "its model couldn't be downloaded whole");
-  }
+    // Before the pull: the server's own program pulls its models, and it needs the runtime to start.
+    if (n.runtime) {
+      const why = await installRuntime(n.runtime, io);
+      if (why) return fail(why, 'runtime');
+    }
+    for (const m of n.models) {
+      if (!m.have) {
+        io.log(`downloading ${m.id} (${mb(m.size)}) with ${n.route.server}; this takes a while`);
+        const r = await run(n.exe, m.pull, { timeoutMs: 3 * 3600_000, env });
+        if (r.code !== 0) return fail(`${n.route.server} couldn't download ${m.id} (exit ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''})`, 'pull', "its model couldn't be downloaded");
+      }
+      const bad = await checkPinned(m, n.support.generation, { tools, hash: io.hash });
+      if (bad.length) return fail(`${m.id} isn't the build that was checked: ${bad.join('; ')}`, 'checksum', "its model couldn't be downloaded whole");
+    }
+    return null;
+  });
+  if (placed) return placed;
   // Its own embedding server, where the route has one: a failure there leaves the NPU's chat as it is, and its
   // embeddings go where they went before.
   const later: string[] = [];
@@ -1410,7 +1473,7 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
   let failed: NpuFailStep | undefined;
   let embedAt: { exe: string; model: string; turn?: string } | undefined;
   if (n.embed) {
-    const why = await setUpNpuEmbed(n, tools, io, env);
+    const why = await inSharedTools(tools, io.log, (shared) => setUpNpuEmbed(n, tools, io, env, shared));
     if (why) {
       noEmbed(`${n.embed.server.server} ${n.embed.server.version}, its embedding server, couldn't be set up: ${why}`, "its embedding server couldn't be set up");
       failed = 'embed';
