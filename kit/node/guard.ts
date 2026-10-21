@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { psQuote } from './ps.ts';
 
@@ -167,18 +168,42 @@ export async function isElevated(runner: Runner = run): Promise<boolean> {
   return r.code === 0 && r.out.trim() === 'True';
 }
 
+/** The first Manor whose Castellan.exe takes `--admin`: an older one would start Manor's page task and exit 0. */
+export const CASTELLAN_ADMIN_FROM = '0.17.7';
+
+/** Manor's signed launcher, where Manor installs it (%USERPROFILE%\.manor, or MANOR_HOME). Whether it is there, and new enough, the elevated command finds out. */
+export const castellanPath = (env: NodeJS.ProcessEnv = process.env, home = os.homedir()) => path.join(env.MANOR_HOME || path.join(home, '.manor'), 'app', 'bin', 'Castellan.exe');
+
 /**
- * Runs a guard script elevated, through Windows' administrator prompt (UAC: Start-Process -Verb RunAs), which waits
- * for the person; its window can't print here, so the script writes `log` (made afresh: any file there is removed
- * first), printed when it ends. The script's path and arguments go to Start-Process as one single-quoted string
- * (psQuote), so nothing in them is ever a command. Exit 1223: the person said no to the prompt, or it couldn't open.
- * (The Watchman's 30 minutes, the Lamplighter's 15, as `timeoutMs`.)
+ * The PowerShell command that runs Windows PowerShell with `inner` (its arguments) through Windows' administrator
+ * prompt (UAC: Start-Process -Verb RunAs), waits, and exits with its exit code, or 1223 (with the reason written out)
+ * when the prompt was turned down or couldn't open. Given `castellan` (Manor's Castellan.exe), it asks Windows for
+ * that instead, with `--admin` in front: it runs the same Windows PowerShell, so the prompt names Castellan, signed by
+ * its publisher, not Windows PowerShell. The command checks the file itself, so no process runs for it: one that is
+ * missing, unreadable or older than `from` (it doesn't know `--admin`) is passed over silently, and PowerShell is
+ * asked for as before. Every path and the arguments go in as single-quoted strings (psQuote), so none is ever a command.
  */
-export async function runElevated(script: string, args: string[], o: { log: string; out: (line: string) => void; runner?: Runner; timeoutMs?: number }): Promise<number> {
+export function elevatedCommand(inner: string, castellan?: string | null, from = CASTELLAN_ADMIN_FROM): string {
+  const pick = castellan
+    ? `$c = ${psQuote(castellan)}; $v = $null; try { $v = [version](Get-Item -LiteralPath $c -ErrorAction Stop).VersionInfo.FileVersion } catch {}; $f = ${psQuote(POWERSHELL)}; $a = ${psQuote(inner)}; if ($v -and $v -ge [version]${psQuote(from)}) { $f = $c; $a = '--admin ' + $a }; `
+    : `$f = ${psQuote(POWERSHELL)}; $a = ${psQuote(inner)}; `;
+  return `${pick}try { $p = Start-Process -FilePath $f -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList $a; exit $p.ExitCode } catch { Write-Output $_.Exception.Message; exit 1223 }`;
+}
+
+/**
+ * Runs a guard script elevated, through Windows' administrator prompt (elevatedCommand: Start-Process -Verb RunAs, asked
+ * for Manor's Castellan.exe `--admin` where it is there and new enough, so the prompt names Castellan; otherwise for
+ * Windows PowerShell), which waits for the person; its window can't print here, so the script writes `log` (made afresh:
+ * any file there is removed first), printed when it ends. The script's path and arguments go to Start-Process as one
+ * single-quoted string (psQuote), so nothing in them is ever a command. Exit 1223: the person said no to the prompt, or
+ * it couldn't open. (The Watchman's 30 minutes, the Lamplighter's 15, as `timeoutMs`.) `castellan` is Manor's
+ * Castellan.exe (castellanPath() unless given); null: ask for Windows PowerShell alone.
+ */
+export async function runElevated(script: string, args: string[], o: { log: string; out: (line: string) => void; runner?: Runner; timeoutMs?: number; castellan?: string | null }): Promise<number> {
   const runner = o.runner ?? run;
   rmSync(o.log, { force: true });
   const inner = [...psFile(script, [...args, '-Log', o.log])].map((a) => (/[\s'"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)).join(' ');
-  const outer = `try { $p = Start-Process -FilePath ${psQuote(POWERSHELL)} -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList ${psQuote(inner)}; exit $p.ExitCode } catch { Write-Output $_.Exception.Message; exit 1223 }`;
+  const outer = elevatedCommand(inner, o.castellan === undefined ? castellanPath() : o.castellan);
   const r = await runner(POWERSHELL, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', outer], { timeoutMs: o.timeoutMs ?? 15 * 60_000 });
   if (existsSync(o.log)) for (const line of readFileSync(o.log, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)) if (line.trim()) o.out(line);
   if (r.code === 1223) o.out(`The administrator prompt was turned down or couldn't open, so nothing changed. ${r.out.trim()}`.trim());
@@ -205,6 +230,8 @@ export interface GuardCommandOptions {
   runner?: Runner;
   /** How long the elevated run may take: 15 minutes unless given. */
   timeoutMs?: number;
+  /** Manor's Castellan.exe, which the administrator prompt is asked for where it is there and new enough (castellanPath() unless given; null: Windows PowerShell alone, tests). */
+  castellan?: string | null;
 }
 
 /**
@@ -242,7 +269,7 @@ export async function guardCommand(action: 'install' | 'uninstall', o: GuardComm
     return r.code;
   }
   o.out(`${doing} the guard: Windows asks for an administrator (it may wait in the taskbar).`);
-  return runElevated(script, args, { log: path.join(o.dataDir, `guard-${action}.log`), out: o.out, runner, timeoutMs });
+  return runElevated(script, args, { log: path.join(o.dataDir, `guard-${action}.log`), out: o.out, runner, timeoutMs, castellan: o.castellan });
 }
 
 // ---------------------------------------------------------------- uninstalling the agent

@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.94.0
+
+**The guard's administrator prompt names Castellan, not Windows PowerShell, where Manor can show it.**
+
+Turning a guard on or off asks Windows for an administrator, and Windows named what it was asked to run: Windows PowerShell, which looks alarming in a prompt the person didn't expect to see named so. Manor 0.17.7 added `Castellan.exe --admin <arguments>`, its signed launcher, which runs the same Windows PowerShell with the same arguments and ends with its exit code. The prompt now asks for that where it is there, so it names Castellan, signed by its publisher.
+
+### What's new
+
+- **guard.ts:** `elevatedCommand(inner, castellan?, from?)` builds the PowerShell command that asks for the administrator prompt (`runElevated`, so `guardCommand`, turning a guard on or off). Given Manor's `Castellan.exe` (`castellanPath()`: `%USERPROFILE%\.manor\app\bin\Castellan.exe`, or under `MANOR_HOME`), it asks Windows for that with `--admin` in front of the arguments, when its FileVersion is `CASTELLAN_ADMIN_FROM` (0.17.7) or later. The command checks the file itself, so no extra process runs. A Castellan.exe that is missing, unreadable or older (it doesn't know `--admin`: it would start Manor's page task and exit 0) is passed over silently, and Windows PowerShell is asked for as before.
+- **guard.ts:** `runElevated` and `GuardCommandOptions` take `castellan` (`castellanPath()` unless given; `null`: Windows PowerShell alone, as tests do).
+
+### What changed
+
+- The elevated command is now `$f = <powershell>; $a = <arguments>; ... try { $p = Start-Process -FilePath $f ... -ArgumentList $a; exit $p.ExitCode } catch { ...; exit 1223 }`: the program and its arguments are set first, so Castellan.exe can replace the program. Exit codes are as they were, 1223 when the prompt is turned down or can't open.
+
+### Before you update
+
+- Nothing in an agent's code: the Watchman and the Lamplighter have this in their own guard already, and no agent takes it from the kit yet. An agent that turns its guard on or off through `guardCommand` or `runElevated` gets the Castellan prompt once its Manor is 0.17.7 or later, with no change of its own.
+
 ## 2.93.3
 
 **A test file that never ends no longer holds a whole check run, and the PC's turn, until its time limit.**
