@@ -15,7 +15,7 @@ process.env.MANOR_HOME = path.join(home, 'manor');
 process.env.LOCALAPPDATA = path.join(home, 'local');
 
 const F = await import('./fixture/src/kit/ffmpeg.ts');
-const { BUILDS, findTools, getFfmpeg, grindArgs, HEIWARD_BIN, lastError, ownBin, SHARED_SOURCE, toolDirs, _resetFfmpegFetch } = F;
+const { BUILDS, findTools, getFfmpeg, grindArgs, HEIWARD_BIN, lastError, olderBuild, ownBin, SHARED_SOURCE, toolDirs, _resetFfmpegFetch } = F;
 const { RANKED } = await import('./fixture/src/kit/video-encoders.ts');
 const { dataDir } = await import('./fixture/src/app.ts');
 type Run = typeof F.run;
@@ -56,17 +56,17 @@ function lay(bin: string) {
   writeFileSync(path.join(bin, 'ffprobe.exe'), 'b');
 }
 
-test('the manor\'s build is n8.1.3-5 (DirectShow too), from its public releases, pinned by SHA-256 for each processor', () => {
+test('the manor\'s build is n8.1.3-6 (DirectShow too, and signed), from its public releases, pinned by SHA-256 for each processor', () => {
   assert.deepEqual(Object.keys(BUILDS).sort(), ['arm64', 'x64']);
   for (const b of Object.values(BUILDS)) {
-    assert.equal(b.version, 'n8.1.3-5');
-    assert.match(b.url, /^https:\/\/github\.com\/Jcollier0120\/Manor-releases\/releases\/download\/ffmpeg-v8\.1\.3-5\//, "the public LGPL build, from the manor's releases, pinned");
+    assert.equal(b.version, 'n8.1.3-6');
+    assert.match(b.url, /^https:\/\/github\.com\/Jcollier0120\/Manor-releases\/releases\/download\/ffmpeg-v8\.1\.3-6\//, "the public LGPL build, from the manor's releases, pinned");
     assert.ok(b.url.endsWith(`/${b.folder}.zip`));
   }
-  // The Chronicler's pins, as they were: a change here is a new build, and its release says what's in it.
-  assert.equal(BUILDS.arm64.sha256, 'df1a3752bec324cc7eab06810fb51d379bcc4f5eeb16d732a3d64b9244105156');
-  assert.equal(BUILDS.x64.sha256, 'a7e22587b514b0f4583bd34970572baed95158d1b47c87a18dc7e5f28403fe55');
-  assert.equal(ownBin('C:\\Users\\me\\.manor', 'x64'), 'C:\\Users\\me\\.manor\\ffmpeg\\n8.1.3-5\\ffmpeg-8.1.3-lean-lgpl-shared-win-x64\\bin');
+  // The signed build's pins: a change here is a new build, and its release says what's in it.
+  assert.equal(BUILDS.arm64.sha256, '28a4b3aaf6d2fa99815d079d6d1619e57e235f5b98333aae7ff2e9de9b85eebf');
+  assert.equal(BUILDS.x64.sha256, 'e26b6ec56ee89b39acb94792916bcb8346df1094f62432b5c18f56b286b1b12b');
+  assert.equal(ownBin('C:\\Users\\me\\.manor', 'x64'), 'C:\\Users\\me\\.manor\\ffmpeg\\n8.1.3-6\\ffmpeg-8.1.3-lean-lgpl-shared-win-x64\\bin');
   assert.equal(ownBin('C:\\Users\\me\\.manor', 'ia32'), null);
 });
 
@@ -82,7 +82,7 @@ test("fetched once into Manor's folder for every agent, when it's the pinned bui
     assert.deepEqual(f.calls, [BUILDS.arm64.url]);
     assert.deepEqual(readdirSync(path.join(p.manor, 'ffmpeg')), [BUILDS.arm64.version], 'no zip, half-unpacked folder or lock left beside it');
     assert.equal(existsSync(p.data), false, "the agent's own folder isn't touched");
-    assert.deepEqual(lines, ['Fetching FFmpeg n8.1.3-5 (LGPL) from github.com', `FFmpeg n8.1.3-5 is in ${ownBin(p.manor, 'arm64')}`]);
+    assert.deepEqual(lines, ['Fetching FFmpeg n8.1.3-6 (LGPL) from github.com', `FFmpeg n8.1.3-6 is in ${ownBin(p.manor, 'arm64')}`]);
     // Another agent (its own data folder) finds it there.
     const other = await getFfmpeg({ dataDir: path.join(p.data, '..', 'other'), home: p.manor, arch: 'arm64', deps: f.deps });
     assert.deepEqual(other, { dir: ownBin(p.manor, 'arm64') });
@@ -206,6 +206,25 @@ test("FFmpeg is looked for in the setting, PATH, where it was found last time, t
   assert.deepEqual(chronicler.map((d) => d.source), ["the Chronicler's own FFmpeg", "the Miller's FFmpeg", "Heiward's FFmpeg"]);
   assert.equal(toolDirs({ setting: '', pathDirs: [], own: 'C:\\o' })[0].source, "the Fixture's own FFmpeg", "the agent's APP.name when no name is given");
   assert.equal(HEIWARD_BIN, '%LOCALAPPDATA%\\Programs\\Heiward\\bin');
+});
+
+test("an older, unsigned build of the manor's isn't looked at, but for the setting's: the signed one is fetched in its place (kit 2.93.2)", () => {
+  const older = (base: string, v: string, arch = 'x64') => `${base}\\ffmpeg\\${v}\\ffmpeg-8.1.3-lean-lgpl-shared-win-${arch}\\bin`;
+  assert.equal(olderBuild(older('C:\\Users\\me\\.manor', 'n8.1.3-5')), true);
+  assert.equal(olderBuild(older('C:\\Users\\me\\.miller', 'n8.1.3-4', 'arm64') + '\\'), true);
+  assert.equal(olderBuild(ownBin('C:\\Users\\me\\.manor', 'x64')!), false, 'the pinned build');
+  assert.equal(olderBuild('E:\\builds\\ffmpeg\\n7.1\\ffmpeg-7.1-full_build\\bin'), false, 'a build of your own');
+  const dirs = toolDirs({
+    setting: '',
+    pathDirs: [older('C:\\Users\\me\\.chronicler', 'n8.1.3-5')],
+    remembered: older('C:\\Users\\me\\.manor', 'n8.1.3-5'),
+    shared: ownBin('C:\\Users\\me\\.manor', 'x64'),
+    also: [{ dir: older('C:\\Users\\me\\.miller', 'n8.1.3-4'), source: "the Miller's FFmpeg" }],
+    env: { LOCALAPPDATA: 'C:\\L' },
+  });
+  assert.deepEqual(dirs.map((d) => d.source), [SHARED_SOURCE, "Heiward's FFmpeg"]);
+  const named = toolDirs({ setting: older('C:\\Users\\me\\.manor', 'n8.1.3-5') + '\\ffmpeg.exe', pathDirs: [], env: { LOCALAPPDATA: 'C:\\L' } });
+  assert.equal(named[0].source, 'the FFmpeg setting', "the person's choice stands");
 });
 
 test("an FFmpeg that ran -version isn't started again just to ask, until it changes; one that didn't run is asked again", async (t) => {

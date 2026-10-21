@@ -37,23 +37,25 @@ export interface Build {
 }
 
 /** The manor's public releases repository, where every release of the staff is too: FFmpeg by its tag, ffmpeg-v<version>. */
-const RELEASE = 'https://github.com/Jcollier0120/Manor-releases/releases/download/ffmpeg-v8.1.3-5';
+const RELEASE = 'https://github.com/Jcollier0120/Manor-releases/releases/download/ffmpeg-v8.1.3-6';
 
 /**
  * Pinned builds by processor (Node's process.arch). The source and the build's configuration are in its release.
  * n8.1.3-5 (the Chronicler's pin since 2026-10-12) is n8.1.3-4 (the Miller's) with DirectShow, which reads capture cards.
+ * n8.1.3-6 (kit 2.93.2) is n8.1.3-5 with every program and library in it signed by the manor: Smart App Control blocks
+ * an unsigned program no one else runs, as the manor's build was.
  */
 export const BUILDS: Record<string, Build> = {
   arm64: {
-    version: 'n8.1.3-5',
+    version: 'n8.1.3-6',
     url: `${RELEASE}/ffmpeg-8.1.3-lean-lgpl-shared-win-arm64.zip`,
-    sha256: 'df1a3752bec324cc7eab06810fb51d379bcc4f5eeb16d732a3d64b9244105156',
+    sha256: '28a4b3aaf6d2fa99815d079d6d1619e57e235f5b98333aae7ff2e9de9b85eebf',
     folder: 'ffmpeg-8.1.3-lean-lgpl-shared-win-arm64',
   },
   x64: {
-    version: 'n8.1.3-5',
+    version: 'n8.1.3-6',
     url: `${RELEASE}/ffmpeg-8.1.3-lean-lgpl-shared-win-x64.zip`,
-    sha256: 'a7e22587b514b0f4583bd34970572baed95158d1b47c87a18dc7e5f28403fe55',
+    sha256: 'e26b6ec56ee89b39acb94792916bcb8346df1094f62432b5c18f56b286b1b12b',
     folder: 'ffmpeg-8.1.3-lean-lgpl-shared-win-x64',
   },
 };
@@ -65,6 +67,16 @@ export const BUILDS: Record<string, Build> = {
 export function ownBin(base: string, arch: string = process.arch): string | null {
   const b = BUILDS[arch];
   return b ? path.join(base, 'ffmpeg', b.version, b.folder, 'bin') : null;
+}
+
+/**
+ * Whether a folder is an older build of the manor's than the one pinned (<base>\ffmpeg\<version>\<folder>\bin, the
+ * manor's lean build under a version no longer pinned). Those before n8.1.3-6 weren't signed, and Smart App Control
+ * blocks them, so they're passed over (toolDirs) and the pinned build is fetched in their place.
+ */
+export function olderBuild(dir: string): boolean {
+  const m = /[\\/]ffmpeg[\\/]([^\\/]+)[\\/]ffmpeg-[^\\/]*-lean-lgpl-shared-win-[^\\/]+[\\/]bin[\\/]?$/i.exec(dir);
+  return !!m && !Object.values(BUILDS).some((b) => b.version === m[1]);
 }
 
 /** Whether a folder holds both programs (whether they run, findTools checks). */
@@ -216,7 +228,8 @@ export interface ToolDir {
  * used last (`remembered`, from its state), so a build of your own it found once keeps being found; the manor's build
  * the staff share (`shared`, getFfmpeg); the agent's own (`own`, fetched into its data folder before kit 2.88.0, or
  * when Manor's folder couldn't be made); any `also` (the Chronicler looked at the Miller's); Heiward's. No folder of
- * anyone's PC is built in: a build elsewhere goes in the FFmpeg setting.
+ * anyone's PC is built in: a build elsewhere goes in the FFmpeg setting. An older build of the manor's (olderBuild) is
+ * left out, but for the setting's: the pinned one is fetched in its place.
  */
 export function toolDirs(o: {
   setting: string;
@@ -230,12 +243,12 @@ export function toolDirs(o: {
   agent?: string;
 }): ToolDir[] {
   const out: ToolDir[] = [];
-  const add = (dir: string, source: string) => {
-    if (dir && !out.some((d) => d.dir.toLowerCase() === dir.toLowerCase())) out.push({ dir, source });
+  const add = (dir: string, source: string, chosen = false) => {
+    if (dir && (chosen || !olderBuild(dir)) && !out.some((d) => d.dir.toLowerCase() === dir.toLowerCase())) out.push({ dir, source });
   };
   if (o.setting.trim()) {
     const s = expandEnv(o.setting.trim(), o.env);
-    add(/\.exe$/i.test(s) ? path.dirname(s) : s, 'the FFmpeg setting');
+    add(/\.exe$/i.test(s) ? path.dirname(s) : s, 'the FFmpeg setting', true);
   }
   for (const d of o.pathDirs) if (d.trim()) add(d.trim(), 'PATH');
   if (o.remembered) add(o.remembered, 'the FFmpeg it used last');
