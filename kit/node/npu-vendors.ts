@@ -20,6 +20,17 @@ import { type AcceleratorEntry, OWN_MEMORY_GB, type Quirk, type ServeKind } from
 export type NpuVendor = 'qualcomm' | 'intel' | 'amd';
 export const NPU_VENDORS: readonly NpuVendor[] = ['qualcomm', 'intel', 'amd'];
 
+/**
+ * A maker's terms that come with something setup downloads for the NPU (kit 2.97.0): what they cover, what they say in a
+ * line, and where to read them. Setup names them, with their links, before it downloads anything they cover (npuTerms).
+ */
+export interface MakerTerms {
+  maker: string;
+  what: string;
+  says: string;
+  url: string;
+}
+
 export interface NpuModel {
   /** The id requests name (the server's model name), and the one pulled. */
   id: string;
@@ -43,6 +54,8 @@ export interface NpuModel {
   /** About how much it downloads, in bytes. */
   size: number;
   licence: string;
+  /** Its maker's terms beyond its licence, named before it's pulled (Qualcomm AI Hub's builds: their card's limits and Qualcomm's Responsible AI License). */
+  terms?: MakerTerms[];
   /**
    * Per generation: the files a pull leaves, each with its size and SHA-256, checked after the pull. `*` is every
    * generation the route takes, for a model that is the same file on each (OpenVINO's, compiled on the PC itself).
@@ -113,6 +126,8 @@ export interface NpuRoute {
   embedServer?: NpuEmbedServer;
   vision?: string;
   licence: string;
+  /** Its maker's terms for the server and what it carries, named before it's downloaded (GenieX, the QAIRT runtime inside it). */
+  terms?: MakerTerms[];
   notes: string;
 }
 
@@ -1062,6 +1077,16 @@ export function planNpu(o: {
     (embed?.modelPull ? embed.server.model.size : 0);
   const powerTool = route.powerTool ? { ...route.powerTool, exe: expandRoute(route.powerTool.exe, { tools: o.tools, env: o.env }) } : undefined;
   return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
+}
+
+/**
+ * The maker's terms that come with what the plan downloads: the server's when it's to be installed, each model's that
+ * isn't here yet. Each document once, where it's last named, so one both name (Qualcomm's Responsible AI License) comes
+ * after everything it applies to. None when nothing they cover is downloaded: a PC set up already isn't asked again.
+ */
+export function npuTerms(p: NpuPlan): MakerTerms[] {
+  const named = [...(p.download ? (p.route.terms ?? []) : []), ...p.models.filter((m) => !m.have).flatMap((m) => m.terms ?? [])];
+  return named.filter((t, i) => !named.slice(i + 1).some((u) => u.url === t.url));
 }
 
 // ------------------------------------------------------------------------------------------------

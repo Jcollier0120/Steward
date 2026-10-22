@@ -616,6 +616,55 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
   assert.equal(tried.download!.what, 'geniex-cli-setup-windows-arm64-v0.9.2.exe');
 });
 
+test("setup names Qualcomm's terms with their links before it downloads GenieX or an AI Hub model, and not once they're here (kit 2.97.0)", async () => {
+  const tools = path.join(home, 'tools');
+  const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';
+  const FOUR_B = 'C:\\Users\\me\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json';
+  const TWO_B = 'C:\\Users\\me\\.cache\\geniex\\models\\unsloth\\Qwen3-VL-2B-Instruct-GGUF\\geniex.json';
+  const GENIEX = 'https://github.com/qualcomm/GenieX/blob/main/LICENSE';
+  const TERMS_OF_USE = 'https://www.qualcomm.com/site/terms-of-use';
+  const CARD = 'https://huggingface.co/qualcomm/Qwen3-VL-4B-Instruct';
+  const RAIL = 'https://www.qualcomm.com/site/responsible-ai-license';
+  const plan = (npu: string, have: string[]) => planSetup({ detection: parseDetection(`${npu}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(have), serverVersion: async () => null });
+  const urls = (p: Awaited<ReturnType<typeof plan>>) => p.terms.map((t) => t.url);
+
+  // A new X Elite: GenieX, the QAIRT runtime it carries, AI Hub's build of its model, and Qualcomm's Responsible AI
+  // License over them, once and last.
+  const elite = await plan(NPU.x1, []);
+  assert.deepEqual(urls(elite), [GENIEX, TERMS_OF_USE, CARD, RAIL]);
+  assert.ok(elite.terms.every((t) => t.maker === 'Qualcomm' && t.what && t.says));
+  const lines = describePlan(elite);
+  const at = lines.findIndex((l) => l.startsWith("Qualcomm's terms"));
+  assert.ok(at > lines.findIndex((l) => l.startsWith('Download: ')), 'shown with the plan, after what it downloads');
+  assert.equal(lines[at], "Qualcomm's terms come with what this downloads for the NPU: setting it up means you accept them, for everyone using this PC and your staff.");
+  assert.match(lines[at + 1], /^  GenieX, the NPU's model server \(https:\/\/github\.com\/qualcomm\/GenieX\/blob\/main\/LICENSE\): Open source under the BSD-3-Clause licence/);
+  assert.match(lines[at + 2], /QAIRT.*\(https:\/\/www\.qualcomm\.com\/site\/terms-of-use\): It comes under no licence of its own: Qualcomm keeps all rights/);
+  assert.match(lines[at + 3], /Qualcomm AI Hub.*\(https:\/\/huggingface\.co\/qualcomm\/Qwen3-VL-4B-Instruct\): Apache-2\.0, with its model card's Usage and Limitations/);
+  assert.match(lines[at + 4], /Responsible AI License.*nor may you let anyone use it, your staff included.*military purposes/);
+  assert.equal(lines.length, at + 5);
+
+  // GenieX here, its model not: the model's terms alone. Both here: none, and nothing asked again.
+  assert.deepEqual(urls(await plan(NPU.x1, [G])), [CARD, RAIL]);
+  assert.deepEqual(urls(await plan(NPU.x1, [G, FOUR_B])), []);
+  // A new X2: GenieX 0.9.1, whose model is unsloth's GGUF (Apache-2.0, no Qualcomm build): GenieX's terms alone.
+  assert.deepEqual(urls(await plan(NPU.x2, [])), [GENIEX, TERMS_OF_USE, RAIL]);
+  assert.deepEqual(urls(await plan(NPU.x2, [G])), [], "its model pulled from unsloth's repository: no Qualcomm terms");
+  assert.deepEqual(urls(await plan(NPU.x2, [G, TWO_B])), []);
+  // Another maker's NPU: none.
+  assert.deepEqual((await planSetup({ detection: parseDetection(`${INTEL_IGPU}${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk() })).terms, []);
+
+  // As a command: the terms are logged with the plan, and the question asks for the download under them.
+  const file = path.join(home, 'terms-config.json');
+  writeFileSync(file, '{}');
+  const log: string[] = [];
+  const asked: string[] = [];
+  const no = await setupCommand({ ids: [], detection: parseDetection(`${NPU.x1}\n${ARM}`), releases: async () => RELEASES, hfFiles: hf, configFile: file, home: tools, env: ENV, log: (l: string) => log.push(l), confirm: async (q: string) => (asked.push(q), false), io: { ...fakeNpuIo().io, exists: disk(), listDevices: async () => '' } });
+  assert.equal(no.code, 1);
+  assert.ok(log.some((l) => l.includes(RAIL)), 'named before the question');
+  assert.match(asked[0], /^Download \d+(\.\d)? GB, under the terms above\? \[y\/N\] $/);
+  assert.equal(readFileSync(file, 'utf8'), '{}', 'declined: nothing written');
+});
+
 test("installedVersion asks the route's server which version it is", async () => {
   const q = V.NPU_CATALOG.routes.qualcomm;
   const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';

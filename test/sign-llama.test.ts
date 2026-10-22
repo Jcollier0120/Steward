@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { batches, peFiles, releaseNotes, toSign, type Built } from '../tools/sign-llama.ts';
+import { batches, peFiles, pinSnippet, releaseNotes, toSign, type Built } from '../tools/sign-llama.ts';
 
 // tools/sign-llama.ts: what it signs and what its release says, without signing or downloading anything.
 const dir = mkdtempSync(path.join(tmpdir(), 'sign-llama-'));
@@ -29,7 +29,7 @@ test('sign-llama signs only the files with no signature, and stops at one whose 
 
 test("sign-llama's release notes name the source and give both sets of checksums", () => {
   const built: Built[] = [
-    { variant: 'cpu-x64', zip: 'C:\\out\\llama-b11734-bin-win-cpu-x64.zip', sha256: '11'.repeat(32), original: { name: 'llama-b11734-bin-win-cpu-x64.zip', size: 1, url: '', digest: `sha256:${'22'.repeat(32)}` }, signed: 50, signedBefore: 0 },
+    { variant: 'cpu-x64', zip: 'C:\\out\\llama-b11734-bin-win-cpu-x64.zip', size: 20606927, sha256: '11'.repeat(32), original: { name: 'llama-b11734-bin-win-cpu-x64.zip', size: 1, url: '', digest: `sha256:${'22'.repeat(32)}` }, signed: 50, signedBefore: 0 },
   ];
   const notes = releaseNotes('b11734', built, { name: 'cudart-llama-bin-win-cuda-12.4-x64.zip', size: 1, url: '', digest: `sha256:${'33'.repeat(32)}` }, 'LICENSE-llama.cpp.txt');
   assert.match(notes, /^llama\.cpp b11734: ggml-org's Windows builds, signed\./);
@@ -39,4 +39,30 @@ test("sign-llama's release notes name the source and give both sets of checksums
   assert.ok(notes.includes(`${'11'.repeat(32)}  llama-b11734-bin-win-cpu-x64.zip`), 'the signed zip');
   assert.ok(notes.includes(`${'22'.repeat(32)}  llama-b11734-bin-win-cpu-x64.zip`), "ggml-org's");
   assert.ok(notes.includes(`${'33'.repeat(32)}  cudart-llama-bin-win-cuda-12.4-x64.zip`));
+});
+
+test("sign-llama writes the kit's pin of the build it signed: the signed zips' sizes and SHA-256s, NVIDIA's runtime from ggml-org (kit 2.97.0)", () => {
+  const built: Built[] = [
+    { variant: 'cpu-x64', zip: 'C:\\out\\llama-b11734-bin-win-cpu-x64.zip', size: 20606927, sha256: '11'.repeat(32), original: { name: 'llama-b11734-bin-win-cpu-x64.zip', size: 1, url: '', digest: `sha256:${'22'.repeat(32)}` }, signed: 50, signedBefore: 0 },
+  ];
+  const cudart = { name: 'cudart-llama-bin-win-cuda-12.4-x64.zip', size: 391443627, url: 'https://github.com/ggml-org/llama.cpp/releases/download/b11734/cudart-llama-bin-win-cuda-12.4-x64.zip', digest: `sha256:${'33'.repeat(32)}` };
+  assert.equal(
+    pinSnippet('b11734', built, cudart),
+    [
+      'export const LLAMA_PIN: { build: string; signed: string; files: Record<string, PinnedDownload> } = {',
+      "  build: 'b11734',",
+      "  signed: 'llama.cpp-b11734',",
+      '  files: {',
+      `    'llama-b11734-bin-win-cpu-x64.zip': { size: 20606927, sha256: '${'11'.repeat(32)}' },`,
+      "    'cudart-llama-bin-win-cuda-12.4-x64.zip': {",
+      '      size: 391443627,',
+      `      sha256: '${'33'.repeat(32)}',`,
+      "      url: 'https://github.com/ggml-org/llama.cpp/releases/download/b11734/cudart-llama-bin-win-cuda-12.4-x64.zip',",
+      '    },',
+      '  },',
+      '};',
+      '',
+    ].join('\n'),
+    "the signed zip's own SHA-256, never ggml-org's",
+  );
 });

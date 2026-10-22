@@ -2,6 +2,31 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.97.0
+
+**Local-AI setup downloads only the llama.cpp build and models the kit pins, each checked against a SHA-256 carried in the kit, and names Qualcomm's terms before it downloads anything for a Snapdragon's NPU.**
+
+### What's new
+
+- **setup.ts: pinned downloads (`LLAMA_PIN`, `MODEL_PINS`, `pinnedRelease`, `pinnedHfFiles`, `pinnedModelUrl`, `PinnedDownload`).** llama.cpp b11734, the manor's signed copy (`llama.cpp-b11734`), for every variant: the processor's on x64 and Arm64, CUDA 12.4 with NVIDIA's runtime from ggml-org's release of b11734, Vulkan, and OpenCL for the Adreno. The models at a Hugging Face commit, fetched from `resolve/<commit>/`: Qwen3-VL-2B-Instruct's Q4_K_M and its Q8_0 projector, Qwen3-Embedding-0.6B's Q8_0, and Qwen3-Reranker-0.6B's Q8_0. Each file's size and SHA-256 are in the kit's code, taken from downloads checked on 2026-10-22 against the release's checksums and Hugging Face's own record. `llamaReleases()` returns the pin and asks GitHub nothing; `setupCommand` plans from `pinnedHfFiles` and asks Hugging Face nothing. They are the build and files setup took before, in the same folders, so a PC set up already downloads nothing again.
+- **Mirrors (`PinnedDownload.mirrors`, carried on `ReleaseAsset`, `ModelFile` and `Download`).** Other places that serve the very same file, tried in turn when the first fails or serves another file, each checked against the pinned size and SHA-256: never trusted for their own word. None is listed yet.
+- **npu-vendors.ts: a maker's terms (`MakerTerms`, `terms` on `NpuRoute` and `NpuModel`, `npuTerms`).** The Snapdragon route names GenieX's licence (BSD-3-Clause), the QAIRT runtime inside it (no licence of its own: Qualcomm's Terms of Use) and Qualcomm's Responsible AI License; AI Hub's Qwen3-VL-4B adds its model card's Usage and Limitations. `npuTerms(plan)` gives the ones that come with what the plan downloads (the route's when its server is to be installed, a model's when it is to be pulled; each document once, the Responsible AI License last; none once everything is there).
+- **`SetupPlan.terms` and `termsLines`.** `describePlan` prints them after the download's size, one line each with its link, under "Qualcomm's terms come with what this downloads for the NPU: setting it up means you accept them, for everyone using this PC and your staff.", and `setupCommand`'s question becomes "Download 5.1 GB, under the terms above? [y/N]".
+- **The Steward's tools/sign-llama.ts** writes the pin of the build it signs (`llama-pin.ts`, beside the zips), to put in setup.ts.
+
+### What changed
+
+- **`download` keeps only a pinned file.** One without a 64-character SHA-256 is refused before anything is fetched. A source that serves another size or SHA-256 is refused, and the next mirror is tried. When none serves the pinned file it throws "<file> wasn't downloaded: <host> served a file whose SHA-256 is …, not the … the kit pins: refused. Nothing was installed from it; setting up again tries once more", leaving no `.part` and a file already at `dest` as it was.
+- **Gone from setup.ts:** `KIT_LLAMA_UNSIGNED` (ggml-org's newest builds), `parseSignedReleases` (the releases repository's newest signed build), `ghExe` and the GitHub API calls. `hfFiles` stays, to find a new pin, and returns `HfFile[]`; setup never plans from it.
+- A build lacking what a card needs now says "the llama.cpp build this kit pins (b11734) has no <variant>". The first line of a run reads "Looking up what this PC needs (llama.cpp b11734 and the models, as this kit pins them)...".
+- **npu-vendors.json:** the Snapdragon's embedding model is fetched at Qwen's commit (the same file and SHA-256 as before), and the Qualcomm route's and AI Hub model's `licence` lines say what the review found.
+- NPU-VENDORS.md's Licences table and ACCELERATORS.md's "Pinned downloads" say the same.
+
+### Before you update
+
+- An agent that imports `ghExe` or `parseSignedReleases` from the kit's setup.ts, or sets `KIT_LLAMA_UNSIGNED`, must stop: they're gone. `SetupOptions.hfFiles` and `PlanInput.hfFiles` take `(repo) => Promise<HfFile[] | null>`; a function returning Hugging Face's list as before still fits.
+- A page that shows setup's plan before its Set up button should show `plan.terms` there, with their links: they're in the plan's lines too.
+
 ## 2.96.2
 
 **An update's copy of the version before goes once the new one has held up, a swap cut short is put back, and uninstall takes the kept copies with it.**

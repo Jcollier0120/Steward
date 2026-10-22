@@ -15,7 +15,7 @@ import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, installedVersion, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
+import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuMeasured, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -23,14 +23,16 @@ import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, exp
  * maker (npu-vendors.ts: GenieX on a Snapdragon, OpenVINO Model Server on an Intel Core Ultra, FastFlowLM on an AMD
  * Ryzen AI 300), downloaded and checked against its pinned SHA-256, installed for this user, its models pulled, and its
  * entry written only once it has answered a test request; llama.cpp's server for each graphics card (and the
- * processor, when there's no card) from the newest of ggml-org/llama.cpp's builds the manor has signed (kit 2.90.0:
- * SIGNED_LLAMA_REPO), the models as GGUF files from Hugging
- * Face, and an accelerator entry per card in config.json. It says how much it will download and asks first. An NPU
- * entry a person configured is left as it is; on a PC with no NPU (or one the manor can't use) the one install wrote by
- * default (and only that one) is dropped.
+ * processor, when there's no card) from the build the kit pins (kit 2.97.0: LLAMA_PIN, the manor's signed copy of
+ * ggml-org's build, SIGNED_LLAMA_REPO), the models as GGUF files from Hugging Face at the revisions the kit pins
+ * (MODEL_PINS), every file checked against its pinned SHA-256, and an accelerator entry per card in config.json. It says
+ * how much it will download, and whose terms come with it (Qualcomm's on a Snapdragon: SetupPlan's `terms`), and asks
+ * first. An NPU entry a person configured is left as it is; on a PC with no NPU (or one the manor can't use) the one
+ * install wrote by default (and only that one) is dropped.
  *
- * Planning is separate from downloading, and every outside answer (the release list, Hugging Face,
- * `llama-server --list-devices`) is parsed by a function of its own, so tests run on fixtures.
+ * Planning is separate from downloading, and every answer it plans from (the pinned build as a release, the pinned
+ * models as Hugging Face's file lists, `llama-server --list-devices`) is parsed or made by a function of its own, so
+ * tests run on fixtures.
  */
 
 export const LLAMA_REPO = 'ggml-org/llama.cpp';
@@ -38,8 +40,8 @@ export const LLAMA_REPO = 'ggml-org/llama.cpp';
  * Where llama.cpp's builds come from (kit 2.90.0): ggml-org's own, each .exe and .dll ggml-org left unsigned signed by
  * the manor (the Steward's tools/sign-llama.ts), in the public releases repository as `llama.cpp-<build>`. Windows'
  * Smart App Control blocks unsigned files it doesn't know (app-control.ts): on 2026-10-19 it blocked one of b11734's
- * processor variants on the gaming desktop. A build reaches the PCs only once it's signed, after the Smith's checks
- * on it: the newest signed build is the pin. KIT_LLAMA_UNSIGNED=1 takes ggml-org's newest instead, to try a build.
+ * processor variants on the gaming desktop. Setup takes the one signed build the kit pins (LLAMA_PIN), never the
+ * newest one there: a build reaches the PCs once it's signed, after the Smith's checks on it, and a kit pins it.
  */
 export const SIGNED_LLAMA_REPO = 'Jcollier0120/Manor-releases';
 export const signedLlamaTag = (build: string) => `llama.cpp-${build}`;
@@ -60,14 +62,68 @@ export interface ReleaseAsset {
   name: string;
   size: number;
   url: string;
-  /** "sha256:<hex>", when the release publishes it. */
+  /** "sha256:<hex>": the kit's pin (pinnedRelease), or what a release publishes. */
   digest?: string;
+  /** Other places that serve the very same file, tried in turn when `url` fails: checked against the same size and digest. */
+  mirrors?: string[];
 }
 export interface Release {
   tag: string;
   assets: ReleaseAsset[];
   /** The signed copy's tag in SIGNED_LLAMA_REPO (`llama.cpp-b11734`), where `tag` is its build (kit 2.90.0). */
   signed?: string;
+}
+
+/** A file the kit pins (kit 2.97.0): its size and SHA-256, which every download of it is checked against, whatever served it. */
+export interface PinnedDownload {
+  size: number;
+  sha256: string;
+  /** Where it's published, when not where its build or repository puts it. */
+  url?: string;
+  /** Other places that serve the very same file, tried in turn when the first fails: never trusted for their own word. */
+  mirrors?: string[];
+}
+
+/**
+ * The llama.cpp build setup downloads, and nothing else (kit 2.97.0): the manor's signed copy of ggml-org's b11734
+ * (SIGNED_LLAMA_REPO's `llama.cpp-b11734`), each zip at the size and SHA-256 below, taken from a download checked on
+ * 2026-10-22 against the release's own checksums.sha256 and GitHub's digests. It is the build the manor has tested: the
+ * only one signed, the one every PC set up since kit 2.90.0 runs, and the one that ran on an RTX 4080 SUPER with all
+ * three models passing the Smith's 13 checks (CUDA, 2026-10-19); its processor build ran on that desktop too, and the
+ * Adreno's is past OLDEST_BUILD. NVIDIA's CUDA runtime comes from ggml-org's release of the same build, as it is
+ * (CUDART_ZIP). A newer build reaches the PCs only with a kit that pins it: the Steward's tools/sign-llama.ts prints
+ * the pin of the build it signs.
+ */
+export const LLAMA_PIN: { build: string; signed: string; files: Record<string, PinnedDownload> } = {
+  build: 'b11734',
+  signed: 'llama.cpp-b11734',
+  files: {
+    'llama-b11734-bin-win-cpu-x64.zip': { size: 20606927, sha256: '2d66250dce46edf0a195d194aa244c751ae9dac053368d7f7258695e98347a58' },
+    'llama-b11734-bin-win-cpu-arm64.zip': { size: 13105961, sha256: 'd2d0e82beb311017f26990d95cd4a33e12d44f1dc07e75476a26f9b4ae49b1a7' },
+    'llama-b11734-bin-win-cuda-12.4-x64.zip': { size: 273862567, sha256: '70d726e7cd7028ee1a05c5434cc1a5b7b776f9c54eb0039a8b2fa9091c34567b' },
+    'llama-b11734-bin-win-vulkan-x64.zip': { size: 33424789, sha256: '283ee8dda415f3d79d366b70e6caf5065e97a58dcfe710d9e9795af6c65ae75e' },
+    'llama-b11734-bin-win-opencl-adreno-arm64.zip': { size: 13687227, sha256: '9d11dd805d0d9405f482ed9dde2233c42220e1c3c56efa856e01779952b29e03' },
+    'cudart-llama-bin-win-cuda-12.4-x64.zip': {
+      size: 391443627,
+      sha256: '8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6',
+      url: 'https://github.com/ggml-org/llama.cpp/releases/download/b11734/cudart-llama-bin-win-cuda-12.4-x64.zip',
+    },
+  },
+};
+
+/** A pinned build as setup plans from it: a release whose assets are its files, each with its pinned digest. Nothing is asked of GitHub. */
+export function pinnedRelease(pin: typeof LLAMA_PIN = LLAMA_PIN): Release {
+  return {
+    tag: pin.build,
+    signed: pin.signed,
+    assets: Object.entries(pin.files).map(([name, f]) => ({
+      name,
+      size: f.size,
+      url: f.url ?? `https://github.com/${SIGNED_LLAMA_REPO}/releases/download/${pin.signed}/${name}`,
+      digest: `sha256:${f.sha256}`,
+      ...(f.mirrors?.length ? { mirrors: [...f.mirrors] } : {}),
+    })),
+  };
 }
 
 /** The release list as GitHub's API (and `gh api`) returns it. */
@@ -78,23 +134,6 @@ export function parseReleases(json: any): Release[] {
       tag: r.tag_name,
       assets: (r.assets ?? []).map((a: any) => ({ name: String(a.name), size: Number(a.size) || 0, url: String(a.browser_download_url ?? ''), digest: typeof a.digest === 'string' ? a.digest : undefined })),
     }));
-}
-
-/**
- * The signed builds among the releases repository's releases (its staff's and FFmpeg's are skipped), each as its
- * build (`b11734`), newest first; a build signed again (`llama.cpp-b11734-2`) counts once, as its newest signing.
- * NVIDIA's runtime (CUDART_ZIP) isn't in them: llamaReleases adds it from ggml-org's release of the build.
- */
-export function parseSignedReleases(json: any): Release[] {
-  const signed = parseReleases(json)
-    .map((r) => ({ r, m: /^llama\.cpp-(b\d+)(?:-(\d+))?$/.exec(r.tag) }))
-    .filter((x): x is { r: Release; m: RegExpExecArray } => !!x.m)
-    .sort((a, b) => Number(b.m[1].slice(1)) - Number(a.m[1].slice(1)) || Number(b.m[2] ?? 1) - Number(a.m[2] ?? 1));
-  const out: Release[] = [];
-  for (const { r, m } of signed) {
-    if (!out.some((o) => o.tag === m[1])) out.push({ tag: m[1], signed: r.tag, assets: r.assets });
-  }
-  return out;
 }
 
 /** llama.cpp's Windows build for an accelerator: its variant (the asset's name between `bin-win-` and `.zip`), and CUDA's runtime. */
@@ -141,7 +180,8 @@ export const OLDEST_BUILD: Readonly<Record<string, number>> = { 'opencl-adreno-a
 
 /**
  * The newest build (b<number>, newest first as GitHub lists them) that has every asset needed, and is no older than any
- * of its variants' OLDEST_BUILD; a build still uploading lacks some.
+ * of its variants' OLDEST_BUILD; a build still uploading lacks some. Setup gives it the pinned build alone
+ * (pinnedRelease), so it says whether the pin has what these accelerators need.
  */
 export function pickRelease(releases: Release[], variants: Variant[]): { release: Release; assets: ReleaseAsset[] } | null {
   for (const r of releases) {
@@ -168,7 +208,9 @@ export interface ModelSpec {
 /**
  * Each kind's model, Qwen's own GGUF repos first, then well-known quantizers. Chat's and vision's are what kits before
  * 2.89.0 set up on cards with memory of their own, Qwen3-4B beside Qwen3-VL-4B: setup now gives every accelerator
- * SMALL_SPEC for both (specFor), and the keeper's look knows an older kit's pair by them (withChatOnVision).
+ * SMALL_SPEC for both (specFor), and the keeper's look knows an older kit's pair by them (withChatOnVision). Setup finds
+ * a model only among the files the kit pins (MODEL_PINS, kit 2.97.0), so of these repos only the pinned one answers: the
+ * quantizers' files are files of their own, never the same as Qwen's.
  */
 export const MODEL_SPECS: Record<EndpointKind, ModelSpec> = {
   chat: {
@@ -239,15 +281,60 @@ export interface ModelFile {
   url: string;
   size: number;
   sha256?: string;
+  /** Other places that serve the very same file (Download's). */
+  mirrors?: string[];
+}
+
+/** A repository's file as setup plans from it: Hugging Face's list, or the kit's pin, which gives where to fetch it. */
+export interface HfFile {
+  file: string;
+  size: number;
+  sha256?: string;
+  /** Where to fetch it, at a pinned revision; else the repository's main. */
+  url?: string;
+  mirrors?: string[];
 }
 
 /** Hugging Face's file list for a repo (GET /api/models/<repo>?blobs=true): name, size, and the LFS sha256. */
-export function parseHfFiles(json: any): { file: string; size: number; sha256?: string }[] {
+export function parseHfFiles(json: any): HfFile[] {
   return (json?.siblings ?? []).map((s: any) => ({ file: String(s.rfilename), size: Number(s.size ?? s.lfs?.size) || 0, sha256: s.lfs?.sha256 }));
 }
 
+/** A model file the kit pins (kit 2.97.0): its repository at one revision (a commit, never a branch), its size and SHA-256. */
+export interface ModelPin extends PinnedDownload {
+  repo: string;
+  revision: string;
+  file: string;
+}
+
+/**
+ * The model files setup downloads, and nothing else (kit 2.97.0): each at a Hugging Face commit, its size and SHA-256
+ * taken from a download of that commit checked on 2026-10-22 against Hugging Face's own record of it. They are the files
+ * setup took before (the first repository in each spec that had one), so a PC set up already has them. None of the
+ * quantizers' repositories holds the very same file (unsloth's, bartowski's, lmstudio-community's and ggml-org's
+ * Qwen3-VL-2B are each their own quantization), so none is a mirror.
+ */
+export const MODEL_PINS: readonly ModelPin[] = [
+  { repo: 'Qwen/Qwen3-VL-2B-Instruct-GGUF', revision: '52d6c8ffea26cc873ac5ad116f8631268d7eb503', file: 'Qwen3VL-2B-Instruct-Q4_K_M.gguf', size: 1107409952, sha256: '089d75c52f4b7ffc56ba998ffc50aae89fcafc755f9e7208aacca281dca6c2ae' },
+  { repo: 'Qwen/Qwen3-VL-2B-Instruct-GGUF', revision: '52d6c8ffea26cc873ac5ad116f8631268d7eb503', file: 'mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf', size: 445053216, sha256: 'f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82' },
+  { repo: 'Qwen/Qwen3-Embedding-0.6B-GGUF', revision: '370f27d7550e0def9b39c1f16d3fbaa13aa67728', file: 'Qwen3-Embedding-0.6B-Q8_0.gguf', size: 639150592, sha256: '06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439' },
+  { repo: 'ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF', revision: 'a02f48bb4f057028298c21fa033da2b30d7742d5', file: 'qwen3-reranker-0.6b-q8_0.gguf', size: 639153184, sha256: '22c9979ce4fbcdc5acdc310c6641c32797eff1aa980b8f7a2db8a8ea23429a48' },
+];
+
+/** Where a pinned model file is fetched: its repository at its revision. */
+export const pinnedModelUrl = (p: ModelPin) => `https://huggingface.co/${p.repo}/resolve/${p.revision}/${p.file}`;
+
+/**
+ * The pinned files of a repository as Hugging Face's file list would give them, each with where it's fetched (setup's
+ * default, kit 2.97.0: nothing is asked of Hugging Face); null for a repository the kit pins nothing in.
+ */
+export async function pinnedHfFiles(repo: string, pins: readonly ModelPin[] = MODEL_PINS): Promise<HfFile[] | null> {
+  const mine = pins.filter((p) => p.repo === repo);
+  return mine.length ? mine.map((p) => ({ file: p.file, size: p.size, sha256: p.sha256, url: p.url ?? pinnedModelUrl(p), ...(p.mirrors?.length ? { mirrors: [...p.mirrors] } : {}) })) : null;
+}
+
 /** The first repo that has each model's file (and, for one that sees, a projector): what to download. A kind stands for its MODEL_SPECS'. */
-export async function findModels(wanted: (EndpointKind | ModelSpec)[], files: (repo: string) => Promise<{ file: string; size: number; sha256?: string }[] | null>): Promise<{ models: ModelFile[]; problems: string[] }> {
+export async function findModels(wanted: (EndpointKind | ModelSpec)[], files: (repo: string) => Promise<HfFile[] | null>): Promise<{ models: ModelFile[]; problems: string[] }> {
   const models: ModelFile[] = [];
   const problems: string[] = [];
   for (const want of wanted) {
@@ -259,9 +346,9 @@ export async function findModels(wanted: (EndpointKind | ModelSpec)[], files: (r
       const main = list.find((f) => spec.file.test(f.file));
       const proj = spec.mmproj ? spec.mmproj.map((re) => list.find((f) => re.test(f.file))).find(Boolean) : undefined;
       if (!main || (spec.mmproj && !proj)) continue;
-      const picks: [ModelFile['role'], { file: string; size: number; sha256?: string }][] = [['model', main], ...(proj ? [['mmproj', proj] as [ModelFile['role'], typeof proj]] : [])];
+      const picks: [ModelFile['role'], HfFile][] = [['model', main], ...(proj ? [['mmproj', proj] as [ModelFile['role'], HfFile]] : [])];
       for (const [role, f] of picks) {
-        models.push({ model: spec.model, role, repo, file: f.file, url: `https://huggingface.co/${repo}/resolve/main/${f.file}`, size: f.size, sha256: f.sha256 });
+        models.push({ model: spec.model, role, repo, file: f.file, url: f.url ?? `https://huggingface.co/${repo}/resolve/main/${f.file}`, size: f.size, sha256: f.sha256, ...(f.mirrors?.length ? { mirrors: f.mirrors } : {}) });
       }
       found = true;
       break;
@@ -650,7 +737,10 @@ export interface Download {
   what: string;
   url: string;
   size: number;
+  /** Its pinned SHA-256: download refuses a file without one (kit 2.97.0), and a file that isn't this one. */
   sha256?: string;
+  /** Other places that serve the very same file, tried in turn when `url` fails: each checked against the same size and SHA-256. */
+  mirrors?: string[];
   /** The file it's saved as (a .zip is unpacked into `unpackTo`). */
   dest: string;
   unpackTo?: string;
@@ -707,6 +797,12 @@ export interface SetupPlan {
   models: ModelFile[];
   /** Bytes still to download. */
   downloadBytes: number;
+  /**
+   * The makers' terms that come with what it downloads (kit 2.97.0), each once: Qualcomm's on a Snapdragon, when GenieX
+   * or an AI Hub model is to be downloaded (npu-vendors.ts' npuTerms). Named, with their links, before anything is
+   * downloaded: describePlan's lines, and an app's own page from these. None when nothing it downloads has any.
+   */
+  terms: MakerTerms[];
   problems: string[];
   serversDir: string;
   modelsDir: string;
@@ -720,8 +816,10 @@ export interface PlanInput {
   kinds?: EndpointKind[];
   /** config.json's content now. */
   raw: Record<string, any>;
+  /** llama.cpp's builds to pick from: the pinned one alone (pinnedRelease), but in tests. */
   releases: Release[];
-  hfFiles: (repo: string) => Promise<{ file: string; size: number; sha256?: string }[] | null>;
+  /** Each repository's files: the pinned ones (pinnedHfFiles), but in tests. */
+  hfFiles: (repo: string) => Promise<HfFile[] | null>;
   /** Where servers and models go (toolsHome: the accelerators' folder, or %USERPROFILE%\.reeve on a PC set up before). */
   home: string;
   /** The environment the NPU route's paths are expanded from (tests give one). */
@@ -850,9 +948,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   // Which build.
   const variants = targets.filter((t) => t.variant).map((t) => t.variant!);
   const picked = variants.length ? pickRelease(o.releases, variants) : null;
-  const unsigned = o.releases.length > 0 && o.releases.every((r) => !r.signed);
-  const where = unsigned ? `${LLAMA_REPO} release` : `llama.cpp build signed for the manor (${SIGNED_LLAMA_REPO})`;
-  if (variants.length && !picked) problems.push(`no ${where} has ${[...new Set(variants.map((v) => v.variant))].join(', ')} (looked at ${o.releases.length})`);
+  if (variants.length && !picked) problems.push(`the llama.cpp build this kit pins (${o.releases.map((r) => r.tag).join(', ') || 'none'}) has no ${[...new Set(variants.map((v) => v.variant))].join(', ')}`);
   const build = picked?.release.tag ?? null;
   const downloads: Download[] = [];
   if (picked) {
@@ -868,6 +964,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
           url: asset.url,
           size: asset.size,
           sha256: asset.digest?.startsWith('sha256:') ? asset.digest.slice(7) : undefined,
+          ...(asset.mirrors?.length ? { mirrors: asset.mirrors } : {}),
           dest: path.join(serversDir, 'downloads', name.replace(/^cudart-llama-bin/, `cudart-${build}`)),
           unpackTo: t.folder,
           marker,
@@ -886,7 +983,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     const dest = path.join(modelsDir, path.basename(m.file));
     // The NPU's embedding server downloads the same file first (it's set up first): once is enough.
     const npuGets = npu?.embed?.modelDownload?.dest.toLowerCase() === dest.toLowerCase();
-    downloads.push({ what: `${m.repo}/${m.file}`, url: m.url, size: m.size, sha256: m.sha256, dest, have: npuGets || (fileSize(dest) === m.size && m.size > 0) });
+    downloads.push({ what: `${m.repo}/${m.file}`, url: m.url, size: m.size, sha256: m.sha256, ...(m.mirrors?.length ? { mirrors: m.mirrors } : {}), dest, have: npuGets || (fileSize(dest) === m.size && m.size > 0) });
   }
 
   // Ports: an accelerator keeps its own; a new one takes the next free from 18191.
@@ -922,7 +1019,8 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     npu.port = next;
   }
   const downloadBytes = downloads.filter((d) => !d.have).reduce((n, d) => n + d.size, 0) + (npu?.downloadBytes ?? 0);
-  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), ...(npuLeftOut ? { npuLeftOut } : {}), ...(leftToNpu.length ? { leftToNpu } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, problems, serversDir, modelsDir };
+  const terms = npu ? npuTerms(npu) : [];
+  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), ...(npuLeftOut ? { npuLeftOut } : {}), ...(leftToNpu.length ? { leftToNpu } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, terms, problems, serversDir, modelsDir };
 }
 
 export const gb = (bytes: number) => `${(bytes / 1e9).toFixed(bytes >= 1e10 ? 0 : 1)} GB`;
@@ -960,21 +1058,67 @@ export function describePlan(p: SetupPlan): string[] {
     if (t.left?.length) lines.push(`  ${t.left.join(' and ')} left off: the card's ${t.memoryGb} GB won't hold it beside ${t.kinds.join(' and ')} at once (to have it anyway: accelerators setup --serve chat,vision,embed)`);
   }
   for (const l of p.leftToNpu ?? []) lines.push(`${l.name} (${l.id}): ${l.kinds.join(' and ')} not set up on it: the NPU does ${l.kinds.length === 1 ? 'that' : 'those'}, and "Use the graphics card for models when there's an NPU" is off`);
-  for (const d of p.downloads) lines.push(`  ${d.have ? 'have' : 'get '} ${d.what} (${mb(d.size)})${d.sha256 ? '' : ', no published checksum'}`);
+  for (const d of p.downloads) lines.push(`  ${d.have ? 'have' : 'get '} ${d.what} (${mb(d.size)})${d.sha256 ? '' : ', no pinned SHA-256: it won\'t be downloaded'}`);
   lines.push(p.downloadBytes ? `Download: ${mb(p.downloadBytes)} into ${path.dirname(p.serversDir)} and ${p.modelsDir}.` : 'Nothing to download.');
+  lines.push(...termsLines(p.terms ?? []));
   for (const x of p.problems) lines.push(`note: ${x}`);
+  return lines;
+}
+
+/**
+ * The makers' terms in a few lines (kit 2.97.0), each maker's under a line of its own: what each covers, what it says,
+ * and its link. Shown before anything is downloaded, wherever the plan is (the command, the Smith's page, Manor's welcome).
+ */
+export function termsLines(terms: readonly MakerTerms[]): string[] {
+  const lines: string[] = [];
+  for (const maker of [...new Set(terms.map((t) => t.maker))]) {
+    lines.push(`${maker}'s terms come with what this downloads for the NPU: setting it up means you accept them, for everyone using this PC and your staff.`);
+    for (const t of terms.filter((x) => x.maker === maker)) lines.push(`  ${t.what} (${t.url}): ${t.says}`);
+  }
   return lines;
 }
 
 // ------------------------------------------------------------------------------------------------
 // Doing it
 
-/** Downloads a file whole (a .part, then a rename), checking its size and published sha256. */
+/** A source's host, for saying which one served what. */
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
+
+/**
+ * Downloads a file whole (a .part, then a rename), only as the kit pins it (kit 2.97.0): its size and SHA-256 checked
+ * whatever served it, from `url`, then each of its mirrors in turn when one fails or serves another file. A file with
+ * no pinned SHA-256 is refused before anything is fetched, and so is one no source serves as pinned, with a plain
+ * message; nothing of it is kept, and a file already at `dest` stays as it was.
+ */
 export async function download(d: Download, progress: (done: number, total: number) => void = () => {}, fetchImpl: typeof fetch = fetch): Promise<void> {
+  const want = d.sha256?.toLowerCase();
+  if (!want || !/^[0-9a-f]{64}$/.test(want)) throw new Error(`${d.what} wasn't downloaded: this kit pins no SHA-256 for it, and setup downloads only files it pins`);
   mkdirSync(path.dirname(d.dest), { recursive: true });
   const part = `${d.dest}.part`;
-  const res = await fetchImpl(d.url, { redirect: 'follow' });
-  if (!res.ok || !res.body) throw new Error(`${d.url}: ${res.status} ${res.statusText}`);
+  const failed: string[] = [];
+  for (const url of [d.url, ...(d.mirrors ?? [])]) {
+    const why = await fetchOne(url, part, d, want, progress, fetchImpl).catch((e: any) => `couldn't be reached (${e?.cause?.message ?? e?.message ?? e})`);
+    if (!why) {
+      rmSync(d.dest, { force: true });
+      renameSync(part, d.dest);
+      return;
+    }
+    rmSync(part, { force: true });
+    failed.push(`${hostOf(url)} ${why}`);
+  }
+  throw new Error(`${d.what} wasn't downloaded: ${failed.join('; ')}. Nothing was installed from it; setting up again tries once more`);
+}
+
+/** One source's copy into `part`: null once it is the pinned file, else why not (an answer that isn't the file, or another file). */
+async function fetchOne(url: string, part: string, d: Download, want: string, progress: (done: number, total: number) => void, fetchImpl: typeof fetch): Promise<string | null> {
+  const res = await fetchImpl(url, { redirect: 'follow' });
+  if (!res.ok || !res.body) return `answered ${res.status} ${res.statusText}`.trim();
   const hash = createHash('sha256');
   let done = 0;
   let last = 0;
@@ -988,18 +1132,11 @@ export async function download(d: Download, progress: (done: number, total: numb
     }
   });
   await pipeline(body, createWriteStream(part));
-  if (d.size && done !== d.size) {
-    rmSync(part, { force: true });
-    throw new Error(`${d.what}: got ${done} bytes, expected ${d.size}`);
-  }
+  if (d.size && done !== d.size) return `served ${done} bytes where the kit pins ${d.size}: not the pinned file, so it was refused`;
   const sum = hash.digest('hex');
-  if (d.sha256 && sum !== d.sha256.toLowerCase()) {
-    rmSync(part, { force: true });
-    throw new Error(`${d.what}: sha256 ${sum} isn't the published ${d.sha256}`);
-  }
-  rmSync(d.dest, { force: true });
-  renameSync(part, d.dest);
+  if (sum !== want) return `served a file whose SHA-256 is ${sum}, not the ${want} the kit pins: refused`;
   progress(done, d.size);
+  return null;
 }
 
 const tarExe = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
@@ -2066,51 +2203,21 @@ export function isDefaultChatEndpoint(ep: any, localAppData: string): boolean {
 }
 
 // ------------------------------------------------------------------------------------------------
-// Setup's outside answers
+// What setup plans from
 
-/** gh on PATH, else where this PC keeps it. */
-export function ghExe(): string | null {
-  for (const candidate of ['gh', 'C:\\tools\\gh\\bin\\gh.exe']) {
-    const r = spawnSync(candidate, ['--version'], { windowsHide: true, stdio: 'ignore' });
-    if (r.status === 0) return candidate;
-  }
-  return null;
-}
-
-/** GitHub's API answer for a path (`repos/…`), through gh (signed in or not), else its public API. */
-async function githubJson(api: string): Promise<any> {
-  const gh = ghExe();
-  if (gh) {
-    const json = await new Promise<string>((resolve, reject) =>
-      execFile(gh, ['api', api], { windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 60_000 }, (e, stdout, stderr) =>
-        e ? reject(new Error(`gh api failed: ${String(stderr || e.message).trim()}`)) : resolve(stdout),
-      ),
-    ).catch(() => '');
-    if (json) return JSON.parse(json);
-  }
-  const res = await fetch(`https://api.github.com/${api}`, { headers: { accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(60_000) });
-  if (!res.ok) throw new Error(`GitHub's ${api.replace(/\?.*/, '')}: ${res.status}`);
-  return res.json();
+/**
+ * llama.cpp's builds setup picks from: the one the kit pins (LLAMA_PIN), as a release, with NVIDIA's runtime beside it
+ * (kit 2.97.0). Nothing is asked of GitHub, so the newest build anywhere is never what decides: a kit pins the next one.
+ */
+export async function llamaReleases(): Promise<Release[]> {
+  return [pinnedRelease()];
 }
 
 /**
- * llama.cpp's builds the manor signed (SIGNED_LLAMA_REPO), newest first, the newest two with NVIDIA's runtime from
- * ggml-org's release of their build (an older one is taken only when a newer lacks a file). Never ggml-org's unsigned
- * copies, but with KIT_LLAMA_UNSIGNED=1: its newest releases as they are, to try a build before it's signed.
+ * A Hugging Face repo's files with sizes and sha256s as Hugging Face lists them now; null when there's no such repo.
+ * Setup never plans from it (pinnedHfFiles): it's for checking what a new pin should be.
  */
-export async function llamaReleases(): Promise<Release[]> {
-  if (process.env.KIT_LLAMA_UNSIGNED === '1') return parseReleases(await githubJson(`repos/${LLAMA_REPO}/releases?per_page=10`));
-  const signed = parseSignedReleases(await githubJson(`repos/${SIGNED_LLAMA_REPO}/releases?per_page=100`));
-  for (const r of signed.slice(0, 2)) {
-    if (!r.assets.some((a) => a.name === assetName(r.tag, 'cuda-12.4-x64')) || r.assets.some((a) => a.name === CUDART_ZIP)) continue;
-    const runtime = parseReleases([await githubJson(`repos/${LLAMA_REPO}/releases/tags/${r.tag}`).catch(() => null)])[0]?.assets.find((a) => a.name === CUDART_ZIP);
-    if (runtime) r.assets.push(runtime);
-  }
-  return signed;
-}
-
-/** A Hugging Face repo's files with sizes and sha256s; null when there's no such repo. */
-export async function hfFiles(repo: string): Promise<{ file: string; size: number; sha256?: string }[] | null> {
+export async function hfFiles(repo: string): Promise<HfFile[] | null> {
   const res = await fetch(`https://huggingface.co/api/models/${repo}?blobs=true`, { signal: AbortSignal.timeout(60_000) });
   if (!res.ok) return null;
   return parseHfFiles(await res.json());
@@ -2128,9 +2235,9 @@ export interface SetupOptions {
   confirm?: (question: string) => Promise<boolean>;
   log?: (line: string) => void;
   detection?: Detection;
-  /** llama.cpp's releases and Hugging Face's file lists (tests give fixtures). */
+  /** llama.cpp's builds and each repository's files to plan from: the kit's pins (llamaReleases, pinnedHfFiles); tests give fixtures. */
   releases?: () => Promise<Release[]>;
-  hfFiles?: typeof hfFiles;
+  hfFiles?: (repo: string) => Promise<HfFile[] | null>;
   /** config.json (acceleratorConfigFile()). */
   configFile?: string;
   /** Where the builds and models go (toolsHome()). */
@@ -2196,10 +2303,10 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   // What this PC has, for every program that reads Reeve's config: a model is never called the NPU on a PC without one.
   const hw = o.detection ? null : hardwareOf(detection);
   if (hw) rememberHardware(hw);
-  log("Looking up llama.cpp's newest build and the models...");
+  log(`Looking up what this PC needs (llama.cpp ${LLAMA_PIN.build} and the models, as this kit pins them)...`);
   const releases = await (o.releases ?? llamaReleases)();
   const withNpu = o.gpuWithNpu ?? gpuWithNpu().on;
-  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
+  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
   for (const l of describePlan(plan)) log(l);
   const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu;
   if (!settingUp && !plan.dropNpu) {
@@ -2213,7 +2320,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     return { code: 0, plan };
   }
   if (settingUp && plan.downloadBytes && !o.yes) {
-    const ok = o.confirm ? await o.confirm(`Download ${mb(plan.downloadBytes)}? [y/N] `) : false;
+    const ok = o.confirm ? await o.confirm(`Download ${mb(plan.downloadBytes)}${plan.terms.length ? ', under the terms above' : ''}? [y/N] `) : false;
     if (!ok) {
       log(o.confirm ? 'Not downloading.' : `It would download ${mb(plan.downloadBytes)}: run again with --yes.`);
       return { code: 1, plan };
@@ -2232,7 +2339,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   const cardsFor = (plan.leftToNpu ?? []).filter((l) => l.kinds.some((k) => missing.includes(k))).map((l) => l.id);
   if (missing.length && cardsFor.length) {
     log(`The graphics card takes the NPU's ${missing.join(' and ')} instead: setting it up for that too.`);
-    const plan2 = await planSetup({ detection, ids: cardsFor, skipNpu: true, raw, releases, hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
+    const plan2 = await planSetup({ detection, ids: cardsFor, skipNpu: true, raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
     for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
     const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the graphics card? [y/N] `) : false);
     if (go) {
@@ -2248,7 +2355,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     const had = readAccelerators(raw).accelerators.find((a) => a.id === 'cpu');
     const cpuKinds = [...new Set([...ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had && serves(had, k)), ...missing])];
     log(`The processor takes the NPU's ${missing.join(' and ')} instead: setting it up for ${cpuKinds.join(' and ')}.`);
-    const plan2 = await planSetup({ detection, ids: ['cpu'], skipNpu: true, cpuKinds, raw, releases, hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists });
+    const plan2 = await planSetup({ detection, ids: ['cpu'], skipNpu: true, cpuKinds, raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists });
     for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
     const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the processor? [y/N] `) : false);
     if (go) {

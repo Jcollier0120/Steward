@@ -9,8 +9,9 @@
  *
  * ggml-org signs none of its builds, and Windows' Smart App Control blocks unsigned files it doesn't know (the kit's
  * app-control.ts): on 2026-10-19 the gaming desktop's blocked one of b11734's processor variants. Setup takes llama.cpp
- * only from these signed copies (setup.ts' llamaReleases), so a newer build reaches the PCs only once it's signed here,
- * after the Smith's checks on it.
+ * only from these signed copies, and only the one build the kit pins (setup.ts' LLAMA_PIN, kit 2.97.0), so a newer build
+ * reaches the PCs only once it's signed here, after the Smith's checks on it, and a kit pins it: this writes that pin,
+ * each zip's size and SHA-256 as signed here (and NVIDIA's runtime's as ggml-org publishes it), to put in the kit.
  *
  * For each build the kit uses (setup.ts' LLAMA_VARIANTS) it downloads ggml-org's zip, checked against GitHub's digest,
  * signs each .exe and .dll in it that has no signature, checks that every one is then signed, and zips it again under its
@@ -77,6 +78,7 @@ export function batches(files: string[], maxChars = 24_000): string[][] {
 export interface Built {
   variant: string;
   zip: string;
+  size: number;
   sha256: string;
   original: ReleaseAsset;
   signed: number;
@@ -108,6 +110,29 @@ export function releaseNotes(build: string, built: Built[], cudart: ReleaseAsset
     '```',
     '',
     '</details>',
+    '',
+  ].join('\n');
+}
+
+/**
+ * setup.ts' LLAMA_PIN for the build signed here, to paste into the kit: each signed zip's size and SHA-256, and NVIDIA's
+ * runtime's as ggml-org's release publishes it (its digest, checked on the download here), fetched from there.
+ */
+export function pinSnippet(build: string, built: Built[], cudart: ReleaseAsset): string {
+  const hex = (d?: string) => (d ?? '').replace(/^sha256:/, '');
+  return [
+    'export const LLAMA_PIN: { build: string; signed: string; files: Record<string, PinnedDownload> } = {',
+    `  build: '${build}',`,
+    `  signed: '${signedLlamaTag(build)}',`,
+    '  files: {',
+    ...built.map((b) => `    '${path.basename(b.zip)}': { size: ${b.size}, sha256: '${b.sha256}' },`),
+    `    '${cudart.name}': {`,
+    `      size: ${cudart.size},`,
+    `      sha256: '${hex(cudart.digest)}',`,
+    `      url: '${cudart.url}',`,
+    '    },',
+    '  },',
+    '};',
     '',
   ].join('\n');
 }
@@ -198,7 +223,7 @@ async function main(): Promise<void> {
     const entries = readdirSync(dir);
     const r = spawnSync(tarExe, ['-a', '-c', '-f', signedZip, '-C', dir, ...entries], { windowsHide: true, encoding: 'utf8' });
     if (r.status !== 0) throw new Error(`tar couldn't zip ${name}: ${r.stderr || r.error?.message}`);
-    built.push({ variant, zip: signedZip, sha256: sha256(signedZip), original, signed: plan.sign.length, signedBefore: plan.signedBefore.length });
+    built.push({ variant, zip: signedZip, size: statSync(signedZip).size, sha256: sha256(signedZip), original, signed: plan.sign.length, signedBefore: plan.signedBefore.length });
     console.log(`${name}: ${plan.sign.length} signed, ${plan.signedBefore.length} already signed, ${(statSync(signedZip).size / 1048576).toFixed(0)} MB`);
   }
   // MIT asks for its notice with every copy: llama.cpp's LICENSE at this build, beside the zips (theirs carry none).
@@ -212,7 +237,10 @@ async function main(): Promise<void> {
   writeFileSync(sums, built.map((b) => `${b.sha256}  ${path.basename(b.zip)}\n`).join(''));
   const notes = path.join(out, 'notes.md');
   writeFileSync(notes, releaseNotes(build, built, cudart, license ?? path.basename(licenseFile)));
+  const pin = path.join(out, 'llama-pin.ts');
+  writeFileSync(pin, pinSnippet(build, built, cudart));
   rmSync(work, { recursive: true, force: true });
+  console.log(`The kit's pin of this build (setup.ts' LLAMA_PIN), to put in the kit once it's published: ${pin}`);
   if (!publish) {
     console.log(`Signed. To publish: node tools/sign-llama.ts ${build} --publish`);
     return;
