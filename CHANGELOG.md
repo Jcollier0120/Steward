@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.171
+
+**It hands out the kit 2.98.0, whose NPU benchmark measures energy with a real meter: Windows' own power readings for each part of the PC where it has them, a smart plug, or a graphics card's reading.**
+
+### What's new
+
+- **Energy, measured properly.** The NPU benchmark, the test of how well a PC's NPU runs the staff's local AI, can now measure how much energy the work takes, part by part: the NPU, the graphics, the processor and memory. It reads Windows' own power readings where the PC has them (a Snapdragon X2 laptop does), a Shelly smart plug, or a graphics card's own reading. Before, it could only read the battery's drain, which proved unreliable.
+- **What a loaded model costs.** It measures the PC at rest with no model loaded, and with one loaded, then batches of each kind of work the staff do (replies, summaries, sorting, reading long text and pictures), so each one's energy can be compared across the NPU, the graphics and the processor.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.170
 
 **It hands out the kit 2.97.1. Your staff's pages call the AI's notes the local AI's, without naming the chip that wrote them, and Qualcomm's AI runtime is described by its real licence. This release brings 0.36.169 and the kit 2.97.0 too, never released on their own.**

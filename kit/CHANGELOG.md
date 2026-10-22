@@ -2,6 +2,38 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.98.0
+
+**The NPU benchmark measures energy with a real meter: Windows' Energy Meter counters, part by part, where a PC has them (the Snapdragon X2 does), a Shelly plug, or a graphics card's own reading. With one it measures what keeping a model loaded costs, and batches of each job, read and picture.**
+
+### What's new
+
+- **power-meter.ts**, the four meters (spec/NPU-BENCHMARK.md, Energy):
+  - `emi`: Windows' Energy Meter counters. Each part's running total (`npu`, `gpu`, `cpu_cluster_*`, `memory`, `soc`, `system`), read through CIM in picowatt-hours, no administrator, at each stretch's two ends only.
+  - `shelly:<address>`: a Shelly Gen2+ plug's `apower`, read every second.
+  - `nvidia`: nvidia-smi's `total_energy_consumption`, else `power.draw`.
+  - `battery`: the discharge rate, as before.
+
+  The module also has `openMeter`, `measureSpan` and `partsSay`. As a command, `node src/kit/power-meter.ts [--meter …] [--seconds n]` says which meter the PC has and what each part draws.
+- **npu-bench.ts `--meter auto|emi|shelly:<address>|nvidia|battery`** (it implies `--energy`; `auto` is the default):
+  - `auto` reads the counters where they're there, plugged in or not; otherwise the battery, unplugged.
+  - With a meter other than the battery, `--energy` also measures the PC at rest before the server starts and just after the cold load (`idle`, with `keepLoadedMilliwatts`).
+  - Each part's power at rest and through the triage minutes (`restParts`, `loadParts`).
+  - Batches: `energy.batch` in the suite, 20 of each job on a full run and 5 on a quick one; as many reads of 1,024 tokens; up to 8 pictures. Each batch reports each part's energy, the work's own over rest, one's and a token's.
+  - It also records whether the battery was charging (`charging`).
+- **The report's `results.energy`** gains `meter`, `charging`, `idle`, `restParts`, `loadParts` and `batches`, all optional. Its old fields are as they were. The format stays `castellan-npu-bench-report/1` and the suite `castellan-npu-bench/2`: no speed figure changes.
+- **The spec's run guide, step 7**: check the meter with `power-meter.ts`, then run `--energy` on each device the route has.
+
+### What changed
+
+- `--energy` plugged in now measures where the PC has the counters. Without them it says so and how to get a figure. It used to say only to unplug.
+- The battery's reading keeps its rule (`ENERGY_MIN_EXTRA`) and measures the triage minutes alone. Another meter's figure counts whenever working draws more than rest.
+- A first trial on the X2 (NPU-BENCHMARK.md, On a Snapdragon): GenieX's chat drew 5 W on the NPU, but about four cores of the processor (25–40 W). A quiet run is to confirm it.
+
+### Before you update
+
+- Nothing for an agent: it carries the new file and the benchmark's new options, and nothing else changes. A reader of the benchmark's reports that rejects unknown fields in `results.energy` should allow the new ones.
+
 ## 2.97.1
 
 **What everyone reads names no hardware: a model's note is "note from the local AI, unverified" wherever it ran. Developer features are said to come with hired developer staff, not a Developer options switch. And the QAIRT runtime's licence is Qualcomm's AI Runtime SDK EULA. This release brings 2.97.0 too, never released on its own.**
