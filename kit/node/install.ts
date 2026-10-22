@@ -420,6 +420,46 @@ async function move(from: string, to: string, d: InstallDeps): Promise<void> {
 const isBusy = (e: unknown) => ['EBUSY', 'EPERM', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '');
 
 /**
+ * The installed copy an install's swap left in app.old, with nothing in app (kit 2.96.2): the PC went off between
+ * moving app aside and moving the release in. Every kit's install swaps the same way, so an older one's leaves this
+ * too. Null when app is there, or app.old holds no release.
+ */
+export const unfinishedSwap = (app: string): Release | null => (existsSync(app) ? null : readRelease(`${app}.old`));
+
+/**
+ * Puts the copy an unfinished swap left in app.old back in app (kit 2.96.2), so the install that finds it is the update
+ * it is: its duty kept, and the version before kept to go back to (safeinstall.ts). Taken for a first install, it put
+ * the agent on duty and deleted the only copy of it. True once app holds it again.
+ */
+export async function finishSwap(app: string, d: InstallDeps): Promise<boolean> {
+  const left = unfinishedSwap(app);
+  if (!left) return false;
+  try {
+    await move(`${app}.old`, app, d);
+  } catch (e) {
+    d.out(`${app} is missing, and ${app}.old (${left.version}, left by an install that never finished) couldn't be put back (${message(e)}).`);
+    return false;
+  }
+  d.out(`${app} was missing: an earlier install never finished its swap. ${left.version}, which it had moved aside to ${app}.old, is back in ${app}.`);
+  return true;
+}
+
+/**
+ * The copies an update keeps beside app (safeinstall.ts): app.prev, the version before, while the new one is on
+ * probation; app.unsafe-<version>, a version that was rolled back, for a look. Their names, in the data folder.
+ */
+export function keptCopies(dataDir: string): string[] {
+  try {
+    return readdirSync(dataDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && /^app\.(prev|unsafe-.+)$/i.test(e.name))
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
  * The release copied over a folder that can't be moved (a shell's or a program's current folder can't be,
  * though its contents can be changed), then whatever the release no longer has removed from it.
  */
@@ -452,8 +492,11 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     out(`This is the installed copy (${app}). To update it, install a newer release: npm run release -- --install in a checkout, or node src\\cli.ts install in an unpacked release.`);
     return 2;
   }
-  const update = existsSync(app);
-  const before = update ? readRelease(app) : null;
+  // An earlier install's swap that never finished: the installed copy is in app.old, and goes back first (kit 2.96.2).
+  const unfinished = unfinishedSwap(app);
+  if (unfinished && !opts.dryRun) await finishSwap(app, d);
+  const update = existsSync(app) || (!!unfinished && !!opts.dryRun);
+  const before = update ? (readRelease(app) ?? unfinished) : null;
   const xmlFile = taskXmlFile(d.dataDir);
   const create = ['/Create', '/TN', TASK_NAME, '/XML', xmlFile, '/F'];
   const what = `${APP.name} ${release.version}${release.dirty ? ' (built with uncommitted changes)' : ''}`;
@@ -463,6 +506,7 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
 
   if (opts.dryRun) {
     out(`${what} from ${d.root}: ${update ? `would update the installed copy${before ? ` (${before.version})` : ''}` : 'would install it'}.`);
+    if (unfinished) out(`  0. Put ${unfinished.version} back in ${app} from ${app}.old, where an earlier install that never finished its swap left it.`);
     out(`  1. End its page process, if it's running (${d.pageUrl}).`);
     out(`  2. Copy the release to ${app}.new${release.native ? ` (its native files for this PC's processor only)` : ''}, then swap it in for ${app}.`);
     out(`  3. Register the task ${TASK_NAME} for ${d.user}, ${manorStarts ? 'run only when asked: Manor starts it at sign-in (Castellan is in Startup apps)' : 'at sign-in'}: ${SCHTASKS} ${quoted(create)}`);
@@ -600,7 +644,8 @@ export async function uninstall(opts: { purge?: boolean; dryRun?: boolean } = {}
     return 2;
   }
   if (opts.dryRun) {
-    out(`${APP.name}: would end its page process if it's running, end and delete the task ${TASK_NAME} (and ${WAKE_TASK_NAME}, if it has one, and ${OLD_TASK_NAME} and ${OLD_WAKE_TASK_NAME} where they're this account's), and remove ${app}.`);
+    const kept = keptCopies(d.dataDir);
+    out(`${APP.name}: would end its page process if it's running, end and delete the task ${TASK_NAME} (and ${WAKE_TASK_NAME}, if it has one, and ${OLD_TASK_NAME} and ${OLD_WAKE_TASK_NAME} where they're this account's), and remove ${app}${kept.length ? ` and the copies its updates kept beside it (${kept.join(', ')})` : ''}.`);
     out(opts.purge ? `--purge: would also remove its data folder, ${d.dataDir}.` : `Its data folder would stay: ${d.dataDir}.`);
     out('--dry-run: nothing changed.');
     return 0;
@@ -640,6 +685,18 @@ export async function uninstall(opts: { purge?: boolean; dryRun?: boolean } = {}
   const had = existsSync(app);
   for (const p of [app, `${app}.new`, `${app}.old`, taskXmlFile(d.dataDir)]) rmSync(p, { recursive: true, force: true });
   out(had ? `Removed ${app}.` : `There's no ${app} to remove.`);
+  // The copies its updates kept beside app (app.prev, app.unsafe-<version>) are its program too, not its data (kit 2.96.2).
+  const kept = keptCopies(d.dataDir);
+  const left = kept.filter((k) => {
+    try {
+      rmSync(path.join(d.dataDir, k), { recursive: true, force: true });
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (kept.length > left.length) out(`Removed the copies its updates kept beside it: ${kept.filter((k) => !left.includes(k)).join(', ')}.`);
+  if (left.length) out(`Couldn't remove ${left.join(', ')} (a file in it is open): remove it from ${d.dataDir} yourself once whatever has it lets go.`);
   if (opts.purge) {
     rmSync(d.dataDir, { recursive: true, force: true });
     out(`Removed its data folder, ${d.dataDir}.`);

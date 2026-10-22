@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.168
+
+**It hands out the kit 2.96.2. Staff updates now clean up after themselves once the new version proves itself, and an update cut short by the PC turning off is fixed by the next one.**
+
+### What changed
+
+- **Updates clean up after themselves.** When a staff member updates, the version before is kept until the new one has run for a minute and a half without trouble, so it can be put back if the new one fails. Until now that copy stayed until the next update, and even after the staff member was removed. Now it's removed as soon as the new version has proved itself. The Steward's own updates work the same way.
+- **An update cut short is fixed.** If the PC turned off at the moment an update swapped in the new version, the next update found nothing installed. It installed the staff member as new, and put it back on duty even if you had stopped it. Now the next update first puts back the version that was there, then updates it as usual, so a staff member you stopped stays stopped.
+- **Removing a staff member removes all of its program.** That includes the copies its updates kept: the version before the last update, and any version that was rolled back. Its data stays unless you remove that too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member works this way from its update after the one that brings it this kit.
+
 ## 0.36.167
 
 **It hands out the kit 2.96.1. Once staff pages open only for you, a bookmark to one goes through Castellan, which opens it signed in.**
