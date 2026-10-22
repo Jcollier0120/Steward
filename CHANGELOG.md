@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.172
+
+**It hands out the kit 2.98.1. On a Snapdragon X2, the local AI no longer keeps the processor busy while it writes, and a PC on GenieX 0.9.3 gets back the memory Castellan's build saves.**
+
+### What changed
+
+- **The processor rests while the NPU writes.** On a Snapdragon X2, GenieX kept about five of the processor's cores busy all the time the NPU was writing an answer, just waiting for work. Now those threads sleep until there is work for them. Answers come just as fast, and the whole PC uses about 60% less energy for each answer. A model running on the processor is unchanged.
+- **GenieX 0.9.3 gets Castellan's build.** A PC that the Smith moved to GenieX 0.9.3 had GenieX's own plugin, which holds about 0.8 GB more memory. It now gets Castellan's build, as 0.9.1 does.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The new build goes in by itself once the Smith, or else Reeve, has the kit 2.98.1, at a moment nobody is using the local AI.
+
 ## 0.36.171
 
 **It hands out the kit 2.98.0, whose NPU benchmark measures energy with a real meter: Windows' own power readings for each part of the PC where it has them, a smart plug, or a graphics card's reading.**

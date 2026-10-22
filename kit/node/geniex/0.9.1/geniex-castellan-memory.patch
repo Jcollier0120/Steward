@@ -83,7 +83,7 @@ index aa1b5441..4b026e63 100644
      if (config.chat_template_content) {
          try {
 diff --git a/sdk/plugins/llama_cpp/src/params.cpp b/sdk/plugins/llama_cpp/src/params.cpp
-index 96a59f52..9b2097a8 100644
+index 96a59f52..7eb8c788 100644
 --- a/sdk/plugins/llama_cpp/src/params.cpp
 +++ b/sdk/plugins/llama_cpp/src/params.cpp
 @@ -4,6 +4,8 @@
@@ -175,6 +175,20 @@ index 96a59f52..9b2097a8 100644
  
      llama_model_params mpar = llama_model_default_params();
      mpar.load_mode          = use_mmap ? LLAMA_LOAD_MODE_MMAP : LLAMA_LOAD_MODE_NONE;
+@@ -194,6 +255,13 @@ ggml_threadpool_params build_threadpool_params(int n_threads, Device device) {
+         tpp.poll = poll;
+     }
+ 
++    // Castellan: with the model on an accelerator, the processor's threads run only the few ops it can't, so they
++    // sleep while they wait for work rather than spin. ggml's default (poll 50) kept every thread busy through each
++    // token: about five cores on the Snapdragon X2 Elite, for no speed. GENIEX_PATCH_POLL=0 leaves ggml's default.
++    if (device != Device::CPU && patch_enabled("GENIEX_PATCH_POLL")) {
++        tpp.poll = 0;
++    }
++
+     return tpp;
+ }
+ 
 diff --git a/sdk/plugins/llama_cpp/src/vlm.cpp b/sdk/plugins/llama_cpp/src/vlm.cpp
 index 135a2d0e..1f573e49 100644
 --- a/sdk/plugins/llama_cpp/src/vlm.cpp

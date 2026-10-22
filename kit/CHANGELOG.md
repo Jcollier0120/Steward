@@ -2,6 +2,27 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.98.1
+
+**Castellan's GenieX build lets the processor's threads sleep while the model is on the NPU, and GenieX 0.9.3 gets that build too.**
+
+### What changed
+
+- **geniex/0.9.1/geniex_plugin.dll**, rebuilt with a fifth commit, GENIEX_PATCH_POLL (`node/geniex/README.md`). With the model on an accelerator, ggml's threads poll 0 and sleep between operations rather than spin.
+  - Measured on the X2 Elite: 0.05 processor cores busy against 5.12, and 251 mJ a token over rest against 699, at the same 72–73 tokens a second (Windows' Energy Meter counters).
+  - The confirmation 2.98.0 asked for: GenieX's processor use was its threadpool spinning, not work.
+  - A model on the processor keeps ggml's default. 0.8.0's build is unchanged.
+  - Its SHA-256 is now `8205873d…`, 370,768 bytes, and the 0.9.0 entry's `pluginPatch` pins it.
+- **The route's `versions` gain `0.9.3`.** GenieX 0.9.3 is 0.9.1 with a `/status` endpoint and its libraries rebuilt, so the entry names 0.9.1's build over 0.9.3's own plugin.
+  - It pins 0.9.3's plugin (`9612f66a…`) and its six libraries.
+  - It repeats 0.9.0's command and embedding server (b11645).
+  - Before, a PC the Smith's Use it moved to 0.9.3 ran GenieX's own plugin: 3.54 GB working set after pictures against 2.72 with the build.
+- spec/NPU-VENDORS.md: the processor's threads, and GenieX 0.9.3.
+
+### Before you update
+
+- Nothing for an agent: the keeper puts the new build in at its next look after the kit changes, in the NPU's turn, and tests it as before.
+
 ## 2.98.0
 
 **The NPU benchmark measures energy with a real meter: Windows' Energy Meter counters, part by part, where a PC has them (the Snapdragon X2 does), a Shelly plug, or a graphics card's own reading. With one it measures what keeping a model loaded costs, and batches of each job, read and picture.**

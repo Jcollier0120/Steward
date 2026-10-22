@@ -6,7 +6,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // The NPU server's file replaced with the kit's build of it (npu-patch.ts): on a Snapdragon X2, GenieX 0.8.0's llama.cpp
-// plugin, or 0.9.1's once the Smith's Use it put 0.9.1 there. Only over GenieX's own file of that version, in the NPU's turn, kept only when the test answers, put back when switched
+// plugin, or 0.9.1's once setup or the Smith's Use it put 0.9.1 or 0.9.3 there. Only over GenieX's own file of that version, in the NPU's turn, kept only when the test answers, put back when switched
 // off or a later kit stops patching; a GenieX update left alone. A fake PC throughout: GenieX's folder in a temporary one,
 // its files and the kit's build stand-ins, pinned by their own hashes.
 const home = mkdtempSync(path.join(tmpdir(), 'kit-npu-patch-'));
@@ -33,7 +33,10 @@ const NEEDS: Record<string, string> = { 'llama.dll': 'llama 0.8.0', 'llama-commo
 const STOCK_091 = "GenieX 0.9.1's own plugin";
 const BUILD_091 = "Castellan's build for 0.9.1";
 const NEEDS_091: Record<string, string> = Object.fromEntries(Object.entries(NEEDS).map(([k, v]) => [k, v.replace('0.8.0', '0.9.1')]));
-const pin = (s: string) => ({ size: Buffer.byteLength(s), sha256: createHash('sha256').update(s).digest('hex') });
+// GenieX 0.9.3: 0.9.1's source with its libraries rebuilt, so the kit puts 0.9.1's build in over it too.
+const STOCK_093 = "GenieX 0.9.3's own plugin";
+const NEEDS_093: Record<string, string> = Object.fromEntries(Object.entries(NEEDS).map(([k, v]) => [k, v.replace('0.8.0', '0.9.3')]));
+const pin =(s: string) => ({ size: Buffer.byteLength(s), sha256: createHash('sha256').update(s).digest('hex') });
 
 /** The X2's entry as setup writes it with this kit. */
 function x2Entry(): Record<string, any> {
@@ -41,18 +44,21 @@ function x2Entry(): Record<string, any> {
   return V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model } });
 }
 
-/** The catalog with the X2's patches (0.8.0's and 0.9.1's) pinned to this PC's stand-ins, or without them (`none`: a later kit's). */
+/** The catalog with the X2's patches (0.8.0's, 0.9.1's and 0.9.3's) pinned to this PC's stand-ins, or without them (`none`: a later kit's). */
 function catalogFor(folder: string, none = false) {
   const c = structuredClone(V.NPU_CATALOG);
   const g = c.routes.qualcomm.generations['snapdragon-x2'];
-  const v = c.routes.qualcomm.versions!.find((x) => x.pluginPatch)!;
+  const versions = c.routes.qualcomm.versions!.filter((x) => x.pluginPatch);
   if (none) {
     delete g.pluginPatch;
-    delete v.pluginPatch;
+    for (const v of versions) delete v.pluginPatch;
   } else {
     g.pluginPatch = { ...g.pluginPatch!, folder, stock: pin(STOCK), patched: { from: 'geniex/geniex_plugin.dll', ...pin(BUILD) }, needs: Object.fromEntries(Object.entries(NEEDS).map(([k, v]) => [k, pin(v)])) };
-    const p = v.pluginPatch!['snapdragon-x2'];
-    v.pluginPatch = { 'snapdragon-x2': { ...p, folder, stock: pin(STOCK_091), patched: { from: 'geniex/0.9.1/geniex_plugin.dll', ...pin(BUILD_091) }, needs: Object.fromEntries(Object.entries(NEEDS_091).map(([k, v]) => [k, pin(v)])) } };
+    for (const v of versions) {
+      const p = v.pluginPatch!['snapdragon-x2'];
+      const [stock, needs] = p.serverVersion === '0.9.3' ? [STOCK_093, NEEDS_093] : [STOCK_091, NEEDS_091];
+      v.pluginPatch = { 'snapdragon-x2': { ...p, folder, stock: pin(stock), patched: { from: 'geniex/0.9.1/geniex_plugin.dll', ...pin(BUILD_091) }, needs: Object.fromEntries(Object.entries(needs).map(([k, v]) => [k, pin(v)])) } };
+    }
   }
   return c;
 }
@@ -138,7 +144,7 @@ test("an X2 with GenieX 0.8.0's own plugin: the build put in, in the NPU's turn,
   assert.deepEqual(pc.did.filter((x) => x === 'detect'), ['detect']);
 });
 
-test('the shipped catalog patches the X2 alone, over GenieX 0.8.0 and 0.9.1, with the builds the kit carries', async () => {
+test('the shipped catalog patches the X2 alone, over GenieX 0.8.0, 0.9.1 and 0.9.3, with the builds the kit carries', async () => {
   const route = V.NPU_CATALOG.routes.qualcomm;
   const p = route.generations['snapdragon-x2'].pluginPatch!;
   assert.equal(p.serverVersion, route.version);
@@ -153,6 +159,17 @@ test('the shipped catalog patches the X2 alone, over GenieX 0.8.0 and 0.9.1, wit
   assert.equal(p091.folder, p.folder);
   assert.equal(p091.stock.sha256, '8102e9de747236b3848f2ec3bca1592a1e3ef8b1bce8d7c3ba843b790c071f9c');
   assert.deepEqual(Object.keys(p091.needs), Object.keys(p.needs), 'the same files it loads');
+  // 0.9.3 runs 0.9.1's build over its own rebuilt libraries, with 0.9.0's command and embedding server (each entry replaces those before it).
+  const v093 = route.versions!.find((v) => v.version === '0.9.3')!;
+  const p093 = v093.pluginPatch!['snapdragon-x2'];
+  assert.equal(p093.serverVersion, '0.9.3');
+  assert.equal(p093.folder, p.folder);
+  assert.equal(p093.stock.sha256, '9612f66a0cc1a29b8f746697b808d62f49cfdd9328b94615b34f6ef1a6dae787');
+  assert.deepEqual(p093.patched, p091.patched, "0.9.1's build");
+  assert.deepEqual(Object.keys(p093.needs), Object.keys(p.needs), 'the same files it loads');
+  for (const name of Object.keys(p093.needs)) assert.notEqual(p093.needs[name].sha256, p091.needs[name].sha256, `0.9.3's own ${name}`);
+  assert.deepEqual(v093.serve, later.serve);
+  assert.deepEqual(v093.embedServer, later.embedServer);
   for (const q of [p, p091]) {
     const built = readFileSync(new URL(`./fixture/src/kit/${q.patched.from}`, import.meta.url));
     assert.equal(built.length, q.patched.size, q.serverVersion);
@@ -249,6 +266,36 @@ test("0.9.1's build only on 0.9.1: a later GenieX with the same plugin, or 0.9.1
   // A 0.9.2 with a plugin of its own: left alone.
   const updated = fakePc({ plugin: "GenieX 0.9.2's plugin", needs: NEEDS_091, version: '0.9.2' });
   assert.deepEqual(await patchNpu(updated.deps), { did: 'hands-off' });
+});
+
+test("an X2 on GenieX 0.9.3 (the Smith's Use it): 0.9.1's build over 0.9.3's own, and kept when the Smith moves 0.9.1 to 0.9.3", async () => {
+  const pc = fakePc({ plugin: STOCK_093, needs: NEEDS_093, version: '0.9.3' });
+  assert.deepEqual(await patchNpu(pc.deps), { did: 'patched' });
+  assert.deepEqual(pc.did, ['detect', 'turn', 'stop geniex.exe http://127.0.0.1:18181', `test on ${BUILD_091}`, 'turn over']);
+  assert.equal(pc.plugin(), BUILD_091);
+  assert.equal(pc.stock(), STOCK_093);
+  assert.deepEqual(await patchNpu(pc.deps), { did: 'looked' });
+
+  // Patched on 0.9.1, then moved to 0.9.3 (its installer writes 0.9.3's own over the build): the build again, 0.9.3's own kept in place of 0.9.1's.
+  const moved = fakePc({ plugin: STOCK_091, needs: NEEDS_091, version: '0.9.1' });
+  assert.equal((await patchNpu(moved.deps)).did, 'patched');
+  writeFileSync(moved.target, STOCK_093);
+  for (const [name, text] of Object.entries(NEEDS_093)) writeFileSync(path.join(moved.folder, name), text);
+  moved.deps.serverVersion = async () => '0.9.3';
+  assert.deepEqual(await patchNpu(moved.deps), { did: 'patched' });
+  assert.equal(moved.plugin(), BUILD_091);
+  assert.equal(moved.stock(), STOCK_093);
+  assert.deepEqual(moved.leftovers(), []);
+});
+
+test("0.9.3's patch only over 0.9.3's own files: a library that isn't 0.9.3's, or a later GenieX, keeps its own", async () => {
+  const mixed = fakePc({ plugin: STOCK_093, needs: { ...NEEDS_093, 'llama.dll': 'llama 0.9.1' }, version: '0.9.3' });
+  assert.deepEqual(await patchNpu(mixed.deps), { did: 'stock', problems: ["GenieX's llama.dll isn't 0.9.3's"] });
+  assert.equal(mixed.plugin(), STOCK_093);
+  assert.ok(!mixed.did.includes('turn'));
+  const later = fakePc({ plugin: STOCK_093, needs: NEEDS_093, version: '0.9.4' });
+  assert.deepEqual(await patchNpu(later.deps), { did: 'stock', problems: ["the patch is for GenieX 0.9.3, and this PC's is 0.9.4"] });
+  assert.equal(later.plugin(), STOCK_093);
 });
 
 test("an X2 whose GenieX can't say its version runs the X2's pin, 0.9.1 (what setup installs there): 0.9.1's build over 0.9.1's own", async () => {
