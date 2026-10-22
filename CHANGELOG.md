@@ -2,13 +2,27 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.170
+
+**It hands out the kit 2.97.1. Your staff's pages call the AI's notes the local AI's, without naming the chip that wrote them, and Qualcomm's AI runtime is described by its real licence. This release brings 0.36.169 and the kit 2.97.0 too, never released on their own.**
+
+### What changed
+
+- **Notes say "the local AI".** A note the AI wrote on a staff member's page is labelled "note from the local AI, unverified", wherever it ran. It used to name the NPU or the graphics card to everyone, even with no developer staff hired. Developers still see where each note was written.
+- **Developer features, in today's words.** A staff member's page no longer mentions a "Developer options" switch, which Castellan doesn't have any more. It says developer features show while developer staff are hired, with a link to your staff in Castellan.
+- **Qualcomm's AI runtime, with its real licence.** On a Snapdragon PC, the terms listed before setting up local AI now say that Qualcomm's AI runtime (QAIRT), which comes with GenieX, is under Qualcomm's AI Runtime SDK licence. It may be used, commercially too, as part of an app, but not handed on by itself or taken apart, and not for the uses it rules out, among them biometrics, reading emotions, social scoring, law enforcement and critical infrastructure. Qualcomm may end it at any time. It has no personal or non-commercial limit.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member shows the new labels from its update that brings the kit 2.97.1.
+
 ## 0.36.169
 
 **It hands out the kit 2.97.0. Setting up local AI now downloads only the versions of llama.cpp and its models that the manor has checked, and on a Snapdragon PC it names Qualcomm's terms before it downloads anything from Qualcomm.**
 
 ### What's new
 
-- **Qualcomm's terms, before the download.** On a Snapdragon PC, when setting up local AI will download Qualcomm's GenieX, the AI runtime that comes with it, or a model Qualcomm AI Hub built, the plan now lists Qualcomm's terms for them, each with a link: GenieX's open-source licence, Qualcomm's Terms of Use for its AI runtime, the model's own limits, and Qualcomm's Responsible AI License. That license rules out some uses, for you and for your staff: among them military use, crime, surveillance and biometric identification, social scoring, discrimination, passing off what the AI writes as not machine-made, and fully automated decisions about people's rights. The question before downloading asks you to accept them. A PC that has everything already isn't asked again.
+- **Qualcomm's terms, before the download.** On a Snapdragon PC, when setting up local AI will download Qualcomm's GenieX, the AI runtime that comes with it, or a model Qualcomm AI Hub built, the plan now lists Qualcomm's terms for them, each with a link: GenieX's open-source licence, Qualcomm's licence for its AI runtime, the model's own limits, and Qualcomm's Responsible AI License. That license rules out some uses, for you and for your staff: among them military use, crime, surveillance and biometric identification, social scoring, discrimination, passing off what the AI writes as not machine-made, and fully automated decisions about people's rights. The question before downloading asks you to accept them. A PC that has everything already isn't asked again.
 
 ### What changed
 

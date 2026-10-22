@@ -434,7 +434,7 @@
         },
         "licence": "llama.cpp: MIT; GenieX's libraries as GenieX (above)"
       },
-      "licence": "GenieX: BSD-3-Clause, and Qualcomm's Terms of Use; its bundled QAIRT runtime states no licence (all rights reserved; the Terms of Use allow personal, non-commercial downloads), and Qualcomm's Responsible AI License applies (terms)",
+      "licence": "GenieX: BSD-3-Clause, and Qualcomm's Terms of Use; its bundled QAIRT runtime: Qualcomm's AI Runtime SDK EULA (use, commercial use included, and distribution only in object code as part of an app; no reverse engineering; prohibited uses), and Qualcomm's Responsible AI License applies (terms)",
       "terms": [
         {
           "maker": "Qualcomm",
@@ -445,8 +445,8 @@
         {
           "maker": "Qualcomm",
           "what": "Qualcomm's AI runtime (QAIRT) that GenieX installs with it",
-          "says": "It comes under no licence of its own: Qualcomm keeps all rights, and its Terms of Use allow what it publishes to be downloaded for personal, non-commercial use unless another licence allows more.",
-          "url": "https://www.qualcomm.com/site/terms-of-use"
+          "says": "Under Qualcomm's AI Runtime SDK licence (EULA), not open source: it may be used, commercially too, as part of an app like GenieX, but not handed on by itself or taken apart (reverse-engineered), and not for essential services, justice or elections, law enforcement or predictive policing, migration, critical infrastructure, education or employment, biometrics, real-time remote biometric identification or reading emotions, social scoring, social-media recommendations, exploiting vulnerable people, manipulation or deception, or scraping facial images; Qualcomm may end it at any time.",
+          "url": "https://github.com/qualcomm/geniex-qairt-plugin/blob/main/THIRD_PARTY_NOTICES.md"
         },
         {
           "maker": "Qualcomm",

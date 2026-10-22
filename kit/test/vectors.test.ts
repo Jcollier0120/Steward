@@ -271,6 +271,7 @@ test('accelerator vectors: why none could take a request, the messages, and the 
     assert.equal(core.theAccelerator(m.ref), m.theAccelerator, m.case);
     assert.equal(A.theAccelerator(m.ref), m.theAccelerator, m.case);
     assert.equal(A.noteLabel(m.ref), m.noteLabel, m.case);
+    assert.equal(A.noteLabel(m.ref, true), m.developerNoteLabel, m.case);
   }
   for (const t of accel.tokens) {
     if (t.text !== undefined) assert.equal(N.estimateTokens(t.text), t.estimate);

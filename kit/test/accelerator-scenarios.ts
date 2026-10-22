@@ -309,7 +309,7 @@ export function makeAcceleratorVectors() {
       { case: 'the processor', ref: { id: 'cpu', name: 'Processor' } },
       { case: 'a name that says "the"', ref: { id: 'cpu', name: 'The Oryon CPU' } },
       { case: 'none: a note that says nothing of where (from before the accelerators) is from a local model, never guessed to be the NPU', ref: null },
-    ].map((m) => ({ ...m, theAccelerator: core.theAccelerator(m.ref), noteLabel: core.noteLabel(m.ref) })),
+    ].map((m) => ({ ...m, theAccelerator: core.theAccelerator(m.ref), noteLabel: core.noteLabel(m.ref), developerNoteLabel: core.noteLabel(m.ref, true) })),
     tokens: [
       { text: 'x'.repeat(9000), estimate: core.estimateTokens(RULES, 'x'.repeat(9000)) },
       { text: 'Hi', estimate: core.estimateTokens(RULES, 'Hi') },

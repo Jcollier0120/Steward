@@ -10,9 +10,18 @@ import { LEGACY_NAMES } from './ids.js';
 export const UNKNOWN_ACCELERATOR = 'a local model';
 
 /**
+ * The model in what a customer reads (kit 2.97.1): "the local AI", as spec/DEVELOPER-OPTIONS.md calls it, never the
+ * NPU, a graphics card or the processor it ran on.
+ */
+export const LOCAL_AI = 'the local AI';
+
+/**
  * "the NPU", "the NVIDIA GeForce RTX 4090", "the graphics card": an accelerator in a sentence. A name that
  * starts with "the" is left as it is. None (a note kept from before accelerators, or one that didn't say) is
  * "a local model": it may have been a graphics card, so it is never guessed to be the NPU.
+ *
+ * It names the hardware, so it's for developers' views, logs and the messages below. What a customer reads says
+ * LOCAL_AI instead (noteLabel without `developer`): no NPU, graphics card or processor by name.
  * @param {AcceleratorRef | { name: string } | null | undefined} a
  * @returns {string}
  */
@@ -24,12 +33,16 @@ export function theAccelerator(a) {
 }
 
 /**
- * A note's label: "note from the NVIDIA GeForce RTX 4090, unverified".
+ * A note's label, on every agent's page: "note from the local AI, unverified", whatever ran it, since what a customer
+ * reads never names the hardware (kit 2.97.1; before, it named it to everyone). `developer` (the manor's developer
+ * view, a log): where it was written, "note from the NVIDIA GeForce RTX 4090, unverified", or "note from a local
+ * model, unverified" for a note that doesn't say.
  * @param {AcceleratorRef | { name: string } | null | undefined} a
+ * @param {boolean} [developer]
  * @returns {string}
  */
-export function noteLabel(a) {
-  return `note from ${theAccelerator(a)}, unverified`;
+export function noteLabel(a, developer = false) {
+  return `note from ${developer ? theAccelerator(a) : LOCAL_AI}, unverified`;
 }
 
 /**
