@@ -263,7 +263,21 @@
           ],
           "listed": "qualcomm/Qwen3-VL-4B-Instruct",
           "size": 4374952637,
-          "licence": "Qwen3-VL-4B-Instruct: Apache-2.0; Qualcomm AI Hub's compiled W4A16 build: the base model's licence plus AI Hub's usage limitations (review)",
+          "licence": "Qwen3-VL-4B-Instruct: Apache-2.0; Qualcomm AI Hub's compiled W4A16 build: Apache-2.0 plus its card's Usage and Limitations, and Qualcomm's Responsible AI License (terms)",
+          "terms": [
+            {
+              "maker": "Qualcomm",
+              "what": "Qwen3-VL-4B-Instruct as Qualcomm AI Hub builds it for the NPU",
+              "says": "Apache-2.0, with its model card's Usage and Limitations: not for essential services, justice or elections, law enforcement or predictive policing, migration, critical infrastructure, education or employment decisions, biometrics, real-time remote biometric identification or reading emotions, social scoring, social-media recommendations, exploiting vulnerable people, subliminal manipulation, or scraping facial images.",
+              "url": "https://huggingface.co/qualcomm/Qwen3-VL-4B-Instruct"
+            },
+            {
+              "maker": "Qualcomm",
+              "what": "Qualcomm's Responsible AI License (revised 17 February 2026), for what Qualcomm makes available for AI",
+              "says": "What it covers may not be used, nor may you let anyone use it, your staff included: against its other terms or read-me files; for military purposes, crime or predicting crime (predictive policing); against the law; to exploit or harm people; for false information, defamation, harassment or impersonation; to put out what it makes without saying it's machine-made; for fully automated decisions that affect someone's legal rights or bind them; to discriminate, score people socially, or exploit vulnerable groups; to manipulate or deceive; for facial-recognition databases scraped from the internet or CCTV, biometric categorisation by sensitive traits, real-time remote biometric identification in public for law enforcement, or reading emotions at work or school. High-risk uses (biometrics, critical infrastructure, education, employment, essential services, law enforcement, migration, justice and elections, social-media recommendations, consequential decisions) are at your own risk, and you indemnify Qualcomm for your use.",
+              "url": "https://www.qualcomm.com/site/responsible-ai-license"
+            }
+          ],
           "pinned": {
             "snapdragon-x": {
               "dir": "%USERPROFILE%\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct",
@@ -412,7 +426,7 @@
         "model": {
           "id": "qwen3-embedding-0.6b-gguf",
           "file": "Qwen3-Embedding-0.6B-Q8_0.gguf",
-          "url": "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf",
+          "url": "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-Q8_0.gguf",
           "size": 639150592,
           "sha256": "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439",
           "licence": "Apache-2.0",
@@ -420,7 +434,27 @@
         },
         "licence": "llama.cpp: MIT; GenieX's libraries as GenieX (above)"
       },
-      "licence": "GenieX: BSD-3-Clause, and Qualcomm's Terms of Use; its bundled QAIRT runtime's terms aren't stated in its NOTICE (review)",
+      "licence": "GenieX: BSD-3-Clause, and Qualcomm's Terms of Use; its bundled QAIRT runtime states no licence (all rights reserved; the Terms of Use allow personal, non-commercial downloads), and Qualcomm's Responsible AI License applies (terms)",
+      "terms": [
+        {
+          "maker": "Qualcomm",
+          "what": "GenieX, the NPU's model server",
+          "says": "Open source under the BSD-3-Clause licence; Qualcomm's Terms of Use apply to using it too.",
+          "url": "https://github.com/qualcomm/GenieX/blob/main/LICENSE"
+        },
+        {
+          "maker": "Qualcomm",
+          "what": "Qualcomm's AI runtime (QAIRT) that GenieX installs with it",
+          "says": "It comes under no licence of its own: Qualcomm keeps all rights, and its Terms of Use allow what it publishes to be downloaded for personal, non-commercial use unless another licence allows more.",
+          "url": "https://www.qualcomm.com/site/terms-of-use"
+        },
+        {
+          "maker": "Qualcomm",
+          "what": "Qualcomm's Responsible AI License (revised 17 February 2026), for what Qualcomm makes available for AI",
+          "says": "What it covers may not be used, nor may you let anyone use it, your staff included: against its other terms or read-me files; for military purposes, crime or predicting crime (predictive policing); against the law; to exploit or harm people; for false information, defamation, harassment or impersonation; to put out what it makes without saying it's machine-made; for fully automated decisions that affect someone's legal rights or bind them; to discriminate, score people socially, or exploit vulnerable groups; to manipulate or deceive; for facial-recognition databases scraped from the internet or CCTV, biometric categorisation by sensitive traits, real-time remote biometric identification in public for law enforcement, or reading emotions at work or school. High-risk uses (biometrics, critical infrastructure, education, employment, essential services, law enforcement, migration, justice and elections, social-media recommendations, consequential decisions) are at your own risk, and you indemnify Qualcomm for your use.",
+          "url": "https://www.qualcomm.com/site/responsible-ai-license"
+        }
+      ],
       "notes": "Unsigned installer (SmartScreen, Smart App Control). Installs per user (HKCU, %LOCALAPPDATA%\\GenieX CLI), no administrator. Models are kept in %USERPROFILE%\\.cache\\geniex\\models. One model for chat and vision, so no model swaps: Qwen3-VL-4B (measured on the X2 Elite 2026-10-04) on the first-generation X, and Qwen3-VL-2B on the X2 (its generation's models)."
     },
     "intel": {

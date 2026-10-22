@@ -1098,38 +1098,113 @@ test('a reranker: set up only when asked for, as an add-on that keeps what its a
   assert.ok(kept.some((s) => s.base === 'http://127.0.0.1:18192' && s.idleMs === 600_000 && s.spec.logFile === path.join('C:\logs', `${card}.rerank.log`)));
 });
 
-test("setup takes llama.cpp's builds the manor signed, never ggml-org's unsigned ones (kit 2.90.0)", async () => {
-  const { parseSignedReleases } = await import('./fixture/src/kit/setup.ts');
-  const signedAsset = (name: string, size = 1000) => ({ ...asset(name, size), browser_download_url: `https://github.com/Jcollier0120/Manor-releases/releases/download/x/${name}` });
-  // The releases repository as GitHub lists it: the staff's, FFmpeg's, and llama.cpp's builds signed, one of them twice.
-  const signed = parseSignedReleases([
-    { tag_name: 'manor-v0.16.6', assets: [signedAsset('Manor-Setup-0.16.6-arm64.exe')] },
-    { tag_name: 'llama.cpp-b11749', assets: [signedAsset('llama-b11749-bin-win-cpu-x64.zip')] },
-    { tag_name: 'llama.cpp-b11749-2', assets: [signedAsset('llama-b11749-bin-win-cpu-x64.zip'), signedAsset('llama-b11749-bin-win-cuda-12.4-x64.zip', 263288146)] },
-    { tag_name: 'ffmpeg-v8.1.3-5', assets: [signedAsset('ffmpeg-8.1.3-lean-lgpl-shared-win-x64.zip')] },
-    { tag_name: 'llama.cpp-b11800', draft: true, assets: [signedAsset('llama-b11800-bin-win-cpu-x64.zip')] },
-    { tag_name: 'llama.cpp-b11734', assets: [signedAsset('llama-b11734-bin-win-cpu-x64.zip')] },
-  ]);
-  assert.deepEqual(signed.map((r) => [r.tag, r.signed]), [['b11749', 'llama.cpp-b11749-2'], ['b11734', 'llama.cpp-b11734']], 'newest first, a build signed again as its newest signing; a draft is not released yet');
-  // NVIDIA's runtime comes from ggml-org's release of the build, as llamaReleases adds it.
-  signed[0].assets.push(parseReleases([{ tag_name: 'b11749', assets: [asset('cudart-llama-bin-win-cuda-12.4-x64.zip', 391443627)] }])[0].assets[0]);
-  const plan = (releases: any[]) => planSetup({ detection: parseDetection(DESKTOP_NO_NPU), ids: ['gpu-nvidia-geforce-rtx-4090'], kinds: ['chat'], raw: {}, releases, hfFiles: hf, home: mkdtempSync(path.join(process.env.REEVE_HOME!, 'signed-')), localAppData: LOCAL });
-  const p = await plan(signed);
-  assert.equal(p.build, 'b11749');
-  assert.equal(path.basename(p.targets[0].folder!), 'llama.cpp-b11749-2-cuda-12.4-x64', "a folder of its own, so a PC set up with ggml-org's unsigned copy gets the signed one");
+test('setup plans only from what the kit pins: llama.cpp b11734 as the manor signed it, the models at a commit, each with its SHA-256 (kit 2.97.0)', async () => {
+  const { assetName, LLAMA_PIN, LLAMA_VARIANTS, llamaReleases, MODEL_PINS, pinnedHfFiles, pinnedModelUrl, pinnedRelease, SIGNED_LLAMA_REPO } = await import('./fixture/src/kit/setup.ts');
+  const { NPU_CATALOG } = await import('./fixture/src/kit/npu-vendors.ts');
+  const releases = await llamaReleases();
+  assert.deepEqual(releases, [pinnedRelease()], 'nothing asked of GitHub: the build the kit pins, whatever is newest there');
+  assert.deepEqual(releases.map((r) => [r.tag, r.signed]), [['b11734', 'llama.cpp-b11734']]);
+  for (const v of LLAMA_VARIANTS) assert.ok(LLAMA_PIN.files[assetName(LLAMA_PIN.build, v)], `every variant setup gives is pinned: ${v}`);
+  for (const a of releases[0].assets) {
+    assert.match(a.digest!, /^sha256:[0-9a-f]{64}$/, a.name);
+    assert.ok(a.size > 1e6, a.name);
+  }
+  for (const m of MODEL_PINS) {
+    assert.match(m.revision, /^[0-9a-f]{40}$/, `${m.file}: a commit, never a branch`);
+    assert.match(m.sha256, /^[0-9a-f]{64}$/, m.file);
+  }
+  assert.equal(await pinnedHfFiles('unsloth/Qwen3-VL-2B-Instruct-GGUF'), null, 'a repository the kit pins nothing in has nothing to give');
+  // The NPU's embedding model is the same file, at the same commit.
+  const npuEmbed = NPU_CATALOG.routes.qualcomm.embedServer!.model as { url: string; sha256: string; file: string };
+  const embedPin = MODEL_PINS.find((m) => m.file === npuEmbed.file)!;
+  assert.deepEqual([npuEmbed.url, npuEmbed.sha256], [pinnedModelUrl(embedPin), embedPin.sha256]);
+
+  const plan = (rs: any[]) => planSetup({ detection: parseDetection(DESKTOP_NO_NPU), ids: ['gpu-nvidia-geforce-rtx-4090'], raw: {}, releases: rs, hfFiles: pinnedHfFiles, home: mkdtempSync(path.join(process.env.REEVE_HOME!, 'pinned-')), localAppData: LOCAL });
+  const p = await plan(releases);
+  assert.equal(p.build, 'b11734');
+  assert.equal(path.basename(p.targets[0].folder!), 'llama.cpp-b11734-cuda-12.4-x64', 'the folder PCs set up since kit 2.90.0 have: nothing is downloaded again');
+  const pinOf = (what: string) => LLAMA_PIN.files[what]?.sha256 ?? MODEL_PINS.find((m) => `${m.repo}/${m.file}` === what)?.sha256;
   assert.deepEqual(
-    p.downloads.filter((d) => d.unpackTo).map((d) => [d.what, d.url.includes('/Jcollier0120/Manor-releases/') ? 'signed' : 'ggml-org']),
+    p.downloads.map((d) => [d.what, d.url, d.sha256 === pinOf(d.what)]),
     [
-      ['llama-b11749-bin-win-cuda-12.4-x64.zip', 'signed'],
-      ['cudart-llama-bin-win-cuda-12.4-x64.zip', 'ggml-org'],
+      ['llama-b11734-bin-win-cuda-12.4-x64.zip', `https://github.com/${SIGNED_LLAMA_REPO}/releases/download/llama.cpp-b11734/llama-b11734-bin-win-cuda-12.4-x64.zip`, true],
+      ['cudart-llama-bin-win-cuda-12.4-x64.zip', 'https://github.com/ggml-org/llama.cpp/releases/download/b11734/cudart-llama-bin-win-cuda-12.4-x64.zip', true],
+      ['Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf', 'https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/52d6c8ffea26cc873ac5ad116f8631268d7eb503/Qwen3VL-2B-Instruct-Q4_K_M.gguf', true],
+      ['Qwen/Qwen3-VL-2B-Instruct-GGUF/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf', 'https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/52d6c8ffea26cc873ac5ad116f8631268d7eb503/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf', true],
+      ['Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf', 'https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-Q8_0.gguf', true],
     ],
   );
-  // No signed build has what a card needs: said so, and nothing comes from ggml-org instead.
+  assert.deepEqual(p.problems, []);
+  assert.deepEqual(p.terms, [], "no maker's terms beyond the licences");
+  assert.ok(!describePlan(p).some((l) => /no pinned SHA-256/.test(l)));
+  // The pin lacking what a card needs: said so, and nothing is fetched from anywhere else.
   const none = await plan([]);
   assert.deepEqual(none.downloads.filter((d) => d.unpackTo), []);
-  assert.match(none.problems.join('\n'), /no llama\.cpp build signed for the manor \(Jcollier0120\/Manor-releases\) has cuda-12\.4-x64 \(looked at 0\)/);
-  // ggml-org's own (KIT_LLAMA_UNSIGNED=1, to try a build): its folder is named by its build, as before.
-  assert.equal(path.basename((await plan(RELEASES)).targets[0].folder!), 'b11749-cuda-12.4-x64');
+  assert.match(none.problems.join('\n'), /the llama\.cpp build this kit pins \(none\) has no cuda-12\.4-x64/);
+});
+
+test('a download is kept only as the kit pins it: its SHA-256 checked whatever served it, a mirror only for the very same file (kit 2.97.0)', async () => {
+  const { download } = await import('./fixture/src/kit/setup.ts');
+  const { createHash } = await import('node:crypto');
+  const dir = mkdtempSync(path.join(process.env.REEVE_HOME!, 'download-'));
+  const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+  const right = Buffer.from('the build the kit pins\n');
+  const other = Buffer.from('the build the kit pinz\n');
+  const longer = Buffer.concat([right, Buffer.from('!')]);
+  // Each source's answer: a file, a status, or a network error.
+  let served: Record<string, Buffer | number | Error> = {};
+  const asked: string[] = [];
+  const fetchImpl = (async (url: string) => {
+    asked.push(url);
+    const b = served[url];
+    if (b instanceof Error) throw b;
+    return Buffer.isBuffer(b) ? new Response(new Uint8Array(b)) : new Response(null, { status: b ?? 404 });
+  }) as typeof fetch;
+  const PRIMARY = 'https://primary.test/llama.zip';
+  const MIRROR = 'https://mirror.test/llama.zip';
+  const d = (o: { mirrors?: string[]; sha256?: string } = {}) => ({ what: 'llama.zip', url: PRIMARY, size: right.length, sha256: 'sha256' in o ? o.sha256 : sha(right), dest: path.join(dir, 'llama.zip'), have: false, ...(o.mirrors ? { mirrors: o.mirrors } : {}) });
+  const go = async (sources: typeof served, o: Parameters<typeof d>[0] = {}) => {
+    served = sources;
+    asked.length = 0;
+    return download(d(o), () => {}, fetchImpl).then(() => null, (e: Error) => e.message);
+  };
+  const left = () => readdirSync(dir).sort();
+
+  // The pinned file: kept, and nothing else left beside it.
+  assert.equal(await go({ [PRIMARY]: right }), null);
+  assert.deepEqual(readFileSync(path.join(dir, 'llama.zip')), right);
+  assert.deepEqual(left(), ['llama.zip']);
+
+  // Another file of the same size: refused by its SHA-256, and the file already there stays as it was.
+  writeFileSync(path.join(dir, 'llama.zip'), 'what was there');
+  const refused = await go({ [PRIMARY]: other });
+  assert.equal(refused, `llama.zip wasn't downloaded: primary.test served a file whose SHA-256 is ${sha(other)}, not the ${sha(right)} the kit pins: refused. Nothing was installed from it; setting up again tries once more`);
+  assert.equal(readFileSync(path.join(dir, 'llama.zip'), 'utf8'), 'what was there');
+  assert.deepEqual(left(), ['llama.zip'], 'no .part left');
+  // Another size: refused before its SHA-256 is needed.
+  assert.match((await go({ [PRIMARY]: longer }))!, /primary\.test served 24 bytes where the kit pins 23: not the pinned file, so it was refused/);
+
+  // A mirror serving a different file is refused as the source would be: neither is trusted for its own.
+  const both = await go({ [PRIMARY]: 503, [MIRROR]: other }, { mirrors: [MIRROR] });
+  assert.match(both!, /^llama\.zip wasn't downloaded: primary\.test answered 503; mirror\.test served a file whose SHA-256 is [0-9a-f]{64}, not the [0-9a-f]{64} the kit pins: refused\./);
+  assert.deepEqual(asked, [PRIMARY, MIRROR], 'the pinned source first, then the mirror');
+  assert.equal(readFileSync(path.join(dir, 'llama.zip'), 'utf8'), 'what was there');
+  // The mirror serving the pinned file, where the source is out of reach or serves another: kept.
+  assert.equal(await go({ [PRIMARY]: new TypeError('fetch failed', { cause: new Error('getaddrinfo ENOTFOUND') }), [MIRROR]: right }, { mirrors: [MIRROR] }), null);
+  assert.deepEqual(readFileSync(path.join(dir, 'llama.zip')), right);
+  rmSync(path.join(dir, 'llama.zip'));
+  assert.equal(await go({ [PRIMARY]: other, [MIRROR]: right }, { mirrors: [MIRROR] }), null);
+  assert.deepEqual(asked, [PRIMARY, MIRROR]);
+  assert.deepEqual(left(), ['llama.zip']);
+  // Out of reach everywhere: said so, by host.
+  assert.match((await go({ [PRIMARY]: new TypeError('fetch failed', { cause: new Error('getaddrinfo ENOTFOUND') }) }))!, /primary\.test couldn't be reached \(getaddrinfo ENOTFOUND\)/);
+
+  // A file the kit pins no SHA-256 for: refused before anything is asked of any source.
+  rmSync(path.join(dir, 'llama.zip'));
+  assert.equal(await go({ [PRIMARY]: right }, { sha256: undefined }), "llama.zip wasn't downloaded: this kit pins no SHA-256 for it, and setup downloads only files it pins");
+  assert.equal(await go({ [PRIMARY]: right }, { sha256: 'ab' }), "llama.zip wasn't downloaded: this kit pins no SHA-256 for it, and setup downloads only files it pins");
+  assert.deepEqual(asked, []);
+  assert.deepEqual(left(), []);
 });
 
 // ---------------------------------------------------------------- the PC's shared folder (Everyone install, kit 2.95.0)

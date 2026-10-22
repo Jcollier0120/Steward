@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.169
+
+**It hands out the kit 2.97.0. Setting up local AI now downloads only the versions of llama.cpp and its models that the manor has checked, and on a Snapdragon PC it names Qualcomm's terms before it downloads anything from Qualcomm.**
+
+### What's new
+
+- **Qualcomm's terms, before the download.** On a Snapdragon PC, when setting up local AI will download Qualcomm's GenieX, the AI runtime that comes with it, or a model Qualcomm AI Hub built, the plan now lists Qualcomm's terms for them, each with a link: GenieX's open-source licence, Qualcomm's Terms of Use for its AI runtime, the model's own limits, and Qualcomm's Responsible AI License. That license rules out some uses, for you and for your staff: among them military use, crime, surveillance and biometric identification, social scoring, discrimination, passing off what the AI writes as not machine-made, and fully automated decisions about people's rights. The question before downloading asks you to accept them. A PC that has everything already isn't asked again.
+
+### What changed
+
+- **Only checked downloads.** Setting up local AI now downloads one fixed build of llama.cpp (b11734, the manor's signed copy, the one recent setups already installed) and fixed versions of its models, and checks each file against its fingerprint (SHA-256) before installing it. If a server sends a different file, setup refuses it, says which server sent what, and installs nothing from it; setting up again tries once more. A PC that's set up already downloads nothing new.
+- A newer llama.cpp or model now arrives with an update, once the manor has tested it, never just because a newer one appeared online.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member sets up local AI this way from its update that brings the kit 2.97.0.
+
 ## 0.36.168
 
 **It hands out the kit 2.96.2. Staff updates now clean up after themselves once the new version proves itself, and an update cut short by the PC turning off is fixed by the next one.**
