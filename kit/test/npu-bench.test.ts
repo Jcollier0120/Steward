@@ -139,7 +139,7 @@ const PLUGGED = { onBattery: false, batteryPercent: 80, powerMode: 'balanced', b
  * minutes. On a Snapdragon (`vendor: 'qualcomm'`), GenieX is "installed" where its installer puts it, in a scratch
  * %LOCALAPPDATA%, and its embedding server is left out: the benchmark asks for no embeddings.
  */
-async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number; conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null; npu?: string; vendor?: 'intel' | 'qualcomm' } = {}) {
+async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number; conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null; npu?: string; vendor?: 'intel' | 'qualcomm'; emi?: () => string } = {}) {
   const port = await freePort();
   const vendor = o.vendor ?? 'intel';
   const catalog = structuredClone(V.NPU_CATALOG);
@@ -199,6 +199,9 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
       conditions: async () => o.conditions ?? PLUGGED,
       cpuBusy: async () => o.busy ?? 4,
       dischargeRate: async () => (o.rate ? o.rate(working()) : null),
+      // No Energy Meter counters unless a test gives them: --energy falls back to the battery, as before kit 2.98.0.
+      meter: { powerShell: async () => o.emi?.() ?? '' },
+      charging: async () => false,
       sleep: () => new Promise<void>((r) => setTimeout(r, 1)),
       clearCache: (dir: string) => cleared.push(dir),
     },
@@ -327,6 +330,10 @@ test("the route for a run: its own compile cache, a cap where the server has one
 
 test('the arguments: --profile, --device, --model or --candidate, --cap, --energy, --yes, --no-setup, --out', () => {
   assert.deepEqual(B.parseBenchArgs(['--profile', 'quick', '--device', 'gpu', '--candidate', 'a/b', '--cap', '2048', '--energy', '--yes', '--out', 'r.json']), { profile: 'quick', device: 'GPU', candidate: 'a/b', cap: 2048, energy: true, yes: true, out: 'r.json' });
+  assert.deepEqual(B.parseBenchArgs(['--meter', 'shelly:192.168.1.40']), { meter: 'shelly:192.168.1.40', energy: true }, 'a meter asks for energy');
+  assert.deepEqual(B.parseBenchArgs(['--meter', 'emi']), { meter: 'emi', energy: true });
+  assert.ok('error' in B.parseBenchArgs(['--meter', 'watts']));
+  assert.ok('error' in B.parseBenchArgs(['--meter']));
   assert.match((B.parseBenchArgs(['--profile', 'long']) as any).error, /quick or full/);
   assert.match((B.parseBenchArgs(['--model', 'a', '--candidate', 'b']) as any).error, /one or the other/);
   assert.match((B.parseBenchArgs(['--cap', '12']) as any).error, /256 or more/);
@@ -734,4 +741,76 @@ test('energy on a PC busy enough to hold the bench past its windows: a reading a
   assert.equal(e.restMilliwatts, 4000);
   assert.ok(e.loadMilliwatts > 4000, 'read while working');
   assert.ok(e.jobs > 0);
+});
+
+/**
+ * Windows' Energy Meter counters as a PC with them answers: the system 10 W at rest and 1 W more while a server runs,
+ * and each request 5 J more, 2 J of it the NPU's; in picowatt-hours, at the counters' clock in ms.
+ */
+function fakeEmi(seen: () => number) {
+  const PWH_MJ = 3.6e-6;
+  let t = performance.now();
+  let counted = 0;
+  const mj = { system: 0, npu: 0 };
+  const state = { up: false };
+  const read = () => {
+    const now = performance.now();
+    const dt = (now - t) / 1000;
+    t = now;
+    const n = seen() - counted;
+    counted = seen();
+    mj.system += (10_000 + (state.up ? 1_000 : 0)) * dt + 5_000 * n;
+    mj.npu += (100 + (state.up ? 400 : 0)) * dt + 2_000 * n;
+    return [`emi|SYSTEM|${Math.round(mj.system / PWH_MJ)}|${now}`, `emi|NPU|${Math.round(mj.npu / PWH_MJ)}|${now}`, 'emi|_Total|0|0'].join('\r\n');
+  };
+  return { read, state };
+}
+
+test('energy from the Energy Meter counters, plugged in: at rest without the model and with it, then a batch of each job and read, by part', async () => {
+  let emi: ReturnType<typeof fakeEmi> | null = null;
+  const s = await scene({ emi: () => emi!.read() });
+  emi = fakeEmi(() => s.fake.seen.length);
+  const meter = emi;
+  s.opts.suite.energy.batch = { quick: 3, full: 3 };
+  const io = {
+    ...s.opts.io,
+    start: async (e: any) => {
+      const server = await s.opts.io.start(e);
+      meter.state.up = true;
+      return { ...server, stop: async () => ((meter.state.up = false), server.stop()) };
+    },
+  };
+  const r = await B.npuBench({ ...s.opts, io, profile: 'quick', energy: true });
+  assert.equal(r.code, 0, s.lines.join('\n'));
+  assert.deepEqual(r.report.marks.map((m: any) => m.code), ['quick'], 'plugged in: the counters read either way');
+  const e = r.report.results.energy!;
+  assert.ok(e, s.lines.join('\n'));
+  assert.deepEqual(e.meter, { kind: 'emi', say: "Windows' Energy Meter counters (system, npu)", whole: 'system' });
+  assert.equal(e.charging, false);
+  const near = (v: number, want: number, by: number, what: string) => assert.ok(Math.abs(v - want) <= by, `${what}: ${v}, not about ${want}`);
+  near(e.idle!.unloadedMilliwatts!.system, 10_000, 200, 'at rest, no model');
+  near(e.idle!.loadedMilliwatts!.npu, 500, 50, "the NPU's, the model loaded");
+  near(e.idle!.keepLoadedMilliwatts!, 1_000, 200, 'keeping it loaded');
+  near(e.restMilliwatts, 11_000, 200, 'at rest before the batches');
+  assert.ok(e.loadMilliwatts > e.restMilliwatts && e.jobs > 0 && e.millijoulesPerToken! > 0);
+  assert.deepEqual(Object.keys(e.batches!), ['triage', 'reply', 'summary', 'read-1024']);
+  for (const [id, b] of Object.entries(e.batches!)) {
+    assert.equal(b.count, 3, id);
+    assert.equal(b.answered, 3, id);
+    near(b.millijoulesEach!, 5_000, 100, `${id}: each over rest`);
+    near(b.extraMillijoules.npu, 6_000, 100, `${id}: the NPU's, three of them`);
+    assert.ok(b.millijoules.system > b.extraMillijoules.system, `${id}: the whole, rest and all`);
+  }
+  assert.ok(s.lines.includes("energy: the meter is Windows' Energy Meter counters (system, npu)"), s.lines.join('\n'));
+  assert.ok(s.lines.some((l) => /^energy at rest, no model loaded: 10\.0 W \(npu 0\.10 W\)$/.test(l)), s.lines.join('\n'));
+  assert.ok(s.lines.some((l) => /^energy at rest, the model loaded: .*; keeping it loaded: [\d.]+ W$/.test(l)), s.lines.join('\n'));
+  assert.ok(s.lines.some((l) => /^energy, 3 reply jobs: [\d.]+ J in [\d.]+ s; each over rest 5\.0\d J \(npu 2\.0\d J\)$/.test(l)), s.lines.join('\n'));
+});
+
+test('--energy plugged in, on a PC without the counters, measures nothing and says what would', async () => {
+  const s = await scene();
+  const r = await B.npuBench({ ...s.opts, profile: 'quick', energy: true });
+  assert.equal(r.code, 0, s.lines.join('\n'));
+  assert.equal(r.report.results.energy, null);
+  assert.ok(s.lines.includes("energy: not measured: this PC has no Energy Meter counters and is plugged in: unplug it for the battery's reading, or give a meter (--meter shelly:<address> for a plug, --meter nvidia for a card)"), s.lines.join('\n'));
 });

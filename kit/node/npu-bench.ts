@@ -9,6 +9,7 @@ import { checkSchema } from './json-schema.ts';
 import { routeOnDevice } from './npu-check.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
 import { atVersion, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, pinnedRoute, planNpu, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
+import { charging, joules, measureSpan, type Meter, type MeterIo, openMeter, partsSay, type Span, watts } from './power-meter.ts';
 import { mb, type NpuIo, saysReady } from './setup.ts';
 import { mixSummary, readTally } from './token-tally.ts';
 
@@ -21,7 +22,8 @@ import { mixSummary, readTally } from './token-tally.ts';
  * isn't ranked.
  *
  *   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]]
- *                                     [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--yes] [--no-setup] [--out <file>]
+ *                                     [--cap <tokens>] [--generation <id>] [--small-pc] [--energy]
+ *                                     [--meter auto|emi|shelly:<address>|nvidia|battery] [--yes] [--no-setup] [--out <file>]
  *
  * It measures the models setup would run on this PC: its generation's own, where it has any (a Snapdragon X2's
  * Qwen3-VL-2B), and on one with little memory (under idleStop.smallPcGb) its generation's smallPc models, where it has
@@ -67,7 +69,8 @@ export interface Suite {
   quiet: { cpuBusyMax: number; samples: number; everyMs: number };
   gate: { score: number; calibrated: boolean };
   holding: { minutes: number; job: string };
-  energy: { restSeconds: number; loadMinutes: number; job: string };
+  /** `batch`: how many of each job, read and picture in each energy batch, by profile (kit 2.98.0). */
+  energy: { restSeconds: number; loadMinutes: number; job: string; batch?: { quick: number; full: number } };
   short: { prompt: string; maxTokens: number; grade: Grade };
   write: { prompt: string; maxTokens: number };
   read: { sizes: number[]; capShare: number; maxTokens: number; question: string };
@@ -284,6 +287,21 @@ export function jobMeasure(tries: number[], answerTokens: (number | null)[], fir
   return { ...measure(tries, maxSpread), answerTokens, firstTokenMs, spreadAtLength: atLength.spread, steady: atLength.steady };
 }
 
+/** One energy batch (kit 2.98.0): `count` of one job, read or picture, one after another, and what they took. */
+export interface EnergyBatch {
+  count: number;
+  answered: number;
+  seconds: number;
+  tokens: number;
+  /** Each part's energy over the batch, in mJ. */
+  millijoules: Record<string, number>;
+  /** Each part's, less what it draws at rest over as long: the work's own. */
+  extraMillijoules: Record<string, number>;
+  /** The whole PC's (the meter's `whole`) over rest, for one of them, and for a token. */
+  millijoulesEach: number | null;
+  millijoulesPerToken: number | null;
+}
+
 export interface Mark {
   /** quick, rehearsal, battery, busy, not-streamed, no-usage, noisy, gate, job-failed, setup, start */
   code: string;
@@ -332,7 +350,24 @@ export interface BenchReport {
     jobTimeS: number | null;
     memory: { workingSetBytes: number; privateBytes: number } | null;
     holding: { minutes: number; firstMinuteMs: number | null; lastMinuteMs: number | null; held: number | null } | null;
-    energy: { restMilliwatts: number; loadMilliwatts: number; jobs: number; tokens: number; millijoulesPerToken: number | null } | null;
+    energy: {
+      restMilliwatts: number;
+      loadMilliwatts: number;
+      jobs: number;
+      tokens: number;
+      millijoulesPerToken: number | null;
+      /** From kit 2.98.0, with a meter other than the battery: what was read, and the part that is the whole PC (the card, for nvidia's). */
+      meter?: { kind: string; say: string; whole: string };
+      /** The battery was charging through the energy step: the whole PC's figures carry it, each part's don't. */
+      charging?: boolean | null;
+      /** Each part's power at rest with no model loaded, then with it loaded (just after the cold load), and what keeping it loaded costs the whole PC. */
+      idle?: { unloadedMilliwatts: Record<string, number> | null; loadedMilliwatts: Record<string, number> | null; keepLoadedMilliwatts: number | null };
+      /** Each part's power at rest just before the energy step, and through its triage minutes. */
+      restParts?: Record<string, number>;
+      loadParts?: Record<string, number>;
+      /** Fixed batches of each job, of reads and of pictures: what each took, by part. */
+      batches?: Record<string, EnergyBatch>;
+    } | null;
   };
   quality: { score: number | null; passed: number; of: number; mustPass: boolean; gate: boolean; items: { id: string; kind: string; ok: boolean; answer: string; ms: number }[] };
   vision: { passed: number; of: number; items: { id: string; ok: boolean; answer: string; ms: number }[] } | null;
@@ -407,17 +442,6 @@ async function cpuBusy(): Promise<number | null> {
     const out = await runPowerShell(`(Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'").PercentProcessorTime`, 20_000);
     const n = Number(out.trim());
     return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The battery's discharge rate in milliwatts (0 when plugged in), or null without a battery. */
-async function dischargeRate(): Promise<number | null> {
-  try {
-    const out = await runPowerShell(`(Get-CimInstance -Namespace root\\wmi -ClassName BatteryStatus -ErrorAction Stop | Select-Object -First 1).DischargeRate`, 20_000);
-    const n = Number(out.trim());
-    return out.trim() && Number.isFinite(n) ? n : null;
   } catch {
     return null;
   }
@@ -509,6 +533,22 @@ export function benchServe(route: NpuRoute, o: { device: string; cap?: number })
   return { ...route, serve, maxContextTokens: o.cap ?? route.maxContextTokens };
 }
 
+/** The suite's pictures as a server takes them: each a file of its own where it reads a path (image-path), else a `data:` URL; `done` removes the files. */
+function pictureInputs(asFiles: boolean) {
+  const dir = asFiles ? mkdtempSync(path.join(os.tmpdir(), 'npu-bench-pictures-')) : null;
+  return {
+    imageOf: (v: Suite['vision'][number]) => {
+      if (!dir) return picture(v.image);
+      const file = path.join(dir, `${v.id}.png`);
+      if (!existsSync(file)) writeFileSync(file, picturePng(v.image));
+      return file;
+    },
+    done: () => {
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
 /** What each of a server's quirks makes the bench's requests do, for its log. */
 const QUIRK_SAYS: Record<Quirk, string> = {
   'prefix-leak': 'a nonce first in every request (prefix-leak)',
@@ -538,6 +578,8 @@ export interface NpuBenchOptions {
   vision?: boolean;
   cap?: number;
   energy?: boolean;
+  /** What --energy reads (power-meter.ts): auto (the default), emi, shelly:<address>, nvidia or battery. */
+  meter?: string;
   setup?: boolean;
   yes?: boolean;
   confirm?: (question: string) => Promise<boolean>;
@@ -557,6 +599,9 @@ export interface NpuBenchOptions {
     conditions?: () => Promise<Omit<Conditions, 'cpuBusyPercent'>>;
     cpuBusy?: () => Promise<number | null>;
     dischargeRate?: () => Promise<number | null>;
+    /** The meters' own reading (power-meter.ts' MeterIo): the Energy Meter counters' PowerShell, nvidia-smi, a plug's fetch. */
+    meter?: MeterIo;
+    charging?: () => Promise<boolean | null>;
     sleep?: (ms: number) => Promise<void>;
     now?: () => number;
     clearCache?: (dir: string) => void;
@@ -697,6 +742,23 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   }
   report.conditions.cpuBusyPercent = busy.length ? Math.round(busy.reduce((a, b) => a + b, 0) / busy.length) : null;
 
+  // Energy (--energy): the meter, and the PC at rest with no model loaded, before the server starts. The battery's
+  // reading is too coarse for the rests and batches (Energy, in the spec): it measures the triage minutes alone, as before.
+  let meter: Meter | null = null;
+  let unloaded: Span | null = null;
+  if (o.energy) {
+    const opened = await openMeter(o.meter, { onBattery: report.conditions.onBattery, io: { now, ...o.io?.meter, dischargeRate: o.io?.dischargeRate ?? o.io?.meter?.dischargeRate } });
+    if ('why' in opened) log(`energy: not measured: ${opened.why}`);
+    else {
+      meter = opened.meter;
+      log(`energy: the meter is ${meter.say}`);
+      if (meter.kind !== 'battery') {
+        unloaded = await measureSpan(meter, { now, sleep, ms: suite.energy.restSeconds * 1000 });
+        log(`energy at rest, no model loaded: ${unloaded ? partsSay(meter, unloaded.milliwatts) : 'no reading'}`);
+      }
+    }
+  }
+
   // 4. The server, measured.
   // The entry carries the route's quirks, and the client's requests are the kit's own (chatBody, visionBody), so they
   // take them as an agent's do: GenieX's nonce first in every request, which stops it reusing a shared prefix's state
@@ -742,6 +804,14 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     report.results.coldLoadMs = await loadAndAnswer();
     log(`cold load: ${report.results.coldLoadMs === null ? `no correct answer (see ${logFile})` : `${(report.results.coldLoadMs / 1000).toFixed(1)} s to the first answer`}`);
     if (report.results.coldLoadMs === null) return finish(1, { code: 'start', say: `${route.server} didn't load and answer "ready": see ${logFile}` });
+
+    // The model loaded and idle (--energy), just after the cold load: what keeping it loaded costs, against no model.
+    let loaded: Span | null = null;
+    if (meter && meter.kind !== 'battery') {
+      loaded = await measureSpan(meter, { now, sleep, ms: suite.energy.restSeconds * 1000 });
+      const w = meter.whole;
+      log(`energy at rest, the model loaded: ${loaded ? partsSay(meter, loaded.milliwatts) : 'no reading'}${loaded && unloaded && w in loaded.milliwatts && w in unloaded.milliwatts ? `; keeping it loaded: ${watts(loaded.milliwatts[w] - unloaded.milliwatts[w])}` : ''}`);
+    }
 
     /** A measurement: warm-ups, then the tries, each one value from its answer (null when it failed); `q` a question, or one fresh each time. */
     const tryTimes = async (q: Question | (() => Question), value: (r: Streamed) => number | null, onEach?: (r: Streamed) => void) => {
@@ -799,13 +869,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
       // A server that reads a local path (GenieX: image-path) gets each picture as a file, as an agent's pictures go to
       // it; a `data:` URL is sent as it is, whatever the quirk says (imageUrl), and GenieX doesn't read one. FastFlowLM's
       // (sides-of-32) are fitted as an agent's are (fitPicture, in serverClient): three of the suite's four have such sides.
-      const dir = acc.quirks.includes('image-path') ? mkdtempSync(path.join(os.tmpdir(), 'npu-bench-pictures-')) : null;
-      const imageOf = (v: Suite['vision'][number]) => {
-        if (!dir) return picture(v.image);
-        const file = path.join(dir, `${v.id}.png`);
-        writeFileSync(file, picturePng(v.image));
-        return file;
-      };
+      const { imageOf, done } = pictureInputs(acc.quirks.includes('image-path'));
       try {
         // A warm-up, as every measurement has: GenieX holds one model at a time, and a server may load its vision part
         // only for the first picture. Neither is a picture's time.
@@ -818,7 +882,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
         report.vision = { passed: items.filter((x) => x.ok).length, of: items.length, items };
         log(`vision: ${report.vision.passed} of ${report.vision.of}`);
       } finally {
-        if (dir) rmSync(dir, { recursive: true, force: true });
+        done();
       }
     }
 
@@ -850,61 +914,101 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
       report.results.holding = { minutes: suite.holding.minutes, firstMinuteMs: first, lastMinuteMs: last, held: first && last ? Number((first / last).toFixed(3)) : null };
       log(`holding speed: ${report.results.holding.held === null ? '—' : `${Math.round(report.results.holding.held * 100)}% after ${suite.holding.minutes} minutes`}`);
     }
-    if (o.energy) {
-      if (!report.conditions.onBattery) log('energy: not measured, as the PC is plugged in (unplug it and run again with --energy)');
-      else {
-        const rate = o.io?.dischargeRate ?? dischargeRate;
-        // Readings for `ms`, at least one, and with work `during`, until a job has finished and a reading came after
-        // it: a PC busy enough to hold this process past a short window still reads the rate, and reads it working.
-        const sample = async (ms: number, during?: () => Promise<void>) => {
-          const xs: number[] = [];
-          const t0 = now();
-          let busyWork: Promise<void> | null = null;
-          let stop = false;
-          let finished = 0;
-          if (during)
-            busyWork = (async () => {
-              while (!stop)
-                try {
-                  await during();
-                } finally {
-                  finished++;
-                }
-            })();
-          for (;;) {
-            const v = await rate();
-            if (v !== null && v > 0) xs.push(v);
-            if (now() - t0 >= ms && (!during || finished > 0)) break;
-            await sleep(5_000);
-          }
-          stop = true;
-          await busyWork;
-          return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
-        };
-        const job = jobById(suite.energy.job);
-        const q = fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens });
-        let jobs = 0;
-        let tokens = 0;
-        const rest = await sample(suite.energy.restSeconds * 1000);
-        const t0 = now();
-        const load = await sample(suite.energy.loadMinutes * 60_000, async () => {
+    if (meter) {
+      const m = meter;
+      const whole = m.whole;
+      const span = (x: { ms?: number; work?: () => Promise<void>; during?: () => Promise<void> }) => measureSpan(m, { now, sleep, ...x });
+      const chargingNow = m.kind === 'battery' ? false : await (o.io?.charging ?? charging)();
+      if (chargingNow && m.kind !== 'nvidia') log(`energy: the battery is charging, so the whole PC's figures (${whole}) carry its charge, and each part's don't: for whole-PC figures, run it with the battery full`);
+      const job = jobById(suite.energy.job);
+      const q = fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens });
+      const tokensOf = (r: Streamed) => (Number(r.usage?.prompt_tokens) || 0) + (Number(r.usage?.completion_tokens) || 0);
+      let jobs = 0;
+      let tokens = 0;
+      const rest = await span({ ms: suite.energy.restSeconds * 1000 });
+      const load = await span({
+        ms: suite.energy.loadMinutes * 60_000,
+        during: async () => {
           const r = await ask(q());
           if (r.ok) {
             jobs++;
-            tokens += (Number(r.usage?.prompt_tokens) || 0) + (Number(r.usage?.completion_tokens) || 0);
+            tokens += tokensOf(r);
           }
-        });
-        const seconds = (now() - t0) / 1000;
-        if (rest !== null && load !== null) {
-          const extraJoules = ((load - rest) / 1000) * seconds;
-          // Working that draws no clearly more than rest is the battery's reading wobbling, not the model's energy:
-          // on the Lunar Lake laptop the rate read 28 W at rest, nearly twice its real drain, and less working (NPU-BENCHMARK.md).
-          const clear = load - rest >= Math.max(ENERGY_MIN_EXTRA.milliwatts, rest * ENERGY_MIN_EXTRA.share);
-          report.results.energy = { restMilliwatts: Math.round(rest), loadMilliwatts: Math.round(load), jobs, tokens, millijoulesPerToken: clear && tokens ? Number(((extraJoules * 1000) / tokens).toFixed(3)) : null };
-          if (clear) log(`energy: ${report.results.energy.millijoulesPerToken} mJ a token (${Math.round(rest)} mW at rest, ${Math.round(load)} mW working)`);
-          else log(`energy: not counted: working read ${Math.round(load)} mW against ${Math.round(rest)} mW at rest, too little more for the battery's reading to tell the model's share`);
-        } else log('energy: the battery gave no discharge rate');
-      }
+        },
+      });
+      if (rest && load && whole in rest.milliwatts && whole in load.milliwatts) {
+        const restMw = rest.milliwatts[whole];
+        const loadMw = load.milliwatts[whole];
+        const extraJoules = ((loadMw - restMw) / 1000) * load.seconds;
+        // Working that draws no clearly more than rest is the battery's reading wobbling, not the model's energy:
+        // on the Lunar Lake laptop the rate read 28 W at rest, nearly twice its real drain, and less working (NPU-BENCHMARK.md).
+        // A meter that keeps totals, or a plug's or a card's own reading, doesn't wobble so: any more than rest counts.
+        const clear = m.kind === 'battery' ? loadMw - restMw >= Math.max(ENERGY_MIN_EXTRA.milliwatts, restMw * ENERGY_MIN_EXTRA.share) : loadMw > restMw;
+        const e: NonNullable<BenchReport['results']['energy']> = { restMilliwatts: Math.round(restMw), loadMilliwatts: Math.round(loadMw), jobs, tokens, millijoulesPerToken: clear && tokens ? Number(((extraJoules * 1000) / tokens).toFixed(3)) : null };
+        report.results.energy = e;
+        if (clear) log(`energy: ${e.millijoulesPerToken} mJ a token (${Math.round(restMw)} mW at rest, ${Math.round(loadMw)} mW working)`);
+        else log(`energy: not counted: working read ${Math.round(loadMw)} mW against ${Math.round(restMw)} mW at rest, too little more for ${m.kind === 'battery' ? "the battery's reading" : 'the meter'} to tell the model's share`);
+        if (m.kind !== 'battery') {
+          const round = (r: Record<string, number>) => Object.fromEntries(Object.entries(r).map(([p, v]) => [p, Math.round(v)]));
+          e.meter = { kind: m.kind, say: m.say, whole };
+          e.charging = chargingNow;
+          e.idle = { unloadedMilliwatts: unloaded ? round(unloaded.milliwatts) : null, loadedMilliwatts: loaded ? round(loaded.milliwatts) : null, keepLoadedMilliwatts: unloaded && loaded && whole in unloaded.milliwatts && whole in loaded.milliwatts ? Math.round(loaded.milliwatts[whole] - unloaded.milliwatts[whole]) : null };
+          e.restParts = round(rest.milliwatts);
+          e.loadParts = round(load.milliwatts);
+          e.batches = {};
+          const batches = e.batches;
+          // Fixed batches of the agents' work, each a stretch of its own, against the PC at rest just before: what one of
+          // each costs, by part. A batch's tries are fresh prompts, as every read and job is.
+          const batch = async (id: string, what: string, count: number, one: (i: number) => Promise<{ ok: boolean; tokens: number }>) => {
+            let answered = 0;
+            let tk = 0;
+            const s = await span({
+              work: async () => {
+                for (let i = 0; i < count; i++) {
+                  const r = await one(i);
+                  if (r.ok) answered++;
+                  tk += r.tokens;
+                }
+              },
+            });
+            if (!s || !(whole in s.millijoules)) return log(`energy, ${count} ${what}: no reading`);
+            const extra = Object.fromEntries(Object.entries(s.millijoules).map(([p, mj]) => [p, Math.max(0, mj - (rest.milliwatts[p] ?? 0) * s.seconds)]));
+            batches[id] = { count, answered, seconds: Number(s.seconds.toFixed(2)), tokens: tk, millijoules: round(s.millijoules), extraMillijoules: round(extra), millijoulesEach: Math.round(extra[whole] / count), millijoulesPerToken: tk ? Number((extra[whole] / tk).toFixed(3)) : null };
+            const each = Object.fromEntries(Object.entries(extra).map(([p, mj]) => [p, mj / count]));
+            log(`energy, ${count} ${what}: ${joules(s.millijoules[whole])} in ${s.seconds.toFixed(1)} s; each over rest ${partsSay(m, each, joules)}`);
+          };
+          const count = suite.energy.batch?.[profile] ?? 0;
+          if (count) {
+            for (const j of suite.jobs)
+              await batch(j.id, `${j.id} jobs`, count, async () => {
+                const r = await ask(fresh({ prompt: promptOf(suite, j), maxTokens: j.maxTokens })());
+                return { ok: r.ok && grade(j.grade, r.answer), tokens: r.ok ? tokensOf(r) : 0 };
+              });
+            const size = Math.max(...suite.read.sizes);
+            await batch(`read-${size}`, `reads of ${size} tokens`, count, async () => {
+              const r = await ask(fresh({ prompt: readPrompt(suite, size), maxTokens: suite.read.maxTokens })());
+              return { ok: r.ok, tokens: r.ok ? tokensOf(r) : 0 };
+            });
+            if (acc.vision?.model && suite.vision.length) {
+              // One picture first, untimed, as for vision above: GenieX loads its vision part for a picture after text.
+              // No more than twice the suite's pictures: GenieX's DSP gives out after about a dozen vision loads in one
+              // process (ACCELERATORS.md), and a run's second process has sent none before this.
+              const pics = pictureInputs(acc.quirks.includes('image-path'));
+              try {
+                const v0 = suite.vision[0];
+                await ask({ prompt: v0.prompt, maxTokens: v0.maxTokens, image: pics.imageOf(v0) });
+                await batch('pictures', 'pictures', Math.min(count, suite.vision.length * 2), async (i) => {
+                  const v = suite.vision[i % suite.vision.length];
+                  const r = await ask({ prompt: v.prompt, maxTokens: v.maxTokens, image: pics.imageOf(v) });
+                  return { ok: r.ok && grade(v.grade, r.answer), tokens: r.ok ? tokensOf(r) : 0 };
+                });
+              } finally {
+                pics.done();
+              }
+            }
+          }
+        }
+      } else log(m.kind === 'battery' ? 'energy: the battery gave no discharge rate' : `energy: ${m.say} gave no reading`);
     }
   } finally {
     await server.stop();
@@ -932,6 +1036,12 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
     if (a === '--yes' || a === '-y') o.yes = true;
     else if (a === '--no-setup') o.setup = false;
     else if (a === '--energy') o.energy = true;
+    else if (a === '--meter') {
+      const v = argv[++i];
+      if (!v || !/^(auto|emi|nvidia|battery|shelly:.+)$/i.test(v)) return { error: '--meter takes auto, emi, shelly:<address>, nvidia or battery' };
+      o.meter = v;
+      o.energy = true;
+    }
     else if (a === '--profile') {
       const v = argv[++i];
       if (v !== 'quick' && v !== 'full') return { error: '--profile takes quick or full' };
@@ -967,7 +1077,7 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
 if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const o = parseBenchArgs(process.argv.slice(2));
   if ('error' in o) {
-    console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]`);
+    console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--meter auto|emi|shelly:<address>|nvidia|battery] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]`);
     process.exit(2);
   }
   if (o.mix) {
