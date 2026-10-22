@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { APP, port } from '../app.ts';
 import { flushTree } from './flush.ts';
-import { appFolder, defaultDeps, install, OLD_TASK_NAME, readRelease, replaceContents, runOwnTask, TASK_NAME, waitForPage, type InstallDeps } from './install.ts';
+import { appFolder, defaultDeps, finishSwap, install, OLD_TASK_NAME, readRelease, replaceContents, runOwnTask, TASK_NAME, waitForPage, type InstallDeps } from './install.ts';
 import { endProcesses, pagesFrom } from './native.ts';
 import { compareVersions } from './update-hold.ts';
 import { ping } from './service.ts';
@@ -19,7 +19,8 @@ import { dataFile, readJson, writeJson } from './store.ts';
  *    a busy PC is forgiven), its home page too;
  * 4. failing any of that (the install itself failing once the new copy was in place included), is rolled back: the
  *    new copy set aside as app.unsafe-<version> for a look, the version before put back and started again, and the
- *    version flagged in unsafe-updates.json.
+ *    version flagged in unsafe-updates.json;
+ * 5. holding up, is done: app.prev goes (kit 2.96.2; it stayed until the next update before), as app.old goes at the swap.
  * A flagged version is refused at once, nothing changed, by every install after (so Manor's automatic updates stop
  * after their few tries), until it is allowed again: `install --allow-unsafe` from the release, or the agent's own way
  * (the Steward's: Dismiss on its alarm). A newer version isn't flagged, and installs as usual; once it holds up, the
@@ -260,16 +261,31 @@ async function goBack(version: string, from: string, why: string, d: SafeDeps): 
 export async function watchProbation(version: string, from: string, since: number, d: SafeDeps): Promise<number> {
   const app = appFolder(d.dataDir);
   const why = d.now() - since < d.probationMs ? await probation(version, d, { since }) : null;
+  const ours = () => readRelease(app)?.version === version && readRelease(`${app}.prev`)?.version === from;
   if (!why) {
     dropOlderFlags(version, d);
-    d.out(`${APP.name} ${version} held up for ${Math.round(d.probationMs / 1000)} s. ${from} stays in ${app}.prev, to go back to by hand.`);
+    // Another install since has an app.prev of its own: that one is its to keep.
+    d.out(`${APP.name} ${version} held up for ${Math.round(d.probationMs / 1000)} s${ours() ? `, so ${dropPrev(`${app}.prev`, from)}` : '.'}`);
     return 0;
   }
-  if (readRelease(app)?.version !== version || readRelease(`${app}.prev`)?.version !== from) {
+  if (!ours()) {
     d.out(`${APP.name} ${version} ${why}, but another install has changed ${app} since: it is left as it is.`);
     return 0;
   }
   return goBack(version, from, why, d);
+}
+
+/**
+ * The version before, once the new one has held up (kit 2.96.2): kept only to go back to during the probation, it goes,
+ * as app.old goes at the swap. Before, it stayed in app.prev until the next update, and on through uninstall. What to say.
+ */
+function dropPrev(prev: string, from: string): string {
+  try {
+    rmSync(prev, { recursive: true, force: true });
+    return `${from}, kept in ${prev} to go back to, is removed.`;
+  } catch (e) {
+    return `${from}, kept in ${prev} to go back to, couldn't be removed yet (${message(e)}): the next update clears it.`;
+  }
 }
 
 /**
@@ -288,13 +304,16 @@ export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean; a
   const release = d.dev ? null : readRelease(d.root);
   // A checkout, not a release, or a dry run: the kit's install says what it says, and changes nothing.
   if (!release || opts.dryRun) return install(opts, d);
+  const app = appFolder(d.dataDir);
+  // An earlier install's swap that never finished (any kit's) left the installed copy in app.old: back in app first, so
+  // this is the update it is, guarded as any other (kit 2.96.2). Before the flag's refusal too: it mends the agent.
+  await finishSwap(app, d);
   if (opts.allowUnsafe && allowUpdate(release.version)) out(`${APP.name} ${release.version} is allowed again, as asked.`);
   const bad = d.flagged()[release.version];
   if (bad) {
     out(`${APP.name} ${release.version} was rolled back on ${bad.at.slice(0, 10)} (${bad.why}), so it isn't installed again until it is allowed: ${(d.allowHint ?? defaultAllowHint)(release.version)}. A newer version installs as usual. Nothing was changed.`);
     return 3;
   }
-  const app = appFolder(d.dataDir);
   const before = existsSync(app) ? readRelease(app) : null;
   const prev = `${app}.prev`;
   // The version it replaces, kept whole first: no copy, no update.
@@ -339,7 +358,7 @@ export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean; a
     if (late) return goBack(release.version, from, late, d);
   }
   dropOlderFlags(release.version, d);
-  out(`${APP.name} ${release.version} held up for ${Math.round(d.probationMs / 1000)} s. ${from} stays in ${prev}, to go back to by hand.`);
+  out(`${APP.name} ${release.version} held up for ${Math.round(d.probationMs / 1000)} s, so ${dropPrev(prev, from)}`);
   return 0;
 }
 

@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.96.2
+
+**An update's copy of the version before goes once the new one has held up, a swap cut short is put back, and uninstall takes the kept copies with it.**
+
+### What changed
+
+- **safeinstall.ts: `app.prev` goes once the new version holds up.** Since 2.51.0 every agent's update keeps the version it replaces in `app.prev` and puts the new one on probation, going back to `app.prev` if it fails. `app.prev` then stayed until the next update, and through uninstall. Now it is removed once the probation passes, whether the install waited for it (`--wait`, or no watcher) or its watcher (`install --watch-probation`) did. The watcher removes it only while `app` and `app.prev` still hold the versions it was started for: a later install's `app.prev` is that install's to keep. The line that says so is now `<name> <version> held up for 90 s, so <before>, kept in …\app.prev to go back to, is removed.` (it was `<before> stays in …\app.prev, to go back to by hand`). Manor's update log leaves the new line out, as it leaves out any "held up" line it doesn't read.
+- **install.ts: a swap cut short is put back first (`unfinishedSwap`, `finishSwap`).** An install moves `app` aside to `app.old`, then the release in. If the PC went off between the two, `app` was missing and the installed copy was in `app.old`: the next install took that for a first install, deleted `app.old` and put the agent on duty. Now `install` and `safeInstall` move `app.old` back to `app` first, and say so, so the update keeps the duty it had and is guarded like any other. Every kit's install swaps this way, so this mends one an older kit left too. `safeInstall` does it before refusing a flagged version, so the agent can start again. `--dry-run` says it would.
+- **install.ts: uninstall removes `app.prev` and `app.unsafe-<version>` (`keptCopies`).** They're copies of the program, not its data. `--dry-run` names them. One that can't be removed (a file in it is open) is named, and uninstall goes on.
+- **kit/test/update-path.test.ts (new).** The kit's real install behind its fail-safe, over real folders: updates from copies older kits installed, with the layouts they left (`app.prev` kept since the last update, a stale `app.old`, a swap cut short, an older version's flag and kept copy), a new version that holds up, one that stops answering on probation, one that never answers after the swap, a flagged version refused and a newer one taken, the watcher, and uninstall.
+
+### Before you update
+
+- Nothing: take the kit and release as usual. An update runs the new release's own kit, so an agent behaves this way from the update after the one that brings it this kit.
+
 ## 2.96.1
 
 **A strict page sends a browser that isn't signed in to Castellan, which opens that same page signed in.**

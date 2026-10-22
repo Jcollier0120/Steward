@@ -92,13 +92,19 @@ function setup(o: { installCode?: number; page?: (t: number) => string | null; h
   return { d, app, said, tasks, ended, running: () => running };
 }
 
-test('an update that holds up for its probation is done, and the version before it is kept beside it', async () => {
+test('an update that holds up for its probation is done, and the version before it, kept beside it until then, goes (kit 2.96.2)', async () => {
   rmSync(unsafeFile(), { force: true });
   const s = setup();
+  let kept: string | null = null;
+  const probe = s.d.homePage;
+  s.d.homePage = async () => ((kept ??= versionIn(`${s.app}.prev`)), probe());
   assert.equal(await safeInstall({}, s.d), 0, s.said.join('\n'));
   assert.equal(versionIn(s.app), '0.8.14');
-  assert.equal(versionIn(`${s.app}.prev`), '0.8.13');
-  assert.match(s.said.at(-1)!, /0\.8\.14 held up for 30 s\. 0\.8\.13 stays in .*app\.prev/);
+  assert.equal(kept, '0.8.13', 'kept beside it while on probation');
+  assert.ok(!existsSync(`${s.app}.prev`), 'and gone once it held up');
+  assert.match(s.said.at(-1)!, /0\.8\.14 held up for 30 s, so 0\.8\.13, kept in .*app\.prev to go back to, is removed\./);
+  // Manor's update log reads "<version> stays in" as a copy kept to go back to (its update-steps.ts): no longer said.
+  assert.doesNotMatch(s.said.at(-1)!, / held up for \d+ \w+\. \S+ stays in /);
   assert.deepEqual(loadUnsafe(), {});
 });
 
@@ -398,9 +404,21 @@ test('the watcher goes back and flags a version that stops answering, timed from
   const ok = setup();
   ok.d.watch = async () => true;
   assert.equal(await safeInstall({}, ok.d), 0);
+  assert.equal(versionIn(`${ok.app}.prev`), '0.8.13', 'kept while the watcher watches');
   assert.equal(await kit.watchProbation('0.8.14', '0.8.13', 0, ok.d), 0);
-  assert.match(ok.said.at(-1)!, /0\.8\.14 held up for 30 s/);
+  assert.match(ok.said.at(-1)!, /0\.8\.14 held up for 30 s, so 0\.8\.13, kept in .*app\.prev to go back to, is removed\./);
   assert.equal(versionIn(ok.app), '0.8.14');
+  assert.ok(!existsSync(`${ok.app}.prev`), 'gone once it held up (kit 2.96.2)');
+
+  // Held up, but another install has been since, with an app.prev of its own: that one stays.
+  const since = setup();
+  since.d.watch = async () => true;
+  assert.equal(await safeInstall({}, since.d), 0);
+  release(`${since.app}.prev`, '0.8.14');
+  release(since.app, '0.8.15');
+  assert.equal(await kit.watchProbation('0.8.14', '0.8.13', 0, { ...since.d, pingVersion: async () => '0.8.14' }), 0);
+  assert.equal(versionIn(`${since.app}.prev`), '0.8.14');
+  assert.match(since.said.at(-1)!, /0\.8\.14 held up for 30 s\.$/);
 
   // Another version installed meanwhile: the watcher of the one before it leaves app as it is.
   const later = setup({ page: (t) => (t < 20_000 ? '0.8.14' : null) });
