@@ -84,10 +84,20 @@ test(`several cards: "the graphics card", which one unknown; none: the processor
 
 test('a note that says nothing of where is "from a local model", never "the NPU"', () => {
   assert.equal(core.theAccelerator(null), 'a local model');
-  assert.equal(core.noteLabel(undefined), 'note from a local model, unverified');
+  assert.equal(core.noteLabel(undefined, true), 'note from a local model, unverified');
   assert.equal(core.theAccelerator({ id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }), 'the NVIDIA GeForce RTX 4080 SUPER');
-  assert.match(unverified('hi'), /title="Written by a local model\. /);
-  assert.match(unverified('hi', { id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }), /Written by a local model on the NVIDIA GeForce RTX 4080 SUPER\./);
+  assert.match(unverified('hi', undefined, true), /title="Written by a local model\. /);
+  assert.match(unverified('hi', { id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }, true), /Written by a local model on the NVIDIA GeForce RTX 4080 SUPER\./);
+});
+
+test('what a customer reads names no hardware: every note is "from the local AI", wherever it ran', () => {
+  for (const ref of [undefined, null, { id: 'npu', name: 'Snapdragon X2 Elite NPU' }, { id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }, { id: 'cpu', name: 'Processor' }]) {
+    assert.equal(core.noteLabel(ref), 'note from the local AI, unverified');
+    const html = unverified('hi', ref, false);
+    assert.match(html, /title="Written by the local AI\. Check it against the facts beside it\.">note from the local AI, unverified</);
+    assert.doesNotMatch(html, /NPU|NVIDIA|Processor|processor|graphics card/);
+  }
+  assert.equal(core.LOCAL_AI, 'the local AI');
 });
 
 test("hardware.json: written only when detection could tell, read by the agents' loader and the keeper's reader", () => {

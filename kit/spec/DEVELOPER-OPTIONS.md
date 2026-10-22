@@ -1,19 +1,20 @@
 # Developer options
 
-Castellan is sold to three audiences: **general purpose** (photos, videos, documents), **gamers** (performance, stability, very large files) and **developers** (repositories, and every agent). Only developers see developer content. Manor's **Developer options** switch says which of them this PC belongs to, and every agent obeys it: on its page, and in what its API answers.
+Castellan is sold to three audiences: **general purpose** (photos, videos, documents), **gamers** (performance, stability, very large files) and **developers** (repositories, and every agent). Only developers see developer content. Whether developer staff are hired says which of them this PC belongs to, and every agent obeys it: on its page, and in what its API answers. "Developer options" (`developerOptions`) stays the name in code and in settings.json; it is no longer a switch anyone sees.
 
 This is the rule for every agent on the kit (kit 2.39.0 and later). An agent that doesn't follow it yet keeps working; it just shows its developer content to everyone until it does.
 
-## The switch
+## What turns it on
 
-- **Under Manor**, Manor's settings.json `"developerOptions"` (the switch on Manor's Settings page) decides. On, Manor's developer roles are held (Reeve, the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward); off, they're vacant and general twins hold their offices.
+- **Under Manor**, Manor's settings.json `"developerOptions"` decides, and Manor writes it from who is hired: `true` while any developer staff member is hired (staff.json marks them `"developer"`: Reeve, the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward), `false` once the last is let go. Manor has had no switch for it since Manor 0.16.33: hiring a developer staff member is what turns developer features on (its `developerOptionsOn`, written by `syncDeveloperOptions` at startup, after a hire or a let-go, and whenever its page looks). A hired developer staff member holds its office, with the general staff member that can fill it on duty behind it; not hired, the general one holds it.
 - **Without Manor**, or with a Manor that hasn't said, the agent's own: `"developerOptions": true` in its own settings.json. Off unless it says `true`.
-- It's read afresh on every request (`node/developer.ts`): flipping it in Manor takes effect at the next request, with no agent restarted. An open page notices within seconds (`/api/ping` says `developer`) and draws itself again.
-- An agent with a switch of its own shows `developerOptionsNote(setBy)` (`node/page.ts`) in its place while Manor decides.
+- It's read afresh on every request (`node/developer.ts`): a hire or a let-go in Manor takes effect at the next request, with no agent restarted. An open page notices within seconds (`/api/ping` says `developer`) and draws itself again.
+- An agent with a switch of its own shows `developerOptionsNote(setBy)` (`node/page.ts`) in its place while Manor decides: "Developer features show while developer staff are hired in <manor>", with a link to Manor's Settings, Employees (`manorStaffUrl`).
+- **What a person reads** never names a "Developer options" switch: it says developer staff, and hiring them (`DEVELOPER_ONLY_FORM`: "These settings can be changed only while developer staff are hired.").
 
 ## What a non-developer never sees
 
-With the switch off, none of this is on an agent's page, in its notices, or in what its API sends the page:
+With it off (no developer staff hired; "the switch" below is `developerOptions`, however it is set), none of this is on an agent's page, in its notices, or in what its API sends the page:
 
 - repositories, git and GitHub, branches, commits, pull requests, CI, releases as builds, build outputs, worktrees and checkouts;
 - ports, PIDs, process names and command lines;
@@ -22,9 +23,10 @@ With the switch off, none of this is on an agent's page, in its notices, or in w
 - JSON, settings.json and its keys;
 - file and folder paths (the person's own choices, like a folder they picked to watch, are theirs to see);
 - command-line commands, PowerShell, WMI, winget, pnputil, FFmpeg and other tools by name;
-- checksums and hashes (SHA-256).
+- checksums and hashes (SHA-256);
+- the hardware that wrote a model's words: the NPU, a graphics card or the processor by name, or a chip's (kit 2.97.1). Where an agent's work runs is said in plain words instead (`node/work.ts`, below).
 
-Say it in plain words instead. Reeve's model and its servers are **the local AI**. A failure says what didn't happen, what the agent does next, and what the person can do, if anything: "The local AI couldn't start. It tries again in a minute." Never the error itself.
+Say it in plain words instead. Reeve's model and its servers are **the local AI**, and a model's note is "note from the local AI, unverified" (`noteLabel(from)`), wherever it ran. A failure says what didn't happen, what the agent does next, and what the person can do, if anything: "The local AI couldn't start. It tries again in a minute." Never the error itself.
 
 ## How an agent obeys it
 
@@ -63,6 +65,7 @@ A string-built page reads `isDeveloper()` as it draws.
 ## What the kit does already
 
 - **Where its work runs** (`node/work.ts`) is in plain words when off: the local AI for Reeve, the AI chip for the NPU, each line's `plain` wording, no developer-only line (`dev: true`), and no tool, server, chip maker or Task Manager graph by name. A developer role's agent (`developerRole`: the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward, the Toller, the Assayer, the Seneschal), whose work doesn't run while the switch is off, has no section then at all.
+- **A model's note** (`core/messages.js`, kit 2.97.1): `noteLabel(from)` is "note from the local AI, unverified" whatever ran it; `noteLabel(from, true)` names where it was written ("note from the NVIDIA GeForce RTX 4090, unverified") for a developer's view or a log. `page.ts`'s `unverified(text, from)` reads the switch itself, and its hover says "Written by the local AI" when off. `theAccelerator(a)` names the hardware, so it's for developers' views, logs and the kit's messages, never for what everyone reads.
 - **The footer** names the agent's data folder only when on; `PageShell.dataDir` is empty when off.
 - **Settings** (`/api/settings`): the settings.json path (`file`) is empty when off, and its problems are one plain line (`PLAIN_PROBLEM`); a save refused by the agent's own rules says `PLAIN_REFUSAL`. Both settings panels say "Changes are checked and saved here" without a path.
 - **`/api/ping`** says `developer`, so an open page draws itself again when it flips. It sends the page's process id (`pid`) only while on (kit 2.40.0): the Pinder, a developer role, knows an agent by the port it listens on first.

@@ -16,7 +16,7 @@ process.env.NPU_AGENT_NPU_LOCK = path.join(tmp, 'locks', 'npu');
 process.env.MANOR_HOME = path.join(tmp, 'no-manor');
 process.env.STEWARD_HOME = path.join(tmp, 'no-steward');
 
-const { HOUSE_SVG, agentUrl, developerOptions, forgetGithubOwner, forgetManorIcon, githubOwner, githubRepo, mayNotify, notifyAllowed, notifyFrom, notifyPrefs, gpuWithNpu, manorIcon, manorLink, manorOwn, manorProjects, manorSettingsUrl, originRepo, projectsFrom, safeSvg } = await import('./fixture/src/kit/manor.ts');
+const { HOUSE_SVG, agentUrl, developerOptions, forgetGithubOwner, forgetManorIcon, githubOwner, githubRepo, mayNotify, notifyAllowed, notifyFrom, notifyPrefs, gpuWithNpu, manorIcon, manorLink, manorOwn, manorProjects, manorSettingsUrl, manorStaffUrl, originRepo, projectsFrom, safeSvg } = await import('./fixture/src/kit/manor.ts');
 const { developerOptionsNote, page } = await import('./fixture/src/kit/page.ts');
 
 /** A Manor folder: settings.json, and an app folder (with its own art) when installed. */
@@ -151,11 +151,13 @@ test("the graphics card beside the NPU: Manor's gpuWithNpu when it says; else th
   assert.equal(gpuWithNpu(true, later).on, false);
 });
 
-test('in place of the agent\'s own switch: "<manor>\'s Developer options set this", and "Change it in <manor>", to its Settings', () => {
+test('in place of the agent\'s own switch: developer features show while developer staff are hired in <manor>, and the way to its staff', () => {
   const m = developerOptions(false, manorAt('note', { name: 'Weasel "&" Manor', port: 18600, developerOptions: true })).setBy;
   assert.equal(manorSettingsUrl(m!), 'http://manor.localhost:18600/#/settings', "Manor's Settings page");
+  assert.equal(manorStaffUrl(m!), 'http://manor.localhost:18600/#/settings/employees', "Manor's Settings, Employees");
   assert.equal(developerOptionsNote(m),
-    '<p class="manor-decides"><span>Weasel &quot;&amp;&quot; Manor\'s Developer options set this.</span> <a href="http://manor.localhost:18600/#/settings">Change it in Weasel &quot;&amp;&quot; Manor</a></p>');
+    '<p class="manor-decides"><span>Developer features show while developer staff are hired in Weasel &quot;&amp;&quot; Manor.</span> <a href="http://manor.localhost:18600/#/settings/employees">See the staff in Weasel &quot;&amp;&quot; Manor</a></p>');
+  assert.doesNotMatch(developerOptionsNote(m), /Developer options/, 'Manor has no such switch');
   assert.equal(developerOptionsNote(null), '', 'the agent\'s own switch stands');
   assert.match(page({ token: 't', body: '' }), /\.manor-decides \{/, 'its look is in every page');
 });

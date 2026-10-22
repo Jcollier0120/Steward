@@ -3076,7 +3076,8 @@
     "name": "Snapdragon X2 Elite NPU"
    },
    "theAccelerator": "the Snapdragon X2 Elite NPU",
-   "noteLabel": "note from the Snapdragon X2 Elite NPU, unverified"
+   "noteLabel": "note from the local AI, unverified",
+   "developerNoteLabel": "note from the Snapdragon X2 Elite NPU, unverified"
   },
   {
    "case": "an older config's card",
@@ -3085,7 +3086,8 @@
     "name": "Graphics card"
    },
    "theAccelerator": "the graphics card",
-   "noteLabel": "note from the graphics card, unverified"
+   "noteLabel": "note from the local AI, unverified",
+   "developerNoteLabel": "note from the graphics card, unverified"
   },
   {
    "case": "the processor",
@@ -3094,7 +3096,8 @@
     "name": "Processor"
    },
    "theAccelerator": "the processor",
-   "noteLabel": "note from the processor, unverified"
+   "noteLabel": "note from the local AI, unverified",
+   "developerNoteLabel": "note from the processor, unverified"
   },
   {
    "case": "a name that says \"the\"",
@@ -3103,13 +3106,15 @@
     "name": "The Oryon CPU"
    },
    "theAccelerator": "The Oryon CPU",
-   "noteLabel": "note from The Oryon CPU, unverified"
+   "noteLabel": "note from the local AI, unverified",
+   "developerNoteLabel": "note from The Oryon CPU, unverified"
   },
   {
    "case": "none: a note that says nothing of where (from before the accelerators) is from a local model, never guessed to be the NPU",
    "ref": null,
    "theAccelerator": "a local model",
-   "noteLabel": "note from a local model, unverified"
+   "noteLabel": "note from the local AI, unverified",
+   "developerNoteLabel": "note from a local model, unverified"
   }
  ],
  "tokens": [

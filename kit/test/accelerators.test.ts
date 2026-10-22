@@ -689,10 +689,13 @@ test('every answer says where it ran, and a background request goes around a car
     assert.equal(b.text, 'from the card');
     assert.deepEqual(b.accelerator, { id: 'gpu-nvidia-geforce-rtx-4090', name: 'NVIDIA GeForce RTX 4090' });
     assert.ok(!card.seen[0].messages.some((m: any) => /\[req /.test(m.content)), 'the card gets no nonce');
-    assert.equal(A.noteLabel(b.accelerator), 'note from the NVIDIA GeForce RTX 4090, unverified');
-    assert.match(unverified('<b>', b.accelerator), /note from the NVIDIA GeForce RTX 4090, unverified<\/span> &lt;b&gt;/);
-    assert.match(unverified('old note'), /note from a local model, unverified/, 'a note that says nothing of where is from a local model, never guessed to be the NPU');
-    assert.match(unverified('old note'), /title="Written by a local model. Check it/);
+    // Where it ran is a developer's to see; everyone else reads "the local AI".
+    assert.equal(A.noteLabel(b.accelerator, true), 'note from the NVIDIA GeForce RTX 4090, unverified');
+    assert.equal(A.noteLabel(b.accelerator), 'note from the local AI, unverified');
+    assert.match(unverified('<b>', b.accelerator, true), /note from the NVIDIA GeForce RTX 4090, unverified<\/span> &lt;b&gt;/);
+    assert.match(unverified('<b>', b.accelerator, false), /title="Written by the local AI\. Check it[^"]*">note from the local AI, unverified<\/span> &lt;b&gt;/);
+    assert.match(unverified('old note', undefined, true), /note from a local model, unverified/, 'a note that says nothing of where is from a local model, never guessed to be the NPU');
+    assert.match(unverified('old note', undefined, true), /title="Written by a local model. Check it/);
     // A game on the card: background work that only the card can take waits; a person waiting may still use it.
     mkdirSync(acceleratorsDir, { recursive: true });
     writeFileSync(A.gamesFile(), JSON.stringify({ checkedAt: new Date().toISOString(), cards: { 'gpu-nvidia-geforce-rtx-4090': { busy: true, percent: 91, by: ['game.exe'] } } }));

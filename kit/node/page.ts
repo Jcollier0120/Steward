@@ -5,7 +5,7 @@ import { isDeveloper } from './developer.ts';
 import { duty, type Duty } from './duty.ts';
 import { trialEnded, trialEndedNote } from './license-check.ts';
 import { lookFor, sceneSvg, type Look } from './look.ts';
-import { manorLink, manorSettingsUrl, type ManorLink } from './manor.ts';
+import { manorLink, manorSettingsUrl, manorStaffUrl, type ManorLink } from './manor.ts';
 import { firstRoundNow, roundTimes, type RoundState } from './schedule.ts';
 import { groupLabel, themes, themesCss, type Theme } from './themes.ts';
 import { workSection } from './work.ts';
@@ -40,12 +40,13 @@ export function until(at: number | string | null | undefined, now = Date.now()):
 }
 
 /**
- * The label every model answer carries: a 4B model's words, for a person to check, and where they were
- * written ("note from the NVIDIA GeForce RTX 4090, unverified"). A note that says nothing of where (one kept from
- * before the accelerators) is "from a local model": it is never guessed to be the NPU's.
+ * The label every model answer carries: a 4B model's words, for a person to check ("note from the local AI,
+ * unverified"). Only a developer (`developer`, the manor's developer view now unless given) is told where they were
+ * written ("note from the NVIDIA GeForce RTX 4090, unverified"); a note that says nothing of where (one kept from
+ * before the accelerators) is "from a local model" then: it is never guessed to be the NPU's.
  */
-export const unverified = (text: string, from?: AcceleratorRef | null) =>
-  `<span class="note"><span class="badge npu" title="Written by a local model${from?.name ? ` on ${esc(theAccelerator(from))}` : ''}. Check it against the facts beside it.">${esc(noteLabel(from))}</span> ${esc(text)}</span>`;
+export const unverified = (text: string, from?: AcceleratorRef | null, developer = isDeveloper()) =>
+  `<span class="note"><span class="badge npu" title="${developer ? `Written by a local model${from?.name ? ` on ${esc(theAccelerator(from))}` : ''}` : 'Written by the local AI'}. Check it against the facts beside it.">${esc(noteLabel(from, developer))}</span> ${esc(text)}</span>`;
 
 /**
  * Where the Settings panel goes on an agent's page. The kit's web part draws it: settings-panel.js
@@ -482,12 +483,14 @@ function backToManor(m: ManorLink | null): string {
 
 /**
  * What stands in place of an agent's own Developer options switch while Manor sets them (manor.ts's
- * developerOptions() gives `setBy`): "<manor>'s Developer options set this", and "Change it in <manor>", to Manor's
- * Settings page, where its switch is. Nothing when the agent's own switch applies (no Manor, or Manor hasn't said).
+ * developerOptions() gives `setBy`): Manor has no switch, and hiring developer staff is what turns developer features
+ * on (kit 2.97.1; before, it named a "Developer options" switch Manor no longer has). "Developer features show while
+ * developer staff are hired in <manor>", and "See the staff in <manor>", to Manor's Settings, Employees. Nothing when
+ * the agent's own switch applies (no Manor, or Manor hasn't said).
  */
 export function developerOptionsNote(setBy: ManorLink | null): string {
   if (!setBy) return '';
-  return `<p class="manor-decides"><span>${esc(setBy.name)}'s Developer options set this.</span> <a href="${esc(manorSettingsUrl(setBy))}">Change it in ${esc(setBy.name)}</a></p>`;
+  return `<p class="manor-decides"><span>Developer features show while developer staff are hired in ${esc(setBy.name)}.</span> <a href="${esc(manorStaffUrl(setBy))}">See the staff in ${esc(setBy.name)}</a></p>`;
 }
 
 /** A notice under the title bar while the agent is off duty: its scheduled rounds are paused (Manor's Stop, or `stop`). */

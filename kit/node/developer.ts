@@ -3,16 +3,17 @@ import { developerOptions, manorHome, type ManorLink } from './manor.ts';
 import { dataFile, readJson } from './store.ts';
 
 /**
- * The manor's Developer options switch, for every agent (kit 2.39.0; the rule is spec/DEVELOPER-OPTIONS.md).
- * Castellan is sold to three audiences, general purpose, gamers and developers, and only developers see developer
- * content: repositories, git and GitHub, pull requests, builds, ports, process ids, the model servers' insides, logs,
- * JSON, file paths and commands. With the switch off, none of it is on an agent's page or in what its API answers.
+ * The manor's Developer options, for every agent (kit 2.39.0; the rule is spec/DEVELOPER-OPTIONS.md). Castellan is
+ * sold to three audiences, general purpose, gamers and developers, and only developers see developer content:
+ * repositories, git and GitHub, pull requests, builds, ports, process ids, the model servers' insides, logs, JSON,
+ * file paths and commands. With them off, none of it is on an agent's page or in what its API answers.
  *
- * One source of truth. With Manor installed and saying (its settings.json's "developerOptions", the switch on Manor's
- * Settings page), Manor's value wins. Otherwise the agent's own: "developerOptions" in its own settings.json, false
- * unless it says true. Both are read afresh on each call (two small files; a stat each while they are unchanged,
- * file-cache.ts), so flipping the switch in Manor takes effect at the next request, with no agent restarted: call
- * developer() per request, never once at start.
+ * One source of truth. With Manor installed and saying (its settings.json's "developerOptions", which Manor writes
+ * from who is hired: true while any developer staff member is, with no switch since Manor 0.16.33), Manor's value
+ * wins. Otherwise the agent's own: "developerOptions" in its own settings.json, false unless it says true. Both are
+ * read afresh on each call (two small files; a stat each while they are unchanged, file-cache.ts), so a hire or a
+ * let-go in Manor takes effect at the next request, with no agent restarted: call developer() per request, never
+ * once at start.
  */
 export interface Developer {
   /** Whether developer content may be shown and served. */

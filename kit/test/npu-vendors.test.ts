@@ -622,7 +622,7 @@ test("setup names Qualcomm's terms with their links before it downloads GenieX o
   const FOUR_B = 'C:\\Users\\me\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json';
   const TWO_B = 'C:\\Users\\me\\.cache\\geniex\\models\\unsloth\\Qwen3-VL-2B-Instruct-GGUF\\geniex.json';
   const GENIEX = 'https://github.com/qualcomm/GenieX/blob/main/LICENSE';
-  const TERMS_OF_USE = 'https://www.qualcomm.com/site/terms-of-use';
+  const QAIRT_EULA = 'https://github.com/qualcomm/geniex-qairt-plugin/blob/main/THIRD_PARTY_NOTICES.md';
   const CARD = 'https://huggingface.co/qualcomm/Qwen3-VL-4B-Instruct';
   const RAIL = 'https://www.qualcomm.com/site/responsible-ai-license';
   const plan = (npu: string, have: string[]) => planSetup({ detection: parseDetection(`${npu}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(have), serverVersion: async () => null });
@@ -631,14 +631,17 @@ test("setup names Qualcomm's terms with their links before it downloads GenieX o
   // A new X Elite: GenieX, the QAIRT runtime it carries, AI Hub's build of its model, and Qualcomm's Responsible AI
   // License over them, once and last.
   const elite = await plan(NPU.x1, []);
-  assert.deepEqual(urls(elite), [GENIEX, TERMS_OF_USE, CARD, RAIL]);
+  assert.deepEqual(urls(elite), [GENIEX, QAIRT_EULA, CARD, RAIL]);
   assert.ok(elite.terms.every((t) => t.maker === 'Qualcomm' && t.what && t.says));
   const lines = describePlan(elite);
   const at = lines.findIndex((l) => l.startsWith("Qualcomm's terms"));
   assert.ok(at > lines.findIndex((l) => l.startsWith('Download: ')), 'shown with the plan, after what it downloads');
   assert.equal(lines[at], "Qualcomm's terms come with what this downloads for the NPU: setting it up means you accept them, for everyone using this PC and your staff.");
   assert.match(lines[at + 1], /^  GenieX, the NPU's model server \(https:\/\/github\.com\/qualcomm\/GenieX\/blob\/main\/LICENSE\): Open source under the BSD-3-Clause licence/);
-  assert.match(lines[at + 2], /QAIRT.*\(https:\/\/www\.qualcomm\.com\/site\/terms-of-use\): It comes under no licence of its own: Qualcomm keeps all rights/);
+  // The runtime is under Qualcomm's AI Runtime SDK EULA (the plugin's THIRD_PARTY_NOTICES.md, items 1 and 2), which
+  // allows commercial use as part of an app: never "no licence" or "personal, non-commercial".
+  assert.match(lines[at + 2], /QAIRT.*\(https:\/\/github\.com\/qualcomm\/geniex-qairt-plugin\/blob\/main\/THIRD_PARTY_NOTICES\.md\): Under Qualcomm's AI Runtime SDK licence \(EULA\).*commercially too, as part of an app.*not handed on by itself or taken apart/);
+  assert.doesNotMatch(lines[at + 2], /no licence|non-commercial|all rights/);
   assert.match(lines[at + 3], /Qualcomm AI Hub.*\(https:\/\/huggingface\.co\/qualcomm\/Qwen3-VL-4B-Instruct\): Apache-2\.0, with its model card's Usage and Limitations/);
   assert.match(lines[at + 4], /Responsible AI License.*nor may you let anyone use it, your staff included.*military purposes/);
   assert.equal(lines.length, at + 5);
@@ -647,7 +650,7 @@ test("setup names Qualcomm's terms with their links before it downloads GenieX o
   assert.deepEqual(urls(await plan(NPU.x1, [G])), [CARD, RAIL]);
   assert.deepEqual(urls(await plan(NPU.x1, [G, FOUR_B])), []);
   // A new X2: GenieX 0.9.1, whose model is unsloth's GGUF (Apache-2.0, no Qualcomm build): GenieX's terms alone.
-  assert.deepEqual(urls(await plan(NPU.x2, [])), [GENIEX, TERMS_OF_USE, RAIL]);
+  assert.deepEqual(urls(await plan(NPU.x2, [])), [GENIEX, QAIRT_EULA, RAIL]);
   assert.deepEqual(urls(await plan(NPU.x2, [G])), [], "its model pulled from unsloth's repository: no Qualcomm terms");
   assert.deepEqual(urls(await plan(NPU.x2, [G, TWO_B])), []);
   // Another maker's NPU: none.

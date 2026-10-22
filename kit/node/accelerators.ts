@@ -59,11 +59,14 @@ export const refOf = (a: AcceleratorRef): AcceleratorRef => ({ id: a.id, name: a
 /** The NPU an older config, and every note written before accelerators, came from. */
 export const LEGACY_NPU: AcceleratorRef = { ...core.LEGACY_NPU };
 
-/** "the NPU", "the NVIDIA GeForce RTX 4090", "the graphics card": an accelerator in a sentence. */
+/** "the NPU", "the NVIDIA GeForce RTX 4090", "the graphics card": an accelerator in a sentence, for developers' views and logs. */
 export const theAccelerator = (a: AcceleratorRef | null | undefined) => core.theAccelerator(a);
 
-/** A note's label: "note from the NVIDIA GeForce RTX 4090, unverified". */
-export const noteLabel = (a: AcceleratorRef | null | undefined) => core.noteLabel(a);
+/**
+ * A note's label: "note from the local AI, unverified" for everyone; with `developer` (isDeveloper(), a log), where
+ * it was written: "note from the NVIDIA GeForce RTX 4090, unverified".
+ */
+export const noteLabel = (a: AcceleratorRef | null | undefined, developer = false) => core.noteLabel(a, developer);
 
 /** Whether it serves this kind of request. */
 export const serves = (a: Accelerator, work: Work) => core.serves(a, work);
