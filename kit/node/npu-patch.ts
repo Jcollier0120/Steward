@@ -11,7 +11,7 @@ import { atVersion, compareVersions, expandRoute, installedVersion, NPU_CATALOG,
  * A file of the NPU's server replaced with the kit's own build of it (npu-vendors.ts' NpuPluginPatch): on the Snapdragon
  * X2, Castellan's build of GenieX's llama.cpp plugin, which holds about 2 GB less (qualcomm/GenieX#1557), until Qualcomm
  * ships the fixes. The build is for the version on the PC (the route's `versions`, pluginPatchOf): 0.8.0's, or 0.9.1's
- * once the Smith's Use it put GenieX 0.9.1 in place. The keeper (the Smith, else Reeve) looks once for each kit version, after the NPU's refresh,
+ * once setup or the Smith's Use it put GenieX 0.9.1 or 0.9.3 in place. The keeper (the Smith, else Reeve) looks once for each kit version, after the NPU's refresh,
  * and again whenever the file changes (GenieX installed or updated since). The patch goes in only over the very file
  * GenieX's pinned version installs, while the files it is built against are that version's too, and only when nobody
  * uses the NPU: holding the NPU's turn, it stops the NPU's servers, keeps GenieX's own file beside it (`<file>.stock`),
@@ -192,7 +192,7 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
   const npu = detected.npu;
   const catalog = d.catalog ?? NPU_CATALOG;
   const generic = npu?.supported && npu.vendor ? catalog.routes[npu.vendor] : undefined;
-  // The build is the one for the version on the PC: GenieX 0.9.1's once the Smith's Use it put it in place.
+  // The build is the one for the version on the PC: 0.9.1's on GenieX 0.9.1 or 0.9.3, whoever put it in place.
   const version = generic ? await (d.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: d.tools, env: d.env })))(generic) : null;
   const route = generic ? atVersion(pinnedRoute(generic, npu!.generation), version) : undefined;
   const patch = route ? pluginPatchOf(route, npu!.generation) : undefined;

@@ -2,7 +2,7 @@
 
 `geniex_plugin.dll` here is GenieX's llama.cpp plugin, built by Castellan with the changes in `geniex-castellan-memory.patch`. It goes in place of the plugin GenieX 0.8.0 installs (`%LOCALAPPDATA%\GenieX CLI\llama_cpp\geniex_plugin.dll`), on the Snapdragon X2 only. The keeper does it (`../npu-patch.ts`, `spec/npu-vendors.json`'s `pluginPatch`), until Qualcomm ships these fixes (qualcomm/GenieX#1557).
 
-`0.9.1/` holds the same changes built for GenieX 0.9.1, which the keeper puts in on an X2 whose GenieX is 0.9.1: one set up by kit 2.88.1 or later, which installs 0.9.1 on an X2, or one the Smith's Use it moved (below, "GenieX 0.9.1"). An X2 set up before keeps GenieX 0.8.0 and the build above.
+`0.9.1/` holds the same changes built for GenieX 0.9.1, which the keeper puts in on an X2 whose GenieX is 0.9.1: one set up by kit 2.88.1 or later, which installs 0.9.1 on an X2, or one the Smith's Use it moved (below, "GenieX 0.9.1"). An X2 set up before keeps GenieX 0.8.0 and the build above. GenieX 0.9.3 gets the same file as 0.9.1 (below, "GenieX 0.9.3").
 
 GenieX is Qualcomm's, under the BSD 3-Clause license in `LICENSE` beside this file. These binaries are modified builds of it, not Qualcomm's release.
 
@@ -17,6 +17,7 @@ The patch applies to qualcomm/GenieX at tag v0.8.0 and touches only `sdk/plugins
 - **GENIEX_PATCH_VISION_IDLE:** the vision encoder is freed again once no picture has come for GENIEX_VISION_IDLE_SECONDS (60 by default), and the next picture loads it again (about 1 s). A request is never cut short: the encoder is freed only between requests.
 - **GENIEX_IMAGE_MAX_TOKENS=n:** a picture over n tokens is scaled down to fit. The kit sets it to the vision model's `pictureTokens`.
 - A text-only prompt to the vision model is fed with positions, as a chat model's is.
+- **GENIEX_PATCH_POLL** (0.9.1's build and later, kit 2.98.1): with the model on the NPU or graphics, the processor's threads sleep while they wait for work rather than spin. They only run the few operations the accelerator leaves them. A model on the processor keeps ggml's default, since there the threads do the work.
 
 Measured on the X2 Elite with Qwen3-VL-2B Q4_0, GenieX's own plugin against this build:
 
@@ -41,11 +42,11 @@ With the encoder freed after a quiet spell (kit 2.82.1, `--nctx 2560`): after a 
 - GenieX's own file is kept beside it as `geniex_plugin.dll.stock`.
 - Set `"npuPatch": false` in the keeper's config.json, and the keeper's next look puts it back.
 - The keeper also puts it back by itself if this build fails its test (a picture and a chat), or a later kit stops patching.
-- A GenieX update replaces the file. The keeper puts in the build for the new version if the kit has one (0.9.1's, below), and otherwise leaves GenieX's own alone.
+- A GenieX update replaces the file. The keeper puts in the build for the new version if the kit has one (0.9.1's and 0.9.3's, below), and otherwise leaves GenieX's own alone.
 
 ## GenieX 0.9.1
 
-`0.9.1/geniex_plugin.dll` is the same patch carried to qualcomm/GenieX at tag v0.9.1 (`0.9.1/geniex-castellan-memory.patch`, four commits, again only `sdk/plugins/llama_cpp`). Each switch above works as it does for 0.8.0. What the port had to keep of 0.9.1's own changes:
+`0.9.1/geniex_plugin.dll` is the same patch carried to qualcomm/GenieX at tag v0.9.1 (`0.9.1/geniex-castellan-memory.patch`, five commits, again only `sdk/plugins/llama_cpp`). Each switch above works as it does for 0.8.0, and the fifth commit adds GENIEX_PATCH_POLL. What the port had to keep of 0.9.1's own changes:
 
 - 0.9.1 reads pictures on the NPU's second Hexagon session (HTP1), which it holds for the vision model's whole life. So the encoder loaded with the first picture, or again after the quiet spell, goes there too, and to the processor if that fails, as 0.9.1's own load does.
 - 0.9.1's `decide` (a choice among tools, which may carry a picture) loads the encoder when its request has a picture, and holds it while it runs, as a generate does.
@@ -70,4 +71,33 @@ Measured on the X2 Elite with Qwen3-VL-2B Q4_0, `--compute npu --nctx 2560`, pic
 
 So 0.9.1 with this build holds what 0.8.0 with its build did at rest, about 1.7 GB less than with its own plugin, and gives its first answer 1.2 s sooner. Its pictures are as quick and as right as 0.9.1's own. The first picture after a chat or a quiet spell takes about 0.4 to 0.8 s more, while the encoder loads.
 
-Built with `0.9.1/build-geniex-plugin.bat`, the same way as 0.8.0's (set its SRC and OUT to a clone of v0.9.1 with the patch applied, and its llama.cpp submodule at e467e5b). Signed with Castellan's certificate (Certum, timestamped). SHA-256 `aa697e55d02300369d1a5917806c920f54b13a7b8e3d3519031ffa9dae457d1b`, 370,768 bytes.
+### The processor's threads (kit 2.98.1)
+
+GenieX's plugin starts one thread for each of the processor's math cores (18 on the X2 Elite) for the few operations the NPU leaves it. At ggml's default those threads spin for a while after each one, waiting for the next, so through every token all of them stay busy. GENIEX_PATCH_POLL sets their poll to 0 when the model is on an accelerator, so they sleep instead. Measured on the X2 Elite, eight chats of about 1,200 tokens, with Windows' Energy Meter counters, 2026-10-22:
+
+| | GenieX's own (poll 50) | This build (poll 0) |
+|---|---|---|
+| Processor cores busy while it writes | 5.12 | 0.05 |
+| Tokens written a second | 72.3 | 72.9 |
+| The whole PC, over rest, a token | 699 mJ | 251 mJ |
+| The NPU, a token | 78 mJ | 78 mJ |
+
+Fewer threads did as well with poll 0 (1 to 8: 0.03 to 0.05 cores) and not with poll 50 (4 threads: 0.83 cores), so the build keeps GenieX's thread count and only changes the poll.
+
+Built with `0.9.1/build-geniex-plugin.bat`, the same way as 0.8.0's (set its SRC and OUT to a clone of v0.9.1 with the patch applied, and its llama.cpp submodule at e467e5b). Signed with Castellan's certificate (Certum, timestamped). SHA-256 `8205873dbd59823b6d20698d8072f9e1eaabb8c4c04b806df095cc221340eb0a`, 370,768 bytes.
+
+## GenieX 0.9.3
+
+GenieX 0.9.3 is 0.9.1 with a `/status` endpoint (qualcomm/GenieX#1560) and a signed catalog for its Hexagon libraries. Its llama.cpp (e467e5b) and plugin source are 0.9.1's, and its libraries are rebuilt: the same sizes, other hashes. The patch applied to v0.9.3 builds byte for byte the file built from v0.9.1, so the keeper puts `0.9.1/geniex_plugin.dll` in on an X2 whose GenieX is 0.9.3 too, after checking each of its libraries is 0.9.3's.
+
+Measured on the X2 Elite with Qwen3-VL-2B Q4_0, `--compute npu --nctx 2560`, 2026-10-22, in a copy of GenieX 0.9.3:
+
+| | 0.9.3's own plugin | 0.9.3 with this build |
+|---|---|---|
+| npu-bench's four pictures | 4 of 4 | 4 of 4 |
+| After the pictures: working set / private | 3.54 / 0.74 GB | 2.72 / 0.50 GB |
+| A 1,392-token read | 527 ms | 516 ms |
+| Eight chats: tokens a second / processor cores busy | 71.2 / 5.22 | 71.0 / 0.08 |
+| The whole PC, over rest, a token | 636 mJ | 245 mJ |
+
+The first picture takes about 0.6 s more, while the encoder loads, as on 0.9.1.

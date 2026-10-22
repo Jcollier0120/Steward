@@ -546,7 +546,7 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
     assert.equal(r.embedServer!.version, 'b11125', `${version}`);
   }
   // 0.9.0 on (until a later entry): no --vit-compute, so GenieX reads them on its second HTP session (HTP1).
-  for (const version of ['0.9.0', '0.9.1', '0.10.2']) {
+  for (const version of ['0.9.0', '0.9.1', '0.9.3', '0.10.2']) {
     const r = V.routeFor(V.atVersion(q, version), 'snapdragon-x2');
     assert.equal(r.version, version);
     assert.deepEqual(tail(r), ['--compute', 'npu', '--nctx', '2560'], version);
@@ -563,9 +563,15 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
   assert.deepEqual(tail(V.routeFor({ ...structuredClone(q), version: '0.9.1' }, 'snapdragon-x2')), ['--compute', 'npu', '--nctx', '2560']);
   assert.equal(V.serverVersionOf(q), undefined, "the route's own 0.8.0 takes none");
   assert.equal(V.atVersion(q, null), q);
-  // The kit's build of GenieX's plugin: 0.8.0's for the route's own version, 0.9.1's from 0.9.0 on, for the X2 alone.
+  // The kit's build of GenieX's plugin: 0.8.0's for the route's own version, 0.9.1's from 0.9.0 on, pinned over 0.9.1's own
+  // files and, from 0.9.3 on, over 0.9.3's; for the X2 alone.
   assert.equal(V.pluginPatchOf(q, 'snapdragon-x2')!.serverVersion, '0.8.0');
-  for (const version of ['0.9.0', '0.9.1', '0.10.2']) assert.equal(V.pluginPatchOf(V.atVersion(q, version), 'snapdragon-x2')!.serverVersion, '0.9.1', version);
+  for (const version of ['0.9.0', '0.9.1', '0.9.2']) assert.equal(V.pluginPatchOf(V.atVersion(q, version), 'snapdragon-x2')!.serverVersion, '0.9.1', version);
+  for (const version of ['0.9.3', '0.10.2']) {
+    const p = V.pluginPatchOf(V.atVersion(q, version), 'snapdragon-x2')!;
+    assert.equal(p.serverVersion, '0.9.3', version);
+    assert.equal(p.patched.from, 'geniex/0.9.1/geniex_plugin.dll', version);
+  }
   for (const version of [null, '0.9.1']) for (const g of ['snapdragon-x', null]) assert.equal(V.pluginPatchOf(V.atVersion(q, version), g), undefined, `${version} ${g}`);
   // The X2 pins GenieX 0.9.1 of its own (serverPin): what setup installs there, and runs where GenieX can't say.
   const pinned = V.pinnedRoute(q, 'snapdragon-x2');

@@ -188,7 +188,7 @@
           },
           "pluginPatch": {
             "snapdragon-x2": {
-              "what": "Castellan's build of GenieX 0.9.1's llama.cpp plugin: qualcomm/GenieX v0.9.1 with four commits of Castellan's (kit node/geniex/README.md), signed with Castellan's certificate. As 0.8.0's: the model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row; the vision encoder loads with the first picture, on the Hexagon's second session, and is freed again after 60 s without one; and GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens",
+              "what": "Castellan's build of GenieX 0.9.1's llama.cpp plugin: qualcomm/GenieX v0.9.1 with five commits of Castellan's (kit node/geniex/README.md), signed with Castellan's certificate. As 0.8.0's: the model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row; the vision encoder loads with the first picture, on the Hexagon's second session, and is freed again after 60 s without one; and GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens. With the model on the NPU, the processor's threads sleep while they wait for work rather than spin (GENIEX_PATCH_POLL)",
               "serverVersion": "0.9.1",
               "folder": "%LOCALAPPDATA%\\GenieX CLI\\llama_cpp",
               "file": "geniex_plugin.dll",
@@ -199,7 +199,7 @@
               "patched": {
                 "from": "geniex/0.9.1/geniex_plugin.dll",
                 "size": 370768,
-                "sha256": "aa697e55d02300369d1a5917806c920f54b13a7b8e3d3519031ffa9dae457d1b"
+                "sha256": "8205873dbd59823b6d20698d8072f9e1eaabb8c4c04b806df095cc221340eb0a"
               },
               "needs": {
                 "llama.dll": {
@@ -227,10 +227,80 @@
                   "sha256": "7e0ef6fb9d155e0a93d279614ed0b6c3fd65951c3821064f4e9edfe09c115c68"
                 }
               },
-              "basis": "Measured on the X2 Elite with Qwen3-VL-2B Q4_0 (--compute npu --nctx 2560, GENIEX_IMAGE_MAX_TOKENS 1024, 2026-10-18, on a private port in the NPU's turn), GenieX 0.9.1's own plugin against this build: after a chat, a 3.27 GB working set, 0.73 GB private and 3.21 GB on the NPU against 1.62, 0.25 and 1.50; after a picture, 3.21 GB on the NPU against 2.45, and 75 quiet seconds later 3.21 against 1.52 (its encoder freed), the PC's available memory 3.6 GB lower against 1.6; its first answer after a start in 3.5 s against 4.7. Its pictures as 0.9.1's own: 34 of 35 screen questions at 1,024 picture tokens in a median 1.50 s, 21 of 21 questions about ten photos in 1.45 s, npu-bench's four pictures right in a median 278 ms; chat at 72.5 tokens written a second, and 21 of 24 quality items, every must-pass one right, as 0.9.1's own. The first picture after a chat takes 1.0 s (0.59) and one after a quiet minute 0.99 s (0.17): its encoder loads then. Every symbol it takes from GenieX's own libraries (llvm-readobj) is in 0.9.1's, which match the GenieX 0.9.1 SDK's byte for byte."
+              "basis": "Measured on the X2 Elite with Qwen3-VL-2B Q4_0 (--compute npu --nctx 2560, GENIEX_IMAGE_MAX_TOKENS 1024, 2026-10-18, on a private port in the NPU's turn), GenieX 0.9.1's own plugin against this build: after a chat, a 3.27 GB working set, 0.73 GB private and 3.21 GB on the NPU against 1.62, 0.25 and 1.50; after a picture, 3.21 GB on the NPU against 2.45, and 75 quiet seconds later 3.21 against 1.52 (its encoder freed), the PC's available memory 3.6 GB lower against 1.6; its first answer after a start in 3.5 s against 4.7. Its pictures as 0.9.1's own: 34 of 35 screen questions at 1,024 picture tokens in a median 1.50 s, 21 of 21 questions about ten photos in 1.45 s, npu-bench's four pictures right in a median 278 ms; chat at 72.5 tokens written a second, and 21 of 24 quality items, every must-pass one right, as 0.9.1's own. The first picture after a chat takes 1.0 s (0.59) and one after a quiet minute 0.99 s (0.17): its encoder loads then. Every symbol it takes from GenieX's own libraries (llvm-readobj) is in 0.9.1's, which match the GenieX 0.9.1 SDK's byte for byte. Its threads (kit 2.98.1): GenieX's plugin starts 18 threads on the X2 Elite for the few operations the NPU leaves to the processor, and at ggml's default (poll 50) they spin through each token. Eight chats, about 1,200 tokens written at 72.3 tokens a second, kept 5.12 of the processor's cores busy and drew 699 mJ a token over the PC at rest; with poll 0, 0.05 cores and 251 mJ, at 72.9 tokens a second (2026-10-22, Windows' Energy Meter counters as npu-bench reads them, spec/NPU-BENCHMARK.md). Fewer threads with poll 0 did the same (1 to 8: 0.03 to 0.05 cores, 73.3 to 74.6 tokens a second); 4 threads with poll 50 still kept 0.83 cores busy (355 mJ)."
             }
           },
           "basis": "GenieX 0.9.0 and 0.9.1 carry llama.cpp e467e5b and read a vision model's pictures on the Hexagon's second session (HTP1) by default (qualcomm/GenieX#1548); asked for the Adreno (--vit-compute GPUOpenCL), 0.9.1 crashed on the first picture, trying to allocate 9.4 GB in OpenCL (the Smith's two tries of it, 2026-10-18). Measured on the X2 Elite with Qwen3-VL-2B Q4_0 (2026-10-18, on private ports in the NPU's turn), 0.9.1 without --vit-compute against 0.8.0 with Castellan's patch and its pictures on the Adreno: 34 of 35 screen questions at 1,024 picture tokens, a median 1.50 s each (33 of 35, 4.49 s); 21 of 21 questions about ten photos, a median 1.45 s (21 of 21, 4.42 s); npu-bench's four pictures right, a median 282 ms (419); the first picture after a chat in 0.55 s (2.0); chat at 72.6 tokens written a second (73.0), 21 of 24 quality items with every must-pass one right (22); nothing on the Adreno, where 0.8.0 holds 1.54 GB after a picture. Its own plugin holds more at rest (Castellan's build for 0.9.1, pluginPatch, brings that back): 3.2 GB on the NPU and a 3.3 GB working set after a chat (1.48 and 1.6), and the PC's available memory 3.6 GB lower after a picture and still after 75 quiet seconds (3.2, then 2.1 once 0.8.0's patch freed its encoder); its first answer after a start took 4.7 s (3.1). Its embedding server is llama.cpp b11645 (e467e5b and one Metal-only commit), whose llama-server loads GenieX 0.9's libraries; b11125's doesn't (0xC0000139: an entry point it needs isn't there). Over 0.9.1's libraries on the Hexagon it gave b11125-over-0.8.0's vectors (cosine 0.99936 or more over 206 texts, median 0.999998; the same top five chunks for all nine of Reeve's search-eval questions; Reeve's search eval over an index b11125 built gave 4 of 9 first and 9 of 9 in the top five with either, each question at the same rank), 72 ms a chunk in Reeve's batches of 16 (112), and held 1.10 GB on the NPU and a 1.39 GB working set (1.41 and 2.00)."
+        },
+        {
+          "version": "0.9.3",
+          "serve": {
+            "unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0": [
+              "--compute",
+              "npu",
+              "--nctx",
+              "2560"
+            ]
+          },
+          "embedServer": {
+            "version": "b11645",
+            "download": {
+              "file": "llama-b11645-bin-win-opencl-adreno-arm64.zip",
+              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11645/llama-b11645-bin-win-opencl-adreno-arm64.zip",
+              "size": 13263463,
+              "sha256": "231e50cdc87ae62b42d4d25c0cc4f937e36df40f8e3593719c23e976ae6eef04"
+            },
+            "into": "{tools}\\servers\\llama.cpp\\b11645-hexagon",
+            "exe": "{tools}\\servers\\llama.cpp\\b11645-hexagon\\llama-server.exe",
+            "env": {
+              "ADSP_LIBRARY_PATH": "{tools}\\servers\\llama.cpp\\b11645-hexagon"
+            }
+          },
+          "pluginPatch": {
+            "snapdragon-x2": {
+              "what": "Castellan's build of GenieX's llama.cpp plugin for 0.9.1, which 0.9.3 runs as is: 0.9.3 carries the same llama.cpp (e467e5b) and plugin source, and loads the build over its own libraries. As 0.9.1's: the model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row; the vision encoder loads with the first picture, on the Hexagon's second session, and is freed again after 60 s without one; GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens; and with the model on the NPU, the processor's threads sleep while they wait for work rather than spin (GENIEX_PATCH_POLL)",
+              "serverVersion": "0.9.3",
+              "folder": "%LOCALAPPDATA%\\GenieX CLI\\llama_cpp",
+              "file": "geniex_plugin.dll",
+              "stock": {
+                "size": 356864,
+                "sha256": "9612f66a0cc1a29b8f746697b808d62f49cfdd9328b94615b34f6ef1a6dae787"
+              },
+              "patched": {
+                "from": "geniex/0.9.1/geniex_plugin.dll",
+                "size": 370768,
+                "sha256": "8205873dbd59823b6d20698d8072f9e1eaabb8c4c04b806df095cc221340eb0a"
+              },
+              "needs": {
+                "llama.dll": {
+                  "size": 3099136,
+                  "sha256": "fb879ea821809e95b0f014b31d6c8b71ea9daa3576c4c2f3385890c871342fb6"
+                },
+                "llama-common.dll": {
+                  "size": 5219840,
+                  "sha256": "6c44239b00968dcc10e88d19ae85abf4fef7df5d57a94dc3e515c9285fcc994a"
+                },
+                "mtmd.dll": {
+                  "size": 1550336,
+                  "sha256": "7fef77166aff398682f3f118989d228da20dadc4e0662a35d75e987fff928917"
+                },
+                "ggml.dll": {
+                  "size": 72192,
+                  "sha256": "2daa509202f5cc9a3d323ae47c9570f67d0f8d516108f16592737efcca7fb167"
+                },
+                "ggml-base.dll": {
+                  "size": 670208,
+                  "sha256": "7d1f6cd72f81b4797629689e09eb89a3cf19d683428b4a9604fe4be637e49c04"
+                },
+                "..\\geniex.dll": {
+                  "size": 4987904,
+                  "sha256": "691fcab1f4fe97ae96a77e3083df668f5305f4d9aa633185fca96a8dd0403ad0"
+                }
+              },
+              "basis": "Measured on the X2 Elite with Qwen3-VL-2B Q4_0 (--compute npu --nctx 2560, 2026-10-22, on a private port), GenieX 0.9.3's own plugin against this build in a copy of GenieX 0.9.3: after npu-bench's four pictures, all four right with either, a 2.72 GB working set and 0.50 GB private against 3.54 and 0.74; a 1,392-token read in 516 ms against 527; eight chats at 71.0 tokens written a second against 71.2, the processor 0.08 cores busy against 5.22, and 245 mJ a token over the PC at rest against 636 (Windows' Energy Meter counters). The first picture takes about 0.6 s longer (its encoder loads then). Built from 0.9.3's source with the same commits it is byte for byte the 0.9.1 build less its signature, so 0.9.3 gets that file."
+            }
+          },
+          "basis": "GenieX 0.9.3 is 0.9.1 with a /status endpoint (qualcomm/GenieX#1560) and a signed catalog for its Hexagon libraries: the same llama.cpp (e467e5b) and plugin source, its libraries rebuilt (the same sizes, other hashes). So it runs as 0.9.1 does, and its embedding server is the same b11645. A PC on 0.9.3 had GenieX's own plugin, holding the memory 0.9.1's build gives back, until this entry: the Smith's Use it can install a newer GenieX than the route pins."
         }
       ],
       "port": 18181,
