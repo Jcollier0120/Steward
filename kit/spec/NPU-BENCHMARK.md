@@ -27,7 +27,7 @@ Every model Castellan runs today is a Qwen model at 4-bit weights:
 | Maker | Server | Model | Weights |
 |---|---|---|---|
 | Qualcomm X | GenieX 0.8.0 | Qwen3-VL-4B-Instruct (W4A16) | 4-bit, 16-bit activations; also does vision |
-| Qualcomm X2 | GenieX 0.8.0 (its llama.cpp plugin) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Adreno |
+| Qualcomm X2 | GenieX 0.9.x (its llama.cpp plugin; the X2 pins 0.9.1) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Hexagon's second session (on the Adreno under 0.8.0) |
 | Intel | OpenVINO Model Server 2026.4.1 | Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov | 4-bit symmetric, channel-wise |
 | AMD | FastFlowLM 1.0.7 | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
 
@@ -220,7 +220,7 @@ Then resume the keeper and the agents in Manor, and put any timeouts back.
 
 ### On a Snapdragon
 
-The route is GenieX 0.8.0 on port 18181, one model for chat and vision: on an X2, Qwen3-VL-2B (unsloth's Q4_0 GGUF, through GenieX's llama.cpp plugin, its pictures' encoder on the Adreno; kit 2.78.8), and on a first-generation X, Qualcomm's Qwen3-VL-4B-Instruct (W4A16). Run it as above, with an Arm64 Node, and look for these:
+The route is GenieX on port 18181, one model for chat and vision: on an X2, GenieX 0.9.x with Qwen3-VL-2B (unsloth's Q4_0 GGUF, through GenieX's llama.cpp plugin, its pictures' encoder on the Hexagon's second session; kit 2.88.1, on the Adreno under 0.8.0), and on a first-generation X, GenieX 0.8.0 with Qualcomm's Qwen3-VL-4B-Instruct (W4A16). Run it as above, with an Arm64 Node, and look for these:
 
 - **GenieX's quirks are applied.** Near the start the log says `GenieX's requests as the kit sends them: a nonce first in every request (prefix-leak); each picture as a file of its own, its path sent (image-path)`. If that line is missing, `src\kit` is older than this page: go back to step 1. Without the nonce GenieX reuses state across the tries of one prompt, and without the files it can't read the pictures.
 - **One model at a time.** GenieX holds one model and loads its vision part for a picture after text. The benchmark sends one picture as an untimed warm-up before the four graded ones, so their times aren't a load's, and its second start (the cached load) is a new process. GenieX's DSP fails after about a dozen vision loads in one process (ACCELERATORS.md); a run sends five. This is also why nothing else may ask GenieX during the run (step 4): another agent's request would make it swap.

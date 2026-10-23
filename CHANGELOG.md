@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.177
+
+**It hands out the kit 2.100.0: on a Snapdragon X2, sharper search runs on the NPU, and the local AI keeps one copy of its small model.**
+
+### What's new
+
+- **Sharper search on the NPU.** On a Snapdragon X2 laptop, Reeve's sharper search (its reranker, which you turn on yourself) now runs on the NPU when you set it up: about twice as fast as on the built-in graphics, with the same results, and without slowing the NPU's chat. If the NPU can't run it, the processor does, as before. Laptops with less than 20 GB of memory keep it where it was.
+- **One copy of the small model.** On a Snapdragon X2, the built-in graphics and the processor now use the same Qwen3-VL-2B file the NPU already has, instead of a second copy of their own. It's as fast and answers the same. A PC set up before switches by itself, with nothing restarted, and the extra copy (about 1.1 GB) is deleted three days later, once nothing uses it.
+
+### What changed
+
+- The NPU's default model on a Snapdragon X2 is named correctly throughout, and an NPU entry an older version wrote by default is still recognised as one.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each employee gets these with the kit 2.100.0. A reranker you set up before stays where it is; to move it onto the NPU, set it up again (`accelerators setup --serve rerank`).
+
 ## 0.36.176
 
 **It hands out the kit 2.99.1: while you have the manor stopped, the local AI stays off.**

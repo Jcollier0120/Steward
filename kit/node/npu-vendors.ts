@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type AcceleratorEntry, OWN_MEMORY_GB, type Quirk, type ServeKind } from './accelerator-config.ts';
+import { type AcceleratorEntry, type Endpoint, OWN_MEMORY_GB, type Quirk, type ServeKind } from './accelerator-config.ts';
 
 /**
  * The NPU on every Copilot+ PC (spec/NPU-VENDORS.md): which maker's NPU this is and which generation, whether the
@@ -124,6 +124,8 @@ export interface NpuRoute {
   embeddings?: string;
   /** Its embeddings' own server, when the route's server serves none (GenieX's): set up and started beside it. */
   embedServer?: NpuEmbedServer;
+  /** Its reranker (kit 2.100.0), when asked for: its embedding server's program started a third time (NpuRerankServer). */
+  rerankServer?: NpuRerankServer;
   /** Its models off the NPU, for the benchmark's graphics and processor runs where its server runs on the NPU only (NpuOffNpu). */
   offNpu?: NpuOffNpu;
   vision?: string;
@@ -302,6 +304,19 @@ export interface NpuEmbedServer {
   /** Its model; `dims`, its vectors' length, is checked by setup's test (embedSanity). */
   model: (NpuEmbedFile | NpuEmbedPull) & { dims?: number };
   licence: string;
+}
+
+/**
+ * A route's reranker (kit 2.100.0): its embedding server's program (llama.cpp on the Hexagon, the route's embedServer),
+ * from the same folder with the same environment, started with `--reranking` on a port of its own, with setup's
+ * reranker model (setup.ts' MODEL_SPECS.rerank: the file a graphics card's or the processor's reranker runs). Set up only
+ * when the reranker is asked for (setup's `--serve rerank`), on a PC with the memory for it (not smallPc).
+ */
+export interface NpuRerankServer {
+  port: number;
+  /** Its arguments: {port}, {file} (the model's path), {model} (the model's id) and {tools} filled in. */
+  serve: string[];
+  basis: string;
 }
 
 /** An embedding model downloaded as a file into the tools home's models folder (where setup puts the graphics card's): the same file, so the same index. */
@@ -615,7 +630,7 @@ export function embedPaths(route: NpuRoute, tools: string, env?: Record<string, 
  * route's. `exe` is written as setup found it. The route's embedding server, when it has one and `embed` says where
  * setup put it, is the embed endpoint, on its own port.
  */
-export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?: number; portable?: (p: string) => string; embed?: { exe: string; model: string; turn?: string } }): AcceleratorEntry {
+export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?: number; portable?: (p: string) => string; embed?: { exe: string; model: string; turn?: string }; rerank?: { file: string; model: string; port?: number } }): AcceleratorEntry {
   const port = o.port ?? route.port;
   const keep = o.portable ?? ((p: string) => p);
   const chat = firstModel(route, 'chat');
@@ -650,8 +665,30 @@ export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?
     // On the processor's graphics (embedTurn), it answers in the graphics' turn, beside the NPU's chat.
     e.embed = { baseUrl: `http://127.0.0.1:${es.port}`, model: es.model.id, startCommand: [keep(o.embed.exe), ...args], ...(embedEnv ? { env: embedEnv } : {}), ...cap('embed'), ...(o.embed.turn ? { turn: o.embed.turn } : {}) };
   }
+  // Its reranker, when asked for (setup's --serve rerank): the embedding server's program, a third time (npuRerank).
+  const rerank = o.rerank ? npuRerank(route, e.embed, { tools: o.tools, ...o.rerank, portable: o.portable }) : null;
+  if (rerank) e.rerank = rerank;
   if (Object.keys(route.timeouts).length) e.timeouts = { ...route.timeouts };
   return e;
+}
+
+/**
+ * The NPU's reranker endpoint (kit 2.100.0): the route's rerankServer, run by the program of the embed endpoint as
+ * config.json has it (written now or by an earlier setup), with its environment, on the reranker's own port, so it
+ * follows that server to a later build. Null when the route has no reranker, or the embed endpoint isn't a llama-server
+ * of its own (one whose requests take another device's turn included).
+ */
+export function npuRerank(route: NpuRoute, embed: Endpoint | undefined, o: { tools: string; file: string; model: string; port?: number; portable?: (p: string) => string }): Endpoint | null {
+  const rs = route.rerankServer;
+  const exe = embed?.startCommand?.[0];
+  if (!rs || !route.embedServer || !embed?.baseUrl || embed.turn || !exe || !/^llama-server(\.exe)?$/i.test(path.win32.basename(exe))) return null;
+  const keep = o.portable ?? ((p: string) => p);
+  const port = o.port ?? rs.port;
+  const args = rs.serve.map((a) => {
+    const x = expandRoute(a, { tools: o.tools, port, model: o.model, file: o.file });
+    return a.includes('{file}') || a.includes('{tools}') ? keep(x) : x;
+  });
+  return { baseUrl: `http://127.0.0.1:${port}`, model: o.model, startCommand: [exe, ...args], ...(embed.env ? { env: { ...embed.env } } : {}) };
 }
 
 /** A graphics card as detection lists it, as far as embedTurn needs it. */

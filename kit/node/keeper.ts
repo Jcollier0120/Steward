@@ -15,7 +15,7 @@ import { cardIdleStopMinutes, NPU_CATALOG, npuIdleStopMinutes, smallPc } from '.
 import { powershell, psQuote } from './ps.ts';
 import { keyInside, pathKey, samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
-import { kitVersion, refreshCardVision, testNpuEmbed, testNpuEntry } from './setup.ts';
+import { kitVersion, refreshCardVision, refreshSmallModel, testNpuEmbed, testNpuEntry } from './setup.ts';
 
 /**
  * Keeping the model servers (spec/ACCELERATORS.md, "Keeping the servers"): whoever keeps them (the Smith; Reeve
@@ -519,7 +519,9 @@ export function reapedServers(
     // An NPU's embed endpoint is looked after when llama-server (Qualcomm's, on the Hexagon) or OpenVINO Model Server
     // (Intel's: 1.7 GB, kept until it was stopped, before kit 2.71.0) runs it; npu-embed exits by itself.
     const npuEmbed = NPU_EMBED_SERVER.test(path.win32.basename(expandEnv(a.embed?.startCommand?.[0] ?? '')));
-    const kinds: EndpointKind[] = a.kind === 'npu' ? ['chat', 'vision', ...(npuEmbed ? (['embed'] as const) : [])] : ['chat', 'vision', 'embed', 'rerank'];
+    // Its reranker too (kit 2.100.0): that llama-server, started a third time.
+    const npuRerank = NPU_EMBED_SERVER.test(path.win32.basename(expandEnv(a.rerank?.startCommand?.[0] ?? '')));
+    const kinds: EndpointKind[] = a.kind === 'npu' ? ['chat', 'vision', ...(npuEmbed ? (['embed'] as const) : []), ...(npuRerank ? (['rerank'] as const) : [])] : ['chat', 'vision', 'embed', 'rerank'];
     for (const kind of kinds) {
       if (!a[kind]?.model) continue;
       let ep: ReturnType<typeof endpointFor>;
@@ -777,7 +779,8 @@ export function serversToReap(raw: Record<string, any>, o: { withNpu?: boolean; 
   const given = raw?.npuIdleStopMinutes === k.npuIdleStopMinutes;
   const gpuGiven = raw?.gpuIdleStopMinutes === k.gpuIdleStopMinutes;
   const ramBytes = o.ramBytes === undefined ? os.totalmem() : o.ramBytes;
-  const npuMsFor = given ? undefined : (program: string, kind: EndpointKind) => npuIdleStopMinutes({ program, kind: kind === 'rerank' ? 'chat' : kind, ramBytes, otherwise: k.npuIdleStopMinutes }) * 60_000;
+  // The NPU's reranker stops as its embedding server does: the same program, as quick to start again.
+  const npuMsFor = given ? undefined : (program: string, kind: EndpointKind) => npuIdleStopMinutes({ program, kind: kind === 'rerank' ? 'embed' : kind, ramBytes, otherwise: k.npuIdleStopMinutes }) * 60_000;
   const otherMsFor = gpuGiven ? undefined : (a: Accelerator) => (a.kind === 'gpu' ? cardIdleStopMinutes({ memoryGb: a.memoryGb, ramBytes, otherwise: k.gpuIdleStopMinutes }) * 60_000 : undefined);
   return reapedServers(accs, o.logDir, { npuMs: k.npuIdleStopMinutes * 60_000, otherMs: k.gpuIdleStopMinutes * 60_000, npuMsFor, otherMsFor }, undefined, { keepGpuOut: gpuKeptOut(accs, o.withNpu ?? gpuWithNpu().on) });
 }
@@ -1025,10 +1028,21 @@ export function refreshCards(o: { logFile?: string } = {}): void {
   }
 }
 
+/** One copy of Qwen3-VL-2B where the NPU keeps one (setup.ts' refreshSmallModel), at most one look at a time: what it changed goes in the keeper's log. */
+let smallModel: Promise<void> | null = null;
+export function startSmallModelRefresh(o: { logFile?: string } = {}): void {
+  if (smallModel) return;
+  const logFile = o.logFile ?? reaperLog();
+  smallModel = refreshSmallModel({ configFile: acceleratorConfigFile(), kit: kitVersion(), running: () => modelServerProcesses().then((ps) => ps.map((p) => p.line)), log: (line) => logLine(logFile, line) })
+    .then(() => {})
+    .catch((e: any) => logLine(logFile, `the graphics' and the processor's Qwen3-VL-2B file couldn't be looked at:${e?.message ?? e}`))
+    .finally(() => (smallModel = null));
+}
+
 /**
  * One look: each server, then the orphans. config.json and Manor's switch are read afresh, so a change applies at the
- * next look. With the PC's own reaper (pcReaper's), it first brings hardware.json, the cards' vision commands and the
- * NPU's command up to date, whether or not it's handed config.json: the Smith hands the one it read for its round, and
+ * next look. With the PC's own reaper (pcReaper's), it first brings hardware.json, the cards' vision commands, the
+ * NPU's command and the cards' Qwen3-VL-2B file up to date, whether or not it's handed config.json: the Smith hands the one it read for its round, and
  * until kit 2.78.8 that kept all three from ever running under it (Reeve leaves the looks to the Smith). A test's
  * reaper asks no PC.
  */
@@ -1037,6 +1051,7 @@ export async function keeperLook(reaper: Reaper, o: { config?: () => Record<stri
     await refreshHardware().catch(() => false);
     refreshCards();
     startNpuRefresh();
+    startSmallModelRefresh();
   }
   const servers = serversToReap((o.config ?? (() => readConfigFile().raw))(), { withNpu: (o.withNpu ?? (() => gpuWithNpu().on))() });
   const looked = await reaper.look(servers);
