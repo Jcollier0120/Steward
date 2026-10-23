@@ -55,8 +55,9 @@ llama.cpp's builds and the models go into the accelerators' folder (`servers\`, 
     },
     {
       "id": "npu", "kind": "npu", "slots": 1, "maxContextTokens": 2400,
-      "chat":   { "baseUrl": "http://127.0.0.1:18181", "model": "qualcomm/Qwen3-4B-Instruct-2507:W4A16", "startCommand": ["%LOCALAPPDATA%\\GenieX CLI\\geniex.exe", "serve", "--skip-update"] },
-      "vision": { "model": "Qwen3-VL-4B-Instruct:W4A16" },
+      "chat":   { "baseUrl": "http://127.0.0.1:18181", "model": "unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0", "startCommand": ["%LOCALAPPDATA%\\GenieX CLI\\geniex.exe", "serve", "--skip-update", "..."] },
+      "vision": { "model": "unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0", "pictureTokens": 1024 },
+      "embed":  { "baseUrl": "http://127.0.0.1:18182", "model": "qwen3-embedding-0.6b-gguf", "startCommand": ["..."] },
       "quirks": ["prefix-leak", "image-path"]
     }
   ],
@@ -67,7 +68,7 @@ llama.cpp's builds and the models go into the accelerators' folder (`servers\`, 
 - `slots`: how many requests it serves at once (llama-server's `--parallel`). The NPU has 1.
 - `maxContextTokens`: the most a request may be, prompt and answer, by the kit's pessimistic estimate. The NPU keeps 2,400: an ~8K-token prompt bluescreened this laptop (bug check 0x18B). A graphics card's comes from its memory and the model's context. A request over every candidate's cap is refused before it's sent, as now.
 - `chat`, `vision`, `embed`: what it serves, each an OpenAI-compatible endpoint (`/v1/chat/completions`, `/v1/embeddings`), its model, and the command that starts its server when it isn't running (detached, hidden, as GenieX is started now). Leaving one out means it doesn't serve that kind.
-- `rerank` (kit 2.41.0): a reranker, llama.cpp's server started with `--reranking` (`/v1/rerank`: a question and documents in, each document's relevance out), set up only when asked for (`--serve rerank`). It is an add-on, not routed work: no agent's chat, vision or embedding requests go to it, and the core doesn't read it. An agent that wants one (Reeve's search) finds it with `endpointFor(a, 'rerank')`. The NPU's servers don't rerank.
+- `rerank` (kit 2.41.0): a reranker, llama.cpp's server started with `--reranking` (`/v1/rerank`: a question and documents in, each document's relevance out), set up only when asked for (`--serve rerank`). It is an add-on, not routed work: no agent's chat, vision or embedding requests go to it, and the core doesn't read it. An agent that wants one (Reeve's search) finds it with `endpointFor(a, 'rerank')`. A Snapdragon X2's NPU reranks (kit 2.100.0): its embedding server's llama.cpp started again with `--reranking` on port 18185, in the NPU's turn (NPU-VENDORS.md, Reranking on the Hexagon); no other NPU's servers rerank.
 - `quirks`, per server: `prefix-leak` (GenieX v0.7.0: each request starts with a nonce), `image-path` (the server reads a local image path; otherwise images are sent as `data:` URLs), `sides-of-32` (FastFlowLM 1.0.7 misreads a picture 720 px tall or less with a side of a whole number of 32 px: the kit's `fitPicture` makes such a side a pixel longer first, NPU-VENDORS.md).
 - `vision.pictureTokens` (kit 2.80.2): the most tokens a picture may be on a server that reads it at its own size, a token per 32 × 32 px (Qwen3-VL through GenieX's llama.cpp plugin), a whole number from 64 to 4,096. The kit redraws a larger picture to fit (`fitPicture`) and counts each picture on that server as this many against its cap, in place of the rules' `imageTokens` (400). Setup writes 1,024 for the X2's Qwen3-VL-2B (NPU-VENDORS.md); without it a picture goes at its own size and counts 400.
 - `acceleratorOrder`: `"auto"`, or a list of ids, first preferred. Auto puts the NPU first, since it does model work without the processor or a graphics card; then graphics cards with 2 GB or more of their own memory, by memory; then graphics that share the PC's memory; then the CPU.

@@ -112,12 +112,23 @@ function stable(x: unknown): string {
 }
 
 /** What setup decides about the NPU's servers: their commands and environments, its caps and quirks. Its timeouts, slots and switch are the PC's. */
-const served = (e: Record<string, any>) => stable({ maxContextTokens: e.maxContextTokens, quirks: e.quirks ?? [], chat: e.chat, vision: e.vision, embed: e.embed });
+const served = (e: Record<string, any>) => stable({ maxContextTokens: e.maxContextTokens, quirks: e.quirks ?? [], chat: e.chat, vision: e.vision, embed: e.embed, rerank: e.rerank });
 
-/** Each server the entry starts, once (an embedding server of its own beside the chat's). */
+/**
+ * The NPU's reranker as its entry has it (setup's npuRerank, kit 2.100.0): its model's file, its id and its port, so it
+ * is made again on the embedding server written now. Undefined for none, or one setup didn't write.
+ */
+function rerankOf(ep: any): { file: string; model: string; port?: number } | undefined {
+  const cmd: unknown[] = Array.isArray(ep?.startCommand) ? ep.startCommand : [];
+  const m = cmd.indexOf('-m');
+  if (m < 1 || typeof cmd[m + 1] !== 'string' || typeof ep.model !== 'string' || !cmd.includes('--reranking')) return undefined;
+  return { file: cmd[m + 1] as string, model: ep.model, ...(portOf(ep.baseUrl) ? { port: portOf(ep.baseUrl) } : {}) };
+}
+
+/** Each server the entry starts, once (an embedding server of its own beside the chat's, and its reranker). */
 export function servers(e: Record<string, any>): { program: string; base: string }[] {
   const out = new Map<string, string>();
-  for (const k of ['chat', 'vision', 'embed']) {
+  for (const k of ['chat', 'vision', 'embed', 'rerank']) {
     const ep = e[k];
     if (ep?.baseUrl && Array.isArray(ep.startCommand) && ep.startCommand.length && !out.has(ep.baseUrl)) out.set(ep.baseUrl, expandEnv(ep.startCommand[0]));
   }
@@ -242,10 +253,11 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   const offered = !hadEmbed && !!plan.embed;
   // The graphics' turn its embeddings take (embedTurn); a detection that listed no cards keeps the entry's.
   const turn = plan.embed?.turn ?? (cards.length || typeof entry.embed?.turn !== 'string' ? undefined : entry.embed.turn);
-  const fresh = npuEntry(plan.route, { tools: d.tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, d.home), embed: plan.embed ? { exe: plan.embed.exe, model: plan.embed.model, ...(turn ? { turn } : {}) } : undefined });
-  // Its slots, timeouts (measured on this PC, or a person's) and switch stay as they are.
+  const fresh = npuEntry(plan.route, { tools: d.tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, d.home), embed: plan.embed ? { exe: plan.embed.exe, model: plan.embed.model, ...(turn ? { turn } : {}) } : undefined, rerank: rerankOf(entry.rerank) });
+  // Its slots, timeouts (measured on this PC, or a person's) and switch stay as they are; its reranker too, unless it's
+  // setup's, made again on the embedding server written now.
   const { chat: _chat, vision: _vision, embed: _embed, ...kept } = entry;
-  let next: AcceleratorEntry = { ...kept, maxContextTokens: fresh.maxContextTokens, quirks: fresh.quirks, chat: fresh.chat, ...(fresh.vision ? { vision: fresh.vision } : {}), ...(fresh.embed ? { embed: fresh.embed } : {}) };
+  let next: AcceleratorEntry = { ...kept, maxContextTokens: fresh.maxContextTokens, quirks: fresh.quirks, chat: fresh.chat, ...(fresh.vision ? { vision: fresh.vision } : {}), ...(fresh.embed ? { embed: fresh.embed } : {}), ...(fresh.rerank ? { rerank: fresh.rerank } : {}) };
   if (served(entry) === served(next)) return done('current');
 
   const offerWords = offered ? `embeddings: on the NPU's own server (${own}, ${next.embed!.model})${next.embed!.turn ? ` in ${next.embed!.turn}'s turn` : ''}` : null;
@@ -255,6 +267,7 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
     ...argChanges(entry.chat.startCommand, next.chat!.startCommand ?? []),
     ...envChanges(entry.chat.env, next.chat!.env),
     ...(entry.embed?.startCommand && next.embed?.startCommand ? argChanges(entry.embed.startCommand, next.embed.startCommand).map((c) => `embeddings: ${c}`) : []),
+    ...(entry.rerank?.startCommand && next.rerank?.startCommand ? argChanges(entry.rerank.startCommand, next.rerank.startCommand).map((c) => `reranker: ${c}`) : []),
     ...(offerWords ? [offerWords] : []),
     ...(!offered && next.embed && (entry.embed?.turn ?? null) !== (next.embed.turn ?? null) ? [`embeddings: in ${next.embed.turn ? `${next.embed.turn}'s` : "the NPU's"} turn`] : []),
     ...(stable(entry.quirks ?? []) !== stable(next.quirks ?? []) ? [`quirks: ${next.quirks?.length ? next.quirks.join(', ') : 'none'}`] : []),

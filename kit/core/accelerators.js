@@ -446,8 +446,8 @@ export function npuServes(list) {
  * (kit 2.69.0: the card on demand), so it is never a candidate for the NPU's own work, not even the fallback when the
  * NPU fails or is busy. On a PC whose NPU serves chat, vision and embeddings (a Snapdragon) every card is left out, as
  * before; on one whose NPU can't see (Intel's), the card keeps vision alone: its server is started by the first vision
- * request and stopped by the keeper once unused (gpuIdleStopMinutes). A reranker, an add-on no NPU serves, is left
- * out with the rest, as before: the processor reranks. The processor stays. A card left with nothing is dropped; one
+ * request and stopped by the keeper once unused (gpuIdleStopMinutes). A card's reranker, an add-on, is left out with
+ * the rest, as before: the NPU reranks where it can (a Snapdragon X2's, kit 2.100.0), else the processor. The processor stays. A card left with nothing is dropped; one
  * left with part of its work is a copy (a vision endpoint on its chat endpoint's server keeps that server). With the
  * switch true, or no NPU serving anything, the list is unchanged: on a PC without an NPU the switch means nothing.
  * @template {{ kind: AcceleratorKind, enabled?: boolean, chat?: unknown, vision?: unknown, embed?: unknown }} A

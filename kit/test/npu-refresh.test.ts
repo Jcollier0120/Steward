@@ -676,6 +676,41 @@ test("an X2 the Smith's Use it moved to GenieX 0.9.1: its command kept, never pu
   assert.deepEqual(await refreshNpu(gone.deps), { did: 'needs-setup' });
 });
 
+test("an X2 whose NPU reranks (kit 2.100.0): its reranker stopped with the others when the command changes, and made again on the embedding server written now, its file and port kept", async () => {
+  const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
+  const x2 = parseNpus(X2, 'arm64')[0];
+  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true })!;
+  const file = '%USERPROFILE%\\.manor\\accelerators\\models\\qwen3-reranker-0.6b-q8_0.gguf';
+  const now = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model }, rerank: { file, model: 'qwen3-reranker-0.6b', port: 18186 } }), timeouts: { ...MEASURED } };
+  assert.equal(now.rerank!.baseUrl, 'http://127.0.0.1:18186');
+  assert.deepEqual(now.rerank!.startCommand![0], now.embed!.startCommand![0], "its embedding server's program");
+  assert.deepEqual(now.rerank!.env, now.embed!.env, 'and environment (ADSP_LIBRARY_PATH)');
+  const x2Pc = (entry: Record<string, any>) => {
+    const pc = fakePc(entry);
+    pc.deps.detect = async () => (pc.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+    return pc;
+  };
+  assert.deepEqual(await refreshNpu(x2Pc(now).deps), { did: 'current' }, "set up by this kit: its reranker is setup's");
+  // An older kit's chat: every server stopped in the NPU's turn, its reranker too, which comes back as it was.
+  const before = structuredClone(now) as Record<string, any>;
+  delete before.chat.env;
+  const pc = x2Pc(before);
+  assert.deepEqual(await refreshNpu(pc.deps), { did: 'refreshed', changes: ['GENIEX_IMAGE_MAX_TOKENS=1024 added'] });
+  assert.ok(pc.did.includes('stop llama-server.exe http://127.0.0.1:18186'), pc.did.join(', '));
+  assert.deepEqual(pc.npu().rerank, now.rerank);
+  // A reranker command an older kit wrote: brought to this one's, and said.
+  const olderRerank = structuredClone(now) as Record<string, any>;
+  olderRerank.rerank.startCommand = olderRerank.rerank.startCommand.map((s: string, i: number, c: string[]) => (c[i - 1] === '-ub' ? '2048' : s));
+  const re = x2Pc(olderRerank);
+  assert.deepEqual(await refreshNpu(re.deps), { did: 'refreshed', changes: ['reranker: 512 added'] });
+  assert.deepEqual(re.npu().rerank, now.rerank);
+  // One a person wrote (not llama.cpp's --reranking): kept as it is.
+  const theirs = { ...structuredClone(now), rerank: { baseUrl: 'http://127.0.0.1:9000', model: 'mine', startCommand: ['C:\\r\\rerank.exe'] } };
+  const own = x2Pc(theirs);
+  assert.deepEqual(await refreshNpu(own.deps), { did: 'current' });
+  assert.deepEqual(own.npu().rerank, theirs.rerank);
+});
+
 test("the changed arguments, as the keeper's log says them", () => {
   assert.deepEqual(argChanges(['ovms.exe', '--port', '18185', '--max_prompt_len', '4096'], ['ovms.exe', '--port', '18185', '--max_prompt_len', '2048', '--plugin_config', '{"NPUW_LLM_PREFILL_CHUNK_SIZE":128}']), [
     '--max_prompt_len 2048 added',

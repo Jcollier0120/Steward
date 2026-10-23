@@ -2,6 +2,27 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.100.0
+
+**On a Snapdragon X2 the reranker runs on the NPU, the graphics and the processor read the NPU's own Qwen3-VL-2B file, and the GenieX default is the X2's model.**
+
+### What's new
+
+- **The NPU reranks on a Snapdragon X2.** Asked for a reranker (`--serve rerank`), setup puts it on the NPU where the NPU has llama.cpp's embedding server: that server's program and environment started a third time, `--reranking` on port 18185 (the route's new `rerankServer`, npu-vendors.ts' `NpuRerankServer`), `-c 4096 -b 2048 -ub 512`, with Qwen3-Reranker-0.6B Q8_0. It is tested first (setup.ts' `testNpuRerank`), in the NPU's turn; a failed test leaves it to the processor (`npuMissing` now says `rerank`). Not on a PC under 20 GB (`smallPc`).
+  - Measured on the X2 Elite Extreme: Reeve's 24 rerank queries gave the same results as on the Adreno (12 first, 19 in the top five), its order the same up to near-ties; a ten-file rerank in 849 ms against 1,558 on the Adreno and 2,286 on the processor; 1.10 GB of the NPU's memory; GenieX's chat beside it at 73.2 tokens a second against 73.3 (spec/NPU-VENDORS.md, Reranking on the Hexagon).
+  - `npuEntry` takes `rerank` (its file, model and port) and `npuRerank` builds the endpoint from an entry's embedding server. The keeper looks after it as the NPU's (`reapedServers`) and stops it when idle as it stops the embedding server; the NPU refresh stops it with the others and makes it again on the embedding server it writes.
+- **One copy of Qwen3-VL-2B on an X2.** Where GenieX's cache has unsloth's Q4_0 at its pinned size (setup.ts' `npuChatFile`, from the route's `offNpu`), setup gives the graphics and the processor that file in place of downloading the Q4_K_M, with setup's own Q8_0 projector beside it (`ModelFile.path`; the plan says `have …: the NPU's own copy`). As fast on the Adreno and the processor, the same answers (spec/NPU-VENDORS.md, One copy of Qwen3-VL-2B).
+  - On a PC set up before, the keeper's look (`refreshSmallModel`, each look) points their `-m` at that file (`withNpuChatFile`), starting and stopping nothing, and removes the Q4_K_M once nothing in config.json has named it for three days and no running process names it (`small-model.json` beside config.json). Never in an Everyone install's shared folder; a Q4_K_M a person puts back is kept.
+
+### What changed
+
+- **`GENIEX_CHAT_MODEL` is `unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`**, the X2's. The old id, `qualcomm/Qwen3-4B-Instruct-2507:W4A16`, is still known as a default (`GENIEX_EARLIER_CHAT_MODELS`), so `isInstallDefaultNpu` still drops an npu an earlier kit wrote by default on a PC without an NPU, and nothing else.
+- spec/NPU-VENDORS.md: the makers' table names each route's models now (AMD's `qwen3.5:2b`, the X2's Qwen3-VL-2B Q4_0 on GenieX 0.9.x); spec/NPU-BENCHMARK.md and spec/ACCELERATORS.md the same.
+
+### Before you update
+
+- Nothing for an agent: take the kit as usual. An agent that reads `rerank` with `endpointFor(a, 'rerank')` finds the NPU's the same way. Its model servers on the NPU take the NPU's turn, as before.
+
 ## 2.99.1
 
 **No model server is started while the manor is stopped from Manor's Settings.**

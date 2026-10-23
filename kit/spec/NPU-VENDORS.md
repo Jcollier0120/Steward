@@ -15,13 +15,13 @@ So each maker gets its own server, chosen for being OpenAI-compatible, installab
 
 | Maker | Server | Version | What it serves on the NPU | Install |
 |---|---|---|---|---|
-| Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.8.0 | chat, vision (one model: Qwen3-VL-2B on the X2, Qwen3-VL-4B on the X) | its Inno Setup installer, silent, per user, no administrator |
+| Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.9.x on the X2 (it pins 0.9.1; 0.9.3 where the Smith's Use it put it), 0.8.0 on the X | chat, vision (one model: Qwen3-VL-2B-Instruct Q4_0 on the X2, Qwen3-VL-4B W4A16 on the X); embeddings, and on the X2 a reranker when asked for, on llama.cpp's server over GenieX's libraries | its Inno Setup installer, silent, per user, no administrator |
 | Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake, Wildcat Lake) | OpenVINO Model Server | 2026.4.1 | chat (Qwen3-4B-Instruct-2507, channel-wise INT4) | a zip, unpacked into the accelerators' folder |
-| AMD Ryzen AI 300 and later (XDNA 2) | FastFlowLM | 1.0.7 | chat (Qwen3-4B-Instruct-2507), vision (Qwen3-VL-4B) | a portable zip, unpacked into the accelerators' folder |
+| AMD Ryzen AI 300 and later (XDNA 2) | FastFlowLM | 1.0.7 | chat, vision (one model: `qwen3.5:2b`, Qwen3.5-2B) | a portable zip, unpacked into the accelerators' folder |
 
 Second choices, if a route fails on hardware: Foundry Local for Snapdragon and Intel; Lemonade Server (AMD's, Apache-2.0, which itself runs FastFlowLM) for AMD.
 
-**Embeddings** run on the Snapdragon's and Intel's NPUs, each through a server of its own (below); the NPU 3720's on the processor's graphics beside it. AMD's stay off the NPU: FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms. There they go to the graphics card, or to the processor on a PC without one: setup sets the processor up for embeddings when the NPU chats but makes none and there is no card.
+**Embeddings** run on the Snapdragon's and Intel's NPUs, each through a server of its own (below); the NPU 3720's on the processor's graphics beside it. A Snapdragon X2 reranks on its NPU too, when a reranker is asked for (Reranking on the Hexagon, below). AMD's stay off the NPU: FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms. There they go to the graphics card, or to the processor on a PC without one: setup sets the processor up for embeddings when the NPU chats but makes none and there is no card.
 
 ### Embeddings on Intel's NPU
 
@@ -99,6 +99,24 @@ Measured on the X2 Elite (2026-10-12), Reeve's search eval on GamerNexus (9 ques
 | Indexing GamerNexus, gentle pace | 31 min | about 65 min | 3 min |
 
 Its vectors match the card's (cosine 0.9990–0.9998 on the same texts), so it keeps the card's model name, `qwen3-embedding-0.6b-gguf`, and an index made by either serves both. Several requests at once are slower on the Hexagon, not faster (`--parallel 4`: 702 ms a chunk), so it takes one at a time. It holds 1.4 GB of the NPU's memory beside GenieX's model (604 MB model, 448 MB context, 302 MB compute; 2.9 GB through kit 2.75.0: below) and is stopped when idle, as GenieX is.
+
+### Reranking on the Hexagon (kit 2.100.0)
+
+A reranker (ACCELERATORS.md's `rerank`: Reeve's opt-in sharper search) is set up only when asked for (`--serve rerank`). On a Snapdragon whose NPU has llama.cpp's embedding server, setup now puts it on the NPU: that server's very program and environment (`ADSP_LIBRARY_PATH`) started a third time, `--reranking` on its own port (18185, the route's `rerankServer`), on `--device HTP0`, with the graphics card's reranker, Qwen3-Reranker-0.6B Q8_0 (ggml-org's GGUF, 639 MB). No download of its own beyond the model, no build of its own. Setup tests it before writing it (`testNpuRerank`: a question and two passages, the one that answers ranked first), in the NPU's turn, which every rerank takes, as chat and embeddings do. A test that fails leaves the reranker to the processor, as before. It isn't set up on a PC under 20 GB (`smallPc`), whose NPU memory is chat's and the embeddings'; there it goes where it went before. The keeper stops it as it stops the embedding server (`npuIdleStopMinutes` for embeddings), and the NPU's refresh makes it again on the embedding server it writes, its file and port kept.
+
+Measured on the X2 Elite Extreme (Hexagon v81, 48 GB, 2026-10-23), llama.cpp b11645 over GenieX 0.9.3's libraries, against the Adreno's llama.cpp b11734 (setup's card) and the processor's:
+
+| | Hexagon | Adreno X2-90 | Processor |
+|---|---|---|---|
+| Reeve's 24 rerank queries, blended with search's order: right file first / in the top five | 12 / 19 | 12 / 19 | 12 / 19 |
+| Order against the Adreno's: the same first file / the same top three / swapped pairs | 21 / 19 / 10, each within 0.0074 | | 22 / 20 / 12, up to 0.051 apart |
+| Ten files of 1,600 characters, median (p90) | 849 ms (943) | 1,558 ms (1,698) | 2,286 ms (2,760) |
+| Memory it holds | 1.10 GB of the NPU's at `-c 4096 -ub 512` (1.65 at the cards' `-c 8192 -ub 2048`, as fast) | 2.08 GB of the card's | 1.6 GB of the PC's |
+
+- **The same order, up to near-ties.** The Hexagon's order differs from the Adreno's as little as the processor's does: the files it swaps were within 0.0074 of each other, and the three queries whose first file differs had their top two within 0.0012. Reeve's results were the same on all three. Its words alone (no reranker) put 8 first and 18 in the top five.
+- **Chat isn't slowed.** In the NPU's turn, GenieX wrote 73.2 tokens a second with reranks asked between its chats, and 73.3 without. A chat waited at most one rerank (about 0.85 s); a rerank waited a median 0.19 s for a chat (1.5 s at most). Asked at the same moment outside the turn, a rerank slowed a chat about five times, so it always takes the NPU's turn.
+- **Its context.** `-c 4096 -b 2048 -ub 512`, as the NPU's embedding server: ten files and a question fit in one request, at 0.55 GB less of the NPU's memory than the cards' flags.
+- **Reeve's warm-up.** Reeve sends a chat warm-up to a server it starts on the NPU; the reranking server answers it (200) without harm.
 
 ### Memory on a 16 GB Snapdragon (kit 2.75.1)
 
@@ -192,6 +210,24 @@ From kit 2.78.0 the 2B was the X2's `smallPc`, for an X2 under 20 GB (`idleStop.
   - The same drawn on a side that isn't (500, 513, 520, 448 × 449, 512 × 513, 513 × 512) read right, and so did the Smith's own pixels with a white column and row added (513 × 513), and any picture the kit redraws: the server's resize, or the kit's, is what the 2B reads such text right after. Drawn in ClearType, as Windows draws text on a screen, it read right on 512 × 512 too, 8 times in 8.
   - **Why the kit doesn't nudge pictures off whole squares** (as `sides-of-32` does for FastFlowLM): a window's screen text, crisp ClearType crops of the drawn desktop at 1280 × 768, 1024 × 768 and 1280 × 736 (960, 768 and 920 tokens, sent as they are), read 15 of 18 questions right as they were and 12 of 18 a pixel wider: the extra resample blurs small text. The Smith draws its picture 513 × 512 instead (Smith 0.8.45: 8 times in 8 right, and through the NPU's own server).
 - **The 4B on an X2**: `npu-bench --model qualcomm/Qwen3-VL-4B-Instruct:W4A16` measures the route's own 4B on an X2, for comparing. A `--candidate` is pulled and served as the route's own model is (AI Hub's QAIRT build), whatever the generation runs. `--small-pc` runs a generation's `smallPc` models, of which there are none now.
+
+### One copy of Qwen3-VL-2B on an X2 (kit 2.100.0)
+
+The X2's graphics card and processor run Qwen3-VL-2B too (ACCELERATORS.md), setup's Q4_K_M with its Q8_0 projector, so an X2 kept two copies of one model: GenieX's Q4_0 (1.06 GB) and setup's Q4_K_M (1.11 GB). From kit 2.100.0 the card and the processor read GenieX's own file where it is (`npuChatFile`: the route's `offNpu` file, at its pinned size, in GenieX's cache), and setup's Q8_0 projector stays beside it. GenieX's F16 projector isn't used: it holds 0.35 GB more, and the processor took 0.77 s a picture with it against 0.43.
+
+Measured on the X2 Elite Extreme (2026-10-23, llama.cpp b11734, setup's flags), GenieX's Q4_0 against setup's Q4_K_M, each run twice in turn:
+
+| | Adreno, Q4_0 | Adreno, Q4_K_M | Processor, Q4_0 | Processor, Q4_K_M |
+|---|---|---|---|---|
+| Tokens written a second | 66 | 67 to 71 | 64 to 70 | 61 to 70 |
+| 1,024 tokens read | 0.82 s | 0.85 to 0.87 s | 1.25 to 1.30 s | 1.47 to 1.77 s |
+| A picture | 0.34 s | 0.29 to 0.31 s | as fast | |
+| Memory | 3.2 GB of its memory | 3.2 GB | 0.1 GB less | |
+| Answers right / pictures right | 22 of 24 / 4 of 4 | 22 of 24 / 4 of 4 | 22 of 24 / 4 of 4 | 22 of 24 / 4 of 4 |
+
+- **Setup** plans the card's and the processor's Qwen3-VL-2B from GenieX's copy when it is there, downloading only the projector; its plan says `have Qwen3-VL-2B-Instruct-Q4_0.gguf: the NPU's own copy, used where it is`. Without GenieX's copy (another Snapdragon, or GenieX hasn't pulled it yet), the Q4_K_M as before.
+- **A PC set up before**: the keeper's look (`refreshSmallModel`, each look, cheap) points the card's and the processor's `-m` at GenieX's copy, and logs it. Nothing is started or stopped: a server running keeps its file until its next start. The Q4_K_M is removed once nothing in `config.json` has named it for three days (`small-model.json` beside it says since when) and no running process names it: an agent that read `config.json` before may still start a server with it. Windows refusing the removal (a program still reads it) is tried again at a later look.
+- **Left as it is**: a Q4_K_M a person puts back in `config.json` (kept, never moved off again), a PC set up for everyone in the shared folder (another account can't read GenieX's cache in this one's profile), and a command that isn't llama-server's. Should GenieX's copy go while the Q4_K_M is still there, the card and the processor read the Q4_K_M again.
 
 ### Memory on a 16 GB Intel PC (the NPU 3720)
 

@@ -8,14 +8,14 @@ import { pipeline } from 'node:stream/promises';
 import { type Block, blockedIn, blockedSay, cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
 export { cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
 import { chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
-import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, isSharedTools, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
+import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, type Endpoint, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, isSharedTools, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
 import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuMeasured, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
+import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -266,6 +266,42 @@ export function specFor(kind: EndpointKind): ModelSpec {
   return kind === 'chat' || kind === 'vision' ? SMALL_SPEC : MODEL_SPECS[kind];
 }
 
+/** SMALL_SPEC's model at any quantization: the one model its projector reads. */
+const SMALL_MODEL_FILE = /(^|[/\\])(Qwen_)?Qwen3-?VL-2B-Instruct-[^/\\]*\.gguf$/i;
+
+/**
+ * The NPU's own copy of SMALL_SPEC's model (kit 2.100.0), which a graphics card and the processor run in place of
+ * SMALL_SPEC's Q4_K_M, so the PC keeps one copy of Qwen3-VL-2B: on a Snapdragon X2, GenieX's Q4_0 (unsloth's, the very
+ * file GenieX serves on the NPU: the route's offNpu), where GenieX's cache has it at its pinned size. SMALL_SPEC's own
+ * Q8_0 projector stays beside it: GenieX's F16 one holds 0.35 GB more, and on the processor took 0.77 s a picture where
+ * the Q8_0 takes 0.43. Measured on the X2 Elite Extreme (2026-10-23, llama.cpp b11734, setup's flags) against the
+ * Q4_K_M: on the Adreno, 66 tokens a second written (67 to 71), 1,024 tokens read in 0.82 s (0.85 to 0.87), a picture in
+ * 0.34 s (0.29 to 0.31), the same 3.2 GB of its memory; on the processor, written as fast (64 to 70, against 61 to 70 in
+ * turn), read in 1.25 to 1.30 s (1.47 to 1.77), pictures as fast, 0.1 GB less; 22 of 24 answers and 4 of 4 pictures right
+ * everywhere, as before. Null where there is no such file, or `home` is the PC's shared folder (an Everyone install),
+ * where another account couldn't read the copy in this one's profile. Without `detection` (the keeper's look), any
+ * route's copy of it that is there at its pinned size.
+ */
+export function npuChatFile(o: { detection?: Detection; home: string; env?: Record<string, string | undefined>; fileSize: (p: string) => number; catalog?: NpuCatalog }): (NpuOffNpuFile & { path: string }) | null {
+  const catalog = o.catalog ?? NPU_CATALOG;
+  if (isSharedTools(o.home, o.env ?? process.env)) return null;
+  let files: NpuOffNpuFile[];
+  if (o.detection) {
+    const det = o.detection.npu;
+    const generic = det?.supported && det.vendor ? catalog.routes[det.vendor] : undefined;
+    if (!det || !generic?.offNpu) return null;
+    const route = routeFor(pinnedRoute(generic, det.generation), det.generation, smallPc(o.detection.ramBytes));
+    const chat = route.models.find((m) => m.kinds.includes('chat'));
+    files = chat ? (generic.offNpu.models[chat.id]?.files ?? []) : [];
+  } else files = Object.values(catalog.routes).flatMap((r) => Object.values(r.offNpu?.models ?? {}).flatMap((m) => m.files));
+  for (const f of files) {
+    if (f.role !== 'model' || !f.present || !SMALL_MODEL_FILE.test(f.file)) continue;
+    const at = expandRoute(f.present, { tools: o.home, env: o.env });
+    if (o.fileSize(at) === f.size) return { ...f, path: at };
+  }
+  return null;
+}
+
 /**
  * The kinds every graphics card serves unless others are asked for. A reranker isn't one of them: it is an add-on, set
  * up only when asked for (`--serve rerank`), beside whatever its accelerator already serves (runSetup).
@@ -283,6 +319,8 @@ export interface ModelFile {
   sha256?: string;
   /** Other places that serve the very same file (Download's). */
   mirrors?: string[];
+  /** Where it already is, used there and never downloaded: the NPU's own copy (npuChatFile). Else the models folder. */
+  path?: string;
 }
 
 /** A repository's file as setup plans from it: Hugging Face's list, or the kit's pin, which gives where to fetch it. */
@@ -785,6 +823,12 @@ export interface SetupPlan {
   npuPlain?: string;
   /** Why the NPU is left out before anything is set up, as its report's code (npu-report.ts): unsupported, its driver, or memory. */
   npuLeftOut?: NpuFailStep;
+  /**
+   * The reranker on the NPU (kit 2.100.0): its route's rerankServer, on the port it had or its route's, made from the
+   * NPU's embed endpoint once that is written, and tested (runSetup). Absent: a reranker asked for goes to the cards or
+   * the processor, as before.
+   */
+  npuRerank?: { route: NpuRoute; port: number; label: string };
   /** Each graphics card's work left to the NPU (gpuWithNpu off): not set up on it. A card the NPU would leave nothing (a Snapdragon's) is set up whole, as before, so isn't here. */
   leftToNpu?: { id: string; name: string; kinds: EndpointKind[] }[];
   build: string | null;
@@ -896,6 +940,15 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   if (askedNpu && !det && !dropNpu) problems.push(noNpu(o.detection) ? 'npu: this PC has no NPU' : "npu: couldn't tell whether this PC has an NPU");
   // What the NPU will serve (set up now, or configured before).
   const npuServes = new Set<EndpointKind>(npu ? npu.kinds : det?.supported && configuredNpu && !installDefault ? ENDPOINT_KINDS.filter((k) => serves(configuredNpu, k)) : []);
+  // The reranker on the NPU (kit 2.100.0), where its route runs one on its embedding server's program (a Snapdragon's
+  // llama.cpp on the Hexagon, npu-vendors.json's rerankServer) and the NPU has that server, set up now or before: when
+  // it's asked for with no accelerator named (or the NPU named), and kept when the NPU is set up again. Not on a PC with
+  // little memory (smallPc), whose NPU servers already give way to its chat: the reranker goes where it went before.
+  const rerankRoute = det?.supported && det.vendor && !o.skipNpu && !smallPc(o.detection.ramBytes) && (askedNpu || !o.ids.length) ? (npu?.route ?? NPU_CATALOG.routes[det.vendor]) : undefined;
+  const hasEmbedServer = !!rerankRoute && (npu ? !!npu.embed : !!configuredNpu && !installDefault && !!npuRerank(rerankRoute, configuredNpu.embed, { tools: o.home, file: '', model: '' }));
+  const rerankOnNpu = !!rerankRoute?.rerankServer && hasEmbedServer && (kinds.includes('rerank') || (!!npu && !!configuredNpu?.rerank));
+  // What the cards and the processor are asked for: the rest.
+  const restKinds = rerankOnNpu ? kinds.filter((k) => k !== 'rerank') : kinds;
 
   // Which accelerators. Every graphics card serves all three, as before: the NPU comes first for what it serves, and a
   // card takes it only when the NPU can't (too big, or failed lately). With no card, the processor chats and sees (one
@@ -917,12 +970,14 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     }
     const kind = card ? 'gpu' : 'cpu';
     // The processor chats and sees, on one SMALL_SPEC server (and reranks, when asked: a 0.6B reranker runs well enough on it).
-    const cpuKinds = o.cpuKinds?.length ? o.cpuKinds : o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? kinds.filter((k) => k === 'chat' || k === 'vision' || k === 'rerank') : cpuDefault;
+    const cpuKinds = o.cpuKinds?.length ? o.cpuKinds : o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? restKinds.filter((k) => k === 'chat' || k === 'vision' || k === 'rerank') : cpuDefault;
     // A card the NPU leaves nothing to (a Snapdragon's, whose NPU serves all three) is set up whole, as before: the
     // switch is offered only beside a configured card, and the person can't turn on a card that has no entry.
-    const besideKinds = card && besideNpu ? core.cardWorkBesideNpu(kinds, [...npuServes]) : kinds;
-    const cardKinds = besideKinds.length ? besideKinds : kinds;
-    const left = card ? kinds.filter((k) => !cardKinds.includes(k)) : [];
+    const besideKinds = card && besideNpu ? core.cardWorkBesideNpu(restKinds, [...npuServes]) : restKinds;
+    const cardKinds = besideKinds.length ? besideKinds : restKinds;
+    // Only the reranker asked for, and the NPU takes it: nothing for this one to do.
+    if (rerankOnNpu && !(card ? cardKinds : cpuKinds).length) continue;
+    const left = card ? restKinds.filter((k) => !cardKinds.includes(k)) : [];
     if (left.length) leftToNpu.push({ id, name: card!.name, kinds: left });
     const size = sizing({ kind, memoryGb: card?.memoryGb, ramGb, kinds: kind === 'cpu' ? cpuKinds : cardKinds, keepKinds: !!o.kinds?.length });
     const v = variantFor({ kind, vendor: card?.vendor, arch });
@@ -976,10 +1031,17 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
 
   // Which models: each target's (specFor), each once; a projector only where one sees (SMALL_SPEC chatting alone hasn't one).
   const seeing = targets.some((t) => t.variant && t.kinds.includes('vision'));
-  const needed = [...new Set(targets.filter((t) => t.variant).flatMap((t) => t.kinds.map((k) => specFor(k))))].map((s) => (s.mmproj && !seeing ? { ...s, mmproj: undefined } : s));
+  const needed = [...new Set([...targets.filter((t) => t.variant).flatMap((t) => t.kinds.map((k) => specFor(k))), ...(rerankOnNpu ? [MODEL_SPECS.rerank] : [])])].map((s) => (s.mmproj && !seeing ? { ...s, mmproj: undefined } : s));
   const found = needed.length ? await findModels(needed, o.hfFiles) : { models: [], problems: [] };
   problems.push(...found.problems);
+  // SMALL_SPEC's model where the NPU keeps a copy of it (npuChatFile, kit 2.100.0): that file, in place of the Q4_K_M.
+  const own = found.models.some((m) => m.model === SMALL_SPEC.model && m.role === 'model') ? npuChatFile({ detection: o.detection, home: o.home, env: o.env, fileSize }) : null;
+  if (own) {
+    const i = found.models.findIndex((m) => m.model === SMALL_SPEC.model && m.role === 'model');
+    found.models[i] = { model: SMALL_SPEC.model, role: 'model', repo: own.repo, file: own.file, url: pinnedModelUrl(own), size: own.size, sha256: own.sha256, path: own.path };
+  }
   for (const m of found.models) {
+    if (m.path) continue;
     const dest = path.join(modelsDir, path.basename(m.file));
     // The NPU's embedding server downloads the same file first (it's set up first): once is enough.
     const npuGets = npu?.embed?.modelDownload?.dest.toLowerCase() === dest.toLowerCase();
@@ -1018,9 +1080,20 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     while (taken.has(next)) next++;
     npu.port = next;
   }
+  // Its reranker's: the one it had, else its route's, unless something else already has it.
+  let npuRerankPlan: SetupPlan['npuRerank'];
+  if (rerankOnNpu && rerankRoute?.rerankServer && det) {
+    const had = configuredNpu?.rerank?.baseUrl ? Number(new URL(serverBase(configuredNpu.rerank.baseUrl)).port) : 0;
+    let port = had || rerankRoute.rerankServer.port;
+    if (!had && (taken.has(port) || port === npu?.port)) {
+      while (taken.has(next) || next === npu?.port) next++;
+      port = next;
+    }
+    npuRerankPlan = { route: rerankRoute, port, label: det.label };
+  }
   const downloadBytes = downloads.filter((d) => !d.have).reduce((n, d) => n + d.size, 0) + (npu?.downloadBytes ?? 0);
   const terms = npu ? npuTerms(npu) : [];
-  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), ...(npuLeftOut ? { npuLeftOut } : {}), ...(leftToNpu.length ? { leftToNpu } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, terms, problems, serversDir, modelsDir };
+  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), ...(npuLeftOut ? { npuLeftOut } : {}), ...(npuRerankPlan ? { npuRerank: npuRerankPlan } : {}), ...(leftToNpu.length ? { leftToNpu } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, terms, problems, serversDir, modelsDir };
 }
 
 export const gb = (bytes: number) => `${(bytes / 1e9).toFixed(bytes >= 1e10 ? 0 : 1)} GB`;
@@ -1045,6 +1118,7 @@ export function describePlan(p: SetupPlan): string[] {
     }
   }
   if (p.npuNote) lines.push(p.npuNote);
+  if (p.npuRerank) lines.push(`${p.npuRerank.label} (npu): reranks on ${p.npuRerank.port}, ${MODEL_SPECS.rerank.model} on its embedding server's ${p.npuRerank.route.embedServer?.server ?? 'program'}`);
   for (const t of p.targets) {
     if (t.problem) {
       lines.push(`${t.name} (${t.id}): skipped, ${t.problem}`);
@@ -1059,6 +1133,7 @@ export function describePlan(p: SetupPlan): string[] {
   }
   for (const l of p.leftToNpu ?? []) lines.push(`${l.name} (${l.id}): ${l.kinds.join(' and ')} not set up on it: the NPU does ${l.kinds.length === 1 ? 'that' : 'those'}, and "Use the graphics card for models when there's an NPU" is off`);
   for (const d of p.downloads) lines.push(`  ${d.have ? 'have' : 'get '} ${d.what} (${mb(d.size)})${d.sha256 ? '' : ', no pinned SHA-256: it won\'t be downloaded'}`);
+  for (const m of p.models.filter((m) => m.path)) lines.push(`  have ${m.file} (${mb(m.size)}): the NPU's own copy, used where it is`);
   lines.push(p.downloadBytes ? `Download: ${mb(p.downloadBytes)} into ${path.dirname(p.serversDir)} and ${p.modelsDir}.` : 'Nothing to download.');
   lines.push(...termsLines(p.terms ?? []));
   for (const x of p.problems) lines.push(`note: ${x}`);
@@ -1232,7 +1307,7 @@ export interface SetupIo extends NpuIo {
  * Downloads what the plan lacks, finds each card's llama.cpp device, and returns config.json's new
  * content (mergeEntries) with an entry per accelerator it set up. The caller writes it.
  */
-export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: SetupIo): Promise<{ raw: Record<string, any>; entries: Accelerator[]; problems: string[]; npu?: NpuSetup }> {
+export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: SetupIo): Promise<{ raw: Record<string, any>; entries: Accelerator[]; problems: string[]; npu?: NpuSetup; rerank?: string[] }> {
   const problems: string[] = [];
   const entries: Accelerator[] = [];
   // The NPU first: its entry is written only once its server has answered a test request.
@@ -1259,7 +1334,7 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
   });
   const modelPath = (spec: ModelSpec, role: 'model' | 'mmproj') => {
     const m = plan.models.find((x) => x.model === spec.model && x.role === role);
-    return m ? path.join(plan.modelsDir, path.basename(m.file)) : undefined;
+    return m ? (m.path ?? path.join(plan.modelsDir, path.basename(m.file))) : undefined;
   };
   for (const t of plan.targets) {
     if (t.problem || !t.variant || !t.folder) {
@@ -1297,14 +1372,33 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
     const serving = Object.keys(models).filter((k) => !(t.chatOnVision && k === 'chat')).map((k) => (t.chatOnVision && k === 'vision' ? 'chat and vision' : k));
     io.log(`${t.name}: ${device ? `device ${device}, ` : ''}${serving.join(', ')} on ${Object.values(t.ports).join(', ')}`);
   }
-  return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems, ...(npu ? { npu } : {}) };
+  // The NPU's reranker (kit 2.100.0): made from its embed endpoint as its entry now has it (set up just now, or before),
+  // and written only once it has ranked a test question's answer first, in the NPU's turn. Otherwise it's left off,
+  // with why (`rerank`), and setupCommand gives the reranker to the processor, as before.
+  let rerankLeft: string[] | undefined;
+  if (plan.npuRerank) {
+    const file = modelPath(MODEL_SPECS.rerank, 'model');
+    const at = entries.findIndex((e) => e.kind === 'npu');
+    const base = at >= 0 ? entries[at] : readAccelerators(raw).accelerators.find((a) => a.kind === 'npu');
+    const rerank = file && base ? npuRerank(plan.npuRerank.route, base.embed, { tools: path.dirname(plan.modelsDir), file, model: MODEL_SPECS.rerank.model, port: plan.npuRerank.port, portable: (p) => portablePath(p) }) : null;
+    const bad = rerank ? await (io.testRerank ?? testNpuRerank)(rerank) : ["its embedding server isn't set up"];
+    if (rerank && base && !bad.length) {
+      // The entry as config.json has it, where setup didn't make it now: only its reranker is added.
+      const own = at >= 0 || !Array.isArray(raw.accelerators) ? undefined : raw.accelerators.find((x: any) => x?.id === base.id);
+      const e = { ...(own && typeof own === 'object' ? own : base), rerank };
+      if (at >= 0) entries[at] = e;
+      else entries.push(e);
+      io.log(`${plan.npuRerank.label}: reranks on ${plan.npuRerank.port}`);
+    } else rerankLeft = bad.map((b) => `${plan.npuRerank!.label}'s reranker: ${b}`);
+  }
+  return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems, ...(npu ? { npu } : {}), ...(rerankLeft ? { rerank: rerankLeft } : {}) };
 }
 
-/** What the NPU was set up to serve (chat, embeddings) and its entry lacks: its test failed for them. */
+/** What the NPU was set up to serve (chat, embeddings, its reranker) and its entry lacks: its test failed for them. */
 export function npuMissing(plan: SetupPlan, entries: Pick<Accelerator, 'id' | 'kind' | EndpointKind>[]): EndpointKind[] {
-  if (!plan.npu) return [];
   const got = entries.find((e) => e.kind === 'npu');
-  return plan.npu.kinds.filter((k) => (k === 'chat' || k === 'embed') && !got?.[k]) as EndpointKind[];
+  const served = plan.npu ? (plan.npu.kinds.filter((k) => (k === 'chat' || k === 'embed') && !got?.[k]) as EndpointKind[]) : [];
+  return [...served, ...(plan.npuRerank && !got?.rerank ? (['rerank'] as const) : [])];
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1321,6 +1415,8 @@ export interface NpuIo {
   testNpu?: (entry: AcceleratorEntry) => Promise<string[]>;
   /** The embedding server's test request (testNpuEmbed): problems, none when it gave a vector. */
   testEmbed?: (entry: AcceleratorEntry) => Promise<string[]>;
+  /** The NPU's reranker's test request (testNpuRerank): problems, none when it ranked the passage that answers first. */
+  testRerank?: (ep: Endpoint) => Promise<string[]>;
   /** Copies the route's server's files over the embedding server's (overlayFiles). */
   overlay?: (from: string, into: string, files: string[]) => number;
   /** A file's SHA-256 (the pinned model files). */
@@ -1987,6 +2083,161 @@ export function refreshCardVision(o: { configFile: string; kit: string; now?: ()
 }
 
 /**
+ * config.json with each graphics card's and the processor's llama-server reading `file` (npuChatFile's: the NPU's own
+ * copy of SMALL_SPEC's model) where an older kit's setup gave it SMALL_SPEC's Q4_K_M, and the entries changed, with the
+ * files they read before. Only `-m` changes: the projector beside it reads either. A command that isn't llama-server's,
+ * reads another model, or reads one of `keep` (a person's), is left as it is. With `from`, those that read that file
+ * instead (back to a Q4_K_M).
+ */
+export function withNpuChatFile(raw: Record<string, any>, file: string, o: { from?: string; keep?: string[] } = {}): { raw: Record<string, any>; changed: string[]; was: string[] } {
+  if (!Array.isArray(raw.accelerators)) return { raw, changed: [], was: [] };
+  const keep = new Set((o.keep ?? []).map((p) => p.toLowerCase()));
+  const changed: string[] = [];
+  const was = new Set<string>();
+  const accelerators = raw.accelerators.map((a: any) => {
+    if ((a?.kind !== 'gpu' && a?.kind !== 'cpu') || typeof a.id !== 'string') return a;
+    let next = a;
+    for (const k of ['chat', 'vision'] as const) {
+      const cmd: unknown = a[k]?.startCommand;
+      if (!Array.isArray(cmd) || !cmd.every((s) => typeof s === 'string') || !/^llama-server(\.exe)?$/i.test(path.win32.basename(cmd[0] ?? ''))) continue;
+      const m = cmd.findIndex((s, i) => i > 0 && (s === '-m' || s === '--model'));
+      if (m < 0 || m + 1 >= cmd.length) continue;
+      const read = expandEnv(cmd[m + 1]);
+      if (o.from ? read.toLowerCase() !== o.from.toLowerCase() : !SMALL_SPEC.file.test(path.win32.basename(read)) || keep.has(read.toLowerCase())) continue;
+      was.add(read);
+      next = { ...next, [k]: { ...a[k], startCommand: cmd.map((s, i) => (i === m + 1 ? portablePath(file) : s)) } };
+    }
+    if (next !== a) changed.push(a.id);
+    return next;
+  });
+  return changed.length ? { raw: { ...raw, accelerators }, changed, was: [...was] } : { raw, changed, was: [] };
+}
+
+/**
+ * The files refreshSmallModel moved the cards and the processor off, and when: `small-model.json`, beside config.json.
+ * Each is removed once nothing has named it for SMALL_MODEL_GRACE_MS.
+ */
+export interface SmallModelRecord {
+  /** The NPU's copy they read now. */
+  file: string;
+  retired: { path: string; since: string }[];
+  /** Those a person put back in config.json: theirs, never moved off again nor removed. */
+  kept?: string[];
+}
+
+export const smallModelFile = (configFile: string) => path.join(path.dirname(configFile), 'small-model.json');
+
+/** How long a file the cards no longer read is kept: an agent that read config.json before still starts its server with it. */
+export const SMALL_MODEL_GRACE_MS = 3 * 24 * 60 * 60_000;
+
+export function readSmallModel(configFile: string): SmallModelRecord | null {
+  try {
+    const r = JSON.parse(readFileSync(smallModelFile(configFile), 'utf8').replace(/^﻿/, ''));
+    if (!r || typeof r.file !== 'string' || !Array.isArray(r.retired)) return null;
+    const kept = Array.isArray(r.kept) ? r.kept.filter((p: unknown) => typeof p === 'string') : [];
+    return { file: r.file, retired: r.retired.filter((x: any) => typeof x?.path === 'string' && typeof x?.since === 'string'), ...(kept.length ? { kept } : {}) };
+  } catch {
+    return null;
+  }
+}
+
+/** Every argument of every server in config.json, its %VARIABLES% expanded, in lower case. */
+function namedFiles(raw: Record<string, any>): Set<string> {
+  const accelerators: any[] = Array.isArray(raw.accelerators) ? raw.accelerators : [];
+  return new Set(accelerators.flatMap((a) => ENDPOINT_KINDS.flatMap((k) => (Array.isArray(a?.[k]?.startCommand) ? a[k].startCommand.filter((s: unknown) => typeof s === 'string').map((s: string) => expandEnv(s).toLowerCase()) : []))));
+}
+
+/**
+ * One copy of Qwen3-VL-2B on a PC whose NPU keeps one (kit 2.100.0): the keeper's look, each time. Where npuChatFile
+ * finds the NPU's copy, the cards and the processor that read SMALL_SPEC's Q4_K_M read it instead (withNpuChatFile);
+ * nothing is started or stopped, and a server running keeps its file until its next start. The Q4_K_M is removed once
+ * no entry in config.json has named it for SMALL_MODEL_GRACE_MS, and no process running names it (`running`: model
+ * servers' command lines); a file Windows won't remove yet (a program still reads it) is tried again at a later look.
+ * A Q4_K_M a person puts back in config.json is theirs: kept, and never moved off again. Should the NPU's copy go while
+ * the Q4_K_M is still kept, they read the Q4_K_M again. Never in the PC's shared folder (an Everyone install), whose
+ * files other accounts read, and never the NPU's own copy. The entries changed and the files removed; none when
+ * config.json couldn't be read (the next look tries).
+ */
+export async function refreshSmallModel(o: {
+  configFile: string;
+  kit: string;
+  home?: string;
+  env?: Record<string, string | undefined>;
+  now?: () => number;
+  fileSize?: (p: string) => number;
+  running?: () => Promise<string[]>;
+  validate?: (raw: unknown) => string[];
+  log: (line: string) => void;
+}): Promise<{ changed: string[]; removed: string[] }> {
+  const env = o.env ?? process.env;
+  const home = o.home ?? toolsHome(env as NodeJS.ProcessEnv);
+  const now = (o.now ?? Date.now)();
+  const size = o.fileSize ?? ((p: string) => (existsSync(p) ? statSync(p).size : -1));
+  const days = (ms: number) => Math.floor(ms / 86_400_000);
+  const had = readSmallModel(o.configFile);
+  const file = readConfigFile(o.configFile);
+  if (file.error || isSharedTools(home, env)) return { changed: [], removed: [] };
+  const own = npuChatFile({ home, env, fileSize: size });
+  const before = namedFiles(file.raw);
+  // A Q4_K_M moved off and named again while the NPU's copy is there: a person's.
+  const setBack = own && had ? had.retired.filter((r) => before.has(r.path.toLowerCase())).map((r) => r.path) : [];
+  for (const p of setBack) o.log(`${path.win32.basename(p)} is named in config.json again: kept, and read where it is named`);
+  const kept = [...new Set([...(had?.kept ?? []), ...setBack])];
+  // Where they read now: the NPU's copy, else back to a Q4_K_M still kept, when the copy they read is gone.
+  const back = !own && had && size(had.file) < 0 ? had.retired.find((r) => size(r.path) > 0) : undefined;
+  let raw = file.raw;
+  let record: SmallModelRecord | null = had ? { ...had, ...(kept.length ? { kept } : {}) } : null;
+  let changed: string[] = [];
+  const next = own ? withNpuChatFile(raw, own.path, { keep: kept }) : back ? withNpuChatFile(raw, back.path, { from: had!.file }) : null;
+  if (next?.changed.length) {
+    const saved = writeConfigFile(o.configFile, next.raw, o.validate ?? validateKeeperConfig);
+    if (saved.problems.length) {
+      o.log(`${next.changed.join(', ')} keep the ${SMALL_SPEC.model} file they read: config.json wasn't written: ${saved.problems.join('; ')}`);
+      return { changed: [], removed: [] };
+    }
+    raw = next.raw;
+    changed = next.changed;
+    if (own) {
+      const since = new Date(now).toISOString();
+      const left = (had?.retired ?? []).filter((r) => !next.was.some((w) => w.toLowerCase() === r.path.toLowerCase()));
+      record = { file: own.path, retired: [...left, ...next.was.map((p) => ({ path: p, since }))], ...(kept.length ? { kept } : {}) };
+      o.log(`${changed.join(', ')}: chat and vision now read the NPU's own copy of ${SMALL_SPEC.model}, ${path.win32.basename(own.path)} (kit ${o.kit}): one copy on this PC where there were two, as fast; each server takes it at its next start, and the Q4_K_M goes once nothing has read it for ${days(SMALL_MODEL_GRACE_MS)} days`);
+    } else o.log(`${changed.join(', ')}: chat and vision read ${path.win32.basename(back!.path)} again (kit ${o.kit}): the NPU's copy they read, ${path.win32.basename(had!.file)}, is gone`);
+  }
+  const removed: string[] = [];
+  if (record?.retired.length) {
+    const named = namedFiles(raw);
+    const due = own ? record.retired.filter((r) => now - Date.parse(r.since) >= SMALL_MODEL_GRACE_MS && !named.has(r.path.toLowerCase()) && r.path.toLowerCase() !== own.path.toLowerCase() && SMALL_SPEC.file.test(path.win32.basename(r.path))) : [];
+    const lines = due.length ? await (o.running ?? (async () => []))().catch(() => null) : null;
+    const left: SmallModelRecord['retired'] = [];
+    for (const r of record.retired) {
+      // One config.json names again (a person's, or read again above) is read: no longer counted.
+      if (named.has(r.path.toLowerCase())) continue;
+      const name = path.win32.basename(r.path).toLowerCase();
+      if (!due.includes(r) || !lines || lines.some((l) => l.toLowerCase().includes(name))) {
+        left.push(r);
+        continue;
+      }
+      const bytes = size(r.path);
+      try {
+        rmSync(r.path);
+        removed.push(r.path);
+        o.log(`removed ${path.win32.basename(r.path)}${bytes > 0 ? ` (${(bytes / 1024 ** 3).toFixed(2)} GB)` : ''}: nothing has read it for ${days(now - Date.parse(r.since))} days, since the cards and the processor read the NPU's own copy, ${path.win32.basename(record.file)}`);
+      } catch (e: any) {
+        if (e?.code !== 'ENOENT') left.push(r);
+      }
+    }
+    record = { ...record, retired: left };
+  }
+  if (record && JSON.stringify(record) !== JSON.stringify(had)) {
+    try {
+      writeFileSync(smallModelFile(o.configFile), JSON.stringify(record, null, 2) + '\n');
+    } catch {}
+  }
+  return { changed, removed };
+}
+
+/**
  * The embedding server's test request, as testNpuEntry's: in the NPU's turn, the server started if it isn't running,
  * then EMBED_TEST's three sentences, whose vectors must make sense (embedSanity). Problems in words; none when they do.
  * `held`: the caller holds the NPU's turn already (npu-refresh.ts). `logFile`, as testNpuEntry's.
@@ -2006,6 +2257,38 @@ export async function testNpuEmbed(e: AcceleratorEntry, o: { dims?: number; held
       rows.forEach((row, i) => (vectors[typeof row?.index === 'number' ? row.index : i] = row?.embedding));
       const bad = embedSanity(rows.length ? vectors : null, o.dims);
       if (bad.length) problems.push(...bad.map((b) => (rows.length ? b : `${b} (${JSON.stringify(r.json).slice(0, 160)})`)));
+    },
+    { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 },
+  ).catch((err: any) => problems.push(String(err?.message ?? err).split(/\r?\n/)[0]));
+  return problems;
+}
+
+/** The reranker's test question, and two passages: one that answers it, then one that doesn't. */
+export const RERANK_TEST = {
+  query: 'How does the keeper stop a model server that nobody has used for a while?',
+  documents: ['Bread rises because yeast turns the sugar in the dough into gas.', 'The keeper stops a model server once it has gone unused for its idle minutes, holding its accelerator\'s turn.'],
+};
+
+/**
+ * The NPU's reranker's test request (kit 2.100.0), as testNpuEmbed's: in the NPU's turn, its server started if it
+ * isn't running, RERANK_TEST asked, and the passage that answers ranked above the one that doesn't. Problems, none
+ * when it did. The server is left running, as the embedding server's test leaves it: the keeper stops it once unused.
+ */
+export async function testNpuRerank(ep: Endpoint, o: { held?: boolean; logFile?: string } = {}): Promise<string[]> {
+  if (!ep.baseUrl) return ['it has no server'];
+  const problems: string[] = [];
+  await inNpuTurn(
+    !!o.held,
+    async () => {
+      const s = { baseUrl: ep.baseUrl!, model: ep.model, startCommand: ep.startCommand, ...(ep.env ? { env: ep.env } : {}) };
+      await ensureServer(s, { waitMs: 120_000, readyMs: 5 * 60_000, ...(o.logFile ? { logFile: o.logFile } : {}) });
+      const r = await postJson(s, '/v1/rerank', { model: ep.model, ...RERANK_TEST, top_n: RERANK_TEST.documents.length }, 5 * 60_000, { loading: true });
+      const rows: { index?: unknown; relevance_score?: unknown }[] = Array.isArray(r.json?.results) ? r.json.results : [];
+      const score = (i: number) => rows.find((x) => x?.index === i)?.relevance_score;
+      const yes = score(1);
+      const no = score(0);
+      if (typeof yes !== 'number' || typeof no !== 'number') problems.push(`it gave no scores (${JSON.stringify(r.json).slice(0, 160)})`);
+      else if (!(yes > no)) problems.push(`it ranked the passage that doesn't answer first (${no.toFixed(3)} against ${yes.toFixed(3)})`);
     },
     { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 },
   ).catch((err: any) => problems.push(String(err?.message ?? err).split(/\r?\n/)[0]));
@@ -2164,9 +2447,13 @@ export async function testNpuEntry(
 /**
  * The GenieX chat server a PC with an NPU is pointed at when config.json has none (the keeper's first look, or
  * Reeve's install). Setup tells this default from an NPU entry a person configured: only the default is ever dropped.
+ * Its model is the Snapdragon X2's (kit 2.100.0), by GenieX's id for it; earlier kits wrote Qwen3-4B, which no route runs now.
  */
 export const GENIEX_BASE_URL = 'http://127.0.0.1:18181';
-export const GENIEX_CHAT_MODEL = 'qualcomm/Qwen3-4B-Instruct-2507:W4A16';
+export const GENIEX_CHAT_MODEL = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
+/** The default's model as earlier kits wrote it: still the default, so a config.json an older install wrote is dropped as before. */
+export const GENIEX_EARLIER_CHAT_MODELS: readonly string[] = ['qualcomm/Qwen3-4B-Instruct-2507:W4A16'];
+const defaultModel = (model: unknown) => model === GENIEX_CHAT_MODEL || GENIEX_EARLIER_CHAT_MODELS.includes(model as string);
 
 /** The config.json written on a PC with an NPU, when there is none. */
 export function genieXConfig(localAppData: string) {
@@ -2184,7 +2471,7 @@ const sameList = (a: unknown, b: string[]) => Array.isArray(a) && a.length === b
 
 /**
  * Whether config.json's `npu` accelerator is exactly what an install wrote by default: GenieX's chat at its
- * address, with its model and start command, and nothing else (no vision, no embeddings). Read either way: the
+ * address, with its model (this kit's or an earlier one's) and start command, and nothing else (no vision, no embeddings). Read either way: the
  * old chatEndpoint, or the entry an earlier setup put in the list from it.
  */
 export function isInstallDefaultNpu(raw: Record<string, any>, localAppData: string): boolean {
@@ -2193,13 +2480,13 @@ export function isInstallDefaultNpu(raw: Record<string, any>, localAppData: stri
   if (!npu?.chat || npu.vision || npu.embed) return false;
   if (read.legacy) return isDefaultChatEndpoint(raw.chatEndpoint, localAppData);
   const want = genieXConfig(localAppData).chatEndpoint;
-  return npu.chat.baseUrl === want.baseUrl && npu.chat.model === want.model && sameList(npu.chat.startCommand, want.startCommand);
+  return npu.chat.baseUrl === want.baseUrl && defaultModel(npu.chat.model) && sameList(npu.chat.startCommand, want.startCommand);
 }
 
 /** Whether config.json's old chatEndpoint is the install's default, word for word. */
 export function isDefaultChatEndpoint(ep: any, localAppData: string): boolean {
   const want = genieXConfig(localAppData).chatEndpoint;
-  return !!ep && typeof ep === 'object' && ep.baseUrl === want.baseUrl && ep.model === want.model && ep.device === want.device && sameList(ep.startCommand, want.startCommand);
+  return !!ep && typeof ep === 'object' && ep.baseUrl === want.baseUrl && defaultModel(ep.model) && ep.device === want.device && sameList(ep.startCommand, want.startCommand);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -2308,7 +2595,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   const withNpu = o.gpuWithNpu ?? gpuWithNpu().on;
   const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
   for (const l of describePlan(plan)) log(l);
-  const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu;
+  const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu || !!plan.npuRerank;
   if (!settingUp && !plan.dropNpu) {
     log('Nothing to set up.');
     // An NPU left out is still worth its report (why, and its PCI id when nobody has it in npu-vendors.json yet).
@@ -2330,6 +2617,8 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   // The NPU failing is no error: its work goes to the card or the processor, and its note says why, quietly.
   const npuDetails = new Set(r.npu?.problems ?? []);
   for (const p of r.problems) log(`${npuDetails.has(p) ? 'note' : 'problem'}: ${p}`);
+  // The NPU's reranker failing is no error either: the processor reranks, as before.
+  for (const p of r.rerank ?? []) log(`note: ${p}`);
   const problems = r.problems.filter((p) => !npuDetails.has(p));
   let raw = r.raw;
   let entries = r.entries;
@@ -2350,8 +2639,9 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
       entries = [...entries.filter((e) => !r2.entries.some((x) => x.id === e.id)), ...r2.entries];
     } else log(`Not downloading for the graphics card: the NPU's ${missing.join(' and ')} stay unserved until setup runs again.`);
   }
-  // With no card to take it, what the NPU couldn't do goes to the processor: set up now, beside what it had.
-  else if (missing.length && !entries.some((e) => e.kind === 'gpu') && detection.cpu) {
+  // With no card to take it, what the NPU couldn't do goes to the processor: set up now, beside what it had. Its
+  // reranker always does: a card beside the NPU reranks only while Manor's gpuWithNpu is on.
+  else if (missing.length && (!entries.some((e) => e.kind === 'gpu') || missing.every((k) => k === 'rerank')) && detection.cpu) {
     const had = readAccelerators(raw).accelerators.find((a) => a.id === 'cpu');
     const cpuKinds = [...new Set([...ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had && serves(had, k)), ...missing])];
     log(`The processor takes the NPU's ${missing.join(' and ')} instead: setting it up for ${cpuKinds.join(' and ')}.`);

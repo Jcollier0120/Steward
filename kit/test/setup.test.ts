@@ -20,6 +20,9 @@ const { setupCommand } = await import('./fixture/src/kit/setup.ts');
 const { acceleratorConfigFile } = await import('./fixture/src/kit/accelerator-config.ts');
 // Intel's model files are pinned (npu-vendors.test.ts tests that): these tests' pulls are fakes that leave none.
 delete (await import('./fixture/src/kit/npu-vendors.ts')).NPU_CATALOG.routes.intel.models[0].pinned;
+// GenieX's own copy of Qwen3-VL-2B (npuChatFile) is in the profile of a PC where GenieX ran: these tests look for it in
+// each one's own folder instead, where only a test that makes it finds it.
+for (const m of Object.values((await import('./fixture/src/kit/npu-vendors.ts')).NPU_CATALOG.routes.qualcomm.offNpu!.models)) for (const f of m.files) if (f.present) f.present = `{tools}\\geniex\\${f.file}`;
 const configFile = acceleratorConfigFile();
 
 // What DETECT_PS prints on this laptop (2026-10-02), and on a gaming desktop with two of one card.
@@ -1309,4 +1312,204 @@ test('a new build folder is unpacked whole, in one rename; into a folder that is
   unpack(zip, into);
   assert.deepEqual(readdirSync(into).sort(), ['cudart64_12.dll', 'ggml.dll', 'llama-server.exe']);
   assert.equal(readFileSync(path.join(into, 'ggml.dll'), 'utf8'), 'newer');
+});
+
+// ---------------------------------------------------------------- the Snapdragon's models (kit 2.100.0)
+
+const { npuChatFile, npuMissing, readSmallModel, refreshSmallModel, SMALL_MODEL_GRACE_MS, smallModelFile, withNpuChatFile } = await import('./fixture/src/kit/setup.ts');
+const SNAPDRAGON_CARD = 'gpu-qualcomm-r-adreno-tm-x2-90-gpu';
+const rerankHf = async (repo: string) =>
+  repo === 'ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF' ? parseHfFiles({ siblings: [{ rfilename: 'qwen3-reranker-0.6b-q8_0.gguf', size: 639153184, lfs: { sha256: '0b' } }] }) : hf(repo);
+const writesDownloads = { log: () => {}, download: async (d: { dest: string }) => (mkdirSync(path.dirname(d.dest), { recursive: true }), writeFileSync(d.dest, 'x')), unpack: () => {}, listDevices: async () => ADRENO_BENCH };
+/** GenieX's Q4_0 of Qwen3-VL-2B, as the Snapdragon's route pins it. */
+const GENIEX_Q4_0 = (await import('./fixture/src/kit/npu-vendors.ts')).NPU_CATALOG.routes.qualcomm.offNpu!.models['unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0'].files.find((f) => f.role === 'model')!;
+
+test('an npu an earlier kit wrote by default is still the default: its GenieX model then was Qwen3-4B', () => {
+  const def = genieXConfig(LOCAL);
+  assert.equal(def.chatEndpoint.model, 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0', "the Snapdragon X2's model now");
+  assert.equal(isInstallDefaultNpu(def, LOCAL), true);
+  assert.equal(isInstallDefaultNpu({ chatEndpoint: { ...def.chatEndpoint, model: 'qualcomm/Qwen3-4B-Instruct-2507:W4A16' } }, LOCAL), true, "the old default: only a default is ever dropped, and this was one");
+  assert.equal(isInstallDefaultNpu({ chatEndpoint: { ...def.chatEndpoint, model: 'qualcomm/Qwen3-8B:W4A16' } }, LOCAL), false);
+});
+
+test("the NPU reranks on a Snapdragon X2: its embedding server's llama.cpp started again with --reranking, on its own port, tested first; neither the card nor the processor sets one up", async () => {
+  const { reapedServers, serversToReap } = await import('./fixture/src/kit/keeper.ts');
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'npu-rerank-'));
+  const exe = '%USERPROFILE%\\.reeve\\servers\\llama.cpp\\b11645-hexagon\\llama-server.exe';
+  const env = { ADSP_LIBRARY_PATH: 'C:\\g\\lib' };
+  const embed = { baseUrl: 'http://127.0.0.1:18182', model: 'qwen3-embedding-0.6b-gguf', startCommand: [exe, '--host', '127.0.0.1', '--port', '18182', '--device', 'HTP0', '-ngl', '99', '-m', 'C:\\m\\e.gguf', '--embeddings'], env };
+  const npu = { id: 'npu', chat: { baseUrl: 'http://127.0.0.1:18181', model: 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0', startCommand: ['C:\\g\\geniex.exe', 'serve'] }, embed, mine: 1 };
+  const cardEmbed = { baseUrl: 'http://127.0.0.1:18191', model: 'qwen3-embedding-0.6b-gguf', startCommand: ['C:\\l\\llama-server.exe', '--port', '18191', '--embeddings'] };
+  const raw = { accelerators: [npu, { id: SNAPDRAGON_CARD, kind: 'gpu', slots: 1, maxContextTokens: 8192, quirks: [], embed: cardEmbed }] };
+  const plan = await planSetup({ detection: parseDetection(LAPTOP), ids: [], kinds: ['rerank'], raw, releases: RELEASES, hfFiles: rerankHf, home });
+  assert.deepEqual(plan.targets, [], 'neither the card nor the processor');
+  assert.equal(plan.npuRerank?.port, 18185);
+  assert.deepEqual(plan.models.map((m) => m.file), ['qwen3-reranker-0.6b-q8_0.gguf']);
+  assert.ok(describePlan(plan).some((l) => /\(npu\): reranks on 18185, qwen3-reranker-0\.6b on its embedding server's /.test(l)), describePlan(plan).join('\n'));
+  const asked: unknown[] = [];
+  const r = await runSetup(plan, raw, { ...writesDownloads, testRerank: async (ep) => (asked.push(ep), []) });
+  assert.deepEqual([r.problems, r.rerank], [[], undefined]);
+  const got = r.raw.accelerators.find((a: any) => a.id === 'npu');
+  const rerank = {
+    baseUrl: 'http://127.0.0.1:18185',
+    model: 'qwen3-reranker-0.6b',
+    startCommand: [exe, '--host', '127.0.0.1', '--port', '18185', '--device', 'HTP0', '-ngl', '99', '-m', portablePath(path.join(home, 'models', 'qwen3-reranker-0.6b-q8_0.gguf')), '--reranking', '-c', '4096', '-b', '2048', '-ub', '512', '--parallel', '1', '--alias', 'qwen3-reranker-0.6b'],
+    env,
+  };
+  assert.deepEqual(got, { ...npu, rerank }, 'the entry as it was, its reranker added: the program and environment of its embedding server');
+  assert.deepEqual(asked, [rerank], 'tested before it is written');
+  assert.equal(r.raw.accelerators.find((a: any) => a.id === SNAPDRAGON_CARD).rerank, undefined);
+  assert.deepEqual(validateAccelerators(r.raw), []);
+  assert.deepEqual(npuMissing(plan, readAccelerators(r.raw).accelerators), []);
+  // The keeper looks after it, in the NPU's turn, stopped when idle as its embedding server is.
+  const kept = reapedServers(readAccelerators(r.raw).accelerators, 'C:\\logs', { npuMsFor: (_p, kind) => (kind === 'embed' ? 120_000 : 60_000) }, (a) => [`C:\\locks\\${a.id}`]);
+  assert.ok(kept.some((s) => s.base === 'http://127.0.0.1:18185' && s.lockDirs.includes('C:\\locks\\npu')), JSON.stringify(kept.map((s) => s.base)));
+  const idle = Object.fromEntries(serversToReap(r.raw, { withNpu: true, ramBytes: 48 * 1024 ** 3 }).map((s) => [s.base, s.idleMs]));
+  assert.ok(idle['http://127.0.0.1:18185']! > 0 && idle['http://127.0.0.1:18185'] === idle['http://127.0.0.1:18182'], JSON.stringify(idle));
+  // Set up again: it keeps its port.
+  const again = await planSetup({ detection: parseDetection(LAPTOP), ids: [], kinds: ['rerank'], raw: r.raw, releases: RELEASES, hfFiles: rerankHf, home });
+  assert.equal(again.npuRerank?.port, 18185);
+
+  // Its test failed: nothing written for it, and setup hands it to the processor (setupCommand's second pass).
+  const failed = await runSetup(plan, raw, { ...writesDownloads, testRerank: async () => ['it ranked the bread first'] });
+  assert.deepEqual(failed.rerank, ["Snapdragon X2 Elite / X2 Plus (Hexagon v81)'s reranker: it ranked the bread first"]);
+  assert.equal(failed.raw.accelerators.find((a: any) => a.id === 'npu').rerank, undefined);
+  assert.deepEqual(npuMissing(plan, readAccelerators(failed.raw).accelerators), ['rerank']);
+
+  // Under 20 GB, the NPU's memory is chat's and the embeddings': the reranker goes where it went before.
+  const small = await planSetup({ detection: parseDetection(LAPTOP.replace('ram|51127103488', 'ram|17179869184')), ids: [], kinds: ['rerank'], raw, releases: RELEASES, hfFiles: rerankHf, home });
+  assert.equal(small.npuRerank, undefined);
+  assert.deepEqual(small.targets.map((t) => t.kinds), [['rerank']]);
+  // An NPU with no llama.cpp embedding server of its own (install's GenieX alone): the card, as before.
+  const genieOnly = await planSetup({ detection: parseDetection(LAPTOP), ids: [], kinds: ['rerank'], raw: { accelerators: [{ id: 'npu', chat: npu.chat }, raw.accelerators[1]] }, releases: RELEASES, hfFiles: rerankHf, home });
+  assert.equal(genieOnly.npuRerank, undefined);
+  assert.deepEqual(genieOnly.targets.map((t) => [t.id, t.kinds]), [[SNAPDRAGON_CARD, ['rerank']]]);
+});
+
+test("one copy of Qwen3-VL-2B on a Snapdragon: the card and the processor read GenieX's Q4_0 where it is at its pinned size, with setup's projector; no Q4_K_M downloaded", async () => {
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'one-copy-'));
+  const at = path.join(home, 'geniex', GENIEX_Q4_0.file);
+  const there = (p: string) => (p === at ? GENIEX_Q4_0.size : -1);
+  const laptop = parseDetection(LAPTOP);
+  assert.equal(GENIEX_Q4_0.file, 'Qwen3-VL-2B-Instruct-Q4_0.gguf');
+  assert.equal(npuChatFile({ detection: laptop, home, fileSize: there })?.path, at);
+  assert.equal(npuChatFile({ home, fileSize: there })?.path, at, "the keeper's look, which doesn't detect: any route's copy");
+  assert.equal(npuChatFile({ detection: laptop, home, fileSize: (p) => (p === at ? GENIEX_Q4_0.size - 1 : -1) }), null, 'not at its pinned size (GenieX still fetching it)');
+  assert.equal(npuChatFile({ detection: parseDetection(DESKTOP_NO_NPU), home, fileSize: there }), null, 'no NPU');
+  await inEveryone(async (tools) => {
+    const shared = path.join(tools, 'geniex', GENIEX_Q4_0.file);
+    assert.equal(npuChatFile({ detection: laptop, home: tools, fileSize: (p) => (p === shared ? GENIEX_Q4_0.size : -1) }), null, "the PC's shared folder: another account couldn't read this one's copy");
+  });
+
+  const plan = await planSetup({ detection: laptop, ids: [SNAPDRAGON_CARD, 'cpu'], raw: {}, releases: RELEASES, hfFiles: hf, home, fileSize: there });
+  assert.ok(!plan.downloads.some((d) => /Q4_K_M/.test(d.what)), plan.downloads.map((d) => d.what).join(', '));
+  const m = plan.models.find((x) => x.model === 'qwen3-vl-2b-instruct' && x.role === 'model')!;
+  assert.deepEqual([m.file, m.size, m.path], [GENIEX_Q4_0.file, GENIEX_Q4_0.size, at]);
+  assert.ok(describePlan(plan).some((l) => l.includes(`have ${GENIEX_Q4_0.file}`) && l.includes("the NPU's own copy")), describePlan(plan).join('\n'));
+  const r = await runSetup(plan, {}, writesDownloads);
+  assert.deepEqual(r.problems, []);
+  assert.ok(!existsSync(path.join(home, 'models', 'Qwen3VL-2B-Instruct-Q4_K_M.gguf')));
+  for (const e of r.entries.filter((x) => x.chat)) {
+    const cmd = e.chat!.startCommand!;
+    assert.equal(cmd[cmd.indexOf('-m') + 1], portablePath(at), e.id);
+    assert.equal(cmd[cmd.indexOf('--mmproj') + 1], portablePath(path.join(home, 'models', 'mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf')), `${e.id}: setup's own Q8_0 projector beside it`);
+  }
+  assert.deepEqual(r.entries.filter((x) => x.chat).map((x) => x.id), [SNAPDRAGON_CARD, 'cpu']);
+  // Without it: the Q4_K_M, as before.
+  const plain = await planSetup({ detection: laptop, ids: [SNAPDRAGON_CARD], raw: {}, releases: RELEASES, hfFiles: hf, home });
+  assert.ok(plain.models.some((x) => x.file === 'Qwen3VL-2B-Instruct-Q4_K_M.gguf' && !x.path));
+});
+
+test("the keeper's look on a Snapdragon set up before: the card and the processor read GenieX's copy; the Q4_K_M goes once nothing has read it for three days, never while a server runs it", async () => {
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'small-model-'));
+  const config = path.join(home, 'config.json');
+  const models = path.join(home, 'models');
+  mkdirSync(models, { recursive: true });
+  const q4km = path.join(models, 'Qwen3VL-2B-Instruct-Q4_K_M.gguf');
+  writeFileSync(q4km, 'q4km');
+  const at = path.join(home, 'geniex', GENIEX_Q4_0.file);
+  let copy = true;
+  const size = (p: string) => (p.toLowerCase() === at.toLowerCase() ? (copy ? GENIEX_Q4_0.size : -1) : existsSync(p) ? readFileSync(p).length : -1);
+  const server = (port: number, device: string[]) => ['C:\\l\\llama-server.exe', '--host', '127.0.0.1', '--port', String(port), ...device, '-m', q4km, '--mmproj', path.join(models, 'mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf'), '-c', '8192', '--alias', 'qwen3-vl-2b-instruct'];
+  const embed = { baseUrl: 'http://127.0.0.1:18192', model: 'qwen3-embedding-0.6b-gguf', startCommand: ['C:\\l\\llama-server.exe', '--port', '18192', '-m', path.join(models, 'e.gguf'), '--embeddings'] };
+  const raw = {
+    accelerators: [
+      { id: SNAPDRAGON_CARD, kind: 'gpu', slots: 1, chat: { baseUrl: 'http://127.0.0.1:18191', model: 'qwen3-vl-2b-instruct', startCommand: server(18191, ['--device', 'GPUOpenCL']) }, vision: { model: 'qwen3-vl-2b-instruct' }, embed },
+      { id: 'cpu', kind: 'cpu', slots: 1, chat: { baseUrl: 'http://127.0.0.1:18193', model: 'qwen3-vl-2b-instruct', startCommand: server(18193, []) } },
+    ],
+    acceleratorOrder: 'auto',
+    mine: 1,
+  };
+  writeFileSync(config, JSON.stringify(raw, null, 2));
+  const t0 = Date.parse('2026-10-23T12:00:00Z');
+  const log: string[] = [];
+  let running: string[] = [];
+  let asked = 0;
+  const look = (now: number) => refreshSmallModel({ configFile: config, kit: '2.100.0', home, now: () => now, fileSize: size, running: async () => (asked++, running), log: (l) => log.push(l) });
+  const modelOf = (id: string) => {
+    const cmd = JSON.parse(readFileSync(config, 'utf8')).accelerators.find((a: any) => a.id === id).chat.startCommand;
+    return cmd[cmd.indexOf('-m') + 1];
+  };
+
+  assert.deepEqual(await look(t0), { changed: [SNAPDRAGON_CARD, 'cpu'], removed: [] });
+  assert.deepEqual([modelOf(SNAPDRAGON_CARD), modelOf('cpu')], [portablePath(at), portablePath(at)]);
+  const written = JSON.parse(readFileSync(config, 'utf8'));
+  assert.equal(written.mine, 1, 'the rest of config.json as it was');
+  assert.deepEqual(written.accelerators[0].embed, embed);
+  assert.ok(written.accelerators[0].chat.startCommand.includes('--mmproj'), 'the projector stays');
+  assert.match(log[0], /^gpu-qualcomm-r-adreno-tm-x2-90-gpu, cpu: chat and vision now read the NPU's own copy of qwen3-vl-2b-instruct, Qwen3-VL-2B-Instruct-Q4_0\.gguf \(kit 2\.100\.0\)/);
+  assert.deepEqual(readSmallModel(config), { file: at, retired: [{ path: q4km, since: new Date(t0).toISOString() }] });
+  // Looks after: nothing to change, nothing due; Windows' process list isn't asked.
+  assert.deepEqual(await look(t0 + 60_000), { changed: [], removed: [] });
+  assert.deepEqual(await look(t0 + SMALL_MODEL_GRACE_MS - 1), { changed: [], removed: [] });
+  assert.equal(asked, 0);
+  assert.ok(existsSync(q4km));
+  // Three days on, a server still runs it (started before): kept.
+  running = [`"C:\\l\\llama-server.exe" --port 18191 -m ${q4km}`];
+  assert.deepEqual(await look(t0 + SMALL_MODEL_GRACE_MS), { changed: [], removed: [] });
+  assert.ok(existsSync(q4km));
+  // Nothing runs it: removed, and said so.
+  running = [];
+  assert.deepEqual(await look(t0 + SMALL_MODEL_GRACE_MS + 60_000), { changed: [], removed: [q4km] });
+  assert.ok(!existsSync(q4km));
+  assert.match(log.at(-1)!, /^removed Qwen3VL-2B-Instruct-Q4_K_M\.gguf \(0\.00 GB\): nothing has read it for 3 days, since the cards and the processor read the NPU's own copy, Qwen3-VL-2B-Instruct-Q4_0\.gguf$/);
+  assert.deepEqual(readSmallModel(config)!.retired, []);
+  assert.deepEqual(await look(t0 + SMALL_MODEL_GRACE_MS + 120_000), { changed: [], removed: [] });
+
+  // A person who puts the Q4_K_M back keeps it: never moved off again, nor removed.
+  writeFileSync(q4km, 'q4km');
+  writeFileSync(config, JSON.stringify(raw, null, 2));
+  rmSync(smallModelFile(config));
+  await look(t0);
+  const mine = JSON.parse(readFileSync(config, 'utf8'));
+  mine.accelerators[1].chat.startCommand = server(18193, []);
+  writeFileSync(config, JSON.stringify(mine, null, 2));
+  assert.deepEqual(await look(t0 + 60_000), { changed: [], removed: [] });
+  assert.equal(modelOf('cpu'), q4km);
+  assert.equal(modelOf(SNAPDRAGON_CARD), portablePath(at));
+  assert.deepEqual(readSmallModel(config)!.kept, [q4km]);
+  assert.deepEqual(await look(t0 + 2 * SMALL_MODEL_GRACE_MS), { changed: [], removed: [] });
+  assert.ok(existsSync(q4km));
+
+  // GenieX's copy gone while the Q4_K_M is still kept: they read the Q4_K_M again.
+  writeFileSync(config, JSON.stringify(raw, null, 2));
+  rmSync(smallModelFile(config));
+  await look(t0);
+  copy = false;
+  assert.deepEqual(await look(t0 + 60_000), { changed: [SNAPDRAGON_CARD, 'cpu'], removed: [] });
+  assert.deepEqual([modelOf(SNAPDRAGON_CARD), modelOf('cpu')], [q4km, q4km]);
+  assert.match(log.at(-1)!, /: chat and vision read Qwen3VL-2B-Instruct-Q4_K_M\.gguf again \(kit 2\.100\.0\): the NPU's copy they read, Qwen3-VL-2B-Instruct-Q4_0\.gguf, is gone$/);
+  assert.deepEqual(await look(t0 + 2 * SMALL_MODEL_GRACE_MS), { changed: [], removed: [] });
+  assert.ok(existsSync(q4km));
+
+  // The PC's shared folder (an Everyone install): left as it is.
+  copy = true;
+  writeFileSync(config, JSON.stringify(raw, null, 2));
+  await inEveryone(async (tools) => {
+    assert.deepEqual(await refreshSmallModel({ configFile: config, kit: '2.100.0', home: tools, fileSize: size, log: () => {} }), { changed: [], removed: [] });
+  });
+  assert.equal(modelOf('cpu'), q4km);
+  // withNpuChatFile: llama-server reading the Q4_K_M only.
+  const other = { accelerators: [{ id: 'cpu', kind: 'cpu', chat: { model: 'x', startCommand: ['C:\\l\\llama-server.exe', '-m', 'C:\\m\\Qwen3-4B-Instruct-2507-Q4_K_M.gguf'] } }, { id: 'npu', chat: { model: 'g', startCommand: ['geniex.exe', '-m', q4km] } }] };
+  assert.deepEqual(withNpuChatFile(other, at).changed, []);
 });
