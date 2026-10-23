@@ -5,13 +5,14 @@
   "tries": { "quick": 3, "full": 5 },
   "warmups": 1,
   "steady": { "maxSpread": 0.15 },
-  "quiet": { "cpuBusyMax": 15, "samples": 10, "everyMs": 3000 },
+  "quiet": { "cpuBusyMax": 15, "samples": 10, "everyMs": 3000, "waitMinutes": 10 },
   "gate": { "score": 0.75, "calibrated": false },
   "holding": { "minutes": 10, "job": "triage" },
   "energy": { "restSeconds": 60, "loadMinutes": 3, "job": "triage", "batch": { "quick": 5, "full": 20 } },
   "short": { "prompt": "Reply with the single word: ready", "maxTokens": 16, "grade": { "regex": "^\\W*ready\\W*$", "flags": "i" } },
   "write": { "prompt": "Write the numbers from one to one hundred in words, separated by commas.", "maxTokens": 256 },
   "read": { "sizes": [512, 1024], "capShare": 0.9, "maxTokens": 4, "question": "How many lines are above? Reply with the number only." },
+  "embed": { "query": "where is the push notification token registered", "texts": 16, "chars": 1500, "batch": { "quick": 5, "full": 20 } },
   "documents": {
     "thread": [
       "From: Dana Whitfield <dana.whitfield@example.com>",

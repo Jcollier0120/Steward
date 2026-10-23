@@ -2,6 +2,38 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.99.0
+
+**The NPU benchmark measures the same model on the NPU, the graphics and the processor on every route, measures embeddings, and runs a series of runs with a summary of their medians.**
+
+### What's new
+
+- **`npu-bench --device GPU|CPU` on the Snapdragon and AMD routes.** GenieX and FastFlowLM run on the NPU only, so off it their model runs on llama.cpp b11734, setup's pinned build for the device (`variantFor`): the Adreno's OpenCL build or Arm64's on an X2, a Radeon's Vulkan build or x64's on AMD.
+  - A route says its model's llama.cpp form in `offNpu` (npu-vendors.ts' `NpuOffNpu`): the GGUF files, pinned, where they may already be (`present`), the context and any arguments.
+  - The X2's is the very Qwen3-VL-2B GGUF GenieX pulls, at GenieX's `--nctx` 2560. AMD's is unsloth's Qwen3.5-2B Q4_0 GGUF, at FastFlowLM's 4096, its thinking off.
+  - `planOffNpu` says what's needed and what's missing; `setUpOffNpu` downloads it, checks each file in place against its pin, finds the graphics' llama.cpp device by name, and builds the entry as setup would (`acceleratorEntry`), without writing config.json. The runs take ports 100 above the route's.
+- **Embeddings.** The suite's new `embed` section: once the chat server has stopped, the embedding server is started by itself and timed to its first vector, then a query and requests of 16 texts of 1,500 characters (`embedTexts`).
+  - The report's `results.embed`. With a meter, `energy.embed` (what keeping the embedding model loaded costs) and `batches.embed`.
+  - The route's embedding server is set up with it, but never past `--no-setup`, which leaves the embeddings out and says so.
+- **A series, and its summary.** `--device NPU,GPU,CPU` runs several devices, a round at a time; `--runs <n>` runs each n times (`npuBenchSeries`). Each run writes its report; then `benchSummary` takes each device's medians (`castellan-npu-bench-summary/1`), and `summarySay` prints them as a table.
+  - The summary has what keeping each model loaded costs a day (Wh/day), each batch's job over rest by part, and the whole PC's energy and time for each batch.
+  - `--summary <report.json>...` sums up reports from separate runs.
+- **The kit's build of GenieX's plugin** (`kitPlugin`). Where GenieX's own plugin is still in place on an X2, the run takes a copy of GenieX in `{tools}\bench\` with the kit's build: GenieX's files are copied, its QAIRT folder is linked, and the copy is removed after (`removeCopy`, links first).
+  - The report's `run.plugin` says which plugin ran. A run on GenieX's own is marked `plugin` and not ranked.
+- **A held port is left to its server.** Where something holds a route's port (the keeper's server), the run takes ports beside it (`routeOnFreePorts`) and is marked `beside` (`conditions.beside`), rather than stopping.
+- **A busy processor is waited for**, up to `quiet.waitMinutes` (10), before a run starts.
+- `energyBatch` is exported: a batch of work as one stretch on the meter.
+
+### What changed
+
+- spec/npu-bench.schema.json: `conditions.beside`, `run.plugin`, `results.embed` and `energy.embed`, all optional. The suite stays `castellan-npu-bench/2`: nothing it asked before changed.
+- With `--yes`, a fresh Intel PC downloads the route's embedding model too (428 MB), and the prompt counts it.
+- spec/NPU-BENCHMARK.md: Comparing devices (how to run a series and read its summary, the X2 Elite's figures, and the commands for Intel and AMD); spec/NPU-VENDORS.md: Off the NPU.
+
+### Before you update
+
+- Nothing for an agent: the benchmark is a command run by hand, and nothing else uses it.
+
 ## 2.98.1
 
 **Castellan's GenieX build lets the processor's threads sleep while the model is on the NPU, and GenieX 0.9.3 gets that build too.**

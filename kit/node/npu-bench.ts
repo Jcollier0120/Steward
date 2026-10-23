@@ -1,16 +1,17 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { type Accelerator, type AcceleratorEntry, type Quirk, readAccelerator, toolsHome } from './accelerator-config.ts';
-import { type Detection, detect, runPowerShell } from './detect.ts';
+import { type Detection, detect, type GpuCard, runPowerShell } from './detect.ts';
 import { checkSchema } from './json-schema.ts';
-import { routeOnDevice } from './npu-check.ts';
-import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
-import { atVersion, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, pinnedRoute, planNpu, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
+import { portFree, routeOnDevice, routeOnFreePorts } from './npu-check.ts';
+import { patchTarget } from './npu-patch.ts';
+import { longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
+import { atVersion, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, pinnedRoute, planNpu, playedRoute, playedSay, playGeneration, pluginPatchOf, routeFor, serverExe, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
 import { charging, joules, measureSpan, type Meter, type MeterIo, openMeter, partsSay, type Span, watts } from './power-meter.ts';
-import { mb, type NpuIo, saysReady } from './setup.ts';
+import { acceleratorEntry, assetName, type Download, download, LLAMA_PIN, listDevices, matchDevice, mb, MODEL_PINS, MODEL_SPECS, type NpuIo, parseListDevices, pinnedModelUrl, saysReady, SIGNED_LLAMA_REPO, unpack, variantFor } from './setup.ts';
 import { mixSummary, readTally } from './token-tally.ts';
 
 /**
@@ -21,9 +22,16 @@ import { mixSummary, readTally } from './token-tally.ts';
  * (spec/npu-bench.schema.json). A run that doesn't meet the conditions is still reported, with marks saying why it
  * isn't ranked.
  *
- *   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]]
- *                                     [--cap <tokens>] [--generation <id>] [--small-pc] [--energy]
+ *   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU[,...]] [--runs <n>] [--model <id>]
+ *                                     [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--small-pc] [--energy]
  *                                     [--meter auto|emi|shelly:<address>|nvidia|battery] [--yes] [--no-setup] [--out <file>]
+ *   node <agent>\src\kit\npu-bench.ts --summary <report.json> [<report.json> ...]
+ *
+ * Off the NPU (--device GPU or CPU), a route whose server has a device to choose (OpenVINO Model Server's) runs there; one
+ * whose server runs on the NPU only (GenieX, FastFlowLM) runs the same model on llama.cpp instead (kit 2.99.0: the
+ * route's offNpu, npu-vendors.ts' NpuOffNpu), the build setup pins, on the graphics card of the NPU's maker or on the
+ * processor. Several devices (--device NPU,GPU,CPU) and --runs run in turn, each device once a round, and end with a
+ * summary of each device's medians (benchSummary); --summary makes one from reports already written.
  *
  * It measures the models setup would run on this PC: its generation's own, where it has any (a Snapdragon X2's
  * Qwen3-VL-2B), and on one with little memory (under idleStop.smallPcGb) its generation's smallPc models, where it has
@@ -66,7 +74,8 @@ export interface Suite {
   tries: { quick: number; full: number };
   warmups: number;
   steady: { maxSpread: number };
-  quiet: { cpuBusyMax: number; samples: number; everyMs: number };
+  /** `waitMinutes` (kit 2.99.0): how long a run waits for a busy processor to quiet down before it starts. */
+  quiet: { cpuBusyMax: number; samples: number; everyMs: number; waitMinutes?: number };
   gate: { score: number; calibrated: boolean };
   holding: { minutes: number; job: string };
   /** `batch`: how many of each job, read and picture in each energy batch, by profile (kit 2.98.0). */
@@ -74,6 +83,8 @@ export interface Suite {
   short: { prompt: string; maxTokens: number; grade: Grade };
   write: { prompt: string; maxTokens: number };
   read: { sizes: number[]; capShare: number; maxTokens: number; question: string };
+  /** Embeddings (kit 2.99.0): a query, and requests of `texts` texts of about `chars` characters each; `batch`, how many requests in its energy batch. */
+  embed?: { query: string; texts: number; chars: number; batch: { quick: number; full: number } };
   documents: Record<string, string[]>;
   jobs: SuiteItem[];
   quality: SuiteItem[];
@@ -104,6 +115,23 @@ export function readPrompt(suite: Suite, tokens: number): string {
     chars += line.length + 1;
   }
   return `${lines.join('\n')}\n\n${suite.read.question}`;
+}
+
+/**
+ * One embedding request's texts (kit 2.99.0): `suite.embed.texts` of about `chars` characters each, each with the
+ * request's tag first and a number of its own, so no two are the same and none was embedded before.
+ */
+export function embedTexts(suite: Suite, tag: string): string[] {
+  const e = suite.embed!;
+  return Array.from({ length: e.texts }, (_, t) => {
+    const lines = [`[${tag}-${t + 1}]`];
+    for (let i = 1, chars = lines[0].length; chars < e.chars; i++) {
+      const line = `Note ${t + 1}.${i}: the steward counts the barrels in cellar ${t + 1} and writes the number in ledger ${i}.`;
+      lines.push(line);
+      chars += line.length + 1;
+    }
+    return lines.join('\n');
+  });
 }
 
 /**
@@ -303,7 +331,7 @@ export interface EnergyBatch {
 }
 
 export interface Mark {
-  /** quick, rehearsal, battery, busy, not-streamed, no-usage, noisy, gate, job-failed, setup, start */
+  /** quick, rehearsal, battery, busy, beside, plugin, not-streamed, no-usage, noisy, gate, job-failed, setup, start */
   code: string;
   say: string;
 }
@@ -318,6 +346,8 @@ export interface Conditions {
   windowsBuild: string | null;
   make: string | null;
   model: string | null;
+  /** The route's ports something else held at the start (kit 2.99.0: the keeper's own server, most likely), so the run took others. */
+  beside?: number[];
 }
 
 export interface BenchReport {
@@ -338,6 +368,12 @@ export interface BenchReport {
     usageReported: boolean | null;
     /** The older Snapdragon's generation this NPU played (--generation), only on a played run: never ranked. */
     played?: string;
+    /**
+     * Which build of the server's plugin ran, where the kit has its own for this PC (kit 2.99.0: npu-vendors.ts'
+     * NpuPluginPatch): `kit`, the kit's, in place already; `kit-copy`, the kit's, in a copy of the server (kitPlugin);
+     * `server`, the server's own (marked: not what the kit runs); `other`, neither (a server update, left as it is).
+     */
+    plugin?: 'kit' | 'kit-copy' | 'server' | 'other';
   };
   results: {
     coldLoadMs: number | null;
@@ -350,6 +386,12 @@ export interface BenchReport {
     jobTimeS: number | null;
     memory: { workingSetBytes: number; privateBytes: number } | null;
     holding: { minutes: number; firstMinuteMs: number | null; lastMinuteMs: number | null; held: number | null } | null;
+    /**
+     * Embeddings (kit 2.99.0), on their own server once the chat server has stopped: its first vector after a start, a
+     * query's time, and a request of the suite's texts (embedTexts): its time, its tokens, and the tokens a second.
+     * Absent from reports before it; null where the run had no embedding server (FastFlowLM's NPU route has none).
+     */
+    embed?: { server: string; model: string; loadMs: number | null; queryMs: Measure; requestMs: Measure; texts: number; tokens: number | null; tokensPerSecond: number | null; dims: number | null } | null;
     energy: {
       restMilliwatts: number;
       loadMilliwatts: number;
@@ -365,8 +407,10 @@ export interface BenchReport {
       /** Each part's power at rest just before the energy step, and through its triage minutes. */
       restParts?: Record<string, number>;
       loadParts?: Record<string, number>;
-      /** Fixed batches of each job, of reads and of pictures: what each took, by part. */
+      /** Fixed batches of each job, of reads and of pictures (and of embedding requests, `embed`): what each took, by part. */
       batches?: Record<string, EnergyBatch>;
+      /** The embedding server loaded and at rest (kit 2.99.0), each part's power, and what keeping it loaded costs the whole PC against no model. */
+      embed?: { loadedMilliwatts: Record<string, number> | null; keepLoadedMilliwatts: number | null };
     } | null;
   };
   quality: { score: number | null; passed: number; of: number; mustPass: boolean; gate: boolean; items: { id: string; kind: string; ok: boolean; answer: string; ms: number }[] };
@@ -383,6 +427,8 @@ export function marksFor(r: BenchReport, suite: Suite): Mark[] {
   if (r.suite.profile === 'quick') marks.push({ code: 'quick', say: `a quick run tries each measurement ${suite.tries.quick} times, not ${suite.tries.full}: shown, not ranked` });
   if (r.conditions.onBattery) marks.push({ code: 'battery', say: 'it ran on the battery: speed is ranked plugged in (an energy figure from it still counts)' });
   if (r.conditions.cpuBusyPercent !== null && r.conditions.cpuBusyPercent > suite.quiet.cpuBusyMax) marks.push({ code: 'busy', say: `the processor was ${r.conditions.cpuBusyPercent}% busy before the start (no more than ${suite.quiet.cpuBusyMax}% for a ranked run)` });
+  if (r.conditions.beside?.length) marks.push({ code: 'beside', say: `the manor's own server ran beside it (port ${r.conditions.beside.join(', ')}), so it ran on other ports: shown, not ranked` });
+  if (r.run.plugin === 'server') marks.push({ code: 'plugin', say: `${r.run.server?.replace(/ [\d.]+$/, '') ?? 'the server'} ran its own plugin, not the kit's build that this PC runs: shown, not ranked` });
   if (r.run.streamed === false) marks.push({ code: 'not-streamed', say: "the server didn't stream, so reading and writing are estimates" });
   if (r.run.usageReported === false) marks.push({ code: 'no-usage', say: "the server didn't report token counts, so they are estimates" });
   const noisy = [['short answer', res.short], ['writing', res.writeTokensPerSecond], ...Object.entries(res.readFirstTokenMs).map(([k, v]) => [`reading ${k} tokens`, v]), ...Object.entries(res.jobs).map(([k, v]) => [`the ${k} job${typeof v.spreadAtLength === 'number' ? ' (at one answer length)' : ''}`, v])].filter(([, m]) => m && !(m as Measure).steady && (m as Measure).median !== null).map(([n]) => n as string);
@@ -560,6 +606,264 @@ const QUIRK_SAYS: Record<Quirk, string> = {
 export const ENERGY_MIN_EXTRA = { milliwatts: 1_000, share: 0.1 };
 
 // ------------------------------------------------------------------------------------------------
+// Off the NPU: llama.cpp, for a route whose server runs on the NPU only (kit 2.99.0)
+
+/** A graphics or processor run on llama.cpp: the build setup pins, the model's files and the embedding model's, and what isn't here yet. */
+export interface OffNpuPlan {
+  device: 'GPU' | 'CPU';
+  /** `llama.cpp b11734 (opencl-adreno-arm64)`. */
+  server: string;
+  backend: 'CUDA' | 'Vulkan' | 'GPUOpenCL' | null;
+  exe: string;
+  model: { id: string; path: string; mmproj?: string; pictureTokens?: number };
+  embed: { path: string; model: string };
+  context: number;
+  serve: string[];
+  /** The model's files (and its projector's), by name, as the report's run.files lists them. */
+  files: Record<string, { size: number; sha256: string }>;
+  /** What isn't here, each checked against its pinned size and SHA-256 as it downloads (llama.cpp's zip unpacked). */
+  downloads: Download[];
+  /** What is, checked against its pin before it runs. */
+  inPlace: { path: string; size: number; sha256: string }[];
+  downloadBytes: number;
+}
+
+const sizeOf = (p: string): number | null => {
+  try {
+    return statSync(p).size;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * What a run of the route's model off the NPU needs, where its server runs on the NPU only: llama.cpp's pinned build
+ * for the device (setup's variantFor: the Adreno's OpenCL build, a Radeon's Vulkan one, the processor's), in setup's
+ * own folder for it; the model as the route's offNpu has it, from where `present` says (GenieX's cache) or the tools
+ * home's models folder; and setup's embedding model, where setup keeps it. Why not, where the route has no llama.cpp
+ * form of the model or llama.cpp no build for the device.
+ */
+export function planOffNpu(route: NpuRoute, model: NpuModel, o: { device: 'GPU' | 'CPU'; vendor: string; arch: string; tools: string; env?: Record<string, string | undefined> }): OffNpuPlan | { why: string } {
+  const off = route.offNpu?.models[model.id];
+  if (!route.offNpu || !off) return { why: `${route.server} runs ${model.id} on the NPU only, and npu-vendors.json has no llama.cpp form of it (the route's offNpu)` };
+  const v = variantFor({ kind: o.device === 'GPU' ? 'gpu' : 'cpu', vendor: o.vendor, arch: o.arch });
+  if ('none' in v) return { why: `llama.cpp off the NPU: ${v.none}` };
+  const zip = assetName(LLAMA_PIN.build, v.variant);
+  const pin = LLAMA_PIN.files[zip];
+  if (!pin || v.cudart) return { why: `the kit pins no llama.cpp ${LLAMA_PIN.build} build for ${v.variant} that the benchmark runs` };
+  const servers = path.join(o.tools, 'servers', 'llama.cpp');
+  const folder = path.join(servers, `${LLAMA_PIN.signed}-${v.variant}`);
+  const exe = path.join(folder, 'llama-server.exe');
+  const downloads: Download[] = [];
+  const inPlace: OffNpuPlan['inPlace'] = [];
+  if (!existsSync(exe)) downloads.push({ what: `llama.cpp ${LLAMA_PIN.build} (${v.variant})`, url: pin.url ?? `https://github.com/${SIGNED_LLAMA_REPO}/releases/download/${LLAMA_PIN.signed}/${zip}`, size: pin.size, sha256: pin.sha256, ...(pin.mirrors?.length ? { mirrors: [...pin.mirrors] } : {}), dest: path.join(servers, 'downloads', zip), unpackTo: folder, marker: exe, have: false });
+  // A file where `present` says, or the tools home's own copy, when it's there at its size; else downloaded to the latter.
+  const take = (f: { file: string; size: number; sha256: string; present?: string }, url: string, own: string) => {
+    const present = f.present ? expandRoute(f.present, { tools: o.tools, env: o.env }) : null;
+    const where = present && sizeOf(present) === f.size ? present : own;
+    if (sizeOf(where) === f.size) inPlace.push({ path: where, size: f.size, sha256: f.sha256 });
+    else downloads.push({ what: f.file, url, size: f.size, sha256: f.sha256, dest: where, have: false });
+    return where;
+  };
+  const files: OffNpuPlan['files'] = {};
+  const paths: Partial<Record<'model' | 'mmproj', string>> = {};
+  for (const f of off.files) {
+    files[f.file] = { size: f.size, sha256: f.sha256 };
+    paths[f.role] = take(f, pinnedModelUrl(f), path.join(o.tools, 'models', ...f.repo.split('/'), f.file));
+  }
+  if (!paths.model) return { why: `npu-vendors.json's offNpu for ${model.id} has no model file` };
+  const e = MODEL_PINS.find((p) => MODEL_SPECS.embed.repos.includes(p.repo) && MODEL_SPECS.embed.file.test(p.file));
+  if (!e) return { why: 'the kit pins no embedding model' };
+  const embedPath = take(e, pinnedModelUrl(e), path.join(o.tools, 'models', path.basename(e.file)));
+  return {
+    device: o.device,
+    server: `llama.cpp ${LLAMA_PIN.build} (${v.variant})`,
+    backend: v.backend,
+    exe,
+    model: { id: model.id, path: paths.model, ...(paths.mmproj ? { mmproj: paths.mmproj } : {}), ...(model.pictureTokens ? { pictureTokens: model.pictureTokens } : {}) },
+    embed: { path: embedPath, model: MODEL_SPECS.embed.model },
+    context: Math.max(route.offNpu.context, route.maxContextTokens),
+    serve: off.serve ?? [],
+    files,
+    downloads,
+    inPlace,
+    downloadBytes: downloads.reduce((n, d) => n + d.size, 0),
+  };
+}
+
+/**
+ * The plan set up, without writing config.json: what isn't here downloaded (llama.cpp's zip unpacked), what is checked
+ * against its pin, the graphics card's llama.cpp device found by its name (matchDevice), and the entry setup would write
+ * for that card or the processor (acceleratorEntry: one server for chat and pictures, one for embeddings), at the NPU's
+ * context, with the route's own arguments for the model and its vision model's picture cap, so every device is asked the
+ * same. Why not, where something failed.
+ */
+export async function setUpOffNpu(p: OffNpuPlan, o: { ports: { chat: number; embed: number }; card: Pick<GpuCard, 'name'> | null; io?: Partial<Pick<NpuIo, 'download' | 'unpack' | 'hash'>> & { listDevices?: (server: string) => Promise<string> }; log: (line: string) => void }): Promise<{ entry: AcceleratorEntry } | { why: string }> {
+  const io = o.io ?? {};
+  try {
+    for (const d of p.downloads) {
+      o.log(`  downloading ${d.what} (${mb(d.size)})`);
+      await (io.download ?? download)(d, (done, total) => o.log(`    ${mb(done)} of ${mb(total)}`));
+      if (d.unpackTo) {
+        (io.unpack ?? unpack)(d.dest, d.unpackTo);
+        rmSync(d.dest, { force: true });
+      }
+    }
+    for (const f of p.inPlace) if ((await (io.hash ?? sha256File)(f.path)) !== f.sha256) return { why: `${f.path} isn't the file the kit pins (its SHA-256 differs)` };
+  } catch (e: any) {
+    return { why: String(e?.message ?? e).split(/\r?\n/)[0] };
+  }
+  let device: string | null = null;
+  if (p.device === 'GPU') {
+    const devices = parseListDevices(await (io.listDevices ?? listDevices)(p.exe));
+    device = (o.card ? matchDevice(o.card, devices, p.backend) : null) ?? devices.find((x) => x.name.startsWith(p.backend ?? ''))?.name ?? null;
+    if (!device) return { why: `${p.server} lists no ${p.backend} device for ${o.card?.name ?? 'the graphics'}${devices.length ? ` (it lists ${devices.map((x) => x.name).join(', ')})` : ''}` };
+  }
+  const m = { path: p.model.path, model: p.model.id, ...(p.model.mmproj ? { mmproj: p.model.mmproj } : {}) };
+  const entry = acceleratorEntry({
+    id: p.device === 'GPU' ? 'gpu-bench' : 'cpu',
+    kind: p.device === 'GPU' ? 'gpu' : 'cpu',
+    device,
+    server: p.exe,
+    models: { ...(p.model.mmproj ? { vision: m } : { chat: m }), embed: { path: p.embed.path, model: p.embed.model } },
+    ports: { chat: o.ports.chat, embed: o.ports.embed },
+    slots: 1,
+    maxContextTokens: p.context,
+    chatOnVision: !!p.model.mmproj,
+  });
+  const cmd = entry.chat!.startCommand!;
+  const c = cmd.indexOf('-c');
+  if (c >= 0) cmd[c + 1] = String(p.context);
+  cmd.push(...p.serve);
+  if (p.model.pictureTokens && entry.vision) entry.vision.pictureTokens = p.model.pictureTokens;
+  return { entry };
+}
+
+/** `n` ports nothing holds, from `from` up (to 99 past it). */
+async function freePorts(from: number, n: number, free: (port: number) => Promise<boolean>): Promise<number[]> {
+  const out: number[] = [];
+  for (let p = from; p < from + 100 && out.length < n; p++) if (await free(p)) out.push(p);
+  if (out.length < n) throw new Error(`no ${n} free ports from ${from} to ${from + 99}`);
+  return out;
+}
+
+// ------------------------------------------------------------------------------------------------
+// The server's plugin as the kit runs it (kit 2.99.0)
+
+/** A copy kitPlugin made, removed: its links first, so nothing they point at is touched, then the rest. */
+export function removeCopy(dir: string): void {
+  if (!existsSync(dir)) return;
+  for (const n of readdirSync(dir)) {
+    const p = path.join(dir, n);
+    try {
+      if (lstatSync(p).isSymbolicLink()) unlinkSync(p);
+    } catch {}
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+/**
+ * The route's server with the kit's build of its plugin (npu-vendors.ts' NpuPluginPatch), as this PC runs it once the
+ * keeper has put it in (npu-patch.ts): GenieX's llama.cpp plugin on the X2, whose own build keeps 18 of the processor's
+ * threads spinning while the NPU writes. Where GenieX's own file is still in place (the keeper hasn't looked since, or
+ * config.json's npuPatch is false), the run takes a copy of the server in the tools home's bench folder: its files
+ * copied, the plugin's folder too with the kit's build in it, its other folders linked rather than copied (GenieX's
+ * QAIRT, 216 MB). The server's own files are never touched, and the copy goes after the run (`done`). Null where the kit
+ * has no build for this PC's server or its file isn't there; `server` where the copy can't run the kit's build, and why.
+ */
+export async function kitPlugin(route: NpuRoute, generation: string | null, o: { tools: string; env?: Record<string, string | undefined>; hash?: (file: string) => Promise<string>; kitDir?: string }): Promise<{ plugin: NonNullable<BenchReport['run']['plugin']>; exe?: string; why?: string; done: () => void } | null> {
+  const patch = pluginPatchOf(route, generation);
+  if (!patch) return null;
+  const target = patchTarget(patch, o.tools, o.env);
+  if (!existsSync(target)) return null;
+  const hash = o.hash ?? sha256File;
+  const none = () => {};
+  const sum = await hash(target);
+  if (sum === patch.patched.sha256) return { plugin: 'kit', done: none };
+  if (sum !== patch.stock.sha256) return { plugin: 'other', done: none };
+  for (const [name, want] of Object.entries(patch.needs)) {
+    const f = path.join(path.dirname(target), name);
+    if (sizeOf(f) !== want.size || (await hash(f)) !== want.sha256) return { plugin: 'server', why: `its ${path.basename(name)} isn't the one the kit's build is made for`, done: none };
+  }
+  const from = path.resolve(o.kitDir ?? path.dirname(fileURLToPath(import.meta.url)), patch.patched.from);
+  if (!existsSync(from)) return { plugin: 'server', why: `the kit has no ${patch.patched.from}`, done: none };
+  const exe = serverExe(route, o.tools, o.env);
+  const home = path.dirname(exe);
+  const dir = path.join(o.tools, 'bench', `${path.basename(home).replace(/\W+/g, '-').toLowerCase()}-${route.version}`);
+  removeCopy(dir);
+  try {
+    mkdirSync(dir, { recursive: true });
+    for (const e of readdirSync(home, { withFileTypes: true })) {
+      const src = path.join(home, e.name);
+      const holds = path.relative(src.toLowerCase(), path.dirname(target).toLowerCase());
+      if (e.isFile()) copyFileSync(src, path.join(dir, e.name));
+      else if (e.isDirectory()) {
+        if (!holds.startsWith('..') && !path.isAbsolute(holds)) cpSync(src, path.join(dir, e.name), { recursive: true });
+        else symlinkSync(src, path.join(dir, e.name), 'junction');
+      }
+    }
+    const into = path.join(dir, path.relative(home, target));
+    copyFileSync(from, into);
+    if ((await hash(into)) !== patch.patched.sha256) throw new Error(`the kit's ${patch.patched.from} isn't the build it pins`);
+  } catch (e: any) {
+    removeCopy(dir);
+    return { plugin: 'server', why: `a copy with the kit's build couldn't be made: ${String(e?.message ?? e).split(/\r?\n/)[0]}`, done: none };
+  }
+  return { plugin: 'kit-copy', exe: path.join(dir, path.basename(exe)), done: () => removeCopy(dir) };
+}
+
+const roundParts = (r: Record<string, number>) => Object.fromEntries(Object.entries(r).map(([p, v]) => [p, Math.round(v)]));
+
+/**
+ * A fixed batch of the agents' work as one stretch on the meter (kit 2.98.0), against the PC at rest just before it
+ * (`rest`): what it took by part, and over rest, each and a token. Null, and said, when the meter gave no reading.
+ */
+export async function energyBatch(m: Meter, rest: Span, count: number, one: (i: number) => Promise<{ ok: boolean; tokens: number }>, o: { now: () => number; sleep: (ms: number) => Promise<void>; what: string; log: (line: string) => void }): Promise<EnergyBatch | null> {
+  const whole = m.whole;
+  let answered = 0;
+  let tokens = 0;
+  const s = await measureSpan(m, {
+    now: o.now,
+    sleep: o.sleep,
+    work: async () => {
+      for (let i = 0; i < count; i++) {
+        const r = await one(i);
+        if (r.ok) answered++;
+        tokens += r.tokens;
+      }
+    },
+  });
+  if (!s || !(whole in s.millijoules)) {
+    o.log(`energy, ${count} ${o.what}: no reading`);
+    return null;
+  }
+  const extra = Object.fromEntries(Object.entries(s.millijoules).map(([p, mj]) => [p, Math.max(0, mj - (rest.milliwatts[p] ?? 0) * s.seconds)]));
+  const each = Object.fromEntries(Object.entries(extra).map(([p, mj]) => [p, mj / count]));
+  o.log(`energy, ${count} ${o.what}: ${joules(s.millijoules[whole])} in ${s.seconds.toFixed(1)} s; each over rest ${partsSay(m, each, joules)}`);
+  return { count, answered, seconds: Number(s.seconds.toFixed(2)), tokens, millijoules: roundParts(s.millijoules), extraMillijoules: roundParts(extra), millijoulesEach: Math.round(extra[whole] / count), millijoulesPerToken: tokens ? Number((extra[whole] / tokens).toFixed(3)) : null };
+}
+
+/** One /v1/embeddings request, never throwing: its time, how many vectors and how long, and the tokens the server counted. */
+async function embedAsk(http: typeof fetch, ep: { baseUrl: string; model: string }, input: string | string[], timeoutMs: number, now: () => number): Promise<{ ok: boolean; ms: number; vectors: number; dims: number; tokens: number | null; error: string | null }> {
+  const t0 = now();
+  try {
+    const res = await http(`${ep.baseUrl}/v1/embeddings`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: ep.model, input }), signal: AbortSignal.timeout(timeoutMs) });
+    const text = await res.text();
+    const ms = Math.round(now() - t0);
+    let j: any = null;
+    try {
+      j = JSON.parse(text);
+    } catch {}
+    const rows: any[] = Array.isArray(j?.data) ? j.data : [];
+    const want = Array.isArray(input) ? input.length : 1;
+    const ok = res.ok && rows.length === want && rows.every((r) => Array.isArray(r?.embedding) && r.embedding.length > 0);
+    return { ok, ms, vectors: rows.length, dims: Array.isArray(rows[0]?.embedding) ? rows[0].embedding.length : 0, tokens: Number(j?.usage?.prompt_tokens ?? j?.usage?.total_tokens) || null, error: ok ? null : text.slice(0, 300) || `answered ${res.status}` };
+  } catch (e: any) {
+    return { ok: false, ms: Math.round(now() - t0), vectors: 0, dims: 0, tokens: null, error: e?.name === 'TimeoutError' ? `no answer in ${Math.round(timeoutMs / 1000)} s` : String(e?.cause?.code ?? e?.message ?? e) };
+  }
+}
+
+// ------------------------------------------------------------------------------------------------
 // The run
 
 export interface NpuBenchOptions {
@@ -568,6 +872,12 @@ export interface NpuBenchOptions {
   mix?: number;
   vendor?: NpuVendor;
   device?: string;
+  /** Several devices, run in turn (`--device NPU,GPU,CPU`): npuBenchSeries. */
+  devices?: string[];
+  /** How many times each device runs (`--runs 3`), the summary taking each figure's median. */
+  runs?: number;
+  /** Reports to sum up instead of running (`--summary <report.json>...`). */
+  summary?: string[];
   /** An older Snapdragon to play on this one (`--generation snapdragon-x` on an X2: npu-vendors.ts' playGeneration). */
   generation?: string;
   /** The models a PC with little memory runs (its generation's smallPc), whatever this PC's memory. */
@@ -607,6 +917,12 @@ export interface NpuBenchOptions {
     clearCache?: (dir: string) => void;
     /** The version of the route's server installed here (npu-vendors.ts' installedVersion by default). */
     serverVersion?: (route: NpuRoute) => Promise<string | null>;
+    /** Whether nothing holds a port on 127.0.0.1 (npu-check.ts' portFree). */
+    portFree?: (port: number) => Promise<boolean>;
+    /** llama-server's --list-devices, for a graphics run off the NPU (setup.ts' listDevices). */
+    listDevices?: (server: string) => Promise<string>;
+    /** The kit's node part, which holds its build of the server's plugin (kitPlugin). */
+    kitDir?: string;
   };
 }
 
@@ -649,7 +965,10 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     marks: [],
     ranked: false,
   };
+  // What a run leaves to be undone however it ends: a copy of the server (kitPlugin).
+  const cleanups: (() => void)[] = [];
   const finish = (code: number, mark?: Mark) => {
+    for (const c of cleanups.splice(0)) c();
     if (mark) report.marks.push(mark);
     else report.marks = marksFor(report, suite);
     report.ranked = code === 0 && !report.marks.length;
@@ -680,6 +999,9 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   const played = play?.kind === 'played' ? play.played : null;
   const generation = played ? played.generation : npu.generation;
   let route: NpuRoute;
+  // Off the NPU, a server with no device to choose runs its model on llama.cpp (planOffNpu): the route stays as the NPU
+  // runs it, for its model, its cap (where the long read goes) and its timeouts.
+  let offNpu = false;
   try {
     // As setup runs it on this generation (routeFor): its own cap, timeouts and server arguments, before anything else.
     // The models setup runs on this PC (the generation's own, a small PC's where it has any), or a small PC's when asked.
@@ -691,7 +1013,9 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     const g = generationOf(generic, generation);
     const runs = routeFor(generic, generation, !!o.smallPc || smallPc(d.ramBytes));
     const offered = [...runs.models, ...(g?.models ?? []), ...(g?.smallPc?.models ?? []), ...generic.models].filter((m, i, all) => all.findIndex((x) => x.id === m.id) === i);
-    route = routeOnDevice(o.candidate ? { ...runs, models: generic.models } : o.model ? { ...runs, models: offered } : runs, device);
+    const asked = o.candidate ? { ...runs, models: generic.models } : o.model ? { ...runs, models: offered } : runs;
+    offNpu = device !== 'NPU' && !asked.serve.includes('--target_device');
+    route = offNpu ? asked : routeOnDevice(asked, device);
     if (played) route = playedRoute(route, played);
     if (o.candidate) route = candidateRoute(route, o.candidate, { vision: o.vision });
     else if (o.model) route = routeWithModel(route, o.model);
@@ -700,47 +1024,119 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     return finish(2, { code: 'setup', say: e.message });
   }
   const chatModel = route.models.find((m) => m.kinds.includes('chat')) ?? route.models[0];
-  report.run.server = `${route.server} ${route.version}`;
+  const tools = o.tools ?? toolsHome(env);
   report.run.model = chatModel.id;
   report.run.cap = device === 'NPU' ? route.maxContextTokens : null;
   const pin = chatModel.pinned?.[generation ?? ''] ?? chatModel.pinned?.['*'];
   report.run.files = pin ? pin.files : null;
-  log(`The NPU benchmark (${suite.version}, ${profile}): ${chatModel.id} on ${npu.label}'s ${device} with ${route.server} ${route.version}`);
+  // Off the NPU on llama.cpp: its build for the graphics card the NPU's maker makes (the Adreno, a Radeon), or the processor's.
+  const card = d.cards.find((c) => c.vendor.toLowerCase() === vendor) ?? null;
+  const off = offNpu ? planOffNpu(route, chatModel, { device: device as 'GPU' | 'CPU', vendor: card?.vendor ?? vendor, arch: d.cpu?.arch ?? route.arch, tools, env }) : null;
+  if (off && 'why' in off) return finish(2, { code: 'setup', say: off.why });
+  report.run.server = off ? off.server : `${route.server} ${route.version}`;
+  if (off) report.run.files = off.files;
+  log(`The NPU benchmark (${suite.version}, ${profile}): ${chatModel.id} on ${npu.label}'s ${device} with ${report.run.server}${off ? `, as ${route.server} runs on the NPU only` : ''}`);
+
+  // The route's ports, where something else holds them (the keeper's own server, most likely): that server is never
+  // stopped, nor measured in the run's place. The run takes ports beside it (routeOnFreePorts), and is marked so.
+  const free = o.io?.portFree ?? portFree;
+  const held: number[] = [];
+  for (const p of [route.port, ...(route.embedServer ? [route.embedServer.port] : [])]) if (!(await free(p))) held.push(p);
+  if (held.length) report.conditions.beside = held;
+  let offPorts: number[] = [];
+  try {
+    if (off) offPorts = await freePorts(route.port + 100, 2, free);
+    else if (held.length) {
+      const moved = await routeOnFreePorts(route, false, free);
+      if ('route' in moved) {
+        route = moved.route;
+        log(`port ${held.join(' and ')} is held (the manor's own server?): this run takes ${moved.moved.join(', ')} beside it, and isn't ranked`);
+      }
+    }
+  } catch (e: any) {
+    return finish(1, { code: 'start', say: e.message });
+  }
 
   // 2. Its server and models, as setup does them.
-  const tools = o.tools ?? toolsHome(env);
-  const support: NpuSupport = played ? { ...npu, generation, verified: false } : npu;
-  if (played) {
-    // Its own GenieX data folder, naming the played chip to AI Hub, before the plan looks for its models there.
-    const dir = setUpPlayed(played, tools);
-    report.run.played = played.generation;
-    log(`Played: ${playedSay(played, dir, catalog)}. Shown, never ranked.`);
+  let entry: AcceleratorEntry;
+  if (off) {
+    const missing = off.downloads.length > 0;
+    if (missing && o.setup === false) return finish(1, { code: 'setup', say: `${off.server} or the model's files aren't here, and --no-setup was given` });
+    if (missing && !o.yes) {
+      const ok = o.confirm ? await o.confirm(`Download ${mb(off.downloadBytes)} (${off.server} and the model's files)? [y/N] `) : false;
+      if (!ok) return finish(1, { code: 'setup', say: `it would download ${mb(off.downloadBytes)}: run again with --yes` });
+    }
+    const r = await setUpOffNpu(off, { ports: { chat: offPorts[0], embed: offPorts[1] }, card, io: { ...o.io?.setup, ...(o.io?.listDevices ? { listDevices: o.io.listDevices } : {}) }, log });
+    if ('why' in r) return finish(1, { code: 'setup', say: r.why });
+    entry = r.entry;
+    const at = entry.chat!.startCommand!.indexOf('--device');
+    log(`  ${off.server} is set up for: chat and pictures, and embeddings beside them, on ${at >= 0 ? entry.chat!.startCommand![at + 1] : 'the processor'}`);
+  } else {
+    const support: NpuSupport = played ? { ...npu, generation, verified: false } : npu;
+    if (played) {
+      // Its own GenieX data folder, naming the played chip to AI Hub, before the plan looks for its models there.
+      const dir = setUpPlayed(played, tools);
+      report.run.played = played.generation;
+      log(`Played: ${playedSay(played, dir, catalog)}. Shown, never ranked.`);
+    }
+    // The route is this generation's already: planned as it is, so the generation's own cap doesn't undo --cap. Its
+    // embedding server is set up too, for the suite's embeddings (kit 2.99.0), but never past --no-setup: Intel's
+    // Qwen3-Embedding (428 MB, in the route's embedServer, not its models) was pulled past it once (kit 2.62.x).
+    const planOf = (noEmbed: boolean) => planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: { ...route, generations: {} } } }, noEmbed, cards: d.cards })!;
+    let plan = planOf(!suite.embed);
+    if (o.setup === false && (plan.embed?.download || plan.embed?.modelDownload || plan.embed?.modelPull)) {
+      plan = planOf(true);
+      log(`embeddings: not measured: ${route.embedServer?.server ?? 'its embedding server'} or its model isn't here, and --no-setup was given`);
+    }
+    // Everything the plan would fetch, its embedding server's too, so --no-setup and the prompt count it.
+    const needs = plan.downloadBytes;
+    const missing = !plan.installed || !!plan.runtime || plan.models.some((m) => !m.have) || !!(plan.embed?.download || plan.embed?.modelDownload || plan.embed?.modelPull);
+    if (missing && o.setup === false) return finish(1, { code: 'setup', say: `${route.server} or its models aren't here, and --no-setup was given` });
+    if (missing && !o.yes) {
+      const ok = o.confirm ? await o.confirm(`Download ${needs ? mb(needs) : 'what it needs'} (${route.server} ${route.version} and its models)? [y/N] `) : false;
+      if (!ok) return finish(1, { code: 'setup', say: `it would download ${needs ? mb(needs) : 'a candidate model'}: run again with --yes` });
+    }
+    const set = await setUpRoute(plan, tools, o.io?.setup ?? {}, log, now);
+    if (!set.entry) return finish(1, { code: 'setup', say: set.problems.join('; ') || 'setup wrote no entry' });
+    entry = set.entry;
+    // A candidate has no pinned files to report: its own are measured, now that setup has pulled them.
+    if (o.candidate) report.run.files = await candidateFiles(chatModel, { server: route.server, tools, env, log, hash: o.io?.setup?.hash });
+    // The server's plugin as this PC runs it: the kit's build, from a copy of the server where its own is still in place.
+    const kp = await kitPlugin(route, generation, { tools, env, hash: o.io?.setup?.hash, kitDir: o.io?.kitDir });
+    if (kp) {
+      report.run.plugin = kp.plugin;
+      cleanups.push(kp.done);
+      if (kp.exe) entry.chat!.startCommand![0] = kp.exe;
+      log(
+        kp.plugin === 'kit'
+          ? `${route.server} runs the kit's build of its plugin, as this PC does`
+          : kp.plugin === 'kit-copy'
+            ? `${route.server}'s own plugin is in place, not the kit's build this PC runs once the keeper puts it in: the run takes a copy of ${route.server} with the kit's build (${path.dirname(kp.exe!)}), removed after it`
+            : kp.plugin === 'server'
+              ? `${route.server} runs its own plugin, as ${kp.why}: shown, not ranked`
+              : `${route.server}'s plugin is neither its own nor the kit's build (an update?): it runs as it is`,
+      );
+    }
   }
-  // The route is this generation's already: planned as it is, so the generation's own cap doesn't undo --cap. The suite
-  // asks for no embeddings, so its embedding server and model are left out (noEmbed): never pulled for the benchmark,
-  // as Intel's Qwen3-Embedding (428 MB, in the route's embedServer, not its models) was past --no-setup.
-  const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: { ...route, generations: {} } } }, noEmbed: true })!;
-  // Everything the plan would fetch, an embedding server's too if it ever has one, so --no-setup and the prompt count it.
-  const needs = plan.downloadBytes;
-  const missing = !plan.installed || !!plan.runtime || plan.models.some((m) => !m.have) || !!(plan.embed?.download || plan.embed?.modelDownload || plan.embed?.modelPull);
-  if (missing && o.setup === false) return finish(1, { code: 'setup', say: `${route.server} or its models aren't here, and --no-setup was given` });
-  if (missing && !o.yes) {
-    const ok = o.confirm ? await o.confirm(`Download ${needs ? mb(needs) : 'what it needs'} (${route.server} ${route.version} and its models)? [y/N] `) : false;
-    if (!ok) return finish(1, { code: 'setup', say: `it would download ${needs ? mb(needs) : 'a candidate model'}: run again with --yes` });
-  }
-  const { entry, problems } = await setUpRoute(plan, tools, o.io?.setup ?? {}, log, now);
-  if (!entry) return finish(1, { code: 'setup', say: problems.join('; ') || 'setup wrote no entry' });
-  // A candidate has no pinned files to report: its own are measured, now that setup has pulled them.
-  if (o.candidate) report.run.files = await candidateFiles(chatModel, { server: route.server, tools, env, log, hash: o.io?.setup?.hash });
 
-  // 3. The conditions: how busy the processor is before the start.
-  const busy: number[] = [];
-  for (let i = 0; i < suite.quiet.samples; i++) {
-    const b = await (o.io?.cpuBusy ?? cpuBusy)();
-    if (b !== null) busy.push(b);
-    if (i < suite.quiet.samples - 1) await sleep(suite.quiet.everyMs);
+  // 3. The conditions: how busy the processor is before the start. A busy one is waited for, up to the suite's
+  // waitMinutes (kit 2.99.0), so a run in a series starts once whatever else ran has finished; then it runs as it is.
+  const sampleBusy = async () => {
+    const busy: number[] = [];
+    for (let i = 0; i < suite.quiet.samples; i++) {
+      const b = await (o.io?.cpuBusy ?? cpuBusy)();
+      if (b !== null) busy.push(b);
+      if (i < suite.quiet.samples - 1) await sleep(suite.quiet.everyMs);
+    }
+    return busy.length ? Math.round(busy.reduce((a, b) => a + b, 0) / busy.length) : null;
+  };
+  report.conditions.cpuBusyPercent = await sampleBusy();
+  const rounds = Math.ceil(((suite.quiet.waitMinutes ?? 0) * 60_000) / Math.max(1, suite.quiet.samples * suite.quiet.everyMs));
+  if (rounds && report.conditions.cpuBusyPercent !== null && report.conditions.cpuBusyPercent > suite.quiet.cpuBusyMax) {
+    log(`the processor is ${report.conditions.cpuBusyPercent}% busy: waiting up to ${suite.quiet.waitMinutes} minutes for it to come under ${suite.quiet.cpuBusyMax}%`);
+    for (let i = 0; i < rounds && report.conditions.cpuBusyPercent !== null && report.conditions.cpuBusyPercent > suite.quiet.cpuBusyMax; i++) report.conditions.cpuBusyPercent = await sampleBusy();
+    log(`the processor is ${report.conditions.cpuBusyPercent ?? '?'}% busy: starting`);
   }
-  report.conditions.cpuBusyPercent = busy.length ? Math.round(busy.reduce((a, b) => a + b, 0) / busy.length) : null;
 
   // Energy (--energy): the meter, and the PC at rest with no model loaded, before the server starts. The battery's
   // reading is too coarse for the rests and batches (Energy, in the spec): it measures the triage minutes alone, as before.
@@ -949,7 +1345,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
         if (clear) log(`energy: ${e.millijoulesPerToken} mJ a token (${Math.round(restMw)} mW at rest, ${Math.round(loadMw)} mW working)`);
         else log(`energy: not counted: working read ${Math.round(loadMw)} mW against ${Math.round(restMw)} mW at rest, too little more for ${m.kind === 'battery' ? "the battery's reading" : 'the meter'} to tell the model's share`);
         if (m.kind !== 'battery') {
-          const round = (r: Record<string, number>) => Object.fromEntries(Object.entries(r).map(([p, v]) => [p, Math.round(v)]));
+          const round = roundParts;
           e.meter = { kind: m.kind, say: m.say, whole };
           e.charging = chargingNow;
           e.idle = { unloadedMilliwatts: unloaded ? round(unloaded.milliwatts) : null, loadedMilliwatts: loaded ? round(loaded.milliwatts) : null, keepLoadedMilliwatts: unloaded && loaded && whole in unloaded.milliwatts && whole in loaded.milliwatts ? Math.round(loaded.milliwatts[whole] - unloaded.milliwatts[whole]) : null };
@@ -960,22 +1356,8 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
           // Fixed batches of the agents' work, each a stretch of its own, against the PC at rest just before: what one of
           // each costs, by part. A batch's tries are fresh prompts, as every read and job is.
           const batch = async (id: string, what: string, count: number, one: (i: number) => Promise<{ ok: boolean; tokens: number }>) => {
-            let answered = 0;
-            let tk = 0;
-            const s = await span({
-              work: async () => {
-                for (let i = 0; i < count; i++) {
-                  const r = await one(i);
-                  if (r.ok) answered++;
-                  tk += r.tokens;
-                }
-              },
-            });
-            if (!s || !(whole in s.millijoules)) return log(`energy, ${count} ${what}: no reading`);
-            const extra = Object.fromEntries(Object.entries(s.millijoules).map(([p, mj]) => [p, Math.max(0, mj - (rest.milliwatts[p] ?? 0) * s.seconds)]));
-            batches[id] = { count, answered, seconds: Number(s.seconds.toFixed(2)), tokens: tk, millijoules: round(s.millijoules), extraMillijoules: round(extra), millijoulesEach: Math.round(extra[whole] / count), millijoulesPerToken: tk ? Number((extra[whole] / tk).toFixed(3)) : null };
-            const each = Object.fromEntries(Object.entries(extra).map(([p, mj]) => [p, mj / count]));
-            log(`energy, ${count} ${what}: ${joules(s.millijoules[whole])} in ${s.seconds.toFixed(1)} s; each over rest ${partsSay(m, each, joules)}`);
+            const b = await energyBatch(m, rest, count, one, { now, sleep, what, log });
+            if (b) batches[id] = b;
           };
           const count = suite.energy.batch?.[profile] ?? 0;
           if (count) {
@@ -1014,11 +1396,283 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     await server.stop();
     await client.untilGone();
   }
+
+  // 5. Embeddings (kit 2.99.0), once the chat server has stopped: the route's embedding server (the NPU's own, or on the
+  // run's device where it moves with it), or llama.cpp's beside the model off the NPU, started by itself as an agent's
+  // first request starts it. A query, and requests of the suite's texts (embedTexts, each request's its own), timed
+  // warm; with a meter, the PC at rest with it loaded (what keeping it loaded costs, against no model) and a batch of
+  // those requests.
+  const ee = entry.embed;
+  if (suite.embed && ee?.baseUrl && ee.startCommand?.length && ee.baseUrl !== entry.chat?.baseUrl) {
+    const se = suite.embed;
+    const ep = { baseUrl: ee.baseUrl, model: ee.model };
+    const http = o.io?.fetch ?? longFetch;
+    const embedLog = path.join(tools, 'servers', 'logs', `npu-bench-${vendor}-embed.log`);
+    const eAsk = (input: string | string[]) => embedAsk(http, ep, input, stepMs, now);
+    const texts = () => embedTexts(suite, `embed ${runTag}-${++asked}`);
+    // Until it no longer takes connections, or 30 seconds.
+    const gone = async () => {
+      const t = now();
+      while (now() - t < 30_000) {
+        try {
+          await (await http(`${ep.baseUrl}/v1/models`, { signal: AbortSignal.timeout(1_000) })).text();
+        } catch (e) {
+          if (refusedConnection(e)) return;
+        }
+        await sleep(250);
+      }
+    };
+    const eServer = await start({ ...entry, chat: ee }, embedLog);
+    try {
+      // Until it gives a vector: a server loading its model answers 503, or not at all, meanwhile.
+      const t0 = now();
+      let first = await eAsk(se.query);
+      while (!first.ok && now() - t0 < Math.max(5 * 60_000, coldMs * 2)) {
+        await sleep(500);
+        first = await eAsk(se.query);
+      }
+      if (!first.ok) {
+        report.results.embed = null;
+        log(`embeddings: no vector after a start (${first.error}): see ${embedLog}`);
+      } else {
+        const loadMs = Math.round(now() - t0);
+        const tryEmbed = async (input: () => string | string[]) => {
+          for (let i = 0; i < suite.warmups; i++) await eAsk(input());
+          const ms: number[] = [];
+          const tk: number[] = [];
+          for (let i = 0; i < tries; i++) {
+            const r = await eAsk(input());
+            ms.push(r.ok ? r.ms : Number.NaN);
+            if (r.ok && r.tokens) tk.push(r.tokens);
+          }
+          return { m: measure(ms, suite.steady.maxSpread), tokens: medianOf(tk) };
+        };
+        const query = await tryEmbed(() => se.query);
+        const request = await tryEmbed(texts);
+        const perSecond = request.tokens && request.m.median ? Math.round(request.tokens / (request.m.median / 1000)) : null;
+        report.results.embed = { server: off ? off.server : `${route.embedServer?.server ?? route.server} ${route.embedServer?.version ?? route.version}`, model: ee.model, loadMs, queryMs: query.m, requestMs: request.m, texts: se.texts, tokens: request.tokens, tokensPerSecond: perSecond, dims: first.dims || null };
+        log(`embeddings: ${ee.model}'s first vector ${(loadMs / 1000).toFixed(1)} s after a start; a query ${query.m.median} ms; ${se.texts} texts ${request.m.median} ms (${request.tokens ?? '?'} tokens, ${perSecond ?? '?'} a second)`);
+        const energy = report.results.energy;
+        if (meter && meter.kind !== 'battery' && energy) {
+          const w = meter.whole;
+          const idle = await measureSpan(meter, { now, sleep, ms: suite.energy.restSeconds * 1000 });
+          const keep = idle && unloaded && w in idle.milliwatts && w in unloaded.milliwatts ? Math.round(idle.milliwatts[w] - unloaded.milliwatts[w]) : null;
+          energy.embed = { loadedMilliwatts: idle ? roundParts(idle.milliwatts) : null, keepLoadedMilliwatts: keep };
+          log(`energy at rest, the embedding model loaded: ${idle ? partsSay(meter, idle.milliwatts) : 'no reading'}${keep !== null ? `; keeping it loaded: ${watts(keep)}` : ''}`);
+          const count = se.batch[profile];
+          if (idle && count) {
+            const b = await energyBatch(meter, idle, count, async () => {
+              const r = await eAsk(texts());
+              return { ok: r.ok, tokens: r.tokens ?? 0 };
+            }, { now, sleep, what: `embedding requests of ${se.texts} texts`, log });
+            if (b) (energy.batches ??= {}).embed = b;
+          }
+        }
+      }
+    } finally {
+      await eServer.stop();
+      await gone();
+    }
+  } else if (suite.embed) {
+    report.results.embed = null;
+    log(`embeddings: not measured: ${!off && !route.embedServer ? `${route.server}'s route has no embedding server${route.embeddings ? ` (${route.embeddings.split(/[:;.]/)[0]})` : ''}` : 'its embedding server wasn\'t set up'}`);
+  }
+
   report.run.streamed = streamedSeen.length ? streamedSeen.every(Boolean) : null;
   report.run.usageReported = usageSeen.length ? usageSeen.every(Boolean) : null;
   const r = finish(0);
   log(r.report.ranked ? 'Ranked: it met every condition.' : `Not ranked: ${r.report.marks.map((m) => m.say).join('; ')}`);
   return r;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Several runs, and their summary (kit 2.99.0)
+
+/** One device's runs, each figure their median (the runs that have it): what NPU-BENCHMARK.md's "Reading a summary" reads. */
+export interface DeviceSummary {
+  runs: number;
+  ranked: number;
+  server: string | null;
+  model: string | null;
+  /** Every mark any of its runs had, by code. */
+  marks: string[];
+  coldLoadMs: number | null;
+  shortMs: number | null;
+  writeTokensPerSecond: number | null;
+  /** Each read size's time to the first token. */
+  readFirstTokenMs: Record<string, number | null>;
+  jobTimeS: number | null;
+  quality: number | null;
+  vision: number | null;
+  embed: { queryMs: number | null; requestMs: number | null; tokensPerSecond: number | null } | null;
+  energy: {
+    /** What keeping the model loaded costs the whole PC, against no model: at rest, and over a day. */
+    keepLoadedMilliwatts: number | null;
+    keepLoadedWhPerDay: number | null;
+    /** The same for the embedding model, on its own. */
+    embedKeepLoadedMilliwatts: number | null;
+    embedKeepLoadedWhPerDay: number | null;
+    /** The triage minutes' energy a token over rest (the figure every report since kit 2.62.0 has). */
+    millijoulesPerToken: number | null;
+    /** Each batch: one job's energy over rest (the whole PC's, and each part's), a token's, and the whole PC's for the batch and its time. */
+    batches: Record<string, { count: number | null; millijoulesEach: number | null; millijoulesPerToken: number | null; wholeMillijoules: number | null; seconds: number | null; eachByPart: Record<string, number | null> }>;
+  } | null;
+}
+
+export interface BenchSummary {
+  format: 'castellan-npu-bench-summary/1';
+  suite: string;
+  kit: string;
+  profile: 'quick' | 'full';
+  at: string;
+  pc: { cpu: string | null; chip: string | null };
+  /** The meter's part that is the whole PC, where the runs had a meter. */
+  whole: string | null;
+  devices: Record<string, DeviceSummary>;
+}
+
+const med = (xs: (number | null | undefined)[], digits = 0): number | null => {
+  const m = medianOf(xs.filter((x): x is number => typeof x === 'number' && Number.isFinite(x)));
+  return m === null ? null : Number(m.toFixed(digits));
+};
+const whPerDay = (mw: number | null) => (mw === null ? null : Number(((mw * 24) / 1000).toFixed(1)));
+
+/** Each device's runs summed up: every figure the median of the runs that have it, so one run's hiccup doesn't move it. */
+export function benchSummary(reports: BenchReport[]): BenchSummary {
+  const first = reports[0];
+  const devices: Record<string, DeviceSummary> = {};
+  for (const device of [...new Set(reports.map((r) => r.run.device))]) {
+    const rs = reports.filter((r) => r.run.device === device);
+    const es = rs.map((r) => r.results.energy).filter((e): e is NonNullable<typeof e> => !!e);
+    const batchIds = [...new Set(es.flatMap((e) => Object.keys(e.batches ?? {})))];
+    const sizes = [...new Set(rs.flatMap((r) => Object.keys(r.results.readFirstTokenMs)))];
+    const embeds = rs.map((r) => r.results.embed).filter((x): x is NonNullable<typeof x> => !!x);
+    const keep = med(es.map((e) => e.idle?.keepLoadedMilliwatts));
+    const embedKeep = med(es.map((e) => e.embed?.keepLoadedMilliwatts));
+    devices[device] = {
+      runs: rs.length,
+      ranked: rs.filter((r) => r.ranked).length,
+      server: rs.find((r) => r.run.server)?.run.server ?? null,
+      model: rs.find((r) => r.run.model)?.run.model ?? null,
+      marks: [...new Set(rs.flatMap((r) => r.marks.map((m) => m.code)))],
+      coldLoadMs: med(rs.map((r) => r.results.coldLoadMs)),
+      shortMs: med(rs.map((r) => r.results.short?.median)),
+      writeTokensPerSecond: med(rs.map((r) => r.results.writeTokensPerSecond?.median), 1),
+      readFirstTokenMs: Object.fromEntries(sizes.map((n) => [n, med(rs.map((r) => r.results.readFirstTokenMs[n]?.median))])),
+      jobTimeS: med(rs.map((r) => r.results.jobTimeS), 2),
+      quality: med(rs.map((r) => (r.quality.score === null ? null : r.quality.passed))),
+      vision: med(rs.map((r) => r.vision?.passed)),
+      embed: embeds.length ? { queryMs: med(embeds.map((x) => x.queryMs.median)), requestMs: med(embeds.map((x) => x.requestMs.median)), tokensPerSecond: med(embeds.map((x) => x.tokensPerSecond)) } : null,
+      energy: es.length
+        ? {
+            keepLoadedMilliwatts: keep,
+            keepLoadedWhPerDay: whPerDay(keep),
+            embedKeepLoadedMilliwatts: embedKeep,
+            embedKeepLoadedWhPerDay: whPerDay(embedKeep),
+            millijoulesPerToken: med(es.map((e) => e.millijoulesPerToken), 3),
+            batches: Object.fromEntries(
+              batchIds.map((id) => {
+                const bs = es.map((e) => ({ b: e.batches?.[id], whole: e.meter?.whole })).filter((x): x is { b: EnergyBatch; whole: string | undefined } => !!x.b);
+                const parts = [...new Set(bs.flatMap((x) => Object.keys(x.b.extraMillijoules)))];
+                return [
+                  id,
+                  {
+                    count: med(bs.map((x) => x.b.count)),
+                    millijoulesEach: med(bs.map((x) => x.b.millijoulesEach)),
+                    millijoulesPerToken: med(bs.map((x) => x.b.millijoulesPerToken), 3),
+                    wholeMillijoules: med(bs.map((x) => (x.whole ? x.b.millijoules[x.whole] : null))),
+                    seconds: med(bs.map((x) => x.b.seconds), 2),
+                    eachByPart: Object.fromEntries(parts.map((p) => [p, med(bs.map((x) => (p in x.b.extraMillijoules ? x.b.extraMillijoules[p] / x.b.count : null)))])),
+                  },
+                ];
+              }),
+            ),
+          }
+        : null,
+    };
+  }
+  return {
+    format: 'castellan-npu-bench-summary/1',
+    suite: first?.suite.version ?? SUITE.version,
+    kit: first?.suite.kit ?? 'unknown',
+    profile: first?.suite.profile ?? 'quick',
+    at: new Date().toISOString(),
+    pc: { cpu: first?.pc.cpu ?? null, chip: first?.pc.chip ?? null },
+    whole: reports.map((r) => r.results.energy?.meter?.whole).find(Boolean) ?? null,
+    devices,
+  };
+}
+
+/** The summary as a table, a column a device, for the log and the PR. */
+export function summarySay(s: BenchSummary): string[] {
+  const ds = Object.keys(s.devices);
+  const rows: [string, (d: DeviceSummary) => string][] = [];
+  const n = (x: number | null, unit = '') => (x === null ? '—' : `${x.toLocaleString('en-GB')}${unit}`);
+  const j = (mj: number | null) => (mj === null ? '—' : mj >= 1000 ? `${(mj / 1000).toFixed(mj >= 10_000 ? 1 : 2)} J` : `${mj} mJ`);
+  rows.push(['runs (ranked)', (d) => `${d.runs} (${d.ranked})`]);
+  rows.push(['server', (d) => (d.server ?? '—').replace(/^llama\.cpp (b\d+) \((.+)\)$/, 'llama.cpp $1 $2')]);
+  rows.push(['first answer after a start', (d) => n(d.coldLoadMs === null ? null : Number((d.coldLoadMs / 1000).toFixed(1)), ' s')]);
+  rows.push(['short answer', (d) => n(d.shortMs, ' ms')]);
+  rows.push(['writing', (d) => n(d.writeTokensPerSecond, ' tokens/s')]);
+  for (const size of [...new Set(ds.flatMap((x) => Object.keys(s.devices[x].readFirstTokenMs)))]) rows.push([`reading ${size} tokens`, (d) => n(d.readFirstTokenMs[size] ?? null, ' ms')]);
+  rows.push(['job time', (d) => n(d.jobTimeS, ' s')]);
+  rows.push(['quality (of 24)', (d) => n(d.quality)]);
+  rows.push(['pictures (of 4)', (d) => n(d.vision)]);
+  rows.push(['embedding a query', (d) => n(d.embed?.queryMs ?? null, ' ms')]);
+  rows.push(['embedding texts', (d) => n(d.embed?.tokensPerSecond ?? null, ' tokens/s')]);
+  if (ds.some((x) => s.devices[x].energy)) {
+    rows.push(['keeping the model loaded', (d) => (d.energy?.keepLoadedMilliwatts == null ? '—' : `${n(d.energy.keepLoadedMilliwatts, ' mW')} (${n(d.energy.keepLoadedWhPerDay, ' Wh/day')})`)]);
+    rows.push(['keeping the embedder loaded', (d) => (d.energy?.embedKeepLoadedMilliwatts == null ? '—' : `${n(d.energy.embedKeepLoadedMilliwatts, ' mW')} (${n(d.energy.embedKeepLoadedWhPerDay, ' Wh/day')})`)]);
+    rows.push(['triage minutes, a token over rest', (d) => n(d.energy?.millijoulesPerToken ?? null, ' mJ')]);
+    for (const id of [...new Set(ds.flatMap((x) => Object.keys(s.devices[x].energy?.batches ?? {})))]) {
+      rows.push([`${id}: each over rest`, (d) => j(d.energy?.batches[id]?.millijoulesEach ?? null)]);
+      rows.push([`${id}: a token over rest`, (d) => n(d.energy?.batches[id]?.millijoulesPerToken ?? null, ' mJ')]);
+      rows.push([`${id}: the whole PC, the batch`, (d) => {
+        const b = d.energy?.batches[id];
+        return b?.wholeMillijoules == null ? '—' : `${j(b.wholeMillijoules)} in ${n(b.seconds, ' s')}`;
+      }]);
+    }
+  }
+  const cells = rows.map(([name, f]) => [name, ...ds.map((x) => f(s.devices[x]))]);
+  const widths = [0, ...ds].map((_, i) => Math.max(...[['', ...ds], ...cells].map((r) => r[i].length)));
+  const line = (r: string[]) => r.map((c, i) => c.padEnd(widths[i])).join('  ').trimEnd();
+  return [`Summary: ${s.suite}, ${s.profile}, each figure the median of its runs${s.whole ? ` (the whole PC is the meter's ${s.whole})` : ''}`, line(['', ...ds]), ...cells.map(line)];
+}
+
+/**
+ * Several runs: each device in turn, a round at a time (NPU, GPU, CPU, then again), so whatever drifts in the PC (its
+ * warmth, what else runs) falls on every device alike, each run waiting for a quiet processor (suite.quiet.waitMinutes).
+ * Each run writes its report as one run does; then the summary of them all (benchSummary) is written beside them and
+ * printed. A device refused as a bad request (code 2: no llama.cpp form of the model, say) isn't tried again.
+ */
+export async function npuBenchSeries(o: NpuBenchOptions & { devices: string[]; runs: number }): Promise<{ code: number; reports: BenchReport[]; summary: BenchSummary; file: string | null }> {
+  const log = o.log ?? console.log;
+  const reports: BenchReport[] = [];
+  let devices = [...o.devices];
+  let worst = 0;
+  for (let round = 1; round <= o.runs && devices.length; round++) {
+    for (const device of [...devices]) {
+      log(`Run ${round} of ${o.runs}: the ${device}`);
+      const out = o.out ? o.out.replace(/(\.json)?$/i, `-${device.toLowerCase()}-${round}.json`) : undefined;
+      const r = await npuBench({ ...o, device, out });
+      reports.push(r.report);
+      worst = Math.max(worst, r.code);
+      if (r.code === 2) devices = devices.filter((d) => d !== device);
+    }
+  }
+  const summary = benchSummary(reports);
+  for (const l of summarySay(summary)) log(l);
+  const vendor = reports[0]?.run.vendor ?? 'none';
+  const file = o.out ? o.out.replace(/(\.json)?$/i, '-summary.json') : path.join(o.tools ?? toolsHome(o.env ?? process.env), `npu-bench-summary-${vendor}-${summary.at.slice(0, 19).replace(/[:T]/g, '-')}.json`);
+  try {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(summary, null, 2) + '\n');
+    log(`The summary: ${file}`);
+    return { code: worst, reports, summary, file };
+  } catch (e: any) {
+    log(`The summary couldn't be written to ${file}: ${e?.message ?? e}`);
+    return { code: worst, reports, summary, file: null };
+  }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1047,9 +1701,18 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
       if (v !== 'quick' && v !== 'full') return { error: '--profile takes quick or full' };
       o.profile = v;
     } else if (a === '--device') {
-      const v = (argv[++i] ?? '').toUpperCase();
-      if (!/^(NPU|CPU|GPU)$/.test(v)) return { error: '--device takes NPU, CPU or GPU' };
-      o.device = v;
+      const vs = (argv[++i] ?? '').toUpperCase().split(',');
+      if (vs.some((v) => !/^(NPU|CPU|GPU)$/.test(v)) || new Set(vs).size < vs.length) return { error: '--device takes NPU, CPU or GPU, or several of them (NPU,GPU,CPU)' };
+      if (vs.length > 1) o.devices = vs;
+      else o.device = vs[0];
+    } else if (a === '--runs') {
+      const v = Number(argv[++i]);
+      if (!Number.isInteger(v) || v < 1 || v > 20) return { error: '--runs takes how many times each device runs, 1 to 20' };
+      o.runs = v;
+    } else if (a === '--summary') {
+      o.summary = argv.slice(i + 1);
+      if (!o.summary.length) return { error: '--summary takes the reports to sum up (npu-bench-*.json)' };
+      i = argv.length;
     } else if (a === '--generation') {
       const v = argv[++i];
       if (!v) return { error: '--generation takes an older Snapdragon to play on this one (snapdragon-x)' };
@@ -1077,13 +1740,22 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
 if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const o = parseBenchArgs(process.argv.slice(2));
   if ('error' in o) {
-    console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--meter auto|emi|shelly:<address>|nvidia|battery] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]`);
+    console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU[,...]] [--runs <n>] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--meter auto|emi|shelly:<address>|nvidia|battery] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]\n       node npu-bench.ts --summary <report.json>...`);
     process.exit(2);
   }
   if (o.mix) {
     for (const line of mixSummary(readTally(o.mix))) console.log(line);
     process.exit(0);
   }
-  const { code } = await npuBench(o);
+  if (o.summary) {
+    const reports = o.summary.map((f) => JSON.parse(readFileSync(f, 'utf8')) as BenchReport);
+    const summary = benchSummary(reports);
+    for (const line of summarySay(summary)) console.log(line);
+    const file = o.summary[0].replace(/(\.json)?$/i, '-summary.json');
+    writeFileSync(file, JSON.stringify(summary, null, 2) + '\n');
+    console.log(`The summary: ${file}`);
+    process.exit(0);
+  }
+  const { code } = o.devices || o.runs ? await npuBenchSeries({ ...o, devices: o.devices ?? [o.device ?? 'NPU'], runs: o.runs ?? 1 }) : await npuBench(o);
   process.exit(code);
 }

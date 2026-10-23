@@ -567,6 +567,15 @@ So a chat that finds the embedding server idle pays about half a second once, an
 
 Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embeddings), OpenVINO Model Server 140 MB (and its Visual C++ runtime, 3 MB), FastFlowLM 40 MB.
 
+**Off the NPU, for the benchmark (kit 2.99.0).** GenieX and FastFlowLM run on the NPU only, so a route of theirs says how the benchmark runs its model on the graphics and the processor instead (`offNpu`): the same model as llama.cpp reads it, at the NPU's context, served by setup's pinned llama.cpp build for the device (`variantFor`), with setup's embedding model beside it. Only `npu-bench --device GPU|CPU` uses it; setup and the keeper never do.
+
+| Route | The model off the NPU | Files | Context | Builds |
+|---|---|---|---|---|
+| Qualcomm X2 | `unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`, the very files GenieX pulls (their `present`: GenieX's cache) | 1.9 GB, none downloaded where GenieX has them | 2,560, GenieX's `--nctx` | b11734 `opencl-adreno-arm64` and `cpu-arm64` |
+| AMD | `qwen3.5:2b` as unsloth's Q4_0 GGUF and F16 projector (`unsloth/Qwen3.5-2B-GGUF` at f6d5376b, Apache-2.0), its thinking off (`--reasoning-budget 0`): FastFlowLM's own weights are its NPU format (q4nx), which nothing else reads | 1.9 GB, into the tools home's `models\` | 4,096, FastFlowLM's `--ctx-len` | b11734 `vulkan-x64` and `cpu-x64` |
+
+Intel's route needs none: OpenVINO Model Server runs the same model on the graphics and the processor (`--target_device`).
+
 ## Licences
 
 | What | Licence | Note |

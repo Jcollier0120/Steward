@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.173
+
+**It hands out the kit 2.99.0, whose NPU benchmark compares the NPU with the graphics and the processor on every kind of PC, and measures the staff's searches too.**
+
+### What's new
+
+- **The NPU against the rest of the chip.** The NPU benchmark can now run the same model on the NPU, the built-in graphics and the processor on a Snapdragon or AMD laptop, as it already could on Intel. It runs each three times in turn and sums them up: how fast each is, and how much energy the whole PC spends on each piece of work and on keeping the model loaded all day.
+- **Searches measured.** It also measures the embedding model the staff use for searching their files: how fast it answers, and what it costs in energy.
+
+### What changed
+
+- The benchmark no longer stops when the staff's own AI is running: it runs beside it, without disturbing it, and says the figures aren't for ranking.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.172
 
 **It hands out the kit 2.98.1. On a Snapdragon X2, the local AI no longer keeps the processor busy while it writes, and a PC on GenieX 0.9.3 gets back the memory Castellan's build saves.**

@@ -62,7 +62,8 @@
         "cpuBusyPercent": { "type": ["number", "null"] },
         "windowsBuild": { "type": ["string", "null"] },
         "make": { "type": ["string", "null"] },
-        "model": { "type": ["string", "null"] }
+        "model": { "type": ["string", "null"] },
+        "beside": { "type": "array", "items": { "type": "number" }, "description": "The route's own ports, which another server held (the manor's own, say), so the run used others. Shown, not ranked." }
       }
     },
     "run": {
@@ -82,7 +83,8 @@
         },
         "streamed": { "type": ["boolean", "null"] },
         "usageReported": { "type": ["boolean", "null"] },
-        "played": { "type": "string", "description": "Only on a played run (--generation): the older Snapdragon's generation this NPU played. Never ranked." }
+        "played": { "type": "string", "description": "Only on a played run (--generation): the older Snapdragon's generation this NPU played. Never ranked." },
+        "plugin": { "enum": ["kit", "kit-copy", "server", "other"], "description": "Where the kit builds the server's plugin (GenieX's): the kit's build installed (kit), a copy of the server running the kit's build (kit-copy), the server's own (server: not ranked), or neither (other)." }
       }
     },
     "results": {
@@ -99,8 +101,9 @@
         "jobs": { "type": "object", "additionalProperties": { "type": "object", "required": ["tries", "median", "spread", "steady", "passed"], "properties": { "passed": { "type": "number" }, "answerTokens": { "type": "array", "items": { "type": ["number", "null"] } }, "firstTokenMs": { "type": "array", "items": { "type": ["number", "null"] } }, "spreadAtLength": { "type": ["number", "null"] } } } },
         "jobTimeS": { "type": ["number", "null"] },
         "memory": { "type": ["object", "null"], "properties": { "workingSetBytes": { "type": "number" }, "privateBytes": { "type": "number" } } },
+        "embed": { "type": ["object", "null"], "required": ["server", "model", "loadMs", "queryMs", "requestMs", "texts", "tokens", "tokensPerSecond", "dims"], "properties": { "server": { "type": ["string", "null"] }, "model": { "type": ["string", "null"] }, "loadMs": { "type": ["number", "null"] }, "queryMs": { "$ref": "#/$defs/measure", "type": "object" }, "requestMs": { "$ref": "#/$defs/measure", "type": "object" }, "texts": { "type": "number" }, "tokens": { "type": ["number", "null"] }, "tokensPerSecond": { "type": ["number", "null"] }, "dims": { "type": ["number", "null"] } } },
         "holding": { "type": ["object", "null"], "properties": { "minutes": { "type": "number" }, "firstMinuteMs": { "type": ["number", "null"] }, "lastMinuteMs": { "type": ["number", "null"] }, "held": { "type": ["number", "null"] } } },
-        "energy": { "type": ["object", "null"], "properties": { "restMilliwatts": { "type": "number" }, "loadMilliwatts": { "type": "number" }, "jobs": { "type": "number" }, "tokens": { "type": "number" }, "millijoulesPerToken": { "type": ["number", "null"] }, "meter": { "type": "object", "required": ["kind", "say", "whole"], "properties": { "kind": { "type": "string" }, "say": { "type": "string" }, "whole": { "type": "string" } } }, "charging": { "type": ["boolean", "null"] }, "idle": { "type": "object", "properties": { "unloadedMilliwatts": { "type": ["object", "null"], "additionalProperties": { "type": "number" } }, "loadedMilliwatts": { "type": ["object", "null"], "additionalProperties": { "type": "number" } }, "keepLoadedMilliwatts": { "type": ["number", "null"] } } }, "restParts": { "type": "object", "additionalProperties": { "type": "number" } }, "loadParts": { "type": "object", "additionalProperties": { "type": "number" } }, "batches": { "type": "object", "additionalProperties": { "type": "object", "required": ["count", "answered", "seconds", "tokens", "millijoules", "extraMillijoules", "millijoulesEach", "millijoulesPerToken"], "properties": { "count": { "type": "number" }, "answered": { "type": "number" }, "seconds": { "type": "number" }, "tokens": { "type": "number" }, "millijoules": { "type": "object", "additionalProperties": { "type": "number" } }, "extraMillijoules": { "type": "object", "additionalProperties": { "type": "number" } }, "millijoulesEach": { "type": ["number", "null"] }, "millijoulesPerToken": { "type": ["number", "null"] } } } } } }
+        "energy": { "type": ["object", "null"], "properties": { "restMilliwatts": { "type": "number" }, "loadMilliwatts": { "type": "number" }, "jobs": { "type": "number" }, "tokens": { "type": "number" }, "millijoulesPerToken": { "type": ["number", "null"] }, "meter": { "type": "object", "required": ["kind", "say", "whole"], "properties": { "kind": { "type": "string" }, "say": { "type": "string" }, "whole": { "type": "string" } } }, "charging": { "type": ["boolean", "null"] }, "idle": { "type": "object", "properties": { "unloadedMilliwatts": { "type": ["object", "null"], "additionalProperties": { "type": "number" } }, "loadedMilliwatts": { "type": ["object", "null"], "additionalProperties": { "type": "number" } }, "keepLoadedMilliwatts": { "type": ["number", "null"] } } }, "embed": { "type": "object", "properties": { "loadedMilliwatts": { "type": ["object", "null"], "additionalProperties": { "type": "number" } }, "keepLoadedMilliwatts": { "type": ["number", "null"] } } }, "restParts": { "type": "object", "additionalProperties": { "type": "number" } }, "loadParts": { "type": "object", "additionalProperties": { "type": "number" } }, "batches": { "type": "object", "additionalProperties": { "type": "object", "required": ["count", "answered", "seconds", "tokens", "millijoules", "extraMillijoules", "millijoulesEach", "millijoulesPerToken"], "properties": { "count": { "type": "number" }, "answered": { "type": "number" }, "seconds": { "type": "number" }, "tokens": { "type": "number" }, "millijoules": { "type": "object", "additionalProperties": { "type": "number" } }, "extraMillijoules": { "type": "object", "additionalProperties": { "type": "number" } }, "millijoulesEach": { "type": ["number", "null"] }, "millijoulesPerToken": { "type": ["number", "null"] } } } } } }
       }
     },
     "quality": {

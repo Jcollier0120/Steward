@@ -124,6 +124,8 @@ export interface NpuRoute {
   embeddings?: string;
   /** Its embeddings' own server, when the route's server serves none (GenieX's): set up and started beside it. */
   embedServer?: NpuEmbedServer;
+  /** Its models off the NPU, for the benchmark's graphics and processor runs where its server runs on the NPU only (NpuOffNpu). */
+  offNpu?: NpuOffNpu;
   vision?: string;
   licence: string;
   /** Its maker's terms for the server and what it carries, named before it's downloaded (GenieX, the QAIRT runtime inside it). */
@@ -310,6 +312,30 @@ export interface NpuEmbedFile {
   size: number;
   sha256: string;
   licence: string;
+}
+
+/**
+ * A route's models off the NPU (kit 2.99.0), for the benchmark's graphics and processor runs where the route's own
+ * server runs on the NPU only (GenieX, FastFlowLM): llama.cpp's llama-server, the build setup pins (setup.ts'
+ * LLAMA_PIN), with the same model as a GGUF, by the route's model id. Each file is taken where `present` says (GenieX's
+ * own copy of the very file) or downloaded into the tools home's models folder, and checked against its size and SHA-256.
+ */
+export interface NpuOffNpu {
+  /** The context it runs with: the NPU server's own (GenieX's --nctx, FastFlowLM's --ctx-len). */
+  context: number;
+  /** Each model's files, and llama-server arguments it needs beside the kit's (its thinking off, where its NPU server serves it so). */
+  models: Record<string, { files: NpuOffNpuFile[]; serve?: string[] }>;
+  basis: string;
+}
+
+/** One GGUF of a model off the NPU: the model, or its projector; a Hugging Face repository at one revision, pinned. */
+export interface NpuOffNpuFile extends PinnedFile {
+  role: 'model' | 'mmproj';
+  repo: string;
+  revision: string;
+  file: string;
+  /** Where another program keeps the very same file, used in place when it is there and pinned. */
+  present?: string;
 }
 
 /** An embedding model the route's own program pulls, as it pulls the chat model, checked against its pinned files. */

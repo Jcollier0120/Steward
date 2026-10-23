@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -29,6 +29,11 @@ const X64 = 'cpu|9|8|Intel(R) Core(TM) Ultra 7 256V\nram|16849174528\n';
 // The owner's Snapdragon laptop, as detection reads it (npu-vendors.test.ts).
 const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
 const ARM = 'cpu|12|18|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm Oryon(TM) CPU\nram|51127103488\n';
+// An AMD Ryzen AI laptop (npu-vendors.test.ts), and the built-in graphics of each, as DXGI_PS lists them.
+const STRIX = 'npu2|32.0.203.376|2026-06-01|Advanced Micro Devices, Inc.|PCI\\VEN_1022&DEV_17F0&SUBSYS_88EE103C&REV_10\\4&2EA2F1A3&0&0141|NPU Compute Accelerator Device';
+const RYZEN = 'cpu|9|12|AMD Ryzen AI 9 HX 370 w/ Radeon 890M\nram|34359738368\n';
+const ADRENO = 'adapter|0|1297040209|0|25769803776|0x00000000_0x0000c3c3|0|Qualcomm(R) Adreno(TM) X2-90 GPU\n';
+const RADEON = 'adapter|0|4098|536870912|17179869184|0x00000000_0x0000b2b2|0|AMD Radeon(TM) 890M Graphics\n';
 const SUITE = B.SUITE;
 /** The line freshPrompt puts first in every read and job: the run's tag and a count. */
 const FRESH = /^\[bench [a-z0-9]*-\d+\]\n/;
@@ -96,7 +101,7 @@ function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: b
     if (prompt.endsWith(SUITE.read.question)) return '42';
     return answers.get(prompt) ?? 'I do not know';
   };
-  const start = async () => {
+  const start = async (at = port) => {
     server = createServer((req, res) => {
       let body = '';
       req.on('data', (c) => (body += c));
@@ -120,7 +125,7 @@ function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: b
         res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: text } }], ...(usage ? { usage } : {}) }));
       });
     });
-    await new Promise<void>((r) => server!.listen(port, '127.0.0.1', r));
+    await new Promise<void>((r) => server!.listen(at, '127.0.0.1', r));
   };
   const stop = async () => {
     if (!server) return;
@@ -132,15 +137,47 @@ function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: b
   return { seen, pictures, start, stop, starts: 0, commands: [] as string[][] };
 }
 
+/** A fake embedding server (OpenVINO Model Server's or llama.cpp's /v1/embeddings): a short vector an input, and the tokens it counted. */
+function fakeEmbed() {
+  const seen: { input: string | string[] }[] = [];
+  let server: Server | null = null;
+  const start = async (at: number) => {
+    server = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[]}');
+        const j = JSON.parse(body);
+        seen.push(j);
+        const input: string[] = Array.isArray(j.input) ? j.input : [j.input];
+        const tokens = input.reduce((n, t) => n + Math.ceil(t.length / 4), 0);
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: input.map((_, index) => ({ index, embedding: [0.1, 0.2, 0.3, 0.4] })), usage: { prompt_tokens: tokens, total_tokens: tokens } }));
+      });
+    });
+    await new Promise<void>((r) => server!.listen(at, '127.0.0.1', r));
+  };
+  const stop = async () => {
+    if (!server) return;
+    const s = server;
+    server = null;
+    s.closeAllConnections();
+    await new Promise((r) => s.close(r));
+  };
+  return { seen, start, stop, starts: 0, commands: [] as string[][] };
+}
+
 const PLUGGED = { onBattery: false, batteryPercent: 80, powerMode: 'balanced', brightness: 60, windowsBuild: '26200', make: 'HP', model: 'HP OmniBook X Laptop 17-dd0xxx' };
 
 /**
  * The catalog on a free port, a scratch tools home with the server "installed", and a suite that holds for moments, not
- * minutes. On a Snapdragon (`vendor: 'qualcomm'`), GenieX is "installed" where its installer puts it, in a scratch
- * %LOCALAPPDATA%, and its embedding server is left out: the benchmark asks for no embeddings.
+ * minutes and doesn't wait for a quiet processor. On a Snapdragon (`vendor: 'qualcomm'`), GenieX is "installed" where
+ * its installer puts it, in a scratch %LOCALAPPDATA%, and its embedding server is left out: the benchmark measures no
+ * embeddings there. Intel's is a fake of its own (`embed`), on a port of its own; every server is started on the port
+ * its entry says, so a run moved off a held port (`held`) or onto llama.cpp's finds its fake there.
  */
-async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number; conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null; npu?: string; vendor?: 'intel' | 'qualcomm'; emi?: () => string } = {}) {
+async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number | (() => number); conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null; npu?: string; vendor?: 'intel' | 'qualcomm' | 'amd'; emi?: () => string; cards?: string; held?: (port: number) => boolean } = {}) {
   const port = await freePort();
+  const embedPort = await freePort();
   const vendor = o.vendor ?? 'intel';
   const catalog = structuredClone(V.NPU_CATALOG);
   const route = catalog.routes[vendor];
@@ -149,21 +186,27 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
   for (const m of [...route.models, ...Object.values(route.generations).flatMap((g) => [...(g.models ?? []), ...(g.smallPc?.models ?? [])])]) delete m.pinned;
   const tools = mkdtempSync(path.join(home, 'tools-'));
   let env: NodeJS.ProcessEnv = { ...process.env, REEVE_HOME: home };
-  if (vendor === 'qualcomm') {
-    delete route.embedServer;
+  if (vendor !== 'intel') {
+    if (vendor === 'qualcomm') delete route.embedServer;
     env = Object.fromEntries(Object.entries(env).filter(([k]) => !/^(localappdata|userprofile)$/i.test(k)));
     Object.assign(env, { LOCALAPPDATA: path.join(tools, 'local'), USERPROFILE: path.join(tools, 'profile') });
+  }
+  if (route.embedServer) {
+    route.embedServer.port = embedPort;
+    delete (route.embedServer.model as { pinned?: unknown }).pinned;
   }
   const exe = V.serverExe(route, tools, env);
   mkdirSync(path.dirname(exe), { recursive: true });
   writeFileSync(exe, '');
   for (const f of route.runtime?.files ?? []) writeFileSync(path.join(path.dirname(exe), f), '');
   const fake = fakeOvms(port, o);
+  const embed = fakeEmbed();
   const suite = structuredClone(SUITE);
   suite.holding.minutes = 0.002;
   suite.energy.restSeconds = 0.05;
   suite.energy.loadMinutes = 0.002;
   suite.quiet.samples = 2;
+  suite.quiet.waitMinutes = 0;
   // A fake in this process answers in a millisecond or two, so its tries can't agree to 15%; and on a busy PC, or one
   // held to the checks pace's cap, one try now and then waits a tenth of a second for the processor: never noisy here.
   suite.steady.maxSpread = Infinity;
@@ -182,22 +225,25 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
     suite,
     kitVersion: '2.62.0',
     env,
-    detection: parseDetection(vendor === 'qualcomm' ? `${ARM}${o.npu ?? X2}\n` : `${X64}${o.npu ?? LUNAR}\n`),
+    detection: parseDetection(vendor === 'qualcomm' ? `${ARM}${o.npu ?? X2}\n${o.cards ?? ''}` : vendor === 'amd' ? `${RYZEN}${o.npu ?? STRIX}\n${o.cards ?? ''}` : `${X64}${o.npu ?? LUNAR}\n${o.cards ?? ''}`),
     out: path.join(tools, 'report.json'),
     log: (l: string) => lines.push(l),
     io: {
       setup: { run: async () => ({ code: 0, out: '' }) },
       // The route's own version installed: no server of this PC's is asked which it is.
       serverVersion: async (r: any) => r.version,
+      // The embedding server is started with its endpoint as the entry's chat (npu-bench's step 5).
       start: async (e: any) => {
-        fake.starts++;
-        fake.commands.push(e.chat.startCommand);
-        await fake.start();
-        return { pid: 4242, stop: fake.stop };
+        const f = e.chat === e.embed ? embed : fake;
+        f.starts++;
+        f.commands.push(e.chat.startCommand);
+        await f.start(Number(new URL(e.chat.baseUrl).port));
+        return { pid: 4242, stop: f.stop };
       },
+      portFree: async (p: number) => !o.held?.(p),
       memory: async () => ({ workingSetBytes: 3.6 * 1024 ** 3, privateBytes: 1.2 * 1024 ** 3 }),
       conditions: async () => o.conditions ?? PLUGGED,
-      cpuBusy: async () => o.busy ?? 4,
+      cpuBusy: async () => (typeof o.busy === 'function' ? o.busy() : (o.busy ?? 4)),
       dischargeRate: async () => (o.rate ? o.rate(working()) : null),
       // No Energy Meter counters unless a test gives them: --energy falls back to the battery, as before kit 2.98.0.
       meter: { powerShell: async () => o.emi?.() ?? '' },
@@ -206,7 +252,7 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
       clearCache: (dir: string) => cleared.push(dir),
     },
   };
-  return { port, catalog, tools, fake, lines, cleared, opts };
+  return { port, embedPort, catalog, tools, fake, embed, lines, cleared, opts };
 }
 
 test('the suite: 24 graded questions, six of each kind, three must-pass, ids unique, and every prompt fits under the smallest cap', () => {
@@ -328,8 +374,14 @@ test("the route for a run: its own compile cache, a cap where the server has one
   assert.throws(() => B.routeWithModel(intel, 'nobody/nothing'), /use --candidate/);
 });
 
-test('the arguments: --profile, --device, --model or --candidate, --cap, --energy, --yes, --no-setup, --out', () => {
+test('the arguments: --profile, --device (one or several), --runs, --summary, --model or --candidate, --cap, --energy, --yes, --no-setup, --out', () => {
   assert.deepEqual(B.parseBenchArgs(['--profile', 'quick', '--device', 'gpu', '--candidate', 'a/b', '--cap', '2048', '--energy', '--yes', '--out', 'r.json']), { profile: 'quick', device: 'GPU', candidate: 'a/b', cap: 2048, energy: true, yes: true, out: 'r.json' });
+  assert.deepEqual(B.parseBenchArgs(['--device', 'npu,gpu,cpu', '--runs', '3', '--energy']), { devices: ['NPU', 'GPU', 'CPU'], runs: 3, energy: true });
+  assert.match((B.parseBenchArgs(['--device', 'NPU,TPU']) as any).error, /NPU, CPU or GPU, or several of them/);
+  assert.match((B.parseBenchArgs(['--device', 'NPU,NPU']) as any).error, /several of them/);
+  assert.match((B.parseBenchArgs(['--runs', '0']) as any).error, /1 to 20/);
+  assert.deepEqual(B.parseBenchArgs(['--summary', 'a.json', 'b.json']), { summary: ['a.json', 'b.json'] }, 'every argument after it a report');
+  assert.match((B.parseBenchArgs(['--summary']) as any).error, /the reports to sum up/);
   assert.deepEqual(B.parseBenchArgs(['--meter', 'shelly:192.168.1.40']), { meter: 'shelly:192.168.1.40', energy: true }, 'a meter asks for energy');
   assert.deepEqual(B.parseBenchArgs(['--meter', 'emi']), { meter: 'emi', energy: true });
   assert.ok('error' in B.parseBenchArgs(['--meter', 'watts']));
@@ -372,6 +424,25 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.ok(report.results.holding!.firstMinuteMs! > 0);
   assert.equal(report.results.energy, null, 'no energy without --energy');
   assert.equal(s.fake.starts, 2, 'a cold start, and a start again from the cache');
+  // Then the embedding server by itself, once the chat server has stopped: a query, and requests of the suite's texts,
+  // each request's texts its own.
+  assert.equal(s.embed.starts, 1);
+  const e = report.results.embed!;
+  assert.ok(e, s.lines.join('\n'));
+  assert.equal(e.server, `OpenVINO Model Server ${V.NPU_CATALOG.routes.intel.embedServer!.version}`);
+  assert.equal(e.model, 'OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov');
+  assert.equal(e.dims, 4);
+  assert.equal(e.texts, SUITE.embed!.texts);
+  assert.equal(e.queryMs.tries.length, SUITE.tries.full);
+  assert.ok(e.tokens! >= SUITE.embed!.texts * (SUITE.embed!.chars / 4) && e.tokensPerSecond! > 0, JSON.stringify(e));
+  const batches = s.embed.seen.filter((j) => Array.isArray(j.input)).map((j) => j.input as string[]);
+  assert.equal(batches.length, SUITE.warmups + SUITE.tries.full);
+  for (const b of batches) {
+    assert.equal(b.length, SUITE.embed!.texts);
+    assert.ok(b.every((t) => t.length >= SUITE.embed!.chars && /^\[embed [a-z0-9]+-\d+-\d+\]\n/.test(t)), b[0].slice(0, 80));
+  }
+  assert.equal(new Set(batches.flat()).size, batches.flat().length, 'no text asked twice');
+  assert.ok(s.lines.some((l) => /^embeddings: OpenVINO\/Qwen3-Embedding-0\.6B-int4-cw-ov's first vector [\d.]+ s after a start; a query \d+ ms; 16 texts \d+ ms \(\d+ tokens, \d+ a second\)$/.test(l)), s.lines.join('\n'));
   assert.match(s.cleared[0], /\.bench-cache-npu$/);
   // Every request was streamed, with the server's usage asked for; Intel's route has no quirks, so none starts with a nonce.
   assert.ok(s.fake.seen.every((j) => j.stream === true && j.stream_options?.include_usage === true));
@@ -436,7 +507,7 @@ test("a server that doesn't stream or count tokens is measured all the same, and
   assert.equal(report.results.holding, null, 'a quick run skips holding speed');
 });
 
-test("--no-setup with the chat model here and Intel's embedder not: nothing pulled, the suite asks for no embeddings; with the chat model gone too, refused, and the prompt names the chat model's size", async () => {
+test("--no-setup with the chat model here and Intel's embedder not: nothing pulled, the embeddings not measured; with the chat model gone too, refused, and the prompt counts the embedder with the chat model", async () => {
   // Intel's embedding model is in the route's embedServer, not its models: on WEASELDEV02 (2026-10-17) setup pulled it
   // (428 MB through OpenVINO Model Server) past --no-setup, because the bench counted only the route's models.
   const s = await scene();
@@ -460,8 +531,12 @@ test("--no-setup with the chat model here and Intel's embedder not: nothing pull
   assert.deepEqual(ran.filter((r) => /pull/i.test(r) || r.includes(route.embedServer!.model.id)), [], 'nothing pulled, the embedder least of all');
   assert.doesNotMatch(s.lines.join('\n'), /downloading/);
   assert.ok(!existsSync(embedder));
+  assert.equal(report.results.embed, null);
+  assert.equal(s.embed.starts, 0);
+  assert.ok(s.lines.includes("embeddings: not measured: OpenVINO Model Server or its model isn't here, and --no-setup was given"), s.lines.join('\n'));
 
-  // Nothing here: --no-setup refuses before anything runs, and the prompt counts what setup would fetch, the chat model.
+  // Nothing here: --no-setup refuses before anything runs, and the prompt counts what setup would fetch: the chat model,
+  // and the embedding model the suite's embeddings run on.
   const bare = await scene();
   const before = ran.length;
   const off = await B.npuBench({ ...bare.opts, io: { ...bare.opts.io, setup: io.setup }, yes: false, setup: false, confirm });
@@ -472,8 +547,9 @@ test("--no-setup with the chat model here and Intel's embedder not: nothing pull
   const no = await B.npuBench({ ...bare.opts, io: { ...bare.opts.io, setup: io.setup }, yes: false, confirm });
   assert.equal(no.code, 1);
   const chat = models.find((m: any) => m.id === no.report.run.model)!;
-  assert.equal(asked, `Download ${mb(chat.size)} (${route.server} ${route.version} and its models)? [y/N] `);
-  assert.match(no.report.marks[0].say, new RegExp(`would download ${mb(chat.size)}: run again with --yes`));
+  const both = chat.size + route.embedServer!.model.size!;
+  assert.equal(asked, `Download ${mb(both)} (${route.server} ${route.version} and its models)? [y/N] `);
+  assert.match(no.report.marks[0].say, new RegExp(`would download ${mb(both)}: run again with --yes`));
   assert.equal(bare.fake.starts, 0, 'nothing started where it refused');
   assert.equal(ran.length, before, 'nor run');
 });
@@ -566,15 +642,138 @@ test("a run on a Snapdragon: GenieX's nonce first in every request, and each pic
   assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
 });
 
-test('on a Snapdragon GenieX is the NPU only: --device GPU and --cap are refused before anything starts', async () => {
+test("on a Snapdragon --cap is refused before anything starts, and so is --device GPU for a candidate: it has no llama.cpp form", async () => {
   const s = await scene({ vendor: 'qualcomm' });
-  const gpu = await B.npuBench({ ...s.opts, device: 'GPU' });
-  assert.equal(gpu.code, 2);
-  assert.match(gpu.report.marks[0].say, /GenieX runs on the NPU only/);
   const cap = await B.npuBench({ ...s.opts, cap: 4096 });
   assert.equal(cap.code, 2);
   assert.match(cap.report.marks[0].say, /no prompt cap to set/);
+  const candidate = await B.npuBench({ ...s.opts, device: 'GPU', candidate: 'ai-hub-models/Qwen3-4B-Instruct-2507' });
+  assert.equal(candidate.code, 2);
+  assert.equal(candidate.report.marks[0].say, 'GenieX runs ai-hub-models/Qwen3-4B-Instruct-2507 on the NPU only, and npu-vendors.json has no llama.cpp form of it (the route\'s offNpu)');
   assert.equal(s.fake.starts, 0);
+});
+
+/**
+ * The route's llama.cpp form of its model (offNpu) made small: each file a few bytes of the test's own, its pin those
+ * bytes', written where its `present` says (GenieX's cache) when `write`.
+ */
+function smallOffNpu(s: Awaited<ReturnType<typeof scene>>, vendor: 'qualcomm' | 'amd', write: boolean) {
+  const files: Record<string, { size: number; sha256: string }> = {};
+  for (const m of Object.values(s.catalog.routes[vendor].offNpu!.models)) {
+    for (const f of m.files) {
+      const bytes = Buffer.from(`${f.role}: ${f.file}`);
+      f.size = bytes.length;
+      f.sha256 = createHash('sha256').update(bytes).digest('hex');
+      files[f.file] = { size: f.size, sha256: f.sha256 };
+      if (write && f.present) {
+        const p = V.expandRoute(f.present, { tools: s.tools, env: s.opts.env });
+        mkdirSync(path.dirname(p), { recursive: true });
+        writeFileSync(p, bytes);
+      }
+    }
+  }
+  return files;
+}
+
+/** setUpOffNpu's downloads and unpacking, as fakes that keep what they were asked. */
+function fakeFetches() {
+  const downloads: { what: string; url: string; dest: string; size: number }[] = [];
+  const unpacked: [string, string][] = [];
+  return {
+    downloads,
+    unpacked,
+    io: { download: async (d: any) => void downloads.push({ what: d.what, url: d.url, dest: d.dest, size: d.size }), unpack: (zip: string, into: string) => void unpacked.push([zip, into]) },
+  };
+}
+
+test("--device GPU on a Snapdragon: the X2's own model, GenieX's files, on llama.cpp's Adreno build at GenieX's context, the Adreno found by name; embeddings beside it", async () => {
+  const s = await scene({ vendor: 'qualcomm', cards: ADRENO });
+  const files = smallOffNpu(s, 'qualcomm', true);
+  const f = fakeFetches();
+  const listed: string[] = [];
+  const listDevices = async (exe: string) => (listed.push(exe), "ggml_opencl: device: 'QUALCOMM Adreno(TM) X2-90 (OpenCL 3.0 Adreno(TM) 840)'\n");
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick', device: 'GPU', io: { ...s.opts.io, setup: { ...s.opts.io.setup, ...f.io }, listDevices } });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.equal(report.run.device, 'GPU');
+  assert.equal(report.run.server, 'llama.cpp b11734 (opencl-adreno-arm64)');
+  assert.equal(report.run.model, 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0', "the X2's own model, as GenieX runs it on the NPU");
+  assert.deepEqual(report.run.files, files);
+  assert.equal(report.run.cap, null);
+  assert.equal(report.quality.passed, 24);
+  assert.equal(report.vision!.passed, 4);
+  // GenieX's model files are where its pull put them: only llama.cpp's build and setup's embedding model are fetched.
+  const folder = path.join(s.tools, 'servers', 'llama.cpp', 'llama.cpp-b11734-opencl-adreno-arm64');
+  assert.deepEqual(f.downloads.map((d) => d.what), ['llama.cpp b11734 (opencl-adreno-arm64)', 'Qwen3-Embedding-0.6B-Q8_0.gguf']);
+  assert.deepEqual(f.unpacked, [[f.downloads[0].dest, folder]]);
+  assert.deepEqual(listed, [path.join(folder, 'llama-server.exe')]);
+  // One server for chat and pictures, on the Adreno, at GenieX's --nctx; then the embedding server on its own port.
+  const cmd = s.fake.commands[0];
+  const arg = (c: string[], k: string) => c[c.indexOf(k) + 1];
+  assert.equal(cmd[0], portablePath(path.join(folder, 'llama-server.exe')));
+  assert.equal(arg(cmd, '--device'), 'GPUOpenCL');
+  assert.equal(arg(cmd, '-c'), '2560');
+  const cache = path.join(s.opts.env.USERPROFILE!, '.cache', 'geniex', 'models', 'unsloth', 'Qwen3-VL-2B-Instruct-GGUF');
+  assert.equal(arg(cmd, '-m'), portablePath(path.join(cache, 'Qwen3-VL-2B-Instruct-Q4_0.gguf')));
+  assert.equal(arg(cmd, '--mmproj'), portablePath(path.join(cache, 'mmproj-F16.gguf')));
+  assert.equal(Number(arg(cmd, '--port')), s.port + 100, "beside the route's own port, never on it");
+  assert.equal(s.embed.starts, 1);
+  assert.equal(Number(arg(s.embed.commands[0], '--port')), s.port + 101);
+  assert.ok(s.embed.commands[0].includes('--embeddings'));
+  assert.equal(report.results.embed!.server, 'llama.cpp b11734 (opencl-adreno-arm64)');
+  // llama.cpp has no quirks: no nonce, and each picture sent as a data: URL.
+  assert.ok(s.fake.seen.every((j) => !j.messages.some((m: any) => typeof m.content === 'string' && /^\[req [a-z0-9]+\]/.test(m.content))), 'no nonce');
+  assert.ok(s.fake.pictures.length && s.fake.pictures.every((p) => /^data:image\/png;base64,/.test(p.url)));
+  assert.ok(s.lines.some((l) => /^The NPU benchmark .*: unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0 on .*'s GPU with llama\.cpp b11734 \(opencl-adreno-arm64\), as GenieX runs on the NPU only$/.test(l)), s.lines.join('\n'));
+  assert.ok(s.lines.includes('  llama.cpp b11734 (opencl-adreno-arm64) is set up for: chat and pictures, and embeddings beside them, on GPUOpenCL'), s.lines.join('\n'));
+  assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
+  // A file that isn't the one pinned stops it before anything starts.
+  const bad = await scene({ vendor: 'qualcomm', cards: ADRENO });
+  smallOffNpu(bad, 'qualcomm', true);
+  bad.catalog.routes.qualcomm.offNpu!.models['unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0'].files[0].sha256 = '0'.repeat(64);
+  const r = await B.npuBench({ ...bad.opts, profile: 'quick', device: 'GPU', io: { ...bad.opts.io, setup: { ...bad.opts.io.setup, ...fakeFetches().io }, listDevices } });
+  assert.equal(r.code, 1);
+  assert.match(r.report.marks[0].say, /Qwen3-VL-2B-Instruct-Q4_0\.gguf isn't the file the kit pins \(its SHA-256 differs\)$/);
+  assert.equal(bad.fake.starts, 0);
+});
+
+test('--device CPU on an AMD Ryzen AI: Qwen3.5-2B as GGUF, downloaded once asked, on the processor with its thinking off and its pictures capped', async () => {
+  const s = await scene({ vendor: 'amd', cards: RADEON });
+  smallOffNpu(s, 'amd', false);
+  const f = fakeFetches();
+  const io = { ...s.opts.io, setup: { ...s.opts.io.setup, ...f.io }, listDevices: async () => assert.fail('the processor has no device to find') };
+  // Nothing is here: --no-setup refuses, and the prompt counts llama.cpp's build, the model's files and the embedder.
+  const no = await B.npuBench({ ...s.opts, io, device: 'CPU', setup: false });
+  assert.equal(no.code, 1);
+  assert.equal(no.report.marks[0].say, "llama.cpp b11734 (cpu-x64) or the model's files aren't here, and --no-setup was given");
+  let asked: string | null = null;
+  const refused = await B.npuBench({ ...s.opts, io, device: 'CPU', yes: false, confirm: async (q: string) => ((asked = q), false) });
+  assert.equal(refused.code, 1);
+  assert.match(asked!, /^Download [\d.]+ [MG]B \(llama\.cpp b11734 \(cpu-x64\) and the model's files\)\? \[y\/N\] $/);
+  assert.equal(f.downloads.length, 0, 'nothing fetched until asked');
+  assert.equal(s.fake.starts, 0);
+
+  const { code, report } = await B.npuBench({ ...s.opts, io, profile: 'quick', device: 'CPU' });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.equal(report.run.server, 'llama.cpp b11734 (cpu-x64)');
+  assert.equal(report.run.model, 'qwen3.5:2b');
+  assert.deepEqual(Object.keys(report.run.files!), ['Qwen3.5-2B-Q4_0.gguf', 'mmproj-F16.gguf']);
+  const models = path.join(s.tools, 'models', 'unsloth', 'Qwen3.5-2B-GGUF');
+  assert.deepEqual(f.downloads.map((d) => d.dest), [
+    path.join(s.tools, 'servers', 'llama.cpp', 'downloads', 'llama-b11734-bin-win-cpu-x64.zip'),
+    path.join(models, 'Qwen3.5-2B-Q4_0.gguf'),
+    path.join(models, 'mmproj-F16.gguf'),
+    path.join(s.tools, 'models', 'Qwen3-Embedding-0.6B-Q8_0.gguf'),
+  ]);
+  assert.match(f.downloads[1].url, /^https:\/\/huggingface\.co\/unsloth\/Qwen3\.5-2B-GGUF\/resolve\/f6d5376be1edb4d416d56da11e5397a961aca8ae\/Qwen3\.5-2B-Q4_0\.gguf/);
+  const cmd = s.fake.commands[0];
+  const arg = (k: string) => cmd[cmd.indexOf(k) + 1];
+  assert.ok(!cmd.includes('--device'), 'the processor: no device');
+  assert.equal(arg('-ngl'), '0');
+  assert.equal(arg('-c'), '4096', "FastFlowLM's --ctx-len");
+  assert.equal(arg('--reasoning-budget'), '0', 'its thinking off, as FastFlowLM serves it');
+  assert.equal(arg('--image-max-tokens'), '1024');
+  assert.ok(s.lines.some((l) => l.endsWith('is set up for: chat and pictures, and embeddings beside them, on the processor')), s.lines.join('\n'));
+  assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
 });
 
 test('--generation snapdragon-x on an X2: the X Elite played (its AI Hub build, from a folder of its own), the report says so, and it is never ranked', async () => {
@@ -766,12 +965,13 @@ function fakeEmi(seen: () => number) {
   return { read, state };
 }
 
-test('energy from the Energy Meter counters, plugged in: at rest without the model and with it, then a batch of each job and read, by part', async () => {
+test('energy from the Energy Meter counters, plugged in: at rest without the model and with it, then a batch of each job, read and embedding request, by part', async () => {
   let emi: ReturnType<typeof fakeEmi> | null = null;
   const s = await scene({ emi: () => emi!.read() });
-  emi = fakeEmi(() => s.fake.seen.length);
+  emi = fakeEmi(() => s.fake.seen.length + s.embed.seen.length);
   const meter = emi;
   s.opts.suite.energy.batch = { quick: 3, full: 3 };
+  s.opts.suite.embed!.batch = { quick: 3, full: 3 };
   const io = {
     ...s.opts.io,
     start: async (e: any) => {
@@ -793,7 +993,11 @@ test('energy from the Energy Meter counters, plugged in: at rest without the mod
   near(e.idle!.keepLoadedMilliwatts!, 1_000, 200, 'keeping it loaded');
   near(e.restMilliwatts, 11_000, 200, 'at rest before the batches');
   assert.ok(e.loadMilliwatts > e.restMilliwatts && e.jobs > 0 && e.millijoulesPerToken! > 0);
-  assert.deepEqual(Object.keys(e.batches!), ['triage', 'reply', 'summary', 'read-1024']);
+  assert.deepEqual(Object.keys(e.batches!), ['triage', 'reply', 'summary', 'read-1024', 'embed']);
+  // The embedding model by itself, after the chat server: what keeping it loaded costs, against no model.
+  near(e.embed!.keepLoadedMilliwatts!, 1_000, 200, 'keeping the embedder loaded');
+  near(e.embed!.loadedMilliwatts!.npu, 500, 50, "the NPU's, the embedder loaded");
+  assert.equal(e.batches!.embed.tokens, 3 * r.report.results.embed!.tokens!, "three requests, each the suite's texts");
   for (const [id, b] of Object.entries(e.batches!)) {
     assert.equal(b.count, 3, id);
     assert.equal(b.answered, 3, id);
@@ -805,6 +1009,9 @@ test('energy from the Energy Meter counters, plugged in: at rest without the mod
   assert.ok(s.lines.some((l) => /^energy at rest, no model loaded: 10\.0 W \(npu 0\.10 W\)$/.test(l)), s.lines.join('\n'));
   assert.ok(s.lines.some((l) => /^energy at rest, the model loaded: .*; keeping it loaded: [\d.]+ W$/.test(l)), s.lines.join('\n'));
   assert.ok(s.lines.some((l) => /^energy, 3 reply jobs: [\d.]+ J in [\d.]+ s; each over rest 5\.0\d J \(npu 2\.0\d J\)$/.test(l)), s.lines.join('\n'));
+  assert.ok(s.lines.some((l) => /^energy at rest, the embedding model loaded: .*; keeping it loaded: [\d.]+ W$/.test(l)), s.lines.join('\n'));
+  assert.ok(s.lines.some((l) => /^energy, 3 embedding requests of 16 texts: [\d.]+ J in [\d.]+ s; each over rest 5\.0\d J \(npu 2\.0\d J\)$/.test(l)), s.lines.join('\n'));
+  assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
 });
 
 test('--energy plugged in, on a PC without the counters, measures nothing and says what would', async () => {
@@ -813,4 +1020,194 @@ test('--energy plugged in, on a PC without the counters, measures nothing and sa
   assert.equal(r.code, 0, s.lines.join('\n'));
   assert.equal(r.report.results.energy, null);
   assert.ok(s.lines.includes("energy: not measured: this PC has no Energy Meter counters and is plugged in: unplug it for the battery's reading, or give a meter (--meter shelly:<address> for a plug, --meter nvidia for a card)"), s.lines.join('\n'));
+});
+
+/**
+ * GenieX "installed" in the scene's %LOCALAPPDATA% with its plugin as `installed` says, and its route's plugin patch made
+ * small: GenieX's own build, the kit's (in a kit folder of the test's own), and the libraries it needs, each a few bytes.
+ * Its QAIRT folder too, which a copy links rather than copies.
+ */
+function geniexWithPlugin(s: Awaited<ReturnType<typeof scene>>, installed: 'stock' | 'kit' | 'other') {
+  const route = s.catalog.routes.qualcomm;
+  const patch = V.pluginPatchOf(route, 'snapdragon-x2')!;
+  const sum = (b: string) => ({ size: Buffer.byteLength(b), sha256: createHash('sha256').update(b).digest('hex') });
+  const kitDir = mkdtempSync(path.join(home, 'kit-'));
+  patch.stock = sum('GenieX build');
+  patch.patched = { from: 'geniex/geniex_plugin.dll', ...sum('kit build') };
+  patch.needs = { 'llama.dll': sum('llama'), '..\\geniex.dll': sum('geniex') };
+  mkdirSync(path.join(kitDir, 'geniex'), { recursive: true });
+  writeFileSync(path.join(kitDir, 'geniex', 'geniex_plugin.dll'), 'kit build');
+  const target = path.join(V.expandRoute(patch.folder, { tools: s.tools, env: s.opts.env }), patch.file);
+  const dir = path.dirname(V.serverExe(route, s.tools, s.opts.env));
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, installed === 'stock' ? 'GenieX build' : installed === 'kit' ? 'kit build' : 'an update');
+  writeFileSync(path.join(path.dirname(target), 'llama.dll'), 'llama');
+  writeFileSync(path.join(dir, 'geniex.dll'), 'geniex');
+  mkdirSync(path.join(dir, 'qairt'), { recursive: true });
+  writeFileSync(path.join(dir, 'qairt', 'QnnHtp.dll'), 'qairt');
+  return { route, patch, target, dir, kitDir };
+}
+
+test("GenieX's plugin as this PC runs it: the kit's build where it's in; else a copy of GenieX with it, its QAIRT linked, gone after; its own where the copy can't run the kit's", async () => {
+  const s = await scene({ vendor: 'qualcomm' });
+  const g = geniexWithPlugin(s, 'stock');
+  const o = { tools: s.tools, env: s.opts.env, kitDir: g.kitDir };
+  const kp = (await B.kitPlugin(g.route, 'snapdragon-x2', o))!;
+  assert.equal(kp.plugin, 'kit-copy');
+  const copy = path.join(s.tools, 'bench', `geniex-cli-${g.route.version}`);
+  assert.equal(kp.exe, path.join(copy, 'geniex.exe'));
+  assert.equal(readFileSync(path.join(copy, 'llama_cpp', 'geniex_plugin.dll'), 'utf8'), 'kit build', "the kit's build in the copy");
+  assert.equal(readFileSync(path.join(copy, 'llama_cpp', 'llama.dll'), 'utf8'), 'llama', 'its folder copied whole');
+  assert.equal(readFileSync(path.join(copy, 'geniex.dll'), 'utf8'), 'geniex');
+  assert.ok(lstatSync(path.join(copy, 'qairt')).isSymbolicLink(), 'QAIRT linked, not copied');
+  assert.equal(readFileSync(path.join(copy, 'qairt', 'QnnHtp.dll'), 'utf8'), 'qairt');
+  assert.equal(readFileSync(g.target, 'utf8'), 'GenieX build', "GenieX's own files untouched");
+  kp.done();
+  assert.ok(!existsSync(copy), 'the copy goes after the run');
+  assert.equal(readFileSync(path.join(g.dir, 'qairt', 'QnnHtp.dll'), 'utf8'), 'qairt', 'and what its link pointed at stays');
+  assert.deepEqual(readdirSync(path.join(s.tools, 'bench')), []);
+
+  // A library the kit's build isn't made for, or no build in the kit: GenieX's own runs, and the run says why.
+  writeFileSync(path.join(path.dirname(g.target), 'llama.dll'), 'a later llama');
+  assert.deepEqual(await B.kitPlugin(g.route, 'snapdragon-x2', o).then((r: any) => [r.plugin, r.why]), ['server', "its llama.dll isn't the one the kit's build is made for"]);
+  writeFileSync(path.join(path.dirname(g.target), 'llama.dll'), 'llama');
+  assert.deepEqual(await B.kitPlugin(g.route, 'snapdragon-x2', { ...o, kitDir: s.tools }).then((r: any) => [r.plugin, r.why]), ['server', 'the kit has no geniex/geniex_plugin.dll']);
+  // The kit's build already in (the keeper put it in), or neither build (an update): it runs as it is.
+  writeFileSync(g.target, 'kit build');
+  assert.equal((await B.kitPlugin(g.route, 'snapdragon-x2', o))!.plugin, 'kit');
+  writeFileSync(g.target, 'an update');
+  assert.equal((await B.kitPlugin(g.route, 'snapdragon-x2', o))!.plugin, 'other');
+  // No plugin file, or a generation the kit builds none for: nothing to say.
+  assert.equal(await B.kitPlugin(g.route, 'snapdragon-x', o), null);
+  rmSync(g.target);
+  assert.equal(await B.kitPlugin(g.route, 'snapdragon-x2', o), null);
+});
+
+test("a run on an X2 with GenieX's own plugin in place runs a copy with the kit's build, ranked as this PC runs it; with GenieX's own, shown, not ranked", async () => {
+  const s = await scene({ vendor: 'qualcomm' });
+  const g = geniexWithPlugin(s, 'stock');
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick', io: { ...s.opts.io, kitDir: g.kitDir } });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.equal(report.run.plugin, 'kit-copy');
+  const copy = path.join(s.tools, 'bench', `geniex-cli-${g.route.version}`);
+  assert.ok(s.fake.commands.length && s.fake.commands.every((c) => c[0] === path.join(copy, 'geniex.exe')), JSON.stringify(s.fake.commands.map((c) => c[0])));
+  assert.ok(!existsSync(copy), 'removed after the run');
+  assert.deepEqual(report.marks.map((m: any) => m.code), ['quick']);
+  assert.ok(s.lines.some((l) => l.startsWith("GenieX's own plugin is in place, not the kit's build this PC runs once the keeper puts it in: the run takes a copy of GenieX with the kit's build")), s.lines.join('\n'));
+  assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
+
+  const own = await scene({ vendor: 'qualcomm' });
+  const g2 = geniexWithPlugin(own, 'stock');
+  const r2 = await B.npuBench({ ...own.opts, profile: 'quick', io: { ...own.opts.io, kitDir: own.tools } });
+  assert.equal(r2.code, 0, own.lines.join('\n'));
+  assert.equal(r2.report.run.plugin, 'server');
+  assert.deepEqual(r2.report.marks.map((m: any) => m.code), ['quick', 'plugin']);
+  assert.equal(r2.report.marks[1].say, "GenieX ran its own plugin, not the kit's build that this PC runs: shown, not ranked");
+  assert.equal(own.fake.commands[0][0], portablePath(V.serverExe(g2.route, own.tools, own.opts.env)));
+});
+
+test("a route's port another server holds (the manor's own): never stopped, the run takes ports beside it, and it isn't ranked", async () => {
+  let held = 0;
+  const s = await scene({ held: (p) => p === held });
+  held = s.port;
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick' });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.deepEqual(report.conditions.beside, [s.port]);
+  const cmd = s.fake.commands[0];
+  const port = Number(cmd[cmd.indexOf('--rest_port') + 1]);
+  assert.ok(port > s.port + 99 && port < s.port + 200, `${port}, beside ${s.port}`);
+  assert.deepEqual(report.marks.map((m: any) => m.code), ['quick', 'beside']);
+  assert.equal(report.marks[1].say, `the manor's own server ran beside it (port ${s.port}), so it ran on other ports: shown, not ranked`);
+  assert.ok(s.lines.some((l) => l.startsWith(`port ${s.port} is held (the manor's own server?): this run takes `) && l.endsWith(" beside it, and isn't ranked")), s.lines.join('\n'));
+  assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
+});
+
+test("a busy processor is waited for, up to the suite's minutes, before a run starts; one that stays busy is run all the same, and marked", async () => {
+  let looks = 0;
+  const s = await scene({ busy: () => (++looks <= 3 ? 60 : 3) });
+  s.opts.suite.quiet.waitMinutes = 1;
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick' });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.equal(report.conditions.cpuBusyPercent, 3);
+  assert.deepEqual(report.marks.map((m: any) => m.code), ['quick']);
+  const wait = s.lines.indexOf(`the processor is 60% busy: waiting up to 1 minutes for it to come under ${SUITE.quiet.cpuBusyMax}%`);
+  assert.ok(wait >= 0, s.lines.join('\n'));
+  assert.equal(s.lines[wait + 1], 'the processor is 3% busy: starting');
+  const busy = await scene({ busy: 60 });
+  busy.opts.suite.quiet.waitMinutes = 0.001;
+  const r = await B.npuBench({ ...busy.opts, profile: 'quick' });
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.report.marks.map((m: any) => m.code), ['quick', 'busy']);
+  assert.ok(busy.lines.includes('the processor is 60% busy: starting'), busy.lines.join('\n'));
+});
+
+test("a series: each device in turn, round after round, a device refused not tried again; the summary each figure's median, a column a device", async () => {
+  const s = await scene({ vendor: 'qualcomm' });
+  delete s.catalog.routes.qualcomm.offNpu;
+  const { code, reports, summary, file } = await B.npuBenchSeries({ ...s.opts, profile: 'quick', devices: ['NPU', 'GPU'], runs: 2 });
+  assert.equal(code, 2, 'the worst run');
+  assert.deepEqual(reports.map((r: any) => r.run.device), ['NPU', 'GPU', 'NPU'], 'the GPU refused once, then left out');
+  for (const [device, round] of [['npu', 1], ['gpu', 1], ['npu', 2]]) assert.ok(existsSync(path.join(s.tools, `report-${device}-${round}.json`)), `${device} ${round}`);
+  assert.equal(file, path.join(s.tools, 'report-summary.json'));
+  assert.deepEqual(JSON.parse(readFileSync(file!, 'utf8')), summary);
+  assert.equal(summary.format, 'castellan-npu-bench-summary/1');
+  assert.deepEqual(Object.keys(summary.devices), ['NPU', 'GPU']);
+  assert.equal(summary.devices.NPU.runs, 2);
+  assert.equal(summary.devices.GPU.runs, 1);
+  assert.equal(summary.devices.GPU.ranked, 0);
+  assert.equal(summary.devices.NPU.quality, 24);
+  assert.ok(s.lines.includes('Run 2 of 2: the NPU'), s.lines.join('\n'));
+  assert.ok(s.lines.includes('Summary: castellan-npu-bench/2, quick, each figure the median of its runs'), s.lines.join('\n'));
+  assert.ok(s.lines.some((l) => /^quality \(of 24\) +24 +—$/.test(l)), s.lines.join('\n'));
+});
+
+test("the summary: each figure the median of a device's runs; keeping a model loaded a day; each batch's job by part", () => {
+  const run = (device: string, cold: number, keep: number, each: number, npu: number) => ({
+    format: 'castellan-npu-bench-report/1',
+    suite: { version: 'castellan-npu-bench/2', kit: '2.99.0', profile: 'full' },
+    pc: { cpu: 'Snapdragon X2', chip: 'Snapdragon X2 Elite' },
+    marks: [],
+    ranked: true,
+    quality: { score: 1, passed: 24 },
+    vision: { passed: 4 },
+    run: { device, server: device === 'NPU' ? 'GenieX 0.9.3' : 'llama.cpp b11734 (cpu-arm64)', model: 'm' },
+    results: {
+      coldLoadMs: cold,
+      short: { median: cold / 10 },
+      writeTokensPerSecond: { median: 20 },
+      readFirstTokenMs: { 512: { median: 100 } },
+      jobTimeS: 5,
+      embed: { queryMs: { median: 30 }, requestMs: { median: 900 }, tokensPerSecond: 7000 },
+      energy: {
+        meter: { kind: 'emi', say: 'x', whole: 'system' },
+        millijoulesPerToken: 1.5,
+        idle: { keepLoadedMilliwatts: keep },
+        embed: { keepLoadedMilliwatts: 100 },
+        batches: { triage: { count: 4, seconds: 8, tokens: 400, millijoules: { system: 80_000 }, extraMillijoules: { system: each * 4, npu: npu * 4 }, millijoulesEach: each, millijoulesPerToken: (each * 4) / 400 } },
+      },
+    },
+  });
+  const s = B.benchSummary([run('NPU', 3000, 500, 4000, 1000), run('CPU', 9000, 40, 9000, 0), run('NPU', 1000, 300, 6000, 3000), run('NPU', 2000, 400, 5000, 2000)] as any);
+  assert.deepEqual(Object.keys(s.devices), ['NPU', 'CPU']);
+  const npu = s.devices.NPU;
+  assert.equal(npu.runs, 3);
+  assert.equal(npu.coldLoadMs, 2000);
+  assert.equal(npu.server, 'GenieX 0.9.3');
+  assert.deepEqual(npu.embed, { queryMs: 30, requestMs: 900, tokensPerSecond: 7000 });
+  assert.equal(npu.energy!.keepLoadedMilliwatts, 400);
+  assert.equal(npu.energy!.keepLoadedWhPerDay, 9.6, '400 mW all day');
+  assert.equal(npu.energy!.embedKeepLoadedWhPerDay, 2.4);
+  assert.deepEqual(npu.energy!.batches.triage, { count: 4, millijoulesEach: 5000, millijoulesPerToken: 50, wholeMillijoules: 80_000, seconds: 8, eachByPart: { system: 5000, npu: 2000 } });
+  assert.equal(s.whole, 'system');
+  const lines = B.summarySay(s);
+  assert.equal(lines[0], "Summary: castellan-npu-bench/2, full, each figure the median of its runs (the whole PC is the meter's system)");
+  assert.match(lines[1], /^ +NPU +CPU$/);
+  const esc = (x: string) => x.replace(/[().]/g, '\\$&');
+  for (const [row, npuCell, cpuCell] of [
+    ['server', 'GenieX 0.9.3', 'llama.cpp b11734 cpu-arm64'],
+    ['first answer after a start', '2 s', '9 s'],
+    ['keeping the model loaded', '400 mW (9.6 Wh/day)', '40 mW (1 Wh/day)'],
+    ['triage: each over rest', '5.00 J', '9.00 J'],
+    ['triage: the whole PC, the batch', '80.0 J in 8 s', '80.0 J in 8 s'],
+  ]) assert.ok(lines.some((l) => new RegExp(`^${esc(row)} +${esc(npuCell)} +${esc(cpuCell)}$`).test(l)), `${row}\n${lines.join('\n')}`);
 });
