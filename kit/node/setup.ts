@@ -15,7 +15,7 @@ import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, sha256File, smallPc, testImage } from './npu-vendors.ts';
+import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage } from './npu-vendors.ts';
 import { RETIRED_GRACE_MS } from './retired.ts';
 
 /**
@@ -885,6 +885,8 @@ export interface PlanInput {
   gpuWithNpu?: boolean;
   /** The version of the NPU route's server installed here (npu-vendors.ts' installedVersion by default): a later one the Smith's Use it left is set up as that version runs. */
   serverVersion?: (route: NpuRoute) => Promise<string | null>;
+  /** The keeper's last look at the NPU's entry (`npu-refresh.json`, readNpuRefresh): `needs-setup` has setup set it up again. */
+  npuRefresh?: NpuRefreshRecord | null;
 }
 
 /** What setup would do: for which accelerators, which build and models, how much to download. Downloads nothing. */
@@ -910,13 +912,19 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   let npuNote: string | undefined;
   let npuPlain: string | undefined;
   let npuLeftOut: NpuFailStep | undefined;
+  // An entry the keeper's look left for setup (`needs-setup`, npu-refresh.ts: this kit's command for it needs a download,
+  // such as Intel's Qwen3-VL-2B in the Qwen3-4B's place, kit 2.103.0, which a look never makes) is set up again, so
+  // Set up local AI makes the change. Only one on the route's server, as the look's was. Its test failing keeps the old
+  // entry (mergeEntries); a new model that doesn't fit beside everything else leaves it as it is.
+  const leftForSetup = o.npuRefresh?.did === 'needs-setup' && !!det?.supported && !!det.vendor && !!configuredNpu && !installDefault && !!NPU_CATALOG.routes[det.vendor] && runsRoute(configuredNpu, NPU_CATALOG.routes[det.vendor]!, o.home);
+  const leftAsIs = `${det?.label} (npu): already set up in config.json; left as it is (accelerators setup npu sets it up again)`;
   if (det && !det.supported) {
     npuNote = `${det.label} (npu): not set up: ${det.why}. The graphics card or the processor takes its work.`;
     npuPlain = npuNoteFor(det.label, 'chat', det.why ?? 'the manor can\'t run its models on it');
     if (!o.skipNpu && (askedNpu || !o.ids.length)) npuLeftOut = skippedStep(det, false) ?? undefined;
   }
   // A reranker alone is no reason to set the NPU up: none of its servers reranks.
-  else if (det && !o.skipNpu && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault) && kinds.some((k) => k !== 'rerank')))) {
+  else if (det && !o.skipNpu && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault || leftForSetup) && kinds.some((k) => k !== 'rerank')))) {
     // Only what fits in this PC's memory beside everything else (npuMemoryFit, at this generation's sizes): the rest
     // goes to the card or the processor.
     // Its generation's own models (a Snapdragon X2: Qwen3-VL-2B), and on a PC with little memory its smallPc ones, where it has any.
@@ -926,7 +934,8 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     const version = generic ? await (o.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: o.home, env: o.env, exists })))(generic) : null;
     const route = generic ? routeFor(atVersion(pinnedRoute(generic, det.generation), version), det.generation, small) : null;
     const fit: { chat: boolean; embed: boolean; why?: string } = route ? npuMemoryFit(route, o.detection.ramBytes) : { chat: true, embed: true };
-    if (!fit.chat) {
+    if (!askedNpu && leftForSetup && !fit.chat) npuNote = leftAsIs;
+    else if (!fit.chat) {
       npuNote = `${det.label} (npu): not set up: ${fit.why}. The graphics card or the processor takes its work.`;
       npuPlain = npuNoteFor(det.label, 'chat', fit.why!);
       npuLeftOut = 'memory';
@@ -941,7 +950,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
         npuPlain = npuNoteFor(det.label, 'embed', fit.why!);
       }
     }
-  } else if (det && configuredNpu) npuNote = `${det.label} (npu): already set up in config.json; left as it is (accelerators setup npu sets it up again)`;
+  } else if (det && configuredNpu) npuNote = leftAsIs;
   if (askedNpu && !det && !dropNpu) problems.push(noNpu(o.detection) ? 'npu: this PC has no NPU' : "npu: couldn't tell whether this PC has an NPU");
   // What the NPU will serve (set up now, or configured before).
   const npuServes = new Set<EndpointKind>(npu ? npu.kinds : det?.supported && configuredNpu && !installDefault ? ENDPOINT_KINDS.filter((k) => serves(configuredNpu, k)) : []);
@@ -2724,7 +2733,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   log(`Looking up what this PC needs (llama.cpp ${LLAMA_PIN.build} and the models, as this kit pins them)...`);
   const releases = await (o.releases ?? llamaReleases)();
   const withNpu = o.gpuWithNpu ?? gpuWithNpu().on;
-  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
+  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu, npuRefresh: readNpuRefresh(configFile) });
   for (const l of describePlan(plan)) log(l);
   const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu || !!plan.npuRerank;
   if (!settingUp && !plan.dropNpu) {
@@ -2760,8 +2769,10 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   // The NPU's pictures are its chat server's (Intel's Qwen3-VL-2B, kit 2.103.0): the card that takes its chat takes them too.
   const taken = ENDPOINT_KINDS.filter((k) => missing.includes(k) || (k === 'vision' && missing.includes('chat') && plan.npu?.kinds.includes('vision')));
   if (missing.length && cardsFor.length) {
-    log(`The graphics card takes the NPU's ${taken.join(' and ')} instead: setting it up for that too.`);
     const plan2 = await planSetup({ detection, ids: cardsFor, skipNpu: true, raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
+    // An NPU entry kept from before (a 4B whose 2B failed) still chats: the card takes only what it plans.
+    const takes = taken.filter((k) => plan2.targets.some((t) => t.kinds.includes(k)));
+    log(`The graphics card takes the NPU's ${(takes.length ? takes : taken).join(' and ')} instead: setting it up for that too.`);
     for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
     const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the graphics card? [y/N] `) : false);
     if (go) {

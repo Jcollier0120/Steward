@@ -1315,7 +1315,7 @@ test("a model pinned for every generation ('*'), as Intel's OpenVINO export is, 
   try {
     const want = intelPins['*'];
     assert.equal(Object.keys(intelPins).join(), '*');
-    assert.equal(want.files['openvino_language_model.bin'].sha256, 'e2350c3208d7863556824d5153ef5de68411be13f776719d94113b3609fd262e');
+    assert.equal(want.files['openvino_language_model.bin'].sha256, '0af5f108ba08e04750fd3ae38cf5c35ae1be636fdda72c05e1f824a7be08197b');
     // Its pictures' files too: the encoder's models, and the configs that cap a picture at 1,024 tokens.
     for (const f of ['openvino_vision_embeddings_model.bin', 'openvino_vision_embeddings_merger_model.bin', 'openvino_vision_embeddings_pos_model.bin', 'preprocessor_config.json', 'processor_config.json']) assert.ok(want.files[f], f);
     // Its embedding model the same way: OpenVINO's export, pulled on a Lunar Lake 2026-10-13.
@@ -1786,6 +1786,60 @@ test('the NPU failing its test at setup: the card takes its chat and pictures, b
   assert.ok(run.log.some((l) => /^The graphics card takes the NPU's chat and vision instead/.test(l)), run.log.join('\n'));
   const got = downloaded(run.did);
   assert.ok(got.some((d) => VL_GGUF.test(d)) && !got.some((d) => CHAT_GGUF.test(d)), got.join('\n'));
+});
+
+test("a PC on the 4B whose Qwen3-VL-2B fails setup's test keeps the 4B's entry: the card takes the pictures, the 4B's folder isn't retired from it", async () => {
+  const first = await intelSetup('kept-4b', { gpuWithNpu: false });
+  assert.deepEqual(kindsOf(first.npuEntry), ['chat', 'vision']);
+  // The entry an earlier kit wrote: the Qwen3-4B, chat only.
+  const file = path.join(home, 'kept-4b-config.json');
+  const old = { ...first.npuEntry, chat: { ...first.npuEntry.chat, model: 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov' } };
+  delete old.vision;
+  writeFileSync(file, JSON.stringify({ ...first.written, accelerators: first.written.accelerators.map((a: any) => (a.kind === 'npu' ? old : a)) }));
+  // The keeper's look: the 2B would need a download, so it's left for setup.
+  S.rememberNpuRefresh(file, { kit: '2.103.0', at: new Date().toISOString(), did: 'needs-setup' });
+  const again = await intelSetup('kept-4b', { gpuWithNpu: false, npu: { answers: false } });
+  assert.equal(again.r.code, 0, again.log.join('\n'));
+  assert.ok(again.log.some((l) => /Qwen3-VL-2B-Instruct-int8-sym-ov/.test(l)), `the 2B was tried: ${again.log.join('\n')}`);
+  assert.deepEqual(again.npuEntry, old, "the 4B's entry as it was");
+  assert.equal(S.readNpuRefresh(file)?.did, 'needs-setup', 'still left for setup: the next Set up local AI tries the 2B again');
+  assert.deepEqual(kindsOf(again.arc), ['vision', 'embed'], 'the 4B still chats on the NPU: the card takes the pictures');
+  assert.ok(again.log.some((l) => /^The graphics card takes the NPU's vision instead/.test(l)), again.log.join('\n'));
+  const retired = V.NPU_CATALOG.routes.intel.retired!.find((r) => r.model === old.chat.model)!;
+  assert.match(retired.path, /Qwen3-4B-Instruct-2507-int4-cw-ov$/);
+  assert.ok(JSON.stringify(again.written).includes(retired.model!), 'its entry names it, so the keeper leaves its folder (retired.ts)');
+  rmSync(S.npuRefreshFile(file), { force: true });
+});
+
+test("a PC on the 4B moves to the Qwen3-VL-2B at Set up local AI (no ids) once the keeper's look left it for setup: not before, nor on a server a person chose", async () => {
+  const first = await intelSetup('to-2b', { gpuWithNpu: false });
+  const file = path.join(home, 'to-2b-config.json');
+  const fourB = 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov';
+  const old = { ...first.npuEntry, chat: { ...first.npuEntry.chat, model: fourB, startCommand: first.npuEntry.chat.startCommand.map((a: string) => a.replace(first.npuEntry.chat.model, fourB)) } };
+  delete old.vision;
+  const withNpu = (e: any) => JSON.parse(JSON.stringify({ ...first.written, accelerators: first.written.accelerators.map((a: any) => (a.kind === 'npu' ? e : a)) }));
+  const planWith = (raw: any, did?: 'needs-setup' | 'set-up') => planSetup({ detection: LUNAR(), ids: [], raw, releases: RELEASES, hfFiles: hf, home: path.join(home, 'to-2b'), env: ENV, exists: disk(), gpuWithNpu: false, npuRefresh: did ? { kit: '2.103.0', at: '2026-10-23T00:00:00.000Z', did } : null });
+  // No look yet (or the keeper found it current): a configured NPU is left as it is, as before.
+  for (const did of [undefined, 'set-up'] as const) {
+    const kept = await planWith(withNpu(old), did);
+    assert.equal(kept.npu, null, did);
+    assert.match(kept.npuNote ?? '', /already set up in config\.json; left as it is/);
+  }
+  assert.deepEqual((await planWith(withNpu(old), 'needs-setup')).npu?.kinds, ['chat', 'vision']);
+  // A person's own server for the NPU, on the 4B's model: theirs, whatever a look said.
+  const theirs = { ...old, chat: { ...old.chat, startCommand: ['C:\\theirs\\server.exe', '--model', fourB] } };
+  const person = await planWith(withNpu(theirs), 'needs-setup');
+  assert.equal(person.npu, null);
+  assert.match(person.npuNote ?? '', /left as it is/);
+
+  writeFileSync(file, JSON.stringify(withNpu(old)));
+  S.rememberNpuRefresh(file, { kit: '2.103.0', at: new Date().toISOString(), did: 'needs-setup' });
+  const moved = await intelSetup('to-2b', { gpuWithNpu: false });
+  assert.equal(moved.r.code, 0, moved.log.join('\n'));
+  assert.equal(moved.npuEntry.chat.model, 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov');
+  assert.deepEqual(kindsOf(moved.npuEntry), ['chat', 'vision']);
+  assert.ok(!moved.npuEntry.chat.startCommand.some((a: string) => a.includes(fourB)), moved.npuEntry.chat.startCommand.join(' '));
+  assert.equal(S.readNpuRefresh(file)?.did, 'set-up', 'set up: the next Set up local AI leaves it');
 });
 
 test('the switch on: the card is set up for everything beside the NPU', async () => {

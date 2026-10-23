@@ -252,22 +252,22 @@ These are the 4B's. Kit 2.103.0 moves Intel to Qwen3-VL-2B, and its energy serie
 
 ### On Intel: Qwen3-VL-2B on the NPU 3720 (kit 2.103.0)
 
-The same PC, 2026-10-23, the full run (no energy) on OpenVINO Model Server 2026.4.1 with Castellan's build of OpenVINO GenAI (NPU-VENDORS.md, Castellan's build of OpenVINO GenAI). Each model was run as a candidate (`--candidate`), its files measured into the report. The first two columns ran at OpenVINO's own prompt settings, the third at the route's (`NPUW_LLM_PREFILL_CHUNK_SIZE` 256, `GENERATE_HINT` BEST_PERF). Every run was ranked.
+The same PC, 2026-10-23, the full run (no energy) on OpenVINO Model Server 2026.4.1 with Castellan's build of OpenVINO GenAI (NPU-VENDORS.md, Castellan's build of OpenVINO GenAI). Each model was run as a candidate (`--candidate`), its files measured into the report. The first two columns ran at OpenVINO's own prompt settings, the last two at the route's (`NPUW_LLM_PREFILL_CHUNK_SIZE` 256, `GENERATE_HINT` BEST_PERF). The last is the export the kit pins: its DeepStack steps rewritten into the form the NPU runs (NPU-VENDORS.md, Qwen3-VL-2B on Intel's NPU), the weights the same. Every run was ranked.
 
-| | Qwen3-VL-4B INT4 (OpenVINO's NPU build) | Qwen3-VL-2B INT8 (Castellan's) | Qwen3-VL-2B INT8, the route's settings |
-|---|---|---|---|
-| Quality | 23 of 24 | 22 of 24 | 22 of 24 |
-| Pictures | 4 of 4, 6.6–7.1 s each | 4 of 4, 2.1–2.5 s | 4 of 4, 0.8–1.1 s |
-| Writing | 8.6 tok/s | 11.0 tok/s | 17.3 tok/s |
-| A short answer | 6.2 s | 1.9 s | 0.56 s |
-| Read 1,024 | 6.3 s | 2.0 s | 2.0 s |
-| Read near the cap (1,73x of 2,048) | 12.7 s | 3.9 s | 3.4 s |
-| Job time (3 jobs) | 46.6 s | 18.7 s | 13.4 s |
-| Cold load / cached | 114 / 13.2 s | 35 / 5.7 s | 46 / 4.3 s |
-| Memory, working set (private) | 6.9 GB (1.5) | 4.4 GB (1.0) | 4.0 GB (1.1) |
-| Speed after 10 minutes | 99% | 100% | 100% |
+| | Qwen3-VL-4B INT4 (OpenVINO's NPU build) | Qwen3-VL-2B INT8 (Castellan's) | Qwen3-VL-2B INT8, the route's settings | The same, DeepStack rewritten (pinned) |
+|---|---|---|---|---|
+| Quality | 23 of 24 | 22 of 24 | 22 of 24 | 22 of 24 |
+| Pictures | 4 of 4, 6.6–7.1 s each | 4 of 4, 2.1–2.5 s | 4 of 4, 0.8–1.1 s | 4 of 4, 0.8–1.1 s |
+| Writing | 8.6 tok/s | 11.0 tok/s | 17.3 tok/s | 17.9 tok/s |
+| A short answer | 6.2 s | 1.9 s | 0.56 s | 0.55 s |
+| Read 1,024 | 6.3 s | 2.0 s | 2.0 s | 2.2 s |
+| Read near the cap (1,73x of 2,048) | 12.7 s | 3.9 s | 3.4 s | 3.6 s |
+| Job time (3 jobs) | 46.6 s | 18.7 s | 13.4 s | 12.9 s |
+| Cold load / cached | 114 / 13.2 s | 35 / 5.7 s | 46 / 4.3 s | 47 / 4.3 s |
+| Memory, working set (private) | 6.9 GB (1.5) | 4.4 GB (1.0) | 4.0 GB (1.1) | 4.0 GB (1.1) |
+| Speed after 10 minutes | 99% | 100% | 100% | 100% |
 
-The 2B misses "time" and "apples" by running out of tokens mid-working, not by a wrong answer. Against the 4B it had on this PC (On Intel: energy, above), the route's 2B does the three jobs in about half the time (13.4 s against 27.4) and writes faster (17.3 tokens a second against 13.2), and it reads pictures as well.
+The 2B misses "time" and "apples" by running out of tokens mid-working, not by a wrong answer. Against the 4B it had on this PC (On Intel: energy, above), the route's 2B does the three jobs in about half the time (12.9 s against 27.4) and writes faster (17.9 tokens a second against 13.2), and it reads pictures as well.
 
 ## Comparing devices (kit 2.99.0)
 

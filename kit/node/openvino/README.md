@@ -15,6 +15,8 @@ Both changes are in `src/cpp/src/visual_language/pipeline.cpp`:
 
 Both are still on openvino.genai's master and OpenVINO's master (NPUW's `llm_infer_request.cpp`) as of 2026-10-23.
 
+A third problem isn't in this file. NPUW's `ReplaceDeepstackScatterWithAdd` recognises Qwen3-VL's DeepStack step only in transformers' form, a `ScatterNDUpdate`. optimum-intel exports it as a masked add, whose mask NPUW never fills, so on the NPU those features were zeroed and clear text was misread. The fix is in the model: Castellan's export has the step rewritten (`scatter_deepstack.py`, in `Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov` on Hugging Face). See ../../spec/NPU-VENDORS.md, Qwen3-VL-2B on Intel's NPU.
+
 ## Measured
 
 On the Core Ultra 5 225U (NPU 3720, driver 32.0.100.5540), 2026-10-23, OpenVINO Model Server 2026.4.1, `--max_prompt_len 2048`. Both models were measured with npu-bench's full run (castellan-npu-bench/2, kit 2.99.1) at OpenVINO's own prompt settings, on this build:
