@@ -50,7 +50,7 @@ const amdEntries = [
     chat: { baseUrl: 'http://x:18191', model: 'qwen3-vl-2b-instruct' }, vision: { model: 'qwen3-vl-2b-instruct' }, embed: { baseUrl: 'http://x:18192', model: 'qwen3-embedding-0.6b' },
   },
 ];
-const amdOrder: core.WorkOrder = { chat: { devices: ['npu', 'gpu', 'cpu'] }, vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true }, embed: { devices: ['gpu', 'cpu'] } };
+const amdOrder: core.WorkOrder = { chat: { devices: ['npu', 'gpu', 'cpu'] }, vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true, batchAt: 4 }, embed: { devices: ['gpu', 'cpu'] } };
 
 const configs: { case: string; raw: unknown; hw?: core.Hardware }[] = [
   {
@@ -162,7 +162,7 @@ const configs: { case: string; raw: unknown; hw?: core.Hardware }[] = [
       acceleratorOrder: 'auto',
       workOrder: {
         chat: { devices: ['npu', 'gpu', 'cpu'] },
-        vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true },
+        vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true, batchAt: 4 },
         embed: { devices: ['gpu', 'gpu'] },
         rerank: { devices: ['cpu'] },
       },
@@ -171,6 +171,10 @@ const configs: { case: string; raw: unknown; hw?: core.Hardware }[] = [
   {
     case: "workOrder isn't read beside a person's acceleratorOrder list: the list is kept for every work",
     raw: { accelerators: amdEntries, acceleratorOrder: ['gpu-amd-radeon-860m-graphics'], workOrder: { vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true } } },
+  },
+  {
+    case: "workOrder: a batchAt that isn't a whole number, 2 or more, is left out, and its work kept",
+    raw: { accelerators: amdEntries, workOrder: { vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true, batchAt: 1 }, chat: { devices: ['npu'], batchAt: 3.5 } } },
   },
   {
     case: 'workOrder with no work written right is none',
@@ -253,7 +257,7 @@ const failed = (minutesAgo: number) => ({ since: iso(NOW - minutesAgo * 60_000),
 const gameOnB = { checkedAt: iso(NOW - 5000), cards: { 'gpu-b': { busy: true, percent: 87, by: ['game.exe'] } } };
 const bg = (work: core.Work, tokens: number) => ({ work, tokens, lane: 'background' as const });
 
-const candidateCases: { case: string; need: core.Need; failures?: Record<string, core.Failure | null>; games?: core.Games; deferredMs?: Record<string, number>; config?: { accelerators: unknown[] }; workOrder?: core.WorkOrder; running?: Record<string, boolean> }[] = [
+const candidateCases: { case: string; need: core.Need; failures?: Record<string, core.Failure | null>; games?: core.Games; deferredMs?: Record<string, number>; config?: { accelerators: unknown[] }; workOrder?: core.WorkOrder; running?: Record<string, boolean>; waiting?: number }[] = [
   { case: 'chat: those that serve it, in order', need: bg('chat', 500) },
   { case: 'vision: only the card with a vision model', need: bg('vision', 500) },
   { case: 'embed: only the processor', need: bg('embed', 500) },
@@ -274,6 +278,11 @@ const candidateCases: { case: string; need: core.Need; failures?: Record<string,
   { case: "workOrder: chat's order puts the NPU first, the only candidate", need: bg('chat', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: false, 'gpu-amd-radeon-860m-graphics': true } },
   { case: 'workOrder: the Radeon failed lately, so a picture goes to the NPU', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: false, 'gpu-amd-radeon-860m-graphics': false }, failures: { 'gpu-amd-radeon-860m-graphics': failed(2) } },
   { case: 'no workOrder: a picture goes to the NPU first, as before', need: bg('vision', 500), config: { accelerators: amdEntries } },
+  // The owner's batch rule (batchAt): from 4 pictures waiting, the Radeon first whoever's server is up.
+  { case: "workOrder: batchAt, 3 pictures waiting and only the NPU's server up: the NPU, as for one", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false }, waiting: 3 },
+  { case: "workOrder: batchAt, 4 pictures waiting and only the NPU's server up: the Radeon first, its server started", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false }, waiting: 4 },
+  { case: 'workOrder: batchAt, 1 picture waiting with both servers up: the Radeon, by runningFirst', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, waiting: 1 },
+  { case: "workOrder: a work with no batchAt goes by its order however many wait: chat on the NPU", need: bg('chat', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, waiting: 9 },
 ];
 
 const looks = (m: Record<string, [boolean, number]>) => Object.fromEntries(Object.entries(m).map(([id, [freeSlot, waiting]]) => [id, { freeSlot, waiting }]));
@@ -334,7 +343,7 @@ export function makeAcceleratorVectors() {
       { case: 'an unreadable time', games: { checkedAt: 'soon', cards: {} }, stale: true },
     ].map((g) => ({ ...g, stale: core.gamesStale(RULES, g.games, NOW) })),
     candidates: candidateCases.map((c) => {
-      const r = core.candidates(RULES, c.config ? config(c.config) : choose, c.need as core.Need, { failures: c.failures, games: c.games, deferredMs: c.deferredMs, nowMs: NOW, workOrder: c.workOrder, running: c.running });
+      const r = core.candidates(RULES, c.config ? config(c.config) : choose, c.need as core.Need, { failures: c.failures, games: c.games, deferredMs: c.deferredMs, nowMs: NOW, workOrder: c.workOrder, running: c.running, waiting: c.waiting });
       return { ...c, config: c.config ?? choosing, expect: { list: byId(r.list), skipped: r.skipped.map((s) => ({ id: s.acc.id, why: s.why, detail: s.detail })) } };
     }),
     pick: pickCases.map((c) => {

@@ -501,6 +501,7 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
         else if (!Array.isArray(devices) || !devices.length || devices.some((d: unknown) => d !== 'npu' && d !== 'gpu' && d !== 'cpu') || new Set(devices).size !== devices.length)
           problems.push(`workOrder.${w}.devices must list npu, gpu and cpu, each at most once, first preferred`);
         else if (o.runningFirst !== undefined && typeof o.runningFirst !== 'boolean') problems.push(`workOrder.${w}.runningFirst must be true or false`);
+        else if (o.batchAt !== undefined && !(Number.isInteger(o.batchAt) && o.batchAt >= 2)) problems.push(`workOrder.${w}.batchAt must be a whole number, 2 or more`);
       }
   }
   return problems;

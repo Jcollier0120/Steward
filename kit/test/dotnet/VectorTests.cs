@@ -232,7 +232,7 @@ public sealed class VectorTests {
 	[Fact]
 	public void Candidates_AndThePick() {
 		foreach (JsonNode c in Each(Accel, "candidates")) {
-			var state = new JsonObject { ["failures"] = c["failures"]?.DeepClone(), ["games"] = c["games"]?.DeepClone(), ["deferredMs"] = c["deferredMs"]?.DeepClone(), ["nowMs"] = Now, ["workOrder"] = c["workOrder"]?.DeepClone(), ["running"] = c["running"]?.DeepClone() };
+			var state = new JsonObject { ["failures"] = c["failures"]?.DeepClone(), ["games"] = c["games"]?.DeepClone(), ["deferredMs"] = c["deferredMs"]?.DeepClone(), ["nowMs"] = Now, ["workOrder"] = c["workOrder"]?.DeepClone(), ["running"] = c["running"]?.DeepClone(), ["waiting"] = c["waiting"]?.DeepClone() };
 			JsonNode r = Json(Core.CallWithRules("candidates", Accelerators(c["config"]!), c["need"]!.DeepClone(), state))!;
 			var plain = new JsonObject {
 				["list"] = new JsonArray(r["list"]!.AsArray().Select(a => (JsonNode?)a!["id"]!.GetValue<string>()).ToArray()),

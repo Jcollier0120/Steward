@@ -126,6 +126,12 @@ export interface AskOptions {
    * The request then waits for the model: a server just started is given its cold load, whatever `timeoutMs` says.
    */
   onWaking?: (w: Waking) => void;
+  /**
+   * How many requests of this kind the caller is sending together, this one included, when it knows: a folder of
+   * screenshots, say. They count with those already waiting toward the work's order's batchAt (kit 2.109.0): on AMD's
+   * Ryzen AI 300, 4 or more pictures go to the Radeon even while only FastFlowLM is up.
+   */
+  batch?: number;
 }
 
 /** A resting model being woken for a request (AskOptions.onWaking). */
@@ -223,7 +229,7 @@ export function acceleratorLines(cfg: AcceleratorConfig | { error: string } = lo
 export function acceleratorTurn<T>(
   acc: { id: string; name?: string; slots?: number },
   fn: () => Promise<T>,
-  opts: { maxWaitMs?: number; maxAhead?: number; lane?: Lane } = {},
+  opts: { maxWaitMs?: number; maxAhead?: number; lane?: Lane; work?: Work } = {},
 ): Promise<T> {
   known.add(acc.id);
   const where = theAccelerator({ id: acc.id, name: acc.name ?? (acc.id === 'npu' ? 'NPU' : acc.id) });
@@ -238,6 +244,7 @@ export function acceleratorTurn<T>(
         who: APP.id,
         waitMs: opts.maxWaitMs ?? MAX_WAIT_MS,
         maxAhead: opts.maxAhead ?? (background ? MAX_AHEAD : undefined),
+        ...(opts.work ? { work: opts.work } : {}),
       });
     } catch (e) {
       const deferred = background ? core.say.deferredFor(BACK_OFF_MS / 60_000) : '';
@@ -254,6 +261,34 @@ export function acceleratorTurn<T>(
   const turn = prev.then(run, run);
   lines.set(acc.id, turn.catch(() => undefined));
   return turn.finally(() => headed.set(acc.id, (headed.get(acc.id) ?? 1) - 1));
+}
+
+/** This process's requests of each kind that haven't started their turn yet (routed, or waiting in a line), for batchAt. */
+const waitingHere = new Map<Work, number>();
+
+/** Counts a request of `work` as waiting until the function returned is called (its turn starts, or it ends): once. */
+function joinWaiting(work: Work): () => void {
+  waitingHere.set(work, (waitingHere.get(work) ?? 0) + 1);
+  let left = false;
+  return () => {
+    if (left) return;
+    left = true;
+    waitingHere.set(work, (waitingHere.get(work) ?? 1) - 1);
+  };
+}
+
+/**
+ * How many requests of `work` wait (kit 2.109.0): this process's that haven't started their turn (a request counts from
+ * when it's asked, so a batch sent at once counts itself whole), and other processes' tickets in these turns' lines that
+ * say they're of it (a ticket's `work`; one that doesn't say counts as none). For the work's order's batchAt.
+ */
+export function waitingFor(work: Work, turns: { id: string; slots: number }[]): number {
+  let others = 0;
+  for (const id of new Set(turns.map((t) => t.id))) {
+    const t = turns.find((x) => x.id === id)!;
+    others += queueSnapshot(lockDirsOf(t)[0]).waiting.filter((w) => w.work === work && w.pid !== process.pid).length;
+  }
+  return (waitingHere.get(work) ?? 0) + others;
 }
 
 /** Runs `fn` holding the NPU (above): for NPU work that isn't a chat or vision request. */
@@ -434,7 +469,8 @@ export class Npu {
 
   /**
    * The contract's choosing (Manor's docs/ACCELERATORS.md): the candidates, the pick, the turn, and one
-   * fallback when the accelerator fails the request.
+   * fallback when the accelerator fails the request. The request counts as waiting from now until its turn starts
+   * (waitingFor, for a work order's batchAt).
    */
   private async route<T>(
     work: Work,
@@ -442,6 +478,23 @@ export class Npu {
     maxTokens: number,
     opts: AskOptions,
     send: (acc: Accelerator, ep: Endpoint, timeoutMs: number, loading: boolean) => Promise<T>,
+  ): Promise<{ value: T; acc: Accelerator; fellBackFrom?: AcceleratorRef & { reason: string } }> {
+    const leave = joinWaiting(work);
+    try {
+      return await this.routeWaiting(work, prompt, maxTokens, opts, send, leave);
+    } finally {
+      leave();
+    }
+  }
+
+  /** route's own, the request counted as waiting until `leave` is called. */
+  private async routeWaiting<T>(
+    work: Work,
+    prompt: PromptTokens,
+    maxTokens: number,
+    opts: AskOptions,
+    send: (acc: Accelerator, ep: Endpoint, timeoutMs: number, loading: boolean) => Promise<T>,
+    leave: () => void,
   ): Promise<{ value: T; acc: Accelerator; fellBackFrom?: AcceleratorRef & { reason: string } }> {
     if ('error' in this.cfg) throw new NpuError(this.cfg.error);
     const cfg = this.cfg;
@@ -464,6 +517,10 @@ export class Npu {
     // The work's own order, where its NPU's generation has one (config.json's workOrder): by whose servers are up, when it
     // goes by that (AMD's pictures: the Radeon, unless only FastFlowLM is up).
     const running = await this.serversUp(serving, work, cfg.workOrder);
+    // Unless as many of the work wait as its batchAt: then the order is kept whoever's server is up, and a batch starts the
+    // first device's (AMD's: 4 pictures start the Radeon's, the owner's rule). The caller's own batch counts, when it says.
+    const batchAt = cfg.workOrder?.[work]?.batchAt;
+    const waiting = batchAt && running ? Math.max(opts.batch ?? 1, waitingFor(work, serving.map((a) => turnFor(a, work, cfg.accelerators)))) : undefined;
     // Each candidate's turn for this work: its own, or another device's its server runs on (an endpoint's `turn`).
     const turnOn = (a: Accelerator) => turnFor(a, work, cfg.accelerators);
     const turnIdOf = (id: string) => {
@@ -480,7 +537,7 @@ export class Npu {
       const { list, skipped, npuFirst } = candidates(
         serving.filter((a) => !tried.has(a.id)),
         { work, tokens, lane },
-        { failure: readFailure, games, deferredMs: lane === 'background' ? (id) => deferredMs(turnIdOf(id)) : undefined, workOrder: cfg.workOrder, running },
+        { failure: readFailure, games, deferredMs: lane === 'background' ? (id) => deferredMs(turnIdOf(id)) : undefined, workOrder: cfg.workOrder, running, waiting },
       );
       if (!list.length) {
         if (loadingOn && !first) {
@@ -509,6 +566,7 @@ export class Npu {
         const value = await acceleratorTurn(
           turn,
           async () => {
+            leave();
             // On a PC with little memory, the NPU's own embedding server stops first, so the chat has its memory.
             if (acc.kind === 'npu' && (work === 'chat' || work === 'vision')) await this.embedGivesWay(acc).catch(() => undefined);
             // A server loading its model is waited on as long as its accelerator's cold load allows (an NPU compiling it).
@@ -536,7 +594,7 @@ export class Npu {
             }
             return answer;
           },
-          { maxWaitMs: opts.maxWaitMs, lane },
+          { maxWaitMs: opts.maxWaitMs, lane, work },
         );
         clearFailure(acc.id);
         return { value, acc, ...(first ? { fellBackFrom: { ...refOf(first.acc), reason: first.reason } } : {}) };

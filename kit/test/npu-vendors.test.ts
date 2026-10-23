@@ -301,6 +301,7 @@ test('every route in npu-vendors.json is whole: a pinned https download, an inst
         assert.ok(['chat', 'vision', 'embed'].includes(w), at);
         assert.ok(o.devices.length && o.devices.every((d) => ['npu', 'gpu', 'cpu'].includes(d)) && new Set(o.devices).size === o.devices.length, at);
         assert.ok(o.runningFirst === undefined || typeof o.runningFirst === 'boolean', at);
+        assert.ok(o.batchAt === undefined || (o.runningFirst && Number.isInteger(o.batchAt) && o.batchAt >= 2), `${at}: batchAt goes with runningFirst`);
         assert.ok(o.basis.length > 40 && /\d J|mJ/.test(o.basis), `${at}: its figures`);
       }
       const wo = V.workOrderFor(r, id);
@@ -310,11 +311,11 @@ test('every route in npu-vendors.json is whole: a pinned https download, an inst
   }
 });
 
-test("each work's order by generation (kit 2.109.0): AMD's Ryzen AI 300 sends pictures to the Radeon unless only FastFlowLM is up; the others the NPU first", () => {
+test("each work's order by generation (kit 2.109.0): AMD's Ryzen AI 300 sends pictures to the Radeon unless only FastFlowLM is up, and 4 waiting there anyway; the others the NPU first", () => {
   const amd = V.NPU_CATALOG.routes.amd;
   assert.deepEqual(V.workOrderFor(amd, 'xdna2'), {
     chat: { devices: ['npu', 'gpu', 'cpu'] },
-    vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true },
+    vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true, batchAt: 4 },
     embed: { devices: ['gpu', 'cpu'] },
   });
   // Every other generation records none: the NPU first for every work, Intel's included.
@@ -334,6 +335,7 @@ test("each work's order by generation (kit 2.109.0): AMD's Ryzen AI 300 sends pi
     'workOrder.rerank: only chat, vision and embed have an order',
     'workOrder.chat.runningFirst must be true or false',
   ]);
+  assert.deepEqual(validateAccelerators({ workOrder: { vision: { devices: ['gpu', 'npu'], runningFirst: true, batchAt: 1 } } }), ['workOrder.vision.batchAt must be a whole number, 2 or more']);
   assert.deepEqual(validateAccelerators({ workOrder: ['gpu'] }), ['workOrder must be an object of chat, vision and embed, each its devices in order']);
 });
 

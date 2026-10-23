@@ -1291,7 +1291,8 @@
        "npu",
        "cpu"
       ],
-      "runningFirst": true
+      "runningFirst": true,
+      "batchAt": 4
      },
      "embed": {
       "devices": [
@@ -1364,7 +1365,8 @@
        "npu",
        "cpu"
       ],
-      "runningFirst": true
+      "runningFirst": true,
+      "batchAt": 4
      }
     },
     "requestTimeoutMs": 180000,
@@ -1467,6 +1469,123 @@
     "order": [
      "gpu-amd-radeon-860m-graphics"
     ],
+    "requestTimeoutMs": 180000,
+    "legacy": false,
+    "problems": []
+   }
+  },
+  {
+   "case": "workOrder: a batchAt that isn't a whole number, 2 or more, is left out, and its work kept",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ],
+    "workOrder": {
+     "vision": {
+      "devices": [
+       "gpu",
+       "npu",
+       "cpu"
+      ],
+      "runningFirst": true,
+      "batchAt": 1
+     },
+     "chat": {
+      "devices": [
+       "npu"
+      ],
+      "batchAt": 3.5
+     }
+    }
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 4096,
+      "quirks": [
+       "sides-of-32"
+      ],
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      }
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 0.5,
+      "slots": 1,
+      "maxContextTokens": 8192,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ],
+    "order": "auto",
+    "workOrder": {
+     "chat": {
+      "devices": [
+       "npu"
+      ]
+     },
+     "vision": {
+      "devices": [
+       "gpu",
+       "npu",
+       "cpu"
+      ],
+      "runningFirst": true
+     }
+    },
     "requestTimeoutMs": 180000,
     "legacy": false,
     "problems": []
@@ -2857,7 +2976,8 @@
       "npu",
       "cpu"
      ],
-     "runningFirst": true
+     "runningFirst": true,
+     "batchAt": 4
     },
     "embed": {
      "devices": [
@@ -2933,7 +3053,8 @@
       "npu",
       "cpu"
      ],
-     "runningFirst": true
+     "runningFirst": true,
+     "batchAt": 4
     },
     "embed": {
      "devices": [
@@ -3008,7 +3129,8 @@
       "npu",
       "cpu"
      ],
-     "runningFirst": true
+     "runningFirst": true,
+     "batchAt": 4
     },
     "embed": {
      "devices": [
@@ -3084,7 +3206,8 @@
       "npu",
       "cpu"
      ],
-     "runningFirst": true
+     "runningFirst": true,
+     "batchAt": 4
     },
     "embed": {
      "devices": [
@@ -3160,7 +3283,8 @@
       "npu",
       "cpu"
      ],
-     "runningFirst": true
+     "runningFirst": true,
+     "batchAt": 4
     },
     "embed": {
      "devices": [
@@ -3232,7 +3356,8 @@
       "npu",
       "cpu"
      ],
-     "runningFirst": true
+     "runningFirst": true,
+     "batchAt": 4
     },
     "embed": {
      "devices": [
@@ -3307,7 +3432,8 @@
       "npu",
       "cpu"
      ],
-     "runningFirst": true
+     "runningFirst": true,
+     "batchAt": 4
     },
     "embed": {
      "devices": [
@@ -3381,6 +3507,316 @@
      }
     ]
    },
+   "expect": {
+    "list": [
+     "npu"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "workOrder: batchAt, 3 pictures waiting and only the NPU's server up: the NPU, as for one",
+   "need": {
+    "work": "vision",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ]
+   },
+   "workOrder": {
+    "chat": {
+     "devices": [
+      "npu",
+      "gpu",
+      "cpu"
+     ]
+    },
+    "vision": {
+     "devices": [
+      "gpu",
+      "npu",
+      "cpu"
+     ],
+     "runningFirst": true,
+     "batchAt": 4
+    },
+    "embed": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
+    }
+   },
+   "running": {
+    "npu": true,
+    "gpu-amd-radeon-860m-graphics": false
+   },
+   "waiting": 3,
+   "expect": {
+    "list": [
+     "npu"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "workOrder: batchAt, 4 pictures waiting and only the NPU's server up: the Radeon first, its server started",
+   "need": {
+    "work": "vision",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ]
+   },
+   "workOrder": {
+    "chat": {
+     "devices": [
+      "npu",
+      "gpu",
+      "cpu"
+     ]
+    },
+    "vision": {
+     "devices": [
+      "gpu",
+      "npu",
+      "cpu"
+     ],
+     "runningFirst": true,
+     "batchAt": 4
+    },
+    "embed": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
+    }
+   },
+   "running": {
+    "npu": true,
+    "gpu-amd-radeon-860m-graphics": false
+   },
+   "waiting": 4,
+   "expect": {
+    "list": [
+     "gpu-amd-radeon-860m-graphics",
+     "npu"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "workOrder: batchAt, 1 picture waiting with both servers up: the Radeon, by runningFirst",
+   "need": {
+    "work": "vision",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ]
+   },
+   "workOrder": {
+    "chat": {
+     "devices": [
+      "npu",
+      "gpu",
+      "cpu"
+     ]
+    },
+    "vision": {
+     "devices": [
+      "gpu",
+      "npu",
+      "cpu"
+     ],
+     "runningFirst": true,
+     "batchAt": 4
+    },
+    "embed": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
+    }
+   },
+   "running": {
+    "npu": true,
+    "gpu-amd-radeon-860m-graphics": true
+   },
+   "waiting": 1,
+   "expect": {
+    "list": [
+     "gpu-amd-radeon-860m-graphics",
+     "npu"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "workOrder: a work with no batchAt goes by its order however many wait: chat on the NPU",
+   "need": {
+    "work": "chat",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ]
+   },
+   "workOrder": {
+    "chat": {
+     "devices": [
+      "npu",
+      "gpu",
+      "cpu"
+     ]
+    },
+    "vision": {
+     "devices": [
+      "gpu",
+      "npu",
+      "cpu"
+     ],
+     "runningFirst": true,
+     "batchAt": 4
+    },
+    "embed": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
+    }
+   },
+   "running": {
+    "npu": true,
+    "gpu-amd-radeon-860m-graphics": true
+   },
+   "waiting": 9,
    "expect": {
     "list": [
      "npu"

@@ -20,7 +20,9 @@ process.env.SMITH_HOME = path.join(home, 'no-smith');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const A = await import('./fixture/src/kit/accelerators.ts');
-const { Npu, resetNpuManners } = await import('./fixture/src/kit/npu.ts');
+const { Npu, resetNpuManners, waitingFor } = await import('./fixture/src/kit/npu.ts');
+const { queueDirFor } = await import('./fixture/src/kit/npu-queue.ts');
+const core = await import('./fixture/src/kit/core/index.js');
 const { acceleratorsDir } = await import('./fixture/src/kit/lock.ts');
 const { testImage } = await import('./fixture/src/kit/npu-vendors.ts');
 
@@ -132,6 +134,73 @@ test("Manor's switch off keeps the Radeon out of the NPU's pictures, whatever th
     assert.equal((await model.vision(image, 'What is it?', ask)).accelerator.id, 'npu');
     assert.equal(radeon.asked(), 0);
   } finally {
+    await npu.close();
+    await radeon.close();
+  }
+});
+
+// The owner's rule (2026-10-23): single pictures stay on the NPU while FastFlowLM is up and the Radeon's server isn't, and
+// 4 or more waiting go to the Radeon (vision's batchAt), starting its server; once it's up, the pictures after follow.
+const BATCH_ORDER = { ...ORDER, vision: { ...ORDER.vision, batchAt: 4 } };
+
+test("the owner's batch rule: 3 pictures at once stay on the NPU, 4 go to the Radeon, and a 5th follows them there", async () => {
+  fresh();
+  const npu = await fakeServer();
+  const radeon = await fakeServer();
+  // FastFlowLM is up. The Radeon's server rests until a picture starts it: up once it has answered since it last rested.
+  let restedAt = 0;
+  const serversUp = async () => (id: string) => id === 'npu' || (id === RADEON && radeon.asked() > restedAt);
+  try {
+    const model = new Npu(config(npu.baseUrl, radeon.baseUrl, BATCH_ORDER), { gpuWithNpu: () => true, embedGivesWay: none, serversUp });
+    const send = async (n: number, more: { batch?: number } = {}) => (await Promise.all(Array.from({ length: n }, () => model.vision(image, 'What is it?', { ...ask, ...more })))).map((a) => a.accelerator.id);
+    assert.deepEqual(await send(3), ['npu', 'npu', 'npu'], '3 waiting: each on the NPU, as one would be');
+    assert.equal(radeon.asked(), 0);
+    assert.deepEqual(await send(4), [RADEON, RADEON, RADEON, RADEON], "4 waiting: the Radeon, though only FastFlowLM's server was up");
+    assert.deepEqual(await send(1), [RADEON], "a 5th, the Radeon's server up now: it follows them there");
+    // A caller that says it's sending a batch (a folder of screenshots) counts it, the Radeon resting again.
+    restedAt = radeon.asked();
+    assert.deepEqual(await send(1, { batch: 3 }), ['npu'], 'a batch of 3: the NPU');
+    assert.deepEqual(await send(1, { batch: 4 }), [RADEON], 'a batch of 4: the Radeon');
+    // Without batchAt in the order, 4 at once stay on the NPU (runningFirst alone).
+    restedAt = radeon.asked();
+    const plain = new Npu(config(npu.baseUrl, radeon.baseUrl), { gpuWithNpu: () => true, embedGivesWay: none, serversUp });
+    assert.deepEqual((await Promise.all(Array.from({ length: 4 }, () => plain.vision(image, 'What is it?', ask)))).map((a) => a.accelerator.id), ['npu', 'npu', 'npu', 'npu']);
+  } finally {
+    await npu.close();
+    await radeon.close();
+  }
+});
+
+test("other agents' pictures in the NPU's line count toward the batch, by their tickets' work", async () => {
+  fresh();
+  const npu = await fakeServer();
+  const radeon = await fakeServer();
+  const turns = [{ id: 'npu', slots: 1 }];
+  const queue = queueDirFor(A.lockDirsOf(turns[0])[0]);
+  mkdirSync(queue, { recursive: true });
+  // Another agent's tickets, fresh: three pictures, two chats, one that doesn't say, and one of this process's own.
+  const put = (i: number, pid: number, work?: string) => {
+    const us = Date.now() * 1000 + i;
+    writeFileSync(path.join(queue, core.ticketName('background', us, pid, `a${i}`)), core.ticketText('background', us, pid, 'another-agent', undefined, work));
+  };
+  const other = process.pid + 1;
+  try {
+    put(1, other, 'vision');
+    put(2, other, 'chat');
+    put(3, other, 'vision');
+    put(4, other);
+    put(5, other, 'chat');
+    put(6, process.pid, 'vision');
+    assert.equal(waitingFor('vision', turns), 2, "two of the other agent's pictures; this process's own count from itself");
+    put(7, other, 'vision');
+    assert.equal(waitingFor('vision', turns), 3);
+    assert.equal(waitingFor('chat', turns), 2);
+    // With them, a picture here makes 4: the Radeon, though only FastFlowLM is up.
+    const model = new Npu(config(npu.baseUrl, radeon.baseUrl, BATCH_ORDER), { gpuWithNpu: () => true, embedGivesWay: none, serversUp: async () => (id: string) => id === 'npu' });
+    assert.equal((await model.vision(image, 'What is it?', ask)).accelerator.id, RADEON);
+    assert.equal(npu.asked(), 0);
+  } finally {
+    rmSync(queue, { recursive: true, force: true });
     await npu.close();
     await radeon.close();
   }

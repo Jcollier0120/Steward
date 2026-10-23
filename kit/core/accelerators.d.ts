@@ -94,6 +94,12 @@ export type WorkOrderOf = {
      * otherwise: on AMD's Ryzen AI 300, a picture goes to the Radeon unless only FastFlowLM is up.
      */
     runningFirst?: boolean;
+    /**
+     * With runningFirst: from this many of the work waiting (`waiting`, this request included),
+     * the order is kept whoever's server is up, so a batch starts the first device's server. On AMD's Ryzen AI 300, 4 pictures
+     * waiting go to the Radeon even while only FastFlowLM is up (the owner's rule, 2026-10-23).
+     */
+    batchAt?: number;
 };
 export type WorkOrder = Partial<Record<Work, WorkOrderOf>>;
 export type AcceleratorConfig = {
@@ -204,6 +210,9 @@ export type Look = {
  * @property {AcceleratorKind[]} devices The kinds of device, first preferred; any it leaves out follow, in the auto order.
  * @property {boolean} [runningFirst] A device whose server is running goes before one whose server isn't, the order kept
  * otherwise: on AMD's Ryzen AI 300, a picture goes to the Radeon unless only FastFlowLM is up.
+ * @property {number} [batchAt] With runningFirst: from this many of the work waiting (`waiting`, this request included),
+ * the order is kept whoever's server is up, so a batch starts the first device's server. On AMD's Ryzen AI 300, 4 pictures
+ * waiting go to the Radeon even while only FastFlowLM is up (the owner's rule, 2026-10-23).
  */
 /** @typedef {Partial<Record<Work, WorkOrderOf>>} WorkOrder */
 /**
@@ -306,8 +315,9 @@ export type Written = {
     pictureTokens?: number;
 };
 /**
- * config.json's `workOrder` as written: each work's devices (npu, gpu, cpu, each at most once) and its runningFirst.
- * A work written otherwise is left out, and with none left, there is none.
+ * config.json's `workOrder` as written: each work's devices (npu, gpu, cpu, each at most once), its runningFirst, and its
+ * batchAt (a whole number, 2 or more; otherwise left out). A work written otherwise is left out, and with none left, there
+ * is none.
  * @param {any} v
  * @returns {WorkOrder | undefined}
  */
@@ -315,17 +325,19 @@ export declare function readWorkOrder(v: any): WorkOrder | undefined;
 /**
  * The accelerators in one work's order (`workOrder`'s): the kinds it names first, in its order, the rest after it as
  * given (the auto order); with runningFirst, those whose server `running` says is up before those whose isn't, that order
- * kept otherwise. No order for the work: as given.
+ * kept otherwise, unless as many of the work wait as its batchAt: then the order is kept as it is. No order for the work:
+ * as given.
  * @template {{ id: string, kind: AcceleratorKind }} A
  * @param {A[]} list
  * @param {WorkOrderOf | undefined} order
  * @param {Record<string, boolean>} [running] By id.
+ * @param {number} [waiting] How many of the work wait, this request included.
  * @returns {A[]}
  */
 export declare function workOrdered<A extends {
     id: string;
     kind: AcceleratorKind;
-}>(list: A[], order: WorkOrderOf | undefined, running?: Record<string, boolean>): A[];
+}>(list: A[], order: WorkOrderOf | undefined, running?: Record<string, boolean>, waiting?: number): A[];
 /**
  * The cap for one kind of request on an accelerator: its endpoint's own (maxContextTokens on chat, vision or embed)
  * when it has one, else the accelerator's.
@@ -604,11 +616,12 @@ export declare function gameCards(rules: Rules, load: GpuLoad, accs: Accelerator
  * **The work's own order** (kit 2.109.0): the config's `workOrder` for the request's kind, when it has one, puts the
  * accelerators in that order first (workOrdered), with `running` saying whose servers are up for its runningFirst. The
  * NPU first then means first in that order: AMD's pictures go to the Radeon, and to the NPU only when its server is up
- * and the Radeon's isn't.
+ * and the Radeon's isn't. With its batchAt, from that many of the work waiting (`waiting`, this request included) the
+ * order is kept whoever's server is up: 4 pictures waiting start the Radeon's (the owner's rule).
  * @param {Rules} rules
  * @param {Accelerator[]} accs
  * @param {Need} need
- * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, deferredMs?: Record<string, number>, nowMs?: number, workOrder?: WorkOrder | null, running?: Record<string, boolean> }} [state]
+ * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, deferredMs?: Record<string, number>, nowMs?: number, workOrder?: WorkOrder | null, running?: Record<string, boolean>, waiting?: number }} [state]
  * @returns {{ list: Accelerator[], skipped: Skipped[], npuFirst: boolean }}
  */
 export declare function candidates(rules: Rules, accs: Accelerator[], need: Need, state?: {
@@ -618,6 +631,7 @@ export declare function candidates(rules: Rules, accs: Accelerator[], need: Need
     nowMs?: number;
     workOrder?: WorkOrder | null;
     running?: Record<string, boolean>;
+    waiting?: number;
 }): {
     list: Accelerator[];
     skipped: Skipped[];

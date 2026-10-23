@@ -544,12 +544,13 @@ export type WorkOrder = core.WorkOrder;
  * failed in the last 10 minutes (unless every one that would do has: then they all may, as a last
  * resort), a game isn't using them (background work only), and this agent isn't leaving them alone
  * after a line that was too long (`deferredMs`). The config's `workOrder` for its kind, when it has one, orders them
- * first, with `running` (serversUp) for its runningFirst.
+ * first, with `running` (serversUp) for its runningFirst, and `waiting` (how many of the work wait, this one included)
+ * for its batchAt.
  */
 export function candidates(
   accs: Accelerator[],
   need: Need,
-  state: { failure?: (id: string) => Failure | null; games?: Games | null; deferredMs?: (id: string) => number; now?: number; workOrder?: WorkOrder | null; running?: (id: string) => boolean } = {},
+  state: { failure?: (id: string) => Failure | null; games?: Games | null; deferredMs?: (id: string) => number; now?: number; workOrder?: WorkOrder | null; running?: (id: string) => boolean; waiting?: number } = {},
 ): { list: Accelerator[]; skipped: Skipped[]; npuFirst: boolean } {
   const asked = accs.filter((a) => core.serves(a, need.work));
   return core.candidates(RULES, accs, need, {
@@ -559,6 +560,7 @@ export function candidates(
     nowMs: state.now ?? Date.now(),
     ...(state.workOrder ? { workOrder: state.workOrder } : {}),
     ...(state.running ? { running: Object.fromEntries(asked.map((a) => [a.id, state.running!(a.id)])) } : {}),
+    ...(state.waiting ? { waiting: state.waiting } : {}),
   });
 }
 

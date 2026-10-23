@@ -8,7 +8,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What's new
 
-- **Each kind of work goes where it costs least.** On a Ryzen AI 7 350 the manor measured each kind of work on the NPU, the Radeon graphics and the processor. Chat stays on the NPU: a triage costs it 26 J, the Radeon 41 J and the processor 89 J. A picture costs the Radeon 10 J and the NPU 27 J, so pictures now go to the Radeon. When the NPU's server is already running and the Radeon's isn't, a picture goes to the NPU, as starting the Radeon's server for it would cost more (66 J). Search (embeddings) stays on the Radeon, at 13 mJ a word-piece against the processor's 44.
+- **Each kind of work goes where it costs least.** On a Ryzen AI 7 350 the manor measured each kind of work on the NPU, the Radeon graphics and the processor. Chat stays on the NPU: a triage costs it 26 J, the Radeon 41 J and the processor 89 J. A picture costs the Radeon 10 J and the NPU 27 J, so pictures now go to the Radeon. The owner's rule: "keep single pictures on the NPU when it's running, but send batches of 4 or more waiting pictures to the Radeon." So when the NPU's server is already running and the Radeon's isn't, a single picture goes to the NPU, as starting the Radeon's server for it would cost more (66 J). When 4 or more pictures are waiting, from any of the staff, they go to the Radeon: from the fourth, its start has paid for itself. Search (embeddings) stays on the Radeon, at 13 mJ a word-piece against the processor's 44.
 
 ### What changed
 

@@ -174,6 +174,8 @@ export interface NpuWorkOrder {
   devices: ('npu' | 'gpu' | 'cpu')[];
   /** A device whose server is up goes before one whose server isn't, the order kept otherwise. */
   runningFirst?: boolean;
+  /** With runningFirst: from this many of the work waiting, the order is kept whoever's server is up (a batch starts the first device's). */
+  batchAt?: number;
   basis: string;
 }
 
@@ -236,7 +238,7 @@ export interface NpuGeneration {
    * the NPU first (the auto order). Setup writes it into config.json as `workOrder` (workOrderFor), which requests follow
    * (the core's candidates), and its fallback when the NPU can't be set up follows it too (fallbackDevices). AMD's Ryzen
    * AI 300 sends pictures to the Radeon, and to the NPU only when FastFlowLM is up and the Radeon's server isn't
-   * (`runningFirst`, the owner's choice, 2026-10-23).
+   * (`runningFirst`), until 4 or more wait (`batchAt`): those start the Radeon's (the owner's rule, 2026-10-23).
    */
   order?: Partial<Record<OrderedWork, NpuWorkOrder>>;
   /**
@@ -631,7 +633,7 @@ export function workOrderFor(route: NpuRoute, generation: string | null | undefi
   const order = generationOf(route, generation)?.order;
   if (!order) return null;
   const out: WorkOrder = {};
-  for (const [w, o] of Object.entries(order) as [OrderedWork, NpuWorkOrder][]) out[w] = { devices: [...o.devices], ...(o.runningFirst ? { runningFirst: true } : {}) };
+  for (const [w, o] of Object.entries(order) as [OrderedWork, NpuWorkOrder][]) out[w] = { devices: [...o.devices], ...(o.runningFirst ? { runningFirst: true } : {}), ...(o.batchAt ? { batchAt: o.batchAt } : {}) };
   return Object.keys(out).length ? out : null;
 }
 
