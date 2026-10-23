@@ -12,10 +12,10 @@
  * compiles its own, as before.
  */
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HELPERS, prebuiltName, SIGNED_BY, type Helper } from '../src/kit/prebuilt.ts';
+import { compileHelperScript, HELPERS, prebuiltName, SIGNED_BY, type Helper } from '../src/kit/prebuilt.ts';
 import { sign, signatures, type Signature } from './sign-llama.ts';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -31,7 +31,19 @@ export function wanted(dir = nodeDir): Map<string, Helper> {
 export const notOurs = (sigs: Signature[]): Signature[] => sigs.filter((s) => s.status !== 'Valid' || s.thumbprint !== SIGNED_BY);
 
 function compile(helper: Helper, out: string): void {
-  const ps = `Add-Type -TypeDefinition (Get-Content -Raw -LiteralPath '${path.join(nodeDir, `${helper}.cs`)}') -OutputAssembly '${out}' -OutputType ${HELPERS[helper].type}`;
+  const source = path.join(nodeDir, `${helper}.cs`);
+  if (HELPERS[helper].refs || HELPERS[helper].manifest) {
+    // Its references and manifest, as each PC compiles it (prebuilt.ts' compileHelperScript).
+    const script = `${out}.ps1`;
+    writeFileSync(script, compileHelperScript(helper, source, out));
+    try {
+      execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    } finally {
+      rmSync(script, { force: true });
+    }
+    return;
+  }
+  const ps = `Add-Type -TypeDefinition (Get-Content -Raw -LiteralPath '${source}') -OutputAssembly '${out}' -OutputType ${HELPERS[helper].type}`;
   execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
 }
 

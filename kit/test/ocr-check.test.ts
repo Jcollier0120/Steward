@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 // The text reader's check (ocr-check.ts, kit 2.102.0): its scoring, which must stay the bench's so figures compare
 // with the baseline in spec/OCR.md, its pages for the browser, and one whole run on Windows.
-const { norm, lev, scoreText, browserPage, parseCheckArgs, formatReport, runCheck, SPEC } = await import('./fixture/src/kit/ocr-check.ts');
+const { norm, lev, scoreText, browserPage, parseCheckArgs, formatReport, runCheck, checkEngine, ENGINES, SPEC } = await import('./fixture/src/kit/ocr-check.ts');
 
 test('scoring: text compared plain, edits counted, words found once each, lines found whole', () => {
   assert.equal(norm('  “Fix” it’s  — done\n'), '"Fix" it\'s - done');
@@ -42,6 +42,12 @@ test("the check's options", () => {
   assert.equal(o.json, true);
   assert.throws(() => parseCheckArgs(['--scale', 'big']), /--scale/);
   assert.throws(() => parseCheckArgs(['--fast']), /unknown option --fast/);
+  assert.deepEqual(parseCheckArgs(['--engine', 'windows,model-npu,model-cpu']).engines, ['windows', 'model-npu', 'model-cpu']);
+});
+
+test("the check's engines: Windows OCR and the kit's model, on the NPU or the processor", async () => {
+  assert.deepEqual(Object.keys(ENGINES), ['windows', 'model-npu', 'model-cpu']);
+  await assert.rejects(checkEngine('tesseract', [], { scale: 1, runs: 1, dir: '.' }), /no engine "tesseract" here \(engines: windows, model-npu, model-cpu\)/);
 });
 
 test('the held-out set shares no string or font with the rest', () => {

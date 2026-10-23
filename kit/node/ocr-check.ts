@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { acceleratorTurn } from './npu.ts';
 import { OCR_ENGINE, OCR_SCRIPT, ocrFiles, parseAnswers } from './ocr.ts';
+import { modelReader, resetModelReader, startReader } from './ocr-npu.ts';
 import { makePdf, type PdfFontName, type PdfLineSpec } from './pdf-make.ts';
 import { powershell, psQuote } from './ps.ts';
 
@@ -11,7 +13,7 @@ import { powershell, psQuote } from './ps.ts';
  * The text reader's check (kit 2.102.0, spec/OCR.md, "The check"): how well and how cheaply each engine reads text
  * whose words are known, on any PC, so every NPU maker's PC measures the same thing.
  *
- *   node <agent>\src\kit\ocr-check.ts [--engine windows] [--scale 1,2|auto] [--runs 3] [--no-browser] [--fixtures <dir>] [--out <file>] [--json]
+ *   node <agent>\src\kit\ocr-check.ts [--engine windows,model-npu,model-cpu] [--scale 1,2|auto] [--runs 3] [--no-browser] [--fixtures <dir>] [--out <file>] [--json]
  *
  * It draws its pictures first, in a scratch folder (or `--fixtures`, kept):
  * - the bench's 25 (ocr-fixtures.ps1, GDI+): 20 screenshots in four themes at 11 to 18 px, and 5 document pages;
@@ -295,9 +297,44 @@ async function runWindows(images: { i: number; file: string }[], scale: number |
   return { texts, wallMs, cpuMs: Number(stats.cpuMs), peakMB: Number(stats.peakMB) };
 }
 
+/** A process's processor time and peak memory so far, as Windows counts them. */
+async function processCost(pid: number | undefined): Promise<{ cpuMs: number; peakMB: number }> {
+  if (!pid) return { cpuMs: 0, peakMB: 0 };
+  const out = await powershell(`$p = Get-Process -Id ${Math.trunc(pid)}; '{"cpuMs":' + [int]$p.TotalProcessorTime.TotalMilliseconds + ',"peakMB":' + [int]($p.PeakWorkingSet64 / 1MB) + '}'`, { timeoutMs: 30_000 });
+  const s = JSON.parse(out.trim().split(/\r?\n/).pop() || '{}');
+  return { cpuMs: Number(s.cpuMs ?? 0), peakMB: Number(s.peakMB ?? 0) };
+}
+
+/**
+ * The kit's model (ocr-npu.ts) over the pictures, in a program of its own started for the run, within the NPU's turn
+ * when it reads on the NPU; its processor time and peak memory asked of Windows before it's closed. 'auto' reads at 1:
+ * the model needs no enlarging.
+ */
+async function runModel(images: { i: number; file: string }[], scale: number | 'auto', on: 'npu' | 'cpu'): Promise<EngineRun> {
+  const run = async (): Promise<EngineRun> => {
+    const t0 = Date.now();
+    const h = await startReader(on, { log: (l) => console.log(`  ${l}`) });
+    try {
+      if (h.hello.on !== on) throw new Error(`the model reads on the ${h.hello.on} here: ${h.hello.why ?? ''}`);
+      const texts = new Map<number, { text: string; ms: number; ok: boolean; error?: string }>();
+      for (const { i, file } of images) {
+        const a = await h.read(file, scale === 'auto' ? 1 : scale, true);
+        texts.set(i, { text: (a.lines ?? []).map((l) => l.text).join('\n'), ms: Number(a.ms ?? 0), ok: !a.error, error: a.error });
+      }
+      const wallMs = Date.now() - t0;
+      return { texts, wallMs, ...(await processCost(h.pid)) };
+    } finally {
+      h.close();
+    }
+  };
+  return on === 'npu' ? acceleratorTurn({ id: 'npu', name: 'NPU', slots: 1 }, run, { lane: 'interactive' }) : run();
+}
+
 /** The engines this check can run, by name, and what each is. */
 export const ENGINES: Record<string, string> = {
   windows: 'Windows.Media.Ocr, on the processor',
+  'model-npu': "the kit's model on the NPU, through ONNX Runtime and the NPU maker's plugin",
+  'model-cpu': "the kit's model on the processor, through ONNX Runtime",
 };
 
 export interface GroupScore extends Omit<Score, 'missed'> {
@@ -329,13 +366,17 @@ function sumGroup(rows: { s: Score; ms: number }[]): GroupScore {
 
 /** Runs one engine over the fixtures: the pictures `runs` times in its own process (and once with nothing), the PDFs through the reader. */
 export async function checkEngine(engine: string, fixtures: Fixture[], o: { scale: number | 'auto'; runs: number; dir: string }): Promise<EngineReport> {
-  if (engine !== OCR_ENGINE) throw new Error(`no engine "${engine}" here (engines: ${Object.keys(ENGINES).join(', ')})`);
+  if (!ENGINES[engine]) throw new Error(`no engine "${engine}" here (engines: ${Object.keys(ENGINES).join(', ')})`);
+  const on = engine === 'model-npu' ? 'npu' : engine === 'model-cpu' ? 'cpu' : null;
   const images = fixtures.map((f, i) => ({ i, file: f.file, f })).filter((x) => x.f.kind === 'image');
+  const runEngine = (list: typeof images) => (on ? runModel(list, o.scale, on) : runWindows(list, o.scale, o.dir));
+  // A first start compiles the model's graphs for the NPU (and fetches what's missing): before anything is measured.
+  if (on) await runModel([], o.scale, on);
   const empty: EngineRun[] = [];
   const full: EngineRun[] = [];
   for (let r = 0; r < o.runs; r++) {
-    empty.push(await runWindows([], o.scale, o.dir));
-    full.push(await runWindows(images, o.scale, o.dir));
+    empty.push(await runEngine([]));
+    full.push(await runEngine(images));
   }
   const last = full[full.length - 1];
   const rows: { f: Fixture; s: Score; ms: number; ok: boolean; error?: string; text: string }[] = [];
@@ -343,12 +384,17 @@ export async function checkEngine(engine: string, fixtures: Fixture[], o: { scal
     const t = last.texts.get(i);
     rows.push({ f, s: scoreText(f.lines, t?.ok ? t.text : ''), ms: median(full.map((run) => run.texts.get(i)?.ms ?? 0)), ok: !!t?.ok, error: t ? t.error : 'no answer', text: t?.text ?? '' });
   }
-  // PDFs: through the reader, as the staff read them (the text layer where there is one).
+  // PDFs: through the reader, as the staff read them (the text layer where there is one), by this engine alone.
+  resetModelReader();
+  const env = { ...process.env, KIT_OCR_ENGINE: 'model', ...(on === 'cpu' ? { KIT_OCR_NPU: 'none' } : {}) };
+  const reader = on ? () => modelReader({ env, log: (l) => console.log(`  ${l}`) }) : async () => null;
   for (const f of fixtures.filter((x) => x.kind === 'pdf')) {
     const t0 = Date.now();
-    const [r] = await ocrFiles([{ path: f.file, kind: 'pdf' }], { tmpRoot: o.dir, scale: o.scale });
+    const [r] = await ocrFiles([{ path: f.file, kind: 'pdf' }], { tmpRoot: o.dir, scale: o.scale, lane: 'interactive', modelReader: reader });
+    if (on && r.engine && r.engine !== engine) throw new Error(`${path.basename(f.file)} was read by ${r.engine}, not ${engine}`);
     rows.push({ f, s: scoreText(f.lines, r.ok ? r.text : ''), ms: Date.now() - t0, ok: r.ok, error: r.error, text: r.text });
   }
+  resetModelReader();
   const groups: Record<string, GroupScore> = {};
   for (const g of [...new Set(rows.map((r) => r.f.group))]) groups[g] = sumGroup(rows.filter((r) => r.f.group === g));
   const startMs = median(empty.map((e) => e.wallMs));

@@ -203,3 +203,64 @@ test('a scanned PDF is OCRed; a PDF with text reads its text unless told to OCR 
   assert.match(old.text, /4417/);
   assert.deepEqual(readdirSync(tmpRoot), []);
 });
+
+test("the model reads what it can, in the caller's lane; Windows' OCR reads what it didn't, and each result says which read it", { skip: process.platform !== 'win32' }, async () => {
+  const dir = path.join(home, 'model');
+  mkdirSync(dir, { recursive: true });
+  const good = path.join(dir, 'good.png');
+  const bad = path.join(dir, 'bad.png');
+  await makeTextPng(good, 'Error 25006: the printer is offline');
+  copyFileSync(good, bad);
+  const jpg = path.join(dir, 'scan.jpg');
+  await makeTextPng(jpg, 'Receipt 7731 for the boiler repair', true);
+  const scan = path.join(dir, 'scan.pdf');
+  writeFileSync(scan, pdfMake.makePdf([{ jpeg: readFileSync(jpg) }]));
+  const thumb = path.join(dir, 'scan-thumb.png');
+  // The model's reader as ocr-npu.ts gives it, without a model: it can't read bad.png.
+  const asked: { pages: any[]; lane?: string }[] = [];
+  const model = {
+    engine: 'model-npu' as const,
+    async read(pages: any[], o: any = {}) {
+      asked.push({ pages: pages.map((p) => ({ ...p, there: existsSync(p.file) })), lane: o.lane });
+      return pages.map((p, id) =>
+        path.basename(p.file) === 'bad.png'
+          ? { id, error: "the text reader couldn't open it", engine: 'model-npu' as const }
+          : { id, width: 2000, height: 1000, ms: 3, engine: 'model-npu' as const, lines: [{ text: `model read ${path.basename(p.file)}`, words: [{ t: 'model', x: 100, y: 200, w: 300, h: 50 }] }] },
+      );
+    },
+  };
+  const tmpRoot = path.join(dir, 'tmp');
+  const jobs = [
+    { path: good, kind: 'image' as const },
+    { path: bad, kind: 'image' as const },
+    { path: scan, kind: 'pdf' as const, thumb },
+  ];
+  const [g, b, s] = await ocrFiles(jobs, { tmpRoot, boxes: true, lane: 'interactive', modelReader: async () => model });
+  assert.equal(asked.length, 1, 'one read for the batch');
+  assert.equal(asked[0].lane, 'interactive');
+  assert.deepEqual(
+    asked[0].pages.map((p) => [path.basename(p.file).replace(/^job\d+-/, ''), p.scale, p.orient, p.there]),
+    [
+      ['good.png', 1, true, true],
+      ['bad.png', 1, true, true],
+      ['p0.png', 1, false, true],
+    ],
+    "the pictures as they are; the scan's page rendered for it",
+  );
+  assert.equal(g.engine, 'model-npu');
+  assert.equal(g.text, 'model read good.png');
+  assert.deepEqual([g.layout![0].width, g.layout![0].height], [2000, 1000]);
+  assert.ok(b.ok, b.error);
+  assert.equal(b.engine, OCR_ENGINE, "Windows' OCR read what the model couldn't");
+  assert.match(b.text, /25006/);
+  assert.ok(s.ok, s.error);
+  assert.equal(s.source, 'ocr');
+  assert.equal(s.engine, 'model-npu');
+  assert.match(s.text, /^model read job\d+-p0\.png$/);
+  assert.equal(s.pageCount, 1);
+  // the page's size and boxes at pdfScale (Letter at 96 dpi, twice), however wide it was rendered
+  assert.deepEqual([s.layout![0].width, s.layout![0].height], [1632, 816]);
+  assert.deepEqual(s.layout![0].lines[0].words[0], { t: 'model', x: 81.6, y: 163.2, w: 244.8, h: 40.8 });
+  assert.ok(readFileSync(thumb).length > 100, 'page 1 rendered for the thumbnail');
+  assert.deepEqual(readdirSync(tmpRoot), [], 'the rendered pages removed with the batch');
+});
