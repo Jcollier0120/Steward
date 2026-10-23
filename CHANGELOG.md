@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.184
+
+**It hands out the kit 2.104.0: when Windows' Smart App Control blocks a model server, setup says so in plain words, and the staff use what runs instead.**
+
+### What's new
+
+- **Setup copes with Smart App Control.** Where Windows' Smart App Control is on, it can stop a model server whose maker doesn't sign it as it starts: AMD's NPU server, FastFlowLM, is one. Setup now tries each server, recognises the block, and goes on to the next one that runs, the graphics card and then the processor. The accelerators' page says which, in plain words. When none runs, it says Smart App Control blocks the staff's local models on this PC.
+- **A record of what was blocked**, file by file, so those files can be signed.
+
+### What changed
+
+- **The NPU check and the benchmark stop at once when a model server quits.** They used to wait 20 minutes for an answer from a server that had already exited. Now they stop and say why: what Windows blocked, the exit code and the server's last lines.
+- **AMD's energy figures** are in the benchmark's notes. On a Ryzen AI 7 350 the NPU does the chat jobs for a third to two thirds of the graphics card's energy, but a picture costs it twice as much: its server's own work on the processor outweighs the NPU's.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Setup never changes Windows' Smart App Control setting.
+
 ## 0.36.183
 
 **It hands out the kit 2.103.0: on an Intel Core Ultra PC, the NPU now reads pictures as well as chat, and answers faster.**
