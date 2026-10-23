@@ -498,6 +498,21 @@ test("each request is in the NPU's turn, as an agent's is, so the keeper's reape
   assert.match(r.report.marks.map((m: any) => m.say).join('; '), /a request waited 10 min for the NPU's turn/);
 });
 
+test("a server that exits before it answers ends the run at once, with why (kit 2.104.0), rather than after the start's 20 minutes", async () => {
+  // Found on WEASELDEV03 (2026-10-23): Smart App Control stopped FastFlowLM as it started (0xC0E90002), its log empty,
+  // and the benchmark waited out its 20 minutes for an answer all the same.
+  const s = await scene({ vendor: 'amd' });
+  const t0 = Date.now();
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick', io: { ...s.opts.io, start: async () => ({ pid: 4242, stop: async () => {}, exited: () => ({ code: 3236495362 }) }) } });
+  assert.equal(code, 1);
+  assert.ok(Date.now() - t0 < 60_000, 'not the 20 minutes');
+  const mark = report.marks.at(-1)!;
+  assert.equal(mark.code, 'start');
+  assert.match(mark.say, /^Windows blocked flm\.exe as it started \(exit 0xC0E90002\), because its maker doesn't sign it \(Smart App Control, or a policy like it\)\. flm\.exe exited \(0xC0E90002\) before it answered; its log is empty \(.+npu-bench-amd\.log\)$/);
+  assert.equal(report.results.coldLoadMs, null);
+  assert.equal(s.fake.seen.length, 0, 'nothing asked');
+});
+
 test("every read and job is a prompt the server hasn't seen, so no prefix cache answers it; the short answer, writing and quality are the same each time", async () => {
   assert.equal(B.freshPrompt('Read this.', 'bench a1-7'), '[bench a1-7]\nRead this.');
   const s = await scene();

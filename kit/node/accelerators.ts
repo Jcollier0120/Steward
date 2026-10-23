@@ -3,7 +3,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync
 import os from 'node:os';
 import path from 'node:path';
 import { alive, startApart } from './apart.ts';
-import { blockedIn, blockedSay, cpuVariants, keepCpuVariant, loadedCpuVariant, type ReadLog } from './app-control.ts';
+import { type Block, blockedExit, blockedExitSay, blockedIn, blockedSay, cpuVariants, keepCpuVariant, loadedCpuVariant, type ReadLog, type SacState, smartAppControlOutsideTests } from './app-control.ts';
 import * as core from './core/index.js';
 import { acceleratorsDir, lockDirFor } from './lock.ts';
 import { manorStopped } from './manor.ts';
@@ -248,6 +248,42 @@ export function readNpuNote(file = npuNoteFile()): { at: string; note: string } 
   try {
     const j = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
     return typeof j?.note === 'string' && j.note ? { at: typeof j.at === 'string' ? j.at : '', note: j.note } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** blocked.json, beside npu-note.json (kit 2.104.0): what Windows blocked of the model servers at setup's last run. */
+export const blockedFile = () => path.join(acceleratorsDir, 'blocked.json');
+
+/** One file Windows' application control blocked as setup tried a server: the file, its policy, and whose server it's part of. */
+export interface BlockedServerFile extends Block {
+  server: string;
+}
+
+/** What setup's last run found blocked (blocked.json): when, Smart App Control's state then, and each file blocked. */
+export interface BlockedRecord {
+  at: string;
+  smartAppControl: SacState | null;
+  blocked: BlockedServerFile[];
+}
+
+/**
+ * Keeps what Windows blocked of the servers setup tried (kit 2.104.0), file by file, so a round of signing knows exactly
+ * which files to sign; none clears it, once setup ran with nothing blocked. A record, never an alarm: setup has gone on
+ * to the next server that runs, and its note says so.
+ */
+export function rememberBlocked(blocked: BlockedServerFile[], sac: SacState | null, file = blockedFile()): void {
+  const one = blocked.filter((b, i) => blocked.findIndex((x) => x.file.toLowerCase() === b.file.toLowerCase()) === i);
+  if (one.length) writeWhole(file, { at: new Date().toISOString(), smartAppControl: sac, blocked: one });
+  else rmSync(file, { force: true });
+}
+
+/** What setup's last run found blocked, or null when it found nothing (or the record can't be read). */
+export function readBlocked(file = blockedFile()): BlockedRecord | null {
+  try {
+    const j = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+    return Array.isArray(j?.blocked) && j.blocked.length ? { at: String(j.at ?? ''), smartAppControl: j.smartAppControl ?? null, blocked: j.blocked } : null;
   } catch {
     return null;
   }
@@ -908,7 +944,7 @@ async function startOnce(ep: Endpoint, waitMs: number, readyMs: number, o: Start
   };
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 250));
-    if (spawnError) throw await blockedFirst(cmd, startedAt, core.say.couldNotStart(cmd, spawnError.message), o.readBlocks);
+    if (spawnError) throw await blockedFirst(cmd, startedAt, core.say.couldNotStart(cmd, spawnError.message), o.readBlocks, null);
     const state = await probe(ep.baseUrl, 2000, lists);
     if (state === 'ready') {
       loaded();
@@ -921,7 +957,7 @@ async function startOnce(ep: Endpoint, waitMs: number, readyMs: number, o: Start
     }
     // GenieX exits at once (code 0) when another server holds its port: it is down only if nothing answers.
     if (apart && exited === undefined && !alive(apart)) exited = null;
-    if (exited !== undefined) throw await blockedFirst(cmd, startedAt, core.say.exitedWhileStarting(program, exited, ep.baseUrl), o.readBlocks);
+    if (exited !== undefined) throw await blockedFirst(cmd, startedAt, core.say.exitedWhileStarting(program, exited, ep.baseUrl), o.readBlocks, exited);
   }
   throw new AcceleratorDown(core.say.didNotAnswer(program, ep.baseUrl, Math.round(waitMs / 1000)));
 }
@@ -929,10 +965,12 @@ async function startOnce(ep: Endpoint, waitMs: number, readyMs: number, o: Start
 /**
  * A server that couldn't start, with what Windows' Smart App Control (or another application control policy) blocked of
  * it said first, when its log names a file in the server's folder since the start (app-control.ts, kit 2.88.4): then a
- * BlockedStart, which start() tries once more.
+ * BlockedStart, which start() tries once more. An exit of 0xC0E90002 (BLOCKED_EXIT, kit 2.104.0) is a block too, said
+ * so where the log names nothing (it can't be read, or the server started apart, whose exit code isn't known).
  */
-async function blockedFirst(cmd: string, since: number, said: string, read?: ReadLog): Promise<AcceleratorDown> {
-  const why = blockedSay(await blockedIn(path.dirname(cmd), Date.now() - since + 5_000, read), path.win32.basename(cmd));
+async function blockedFirst(cmd: string, since: number, said: string, read: ReadLog | undefined, code: number | null): Promise<AcceleratorDown> {
+  const program = path.win32.basename(cmd);
+  const why = blockedSay(await blockedIn(path.dirname(cmd), Date.now() - since + 5_000, read), program) ?? (blockedExit(code) ? blockedExitSay(program, smartAppControlOutsideTests()) : null);
   return why ? new BlockedStart(`${why}. ${said}`) : new AcceleratorDown(said);
 }
 

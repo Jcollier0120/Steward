@@ -15,6 +15,9 @@ process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 const { NAMED_TITLE, namedBuilt, namedExe, namedHeld, namedHold, namedHoldFile, namedId, namedLauncher, namedSource, namedWanted } = await import('./fixture/src/kit/named.ts');
 const { pageLaunch } = await import('./fixture/src/kit/service.ts');
 const { powershell } = await import('./fixture/src/kit/ps.ts');
+const { smartAppControlState } = await import('./fixture/src/kit/app-control.ts');
+// The tests that compile a launcher and run it need Windows, and Smart App Control off (kit 2.104.0).
+const ownExe = process.platform !== 'win32' || (smartAppControlState() === 'on' && 'Smart App Control is on: it blocks the launcher this test compiles, which nothing signs');
 
 const template = readFileSync(new URL('../node/named.cs', import.meta.url), 'utf8');
 const smith = { id: 'smith', name: 'Smith' };
@@ -106,7 +109,7 @@ test("pageLaunch with the launcher: start runs it, and it the page; an id or pat
   assert.deepEqual(pageLaunch(node, entry, { platform: 'linux', args: ['dashboard'] }).args, [entry, 'dashboard']);
 });
 
-test("on Windows the launcher compiles with the agent's name, runs the page as it was in the agent's job, and what the page starts detached outlives it", { skip: process.platform !== 'win32' }, async () => {
+test("on Windows the launcher compiles with the agent's name, runs the page as it was in the agent's job, and what the page starts detached outlives it", { skip: ownExe }, async () => {
   const logged: string[] = [];
   const agent = { id: 'kit-named-test', name: 'Kit Named Test' };
   const exe = await namedLauncher(agent, { kitDir, env: { ...process.env, KIT_NAMED: '1' }, sac: () => 'off', log: (l) => logged.push(l) });
@@ -189,7 +192,7 @@ public static class NamedTestJob {
 // kit 2.86.1: the console cmd's `start /b` gave the launcher has its host in the jobs the page leaves (Task Scheduler's,
 // for every page Manor starts), and Manor's update ends them. The page has a windowless console of its own instead, and the
 // launcher lets go of cmd's, whose host ends with cmd.
-test("on Windows the page started through the launcher has a console of its own: cmd's ends with cmd, and the page's git still starts", { skip: process.platform !== 'win32' }, async () => {
+test("on Windows the page started through the launcher has a console of its own: cmd's ends with cmd, and the page's git still starts", { skip: ownExe }, async () => {
   const agent = { id: 'kit-named-test', name: 'Kit Named Test' };
   const exe = await namedLauncher(agent, { kitDir, env: { ...process.env, KIT_NAMED: '1' }, sac: () => 'off' });
   assert.ok(exe);
