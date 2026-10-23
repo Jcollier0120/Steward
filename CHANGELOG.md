@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.174
+
+**It hands out the kit 2.98.2, whose NPU benchmark measures energy properly on an Intel PC and runs to the end without the local AI's housekeeping stopping it.**
+
+### What changed
+
+- **Energy on Intel.** On an Intel laptop, Windows' power readings are the processor chip's as a whole, its cores and its graphics. The benchmark took the graphics reading for the whole PC's, so its totals were far too low. It now takes the chip's.
+- **The benchmark keeps its model running.** The local AI's housekeeping stops a model nobody has used for a few minutes, and it didn't count the benchmark's own questions as use. It stopped the benchmark's model partway through every run, and every answer after that failed. The benchmark now asks the way the staff do, so the model stays up.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.172
 
 **It hands out the kit 2.98.1. On a Snapdragon X2, the local AI no longer keeps the processor busy while it writes, and a PC on GenieX 0.9.3 gets back the memory Castellan's build saves.**

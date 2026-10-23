@@ -20,6 +20,27 @@ test("the Energy Meter counters: each part's running total from picowatt-hours t
   assert.equal(M.parseEmi('problem|PowerShell: Invalid class'), null);
 });
 
+// A Core Ultra 5 225U's (Lenovo 83KS) counters, as CIM gave them on 2026-10-22: Intel's RAPL, no system and no NPU.
+const INTEL_EMI = [
+  'emi|RAPL_Package0_PP1|1340468781388|8773310',
+  'emi|RAPL_Package0_PP0|2216215789722|8773310',
+  'emi|RAPL_Package0_DRAM|0|8773310',
+  'emi|RAPL_Package0_PKG|9820345436111|8773310',
+  'emi|_Total|13377030007221|0',
+].join('\r\n');
+
+test("Intel's counters: the package is the whole, not the first listed (its graphics); its cores the processor, pp1 the graphics", async () => {
+  const opened = await M.openMeter('auto', { onBattery: false, io: { powerShell: async () => INTEL_EMI } });
+  assert.ok('meter' in opened);
+  assert.equal(opened.meter.whole, 'rapl_package0_pkg');
+  const said = M.partsSay(opened.meter, { rapl_package0_pp1: 2100, rapl_package0_pp0: 1100, rapl_package0_dram: 0, rapl_package0_pkg: 6100 });
+  assert.equal(said, '6.1 W (graphics 2.1 W, processor 1.1 W, memory 0.00 W)');
+  // The Snapdragon's, unchanged.
+  const x2 = await M.openMeter('auto', { onBattery: false, io: { powerShell: async () => X2_EMI } });
+  assert.ok('meter' in x2);
+  assert.equal(M.partsSay(x2.meter, { system: 21300, npu: 5100, gpu: 200, cpu_cluster_0: 3000, cpu_cluster_1: 2000, memory: 900 }), '21.3 W (npu 5.1 W, graphics 0.20 W, processor 5.0 W, memory 0.90 W)');
+});
+
 test("nvidia-smi: the card's running total where it keeps one, else its draw; one name a card", () => {
   assert.deepEqual(M.parseNvidia('123456789, 35.20\r\n', 7), { at: 7, totals: { card: 123456789 } });
   assert.deepEqual(M.parseNvidia('[N/A], 35.20\r\n', 7), { at: 7, milliwatts: { card: 35200 } });
