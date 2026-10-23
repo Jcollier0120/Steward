@@ -14,7 +14,8 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### Before you update
 
-- **Check that every PC running Castellan's paid staff holds a license**, test PCs included: a complimentary license does. Nothing changes on a PC that holds one.
+- **Check that every PC running Castellan's paid staff holds a license**, test PCs included: a complimentary license does. Manor's Settings > License on each PC says what it holds. Nothing changes on a PC that holds one.
+- **A waiting employee says so, and signing in brings it back.** Its page says "This PC holds no license for it: signing in brings it back", its pill says No license, and its rounds and Run now wait. Sign in on that PC in Manor's Settings > License, with the email you bought Castellan with (or enter a key): the staff go back on duty, with nothing to reinstall and their settings and data as they were.
 
 ## 0.36.188
 
