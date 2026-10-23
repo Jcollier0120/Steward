@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.98.2
+
+**The NPU benchmark measures energy on Intel, and runs to the end: its requests take the NPU's turn, so the keeper's reaper no longer stops its server partway.**
+
+### What changed
+
+- **power-meter.ts reads Intel's counters.** On a Core Ultra 5 225U, Windows' Energy Meter counters are RAPL's: `rapl_package0_pkg` (the chip whole), `_pp0` (its cores), `_pp1` (its graphics) and `_dram` (0 there). With no `system`, the whole was the first one listed, the graphics. Now it is the package (`pkg`), and `partsSay` names its cores the processor, `_pp1` the graphics and `_dram` memory. The Snapdragon's are unchanged.
+- **npu-bench.ts takes the NPU's turn for each request** (`BENCH_TURN`, `io.turn`), as an agent's request does, whichever device it runs on. Its server is on the route's port, which the keeper's reaper watches as the NPU's and stops once nobody has taken the NPU's turn for its idle time.
+  - Without it the reaper stopped the benchmark's server 7 minutes into a run on the 225U, and every answer after failed (quality 0 of 24).
+  - A turn held for the whole run was tried and doesn't do: anyone else counts a holder stale after `rules.json`'s `lock.staleMs` (10 minutes), and the reaper took the lock then (every energy batch 0 of 20, on each device).
+  - A request that waits `BENCH_TURN.waitMs` (10 minutes) for the turn ends the run with a `start` mark that says so.
+- spec/NPU-BENCHMARK.md: Intel's counters, the turn (Running it, step 4), and the first energy runs on Intel (the 225U's NPU, graphics and processor).
+
+### Before you update
+
+- Nothing for an agent: only the benchmark and the meter changed.
+
 ## 2.98.1
 
 **Castellan's GenieX build lets the processor's threads sleep while the model is on the NPU, and GenieX 0.9.3 gets that build too.**

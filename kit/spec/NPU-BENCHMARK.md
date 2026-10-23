@@ -68,6 +68,7 @@ The suite is data, `npu-bench-suite.json` beside this file, with a version (`cas
 8. **Holding speed** (the full run only). Ten minutes of triage jobs back to back. It shows how fast the job runs in the first minute and in the last: a laptop that gets hot and slows down shows it here.
 9. **Energy** (optional, `--energy`). What the run reads depends on the PC (`power-meter.ts`, kit 2.98.0):
    - **Windows' Energy Meter counters**, where the PC's firmware has them (the Snapdragon X2 laptop does): a running energy total for each part it meters (`npu`, `gpu`, each `cpu_cluster`, `memory`, `soc`, and `system`, the whole PC), read through CIM (`Win32_PerfRawData_PowerMeterCounter_EnergyMeter`: picowatt-hours, at a clock in milliseconds) with no administrator, and only at each stretch's two ends, so the reading's own cost is the same in every stretch and taking rest away takes it out. They read plugged in or not. `--meter auto`, the default, uses them where they're there.
+     An Intel laptop has Intel's own (RAPL; a Core Ultra 5 225U does): `rapl_package0_pkg`, the processor chip whole (its cores, graphics, NPU and the rest of it); `_pp0`, its cores; `_pp1`, its graphics; and `_dram`, memory, which reads 0 on the 225U. No `system`, so the chip is the whole (kit 2.98.2; before, the first counter listed, its graphics, was), and no `npu`: the NPU's share is the chip's less its cores' and graphics'. The screen and the rest of the PC aren't in it.
    - **A Shelly plug** (Gen2 or later, `--meter shelly:<address>`): the whole PC from the wall, its charger's loss too, its power read every second over the local network (`/rpc/Switch.GetStatus?id=0`). Plugged in, with the battery full: a charging battery would swamp it, so the run reads `BatteryStatus` and says when it was charging (`charging` in the report).
    - **The graphics card's own reading** (`--meter nvidia`): nvidia-smi's running total (`total_energy_consumption`) where the card keeps one, else its draw every second. The card alone, for a desktop.
    - **The battery's discharge rate** (`--meter battery`, and `auto` unplugged on a PC without the counters; `root\wmi` `BatteryStatus.DischargeRate`, in milliwatts, every 5 s). The least trusted: on the Lunar Lake laptop, an HP OmniBook X 17, it read 28–29 W at rest while the battery's real drain was about 16 W, and working read only 2–6% more, or less. So its figure counts only when working reads clearly more than rest: by 1 W and by a tenth of the rest reading (`ENERGY_MIN_EXTRA`); otherwise the report keeps both readings with no millijoules a token, and the log says why. With it the run measures the triage minutes alone, as before kit 2.98.0.
@@ -162,6 +163,8 @@ npm run kit        # fills src\kit\ from kit\
 
   Run the first command again: it must list nothing. A program that isn't the manor's (its path outside the GenieX CLI folder and the tools home's `servers\`) is the owner's to stop, not yours.
 
+  From kit 2.98.2 each of the benchmark's requests takes the NPU's turn, as an agent's does, whichever device it runs on: its server is on the route's port, which the keeper's reaper watches as the NPU's and stops once nobody has taken the NPU's turn for 5 minutes. Before, it stopped the benchmark's server partway through every run on a Core Ultra 5 225U, and every answer after failed. A turn held for the whole run doesn't do: anyone else counts a holder stale after `rules.json`'s `lock.staleMs` (10 minutes). An agent's request still gets the NPU's turn between two of the benchmark's, and reaches its server, so pausing the agents still matters.
+
 **5. A quick run first** (about 8 minutes past setup), to see every step works before the half hour:
 
 ```powershell
@@ -223,6 +226,18 @@ The route is GenieX 0.8.0 on port 18181, one model for chat and vision: on an X2
 - **An X played on the X2.** `--generation snapdragon-x` (kit 2.74.7) runs the first X's code on the X2's NPU: AI Hub's X Elite build of the model, served by GenieX from a folder of its own (`{tools}\played\snapdragon-x\geniex`, whose `config.json` names the X Elite to AI Hub), checked against the X Elite's pins there. The report says `run.played`, carries a `played` mark, and is never ranked: its numbers are the X's code on the X2, not an X's speed. A newer Snapdragon on an older one is refused (exit 2), as is `--generation` on any NPU but a Snapdragon, where it would be another generation's starting values alone (NPU-VENDORS.md, Playing an older Snapdragon on a newer one).
 
 The plugged-in full run's report is what the website's speed table takes for the Snapdragon row.
+
+### On Intel: energy on a Core Ultra 5 225U
+
+The first energy runs on Intel (kit 2.98.2, 2026-10-22): a Lenovo 83KS, Core Ultra 5 225U (NPU 3720, Arc graphics), plugged in, Balanced, Reeve stopped, Qwen3-4B-Instruct-2507 int4-cw on OpenVINO Model Server 2026.4.1, the full run with `--energy` on each device, each ranked. Energy is the chip's (RAPL `pkg`) over rest; each job's is a batch of 20's, divided by 20.
+
+| | job time (3 jobs) | writing | read 1,024 | triage, reply, summary: each | the three | over rest while working | a token (triage minutes) |
+|---|---|---|---|---|---|---|---|
+| NPU | 27.4 s | 13.2 tok/s | 3.5 s | 34, 63, 81 J | 178 J | 6.7 W | 36 mJ |
+| Graphics | 21.6 s | 19.0 tok/s | 4.3 s | 79, 112, 145 J | 336 J | 16.2 W | 85 mJ |
+| Processor | 36.3 s | 18.0 tok/s | 11.0 s | 249, 208, 361 J | 818 J | 22.3 W | 279 mJ |
+
+The graphics card does the three jobs 21% faster than the NPU, for 1.9 times the energy; the processor is slower than the NPU and takes 4.6 times it. The NPU's own share has no counter: its cores drew 2–6 J a job, the rest is the NPU and the chip around it. All three answered the same 23 of 24 quality items. Keeping the model loaded cost nothing measurable on any of them (−0.6 to +0.3 W, within the rest's noise).
 
 ## The website
 

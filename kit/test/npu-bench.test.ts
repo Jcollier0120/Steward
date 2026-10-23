@@ -392,6 +392,31 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.match(B.marksFor(noisyJob, SUITE)[0].say, /more than 15%: the reply job$/);
 });
 
+test("each request is in the NPU's turn, as an agent's is, so the keeper's reaper leaves the server alone; a turn that never comes ends the run, saying so", async () => {
+  const { lineState, LockTimeout } = await import('./fixture/src/kit/npu-queue.ts');
+  const { lockDirsOf } = await import('./fixture/src/kit/accelerators.ts');
+  const npu = lockDirsOf({ id: 'npu', slots: 1 });
+  const s = await scene();
+  // The NPU's line as each request reaches the server.
+  const held: number[] = [];
+  const push = s.fake.seen.push.bind(s.fake.seen);
+  s.fake.seen.push = (...xs: any[]) => (held.push(lineState(npu).held), push(...xs));
+  const { code } = await B.npuBench(s.opts);
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.ok(held.length > 20 && held.every((h) => h === 1), `held as each request came: ${held}`);
+  assert.equal(lineState(npu).held, 0, 'let go after each');
+
+  // An agent's request holds it past the wait: the run ends there, nothing asked, and the reason.
+  const busy = await scene();
+  const timeout = (async () => {
+    throw new LockTimeout('waited');
+  }) as <T>(fn: () => Promise<T>) => Promise<T>;
+  const r = await B.npuBench({ ...busy.opts, io: { ...busy.opts.io, turn: timeout } });
+  assert.equal(r.code, 1);
+  assert.equal(busy.fake.seen.length, 0);
+  assert.match(r.report.marks.map((m: any) => m.say).join('; '), /a request waited 10 min for the NPU's turn/);
+});
+
 test("every read and job is a prompt the server hasn't seen, so no prefix cache answers it; the short answer, writing and quality are the same each time", async () => {
   assert.equal(B.freshPrompt('Read this.', 'bench a1-7'), '[bench a1-7]\nRead this.');
   const s = await scene();

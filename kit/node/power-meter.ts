@@ -60,6 +60,16 @@ export interface Span {
 /** A picowatt-hour in millijoules. */
 const PWH_MJ = 3.6e-6;
 
+/**
+ * Intel's counters (RAPL, as on a Core Ultra 5 225U): the package, the whole chip (`rapl_package0_pkg`); its cores
+ * (`_pp0`); its graphics (`_pp1`); and memory (`_dram`, read 0 on the 225U). The NPU has none of its own: it is in the
+ * package, beside the cores and graphics.
+ */
+const RAPL_PKG = /^rapl_package\d+_pkg$/;
+const RAPL_CORES = /^rapl_package\d+_pp0$/;
+const RAPL_GRAPHICS = /^rapl_package\d+_pp1$/;
+const RAPL_DRAM = /^rapl_package\d+_dram$/;
+
 /** The Energy Meter counters' raw values: a line `name|energy|time` for each part. */
 export const EMI_PS = `$ErrorActionPreference = 'SilentlyContinue'
 Get-CimInstance Win32_PerfRawData_PowerMeterCounter_EnergyMeter | ForEach-Object { "emi|$($_.Name)|$($_.Energy)|$($_.Time)" }`;
@@ -142,7 +152,10 @@ export async function openMeter(spec: string | undefined, o: { onBattery: boolea
     const read = async () => parseEmi(await (o.io?.powerShell ?? ((s: string) => runPowerShell(s, 20_000)))(EMI_PS));
     const first = await read();
     if (!first) return null;
-    return { kind: 'emi', say: `Windows' Energy Meter counters (${Object.keys(first.totals!).join(', ')})`, whole: 'system' in first.totals! ? 'system' : Object.keys(first.totals!)[0], totals: true, everyMs: 1_000, read };
+    const names = Object.keys(first.totals!);
+    // The whole PC where it's metered (system), else on Intel the processor's package: its cores, graphics, NPU and the rest of the chip.
+    const whole = names.includes('system') ? 'system' : (names.find((p) => RAPL_PKG.test(p)) ?? names[0]);
+    return { kind: 'emi', say: `Windows' Energy Meter counters (${names.join(', ')})`, whole, totals: true, everyMs: 1_000, read };
   };
   const battery = (): Meter => {
     const rate = o.io?.dischargeRate ?? dischargeRate;
@@ -261,14 +274,20 @@ export const watts = (mw: number | undefined) => (mw === undefined ? '—' : `${
 /** A part's energy in a log line: joules to a tenth (a hundredth under ten). */
 export const joules = (mj: number | undefined) => (mj === undefined ? '—' : `${(mj / 1000).toFixed(Math.abs(mj) < 10_000 ? 2 : 1)} J`);
 
-/** The parts worth naming in a log line: the whole PC, then the NPU, the graphics, the processor's clusters added up, and memory. */
+/**
+ * The parts worth naming in a log line: the whole PC (or Intel's package), then the NPU, the graphics, the processor's
+ * clusters (or Intel's cores) added up, and memory.
+ */
 export function partsSay(meter: Meter, values: Record<string, number>, say: (v: number | undefined) => string = watts): string {
-  const cpu = Object.entries(values).filter(([p]) => p.startsWith('cpu')).reduce((a, [, v]) => a + v, 0);
+  const sum = (of: (p: string) => boolean) => {
+    const parts = Object.keys(values).filter(of);
+    return parts.length ? parts.reduce((a, p) => a + values[p], 0) : undefined;
+  };
   const named: [string, number | undefined][] = [
     ['npu', values.npu],
-    ['graphics', values.gpu],
-    ['processor', Object.keys(values).some((p) => p.startsWith('cpu')) ? cpu : undefined],
-    ['memory', values.memory],
+    ['graphics', values.gpu ?? sum((p) => RAPL_GRAPHICS.test(p))],
+    ['processor', sum((p) => p.startsWith('cpu') || RAPL_CORES.test(p))],
+    ['memory', values.memory ?? sum((p) => RAPL_DRAM.test(p))],
   ];
   const rest = named.filter(([, v]) => v !== undefined).map(([n, v]) => `${n} ${say(v)}`);
   return `${say(values[meter.whole])}${rest.length ? ` (${rest.join(', ')})` : ''}`;
