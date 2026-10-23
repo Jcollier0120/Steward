@@ -102,7 +102,8 @@ test('fetching: the model, ONNX Runtime and the plugin, each pinned, only the fi
   assert.deepEqual(readdirSync(path.join(place.ort, 'notices')).sort(), ['LICENSE', 'ThirdPartyNotices.txt']);
   assert.deepEqual(readdirSync(place.pack!).sort(), [...m.QNN_PACK.keep, 'notices', 'ready'].sort());
   assert.equal(readFileSync(path.join(place.pack!, 'QnnHtp.dll'), 'utf8'), 'QnnHtp.dll');
-  assert.deepEqual(readdirSync(place.models).sort(), ['charset.txt', 'det.onnx', 'ready', 'rec.onnx']);
+  assert.deepEqual(readdirSync(place.models).sort(), ['charset.txt', 'det.onnx', 'notices', 'ready', 'rec.onnx']);
+  assert.deepEqual(readdirSync(path.join(place.models, 'notices')).sort(), ['LICENSE.txt', 'NOTICE.txt']);
   assert.deepEqual(readdirSync(path.join(place.home, 'downloads')), [], 'the zips are deleted once unpacked');
   assert.deepEqual(readdirSync(place.home).filter((f) => /unpacking|fetching/.test(f)), []);
 });

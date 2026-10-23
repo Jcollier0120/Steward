@@ -20,8 +20,9 @@ import { download, type Download } from './setup.ts';
  * - What it needs is fetched once for every agent on the PC, in the background, into the reader's shared folder
  *   (ocrHome: %USERPROFILE%\.npu-agent\ocr, beside the NPU's line and the kit's helpers): ONNX Runtime from Microsoft's
  *   release, the NPU maker's plugin from its own NuGet package (Qualcomm's, on an Arm PC), and the model from the
- *   manor's releases, each pinned by size and SHA-256, keeping only the files it uses and their notices. About 225 MB
- *   to fetch on a Snapdragon, 65 MB kept. Until all of it is there, Windows' OCR reads, as before.
+ *   manor's releases, each pinned by size and SHA-256, keeping only the files it uses and their notices. About 226 MB
+ *   to fetch on a Snapdragon, 242 MB kept (Qualcomm's compiler alone is 182 MB), and 13 MB of compiled graphs. Until
+ *   all of it is there, Windows' OCR reads, as before.
  * - The program (a kit helper, signed: prebuilt.ts) loads the model once and stays, reading picture after picture,
  *   until no picture has come for two minutes. It runs in the cache folder, where what a runtime leaves in its working
  *   folder (VitisAI's signature files) belongs, and keeps each NPU's compiled graphs there.
@@ -137,11 +138,16 @@ export const OPENVINO_PACK: NpuPack = {
 export const MODEL_VERSION = '1';
 const MODEL_RELEASE = `https://github.com/Jcollier0120/Manor-releases/releases/download/ocr-model-v${MODEL_VERSION}`;
 
-/** The model's files (tools/ocr-model/export.py makes them): the detector, the recognizer, and its characters. */
-export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt', Pinned>> = {
+/**
+ * The model's files (tools/ocr-model/export.py makes them), by where each goes in the model's folder: the detector, the
+ * recognizer, its characters, and the license and notice that come with them (Apache-2.0, as PaddleOCR's models are).
+ */
+export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt' | 'notices/LICENSE.txt' | 'notices/NOTICE.txt', Pinned>> = {
   'det.onnx': { url: `${MODEL_RELEASE}/det.onnx`, size: 1_744_568, sha256: '0000000000000000000000000000000000000000000000000000000000000000' },
   'rec.onnx': { url: `${MODEL_RELEASE}/rec.onnx`, size: 2_274_260, sha256: '0000000000000000000000000000000000000000000000000000000000000000' },
   'charset.txt': { url: `${MODEL_RELEASE}/charset.txt`, size: 298, sha256: '0000000000000000000000000000000000000000000000000000000000000000' },
+  'notices/LICENSE.txt': { url: `${MODEL_RELEASE}/LICENSE.txt`, size: 11_358, sha256: 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30' },
+  'notices/NOTICE.txt': { url: `${MODEL_RELEASE}/NOTICE.txt`, size: 0, sha256: '0000000000000000000000000000000000000000000000000000000000000000' },
 };
 
 /**

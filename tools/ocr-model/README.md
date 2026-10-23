@@ -45,7 +45,14 @@ python -I -X utf8 export.py models runs/r2/best.pt out/r2
 `train.py` fine-tunes the recognizer (`recnet.py`: PP-OCRv6 tiny's, with a head over our characters), scoring the
 held-back lines and the check's pictures every `--every` steps; about five hours on a Snapdragon X2's processor.
 `export.py` writes what the reader takes: `det.onnx`, `rec.onnx` and `charset.txt`, each checked against the model it
-came from.
+came from, with `LICENSE.txt` (Apache-2.0, PaddleOCR's) and `NOTICE.txt` (what the files are and what was changed).
+
+## Publishing
+
+The five files are the assets of the release `ocr-model-v<version>` in the manor's public releases, where the reader
+fetches them (`kit/node/ocr-npu.ts`, `MODEL_VERSION` and `MODEL_FILES`, each pinned by size and SHA-256). A model that
+reads differently is a new version: a new release, never a changed asset, so a reader with the old pins never fetches
+files that don't match them.
 
 ## Scoring outside the kit
 

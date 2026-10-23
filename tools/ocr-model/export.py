@@ -1,4 +1,5 @@
-"""The models as the kit's reader takes them (kit/node/ocr-npu.cs): det.onnx, rec.onnx and charset.txt.
+"""The models as the kit's reader takes them (kit/node/ocr-npu.cs): det.onnx, rec.onnx and charset.txt, with the
+license and notice that go with them (LICENSE.txt, NOTICE.txt): what the ocr-model-v<version> release holds.
 
     python export.py <models> <checkpoint.pt | -> <out dir>
 
@@ -7,6 +8,7 @@
   [n, 3, 48, w] in (w a multiple of 8), logits [n, w / 8, classes] out (no softmax: the reader takes the best class at
   each step), its one pooling written as the NPU runs it quickly (pool_as_means).
 - charset.txt: the recognizer's characters, class 1 onwards.
+- LICENSE.txt (Apache-2.0, as PaddleOCR's models are) and NOTICE.txt (what they are and how they were changed).
 Each is checked against the model it came from on random input before it's written.
 """
 import sys
@@ -111,6 +113,8 @@ def main():
     export_det(models, out)
     export_rec(models, ckpt, out)
     (out / 'charset.txt').write_text(CHARSET, encoding='utf-8')
+    for f in ('LICENSE.txt', 'NOTICE.txt'):
+        (out / f).write_bytes((HERE / f).read_bytes().replace(b'\r\n', b'\n'))
 
 
 if __name__ == '__main__':
