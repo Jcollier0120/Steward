@@ -106,7 +106,7 @@ function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: b
       let body = '';
       req.on('data', (c) => (body += c));
       req.on('end', () => {
-        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov"}]}');
+        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov"}]}');
         const j = JSON.parse(body);
         seen.push(j);
         const content = j.messages.at(-1).content;
@@ -410,13 +410,13 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.equal(report.ranked, true);
   assert.equal(report.run.streamed, true);
   assert.equal(report.run.usageReported, true);
-  assert.equal(report.run.model, 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov');
+  assert.equal(report.run.model, 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov');
   assert.equal(report.run.cap, V.NPU_CATALOG.routes.intel.maxContextTokens, "the route's own cap");
   assert.equal(report.pc.chip, 'Core Ultra 200V, Lunar Lake (NPU 4)');
   assert.equal(report.pc.make, 'HP');
   assert.equal(report.quality.passed, 24);
   assert.equal(report.quality.gate, true);
-  assert.equal(report.vision, null, "Intel's route has no vision model");
+  assert.deepEqual([report.vision?.passed, report.vision?.of], [4, 4], "Intel's route sees since kit 2.103.0: the suite's pictures, all four right");
   assert.deepEqual(Object.keys(report.results.readFirstTokenMs), ['512', '1024']);
   assert.ok(report.results.writeTokensPerSecond!.median! > 0);
   for (const j of SUITE.jobs) {
@@ -456,7 +456,8 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.match(s.cleared[0], /\.bench-cache-npu$/);
   // Every request was streamed, with the server's usage asked for; Intel's route has no quirks, so none starts with a nonce.
   assert.ok(s.fake.seen.every((j) => j.stream === true && j.stream_options?.include_usage === true));
-  assert.ok(s.fake.seen.every((j) => j.messages[0].role === 'user'));
+  // A picture's question has the kit's system message first (visionBody): no nonce before it either.
+  assert.ok(s.fake.seen.every((j) => j.messages[0].role === 'user' || (j.messages[0].role === 'system' && j.messages[0].content.startsWith('You answer questions about images'))), JSON.stringify(s.fake.seen.map((j) => j.messages[0])).slice(0, 400));
   assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
   // Nothing in it names the person or the PC.
   assert.doesNotMatch(readFileSync(s.opts.out, 'utf8'), new RegExp(process.env.USERNAME ?? 'no-user-name-here', 'i'));
@@ -496,6 +497,21 @@ test("each request is in the NPU's turn, as an agent's is, so the keeper's reape
   assert.equal(r.code, 1);
   assert.equal(busy.fake.seen.length, 0);
   assert.match(r.report.marks.map((m: any) => m.say).join('; '), /a request waited 10 min for the NPU's turn/);
+});
+
+test("a server that exits before it answers ends the run at once, with why (kit 2.104.0), rather than after the start's 20 minutes", async () => {
+  // Found on WEASELDEV03 (2026-10-23): Smart App Control stopped FastFlowLM as it started (0xC0E90002), its log empty,
+  // and the benchmark waited out its 20 minutes for an answer all the same.
+  const s = await scene({ vendor: 'amd' });
+  const t0 = Date.now();
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick', io: { ...s.opts.io, start: async () => ({ pid: 4242, stop: async () => {}, exited: () => ({ code: 3236495362 }) }) } });
+  assert.equal(code, 1);
+  assert.ok(Date.now() - t0 < 60_000, 'not the 20 minutes');
+  const mark = report.marks.at(-1)!;
+  assert.equal(mark.code, 'start');
+  assert.match(mark.say, /^Windows blocked flm\.exe as it started \(exit 0xC0E90002\), because its maker doesn't sign it \(Smart App Control, or a policy like it\)\. flm\.exe exited \(0xC0E90002\) before it answered; its log is empty \(.+npu-bench-amd\.log\)$/);
+  assert.equal(report.results.coldLoadMs, null);
+  assert.equal(s.fake.seen.length, 0, 'nothing asked');
 });
 
 test("every read and job is a prompt the server hasn't seen, so no prefix cache answers it; the short answer, writing and quality are the same each time", async () => {
@@ -553,6 +569,10 @@ test("--no-setup with the chat model here and Intel's embedder not: nothing pull
     mkdirSync(path.dirname(file), { recursive: true });
     writeFileSync(file, '');
   }
+  // Castellan's build of OpenVINO GenAI, downloaded beside the server by setup (kit 2.103.0), is here with the model.
+  const dll = V.hostedPatchFile(route.pluginPatch!, s.tools);
+  mkdirSync(path.dirname(dll), { recursive: true });
+  writeFileSync(dll, '');
   const embedder = V.embedPaths(route, s.tools, s.opts.env).model;
   assert.ok(route.embedServer && !existsSync(embedder), "Intel's route has an embedding server, and its model isn't here");
   const ran: string[] = [];
@@ -582,7 +602,7 @@ test("--no-setup with the chat model here and Intel's embedder not: nothing pull
   const no = await B.npuBench({ ...bare.opts, io: { ...bare.opts.io, setup: io.setup }, yes: false, confirm });
   assert.equal(no.code, 1);
   const chat = models.find((m: any) => m.id === no.report.run.model)!;
-  const both = chat.size + route.embedServer!.model.size!;
+  const both = chat.size + route.pluginPatch!.patched.size + route.embedServer!.model.size!;
   assert.equal(asked, `Download ${mb(both)} (${route.server} ${route.version} and its models)? [y/N] `);
   assert.match(no.report.marks[0].say, new RegExp(`would download ${mb(both)}: run again with --yes`));
   assert.equal(bare.fake.starts, 0, 'nothing started where it refused');
@@ -868,7 +888,9 @@ test('a candidate chats only unless --vision says it sees: pulled as its own typ
   assert.deepEqual(B.candidateRoute(V.NPU_CATALOG.routes.amd, 'qwen3-it:1.7b').models[0].pull, ['pull', 'qwen3-it:1.7b']);
   const intel = B.candidateRoute(V.NPU_CATALOG.routes.intel, 'Castellan-AI/Qwen3-1.7B-int4-cw-ov');
   assert.equal(intel.models[0].present, '{tools}\\models\\openvino\\Castellan-AI\\Qwen3-1.7B-int4-cw-ov\\graph.pbtxt');
-  assert.throws(() => B.candidateRoute(V.NPU_CATALOG.routes.intel, 'a/b', { vision: true }), /has no vision/);
+  // Every route sees since Intel's took Qwen3-VL-2B (kit 2.103.0): a route that only chats, as Intel's did, has no vision to measure.
+  const textOnly = { ...V.NPU_CATALOG.routes.intel, models: V.NPU_CATALOG.routes.intel.models.map((m: any) => ({ ...m, kinds: ['chat'] })) };
+  assert.throws(() => B.candidateRoute(textOnly, 'a/b', { vision: true }), /has no vision/);
   assert.deepEqual(B.parseBenchArgs(['--candidate', 'a/b', '--vision']), { candidate: 'a/b', vision: true });
   assert.match((B.parseBenchArgs(['--vision']) as any).error, /--vision says a --candidate sees/);
 });
@@ -1031,7 +1053,7 @@ test('energy from the Energy Meter counters, plugged in: at rest without the mod
   near(e.idle!.keepLoadedMilliwatts!, 1_000, 200, 'keeping it loaded');
   near(e.restMilliwatts, 11_000, 200, 'at rest before the batches');
   assert.ok(e.loadMilliwatts > e.restMilliwatts && e.jobs > 0 && e.millijoulesPerToken! > 0);
-  assert.deepEqual(Object.keys(e.batches!), ['triage', 'reply', 'summary', 'read-1024', 'embed']);
+  assert.deepEqual(Object.keys(e.batches!), ['triage', 'reply', 'summary', 'read-1024', 'pictures', 'embed']);
   // The embedding model by itself, after the chat server: what keeping it loaded costs, against no model.
   near(e.embed!.keepLoadedMilliwatts!, 1_000, 200, 'keeping the embedder loaded');
   near(e.embed!.loadedMilliwatts!.npu, 500, 50, "the NPU's, the embedder loaded");

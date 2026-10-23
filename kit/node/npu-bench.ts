@@ -11,8 +11,8 @@ import { lockDirsOf } from './accelerators.ts';
 import { portFree, routeOnDevice, routeOnFreePorts } from './npu-check.ts';
 import { LockTimeout, QueueFull, withAcceleratorTurn } from './npu-queue.ts';
 import { patchTarget } from './npu-patch.ts';
-import { longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
-import { atVersion, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, pinnedRoute, planNpu, playedRoute, playedSay, playGeneration, pluginPatchOf, routeFor, serverExe, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
+import { exitedSay, logLength, longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
+import { atVersion, expandRoute, generationOf, hostedPatchFile, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, pinnedRoute, planNpu, playedRoute, playedSay, playGeneration, pluginPatchOf, routeFor, serverExe, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
 import { charging, joules, measureSpan, type Meter, type MeterIo, openMeter, partsSay, type Span, watts } from './power-meter.ts';
 import { acceleratorEntry, assetName, type Download, download, LLAMA_PIN, listDevices, matchDevice, mb, MODEL_PINS, MODEL_SPECS, type NpuIo, parseListDevices, pinnedModelUrl, saysReady, SIGNED_LLAMA_REPO, unpack, variantFor } from './setup.ts';
 import { mixSummary, readTally } from './token-tally.ts';
@@ -833,8 +833,9 @@ export async function kitPlugin(route: NpuRoute, generation: string | null, o: {
     const f = path.join(path.dirname(target), name);
     if (sizeOf(f) !== want.size || (await hash(f)) !== want.sha256) return { plugin: 'server', why: `its ${path.basename(name)} isn't the one the kit's build is made for`, done: none };
   }
-  const from = path.resolve(o.kitDir ?? path.dirname(fileURLToPath(import.meta.url)), patch.patched.from);
-  if (!existsSync(from)) return { plugin: 'server', why: `the kit has no ${patch.patched.from}`, done: none };
+  // The kit's build: in the kit's node part, or the one setup downloaded (OpenVINO GenAI's).
+  const from = patch.patched.url ? hostedPatchFile(patch, o.tools) : path.resolve(o.kitDir ?? path.dirname(fileURLToPath(import.meta.url)), patch.patched.from!);
+  if (!existsSync(from)) return { plugin: 'server', why: patch.patched.url ? `the kit's ${path.basename(from)} isn't downloaded` : `the kit has no ${patch.patched.from}`, done: none };
   const exe = serverExe(route, o.tools, o.env);
   const home = path.dirname(exe);
   const dir = path.join(o.tools, 'bench', `${path.basename(home).replace(/\W+/g, '-').toLowerCase()}-${route.version}`);
@@ -852,7 +853,7 @@ export async function kitPlugin(route: NpuRoute, generation: string | null, o: {
     }
     const into = path.join(dir, path.relative(home, target));
     copyFileSync(from, into);
-    if ((await hash(into)) !== patch.patched.sha256) throw new Error(`the kit's ${patch.patched.from} isn't the build it pins`);
+    if ((await hash(into)) !== patch.patched.sha256) throw new Error(`the kit's ${patch.patched.from ?? path.basename(from)} isn't the build it pins`);
   } catch (e: any) {
     removeCopy(dir);
     return { plugin: 'server', why: `a copy with the kit's build couldn't be made: ${String(e?.message ?? e).split(/\r?\n/)[0]}`, done: none };
@@ -1168,7 +1169,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     }
     // Everything the plan would fetch, its embedding server's too, so --no-setup and the prompt count it.
     const needs = plan.downloadBytes;
-    const missing = !plan.installed || !!plan.runtime || plan.models.some((m) => !m.have) || !!(plan.embed?.download || plan.embed?.modelDownload || plan.embed?.modelPull);
+    const missing = !plan.installed || !!plan.runtime || !!(plan.patch && !plan.patch.have) || plan.models.some((m) => !m.have) || !!(plan.embed?.download || plan.embed?.modelDownload || plan.embed?.modelPull);
     if (missing && o.setup === false) return finish(1, { code: 'setup', say: `${route.server} or its models aren't here, and --no-setup was given` });
     if (missing && !o.yes) {
       const ok = o.confirm ? await o.confirm(`Download ${needs ? mb(needs) : 'what it needs'} (${route.server} ${route.version} and its models)? [y/N] `) : false;
@@ -1294,18 +1295,27 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
       const runTag = Math.random().toString(36).slice(2, 8);
       let asked = 0;
       const fresh = (q: Question) => (): Question => ({ ...q, prompt: freshPrompt(q.prompt, `bench ${runTag}-${++asked}`) });
+      // A server that exits before it answers ends the wait at once (kit 2.104.0), and `early` says why: Windows blocking
+      // it, its exit, its log's last lines. It waited the whole start limit (20 minutes or more) before.
+      let early: string | null = null;
       const loadAndAnswer = async () => {
         const t0 = now();
-        const up = await client.untilAnswers(startLimit);
-        if (up === null) return null;
+        const since = Date.now();
+        const logFrom = logLength(logFile);
+        const up = await client.untilAnswers(startLimit, () => !!server.exited?.());
+        if (up === null) {
+          const gone = server.exited?.();
+          early = gone ? (await exitedSay(entry, gone.code, { since, logFile, logFrom })).say : null;
+          return null;
+        }
         const first = await ask({ prompt: suite.short.prompt, maxTokens: suite.short.maxTokens });
         return first.ok && saysReady(first.raw) ? Math.round(now() - t0) : null;
       };
       let server = await start(entry, logFile);
       try {
         report.results.coldLoadMs = await loadAndAnswer();
-        log(`cold load: ${report.results.coldLoadMs === null ? `no correct answer (see ${logFile})` : `${(report.results.coldLoadMs / 1000).toFixed(1)} s to the first answer`}`);
-        if (report.results.coldLoadMs === null) return finish(1, { code: 'start', say: `${route.server} didn't load and answer "ready": see ${logFile}` });
+        log(`cold load: ${report.results.coldLoadMs === null ? (early ?? `no correct answer (see ${logFile})`) : `${(report.results.coldLoadMs / 1000).toFixed(1)} s to the first answer`}`);
+        if (report.results.coldLoadMs === null) return finish(1, { code: 'start', say: early ?? `${route.server} didn't load and answer "ready": see ${logFile}` });
 
         // The model loaded and idle (--energy), just after the cold load: what keeping it loaded costs, against no model.
         let loaded: Span | null = null;
@@ -1393,9 +1403,10 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
         // A start again, from the compile cache.
         await server.stop();
         await client.untilGone();
+        early = null;
         server = await start(entry, logFile);
         report.results.cachedLoadMs = await loadAndAnswer();
-        log(`cached load: ${report.results.cachedLoadMs === null ? 'no correct answer' : `${(report.results.cachedLoadMs / 1000).toFixed(1)} s`}`);
+        log(`cached load: ${report.results.cachedLoadMs === null ? (early ?? 'no correct answer') : `${(report.results.cachedLoadMs / 1000).toFixed(1)} s`}`);
 
         const jobById = (id: string) => suite.jobs.find((j) => j.id === id) ?? suite.jobs[0];
         if (profile === 'full') {
@@ -1528,18 +1539,21 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
             await sleep(250);
           }
         };
+        const eStarted = Date.now();
+        const eLogFrom = logLength(embedLog);
         const eServer = await start({ ...entry, chat: ee }, embedLog);
         try {
           // Until it gives a vector: a server loading its model answers 503, or not at all, meanwhile.
           const t0 = now();
           let first = await eAsk(se.query);
-          while (!first.ok && now() - t0 < Math.max(5 * 60_000, coldMs * 2)) {
+          while (!first.ok && !eServer.exited?.() && now() - t0 < Math.max(5 * 60_000, coldMs * 2)) {
             await sleep(500);
             first = await eAsk(se.query);
           }
+          const eGone = first.ok ? undefined : eServer.exited?.();
           if (!first.ok) {
             report.results.embed = null;
-            log(`embeddings: no vector after a start (${first.error}): see ${embedLog}`);
+            log(`embeddings: ${eGone ? (await exitedSay({ ...entry, chat: ee }, eGone.code, { since: eStarted, logFile: embedLog, logFrom: eLogFrom })).say : `no vector after a start (${first.error}): see ${embedLog}`}`);
           } else {
             const loadMs = Math.round(now() - t0);
             const tryEmbed = async (input: () => string | string[]) => {

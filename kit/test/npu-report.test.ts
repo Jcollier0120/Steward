@@ -36,7 +36,7 @@ test('a setup report: ids, versions and times, rounded, and nothing else', () =>
     kit: '2.80.0',
     app: 'manor 0.16.200',
     chip: { vendor: 'intel', generation: 'lunar-lake', pciDevice: '643E', cpu: r.chip.cpu, npu: r.chip.npu, driver: '32.0.100.4239', driverDate: '2025-09-01', arch: 'x64', ramGb: 32, windows: '26200' },
-    route: { server: intel().server, version: intel().version, model: 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov', cap: intel().maxContextTokens, verified: true },
+    route: { server: intel().server, version: intel().version, model: 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov', cap: intel().maxContextTokens, verified: true },
     ok: true,
     failed: null,
     speeds: { coldMs: 41_235, warmMs: 812, tokensPerSecond: 18.46, readTokens: 998, readMs: 2_100 },

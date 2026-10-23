@@ -187,8 +187,8 @@ test('embeddings not offered: their model not here (left for setup, the chat ref
   assert.ok(!r.changes!.some((c) => c.startsWith('embeddings')), r.changes!.join('; '));
   assert.equal(noModel.npu().embed, undefined);
   assert.ok(!noModel.did.some((d) => d.startsWith('test embed')));
-  // 12 GB: room for the chat's model, not for both (npuMemoryFit, as setup decides).
-  const ramBytes = 12 * 1024 ** 3;
+  // 14 GB: room for the chat's model, not for both (npuMemoryFit, as setup decides).
+  const ramBytes = 14 * 1024 ** 3;
   const fit = V.npuMemoryFit(V.routeFor(V.NPU_CATALOG.routes.intel, support.generation), ramBytes);
   assert.ok(fit.chat && !fit.embed, JSON.stringify(fit));
   const small = fakePc(setUpEntry({ noEmbed: true }));

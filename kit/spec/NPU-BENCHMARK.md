@@ -22,13 +22,13 @@ The website shows two boards:
 - **Chips**: one row per chip generation (Snapdragon X2 Elite, Lunar Lake, Ryzen AI 300...), each with the model Castellan ships for it, measured by us. This is what a customer gets on that chip.
 - **Models**: per chip, every model we've measured on it, shipped or a candidate. This is how we choose what to ship.
 
-Every model Castellan runs today is a Qwen model at 4-bit weights:
+Every model Castellan runs today is a Qwen model, at 4-bit weights except Intel's 8-bit:
 
 | Maker | Server | Model | Weights |
 |---|---|---|---|
 | Qualcomm X | GenieX 0.9.3 (its pin, kit 2.101.0) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0), as on the X2; Qwen3-VL-4B-Instruct (W4A16) its fallback | 4-bit; also does vision, on the Hexagon's second session |
 | Qualcomm X2 | GenieX 0.9.x (its llama.cpp plugin; the X2 pins 0.9.1) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Hexagon's second session (on the Adreno under 0.8.0) |
-| Intel | OpenVINO Model Server 2026.4.1 | Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov | 4-bit symmetric, channel-wise |
+| Intel | OpenVINO Model Server 2026.4.1, with Castellan's build of OpenVINO GenAI | Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov (kit 2.103.0; Qwen3-4B-Instruct-2507 int4-cw before) | 8-bit symmetric, per channel; also does vision |
 | AMD | FastFlowLM 1.0.7 | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
 
 They are not the same weights: each maker's NPU needs its own format, Qualcomm's are vision models, and AMD's is a smaller model that does both. So the chips board doesn't claim identical models. It compares what each chip delivers with its shipped model, names the model on every row, and shows a quality score beside the speed, so a faster chip whose model answers worse can't hide it.
@@ -248,6 +248,27 @@ The first energy runs on Intel (kit 2.98.2, 2026-10-22): a Lenovo 83KS, Core Ult
 
 The graphics card does the three jobs 21% faster than the NPU, for 1.9 times the energy; the processor is slower than the NPU and takes 4.6 times it. The NPU's own share has no counter: its cores drew 2–6 J a job, the rest is the NPU and the chip around it. All three answered the same 23 of 24 quality items. Keeping the model loaded cost nothing measurable on any of them (−0.6 to +0.3 W, within the rest's noise).
 
+These are the 4B's. Kit 2.103.0 moves Intel to Qwen3-VL-2B, and its energy series is still to run.
+
+### On Intel: Qwen3-VL-2B on the NPU 3720 (kit 2.103.0)
+
+The same PC, 2026-10-23, the full run (no energy) on OpenVINO Model Server 2026.4.1 with Castellan's build of OpenVINO GenAI (NPU-VENDORS.md, Castellan's build of OpenVINO GenAI). Each model was run as a candidate (`--candidate`), its files measured into the report. The first two columns ran at OpenVINO's own prompt settings, the last two at the route's (`NPUW_LLM_PREFILL_CHUNK_SIZE` 256, `GENERATE_HINT` BEST_PERF). The last is the export the kit pins: its DeepStack steps rewritten into the form the NPU runs (NPU-VENDORS.md, Qwen3-VL-2B on Intel's NPU), the weights the same. Every run was ranked.
+
+| | Qwen3-VL-4B INT4 (OpenVINO's NPU build) | Qwen3-VL-2B INT8 (Castellan's) | Qwen3-VL-2B INT8, the route's settings | The same, DeepStack rewritten (pinned) |
+|---|---|---|---|---|
+| Quality | 23 of 24 | 22 of 24 | 22 of 24 | 22 of 24 |
+| Pictures | 4 of 4, 6.6–7.1 s each | 4 of 4, 2.1–2.5 s | 4 of 4, 0.8–1.1 s | 4 of 4, 0.8–1.1 s |
+| Writing | 8.6 tok/s | 11.0 tok/s | 17.3 tok/s | 17.9 tok/s |
+| A short answer | 6.2 s | 1.9 s | 0.56 s | 0.55 s |
+| Read 1,024 | 6.3 s | 2.0 s | 2.0 s | 2.2 s |
+| Read near the cap (1,73x of 2,048) | 12.7 s | 3.9 s | 3.4 s | 3.6 s |
+| Job time (3 jobs) | 46.6 s | 18.7 s | 13.4 s | 12.9 s |
+| Cold load / cached | 114 / 13.2 s | 35 / 5.7 s | 46 / 4.3 s | 47 / 4.3 s |
+| Memory, working set (private) | 6.9 GB (1.5) | 4.4 GB (1.0) | 4.0 GB (1.1) | 4.0 GB (1.1) |
+| Speed after 10 minutes | 99% | 100% | 100% | 100% |
+
+The 2B misses "time" and "apples" by running out of tokens mid-working, not by a wrong answer. Against the 4B it had on this PC (On Intel: energy, above), the route's 2B does the three jobs in about half the time (12.9 s against 27.4) and writes faster (17.9 tokens a second against 13.2), and it reads pictures as well.
+
 ## Comparing devices (kit 2.99.0)
 
 What the NPU is for shows against the rest of the chip: the same model on the NPU, the built-in graphics and the processor, each measured the same way, and what the whole PC spends on each.
@@ -303,6 +324,39 @@ Kit 2.99.0, the quick profile, three runs of each device a round at a time, medi
 - **Awake, quiet, the X2 rests at 9.1–10.1 W** with the screen at 75%. A first series ran with the screen off, in Modern Standby, where it rests at 5.4 W. Its costs over rest came out within 15% of these (NPU triage 11.0 J, Adreno 50.0 J, processor 115.8 J), but its rests, and so what keeping a model loaded costs, didn't. Hence the hold awake (Energy, above).
 - Two runs' rests with no model caught a burst of other work: the NPU's first (35 W, the processor at 18 W) and the processor's third (11.7 W). Each made that run's "keeping it loaded" negative. The medians leave them out, which is what three runs are for.
 
+### The AMD Ryzen AI 7 350, 2026-10-23
+
+Kit 2.99.1, the quick profile, three runs of each device, medians. A Dell 14 (DC14255): Ryzen AI 7 350 (Krackan, XDNA 2), Radeon 860M. The graphics and processor ran a round at a time (14:39–16:13 UTC), the NPU's three after them (16:13–16:50), because Windows' Smart App Control stopped FastFlowLM as it started until the PC's owner turned it off (NPU-VENDORS.md). The same model on each, Qwen3.5-2B: on the NPU FastFlowLM 1.0.7's `qwen3.5:2b` (its own NPU format), on the Radeon and the processor unsloth's Q4_0 GGUF with its F16 mmproj on llama.cpp b11734's Vulkan and x64 builds, with Qwen3-Embedding-0.6B beside it (AMD's NPU route has no embedding model). Plugged in, the battery at 100%, Windows' power mode Balanced, the screen at 75% and held on by each run (no standby), the manor stopped, and the processor 4–10% busy at each start.
+
+The energy is the chip's (`rapl_package0_pkg`), not the whole PC's. AMD's counters name their parts with a " power" suffix: `cpu power`, `npu power`, `gpu power`, `apu power`, `socket power` and `system power`, beside RAPL's package and its eight cores. `system power` reads a flat 1.5 W, at rest or working, so it can't be the whole: the summary takes the package, which rests at 4.0–4.6 W. As on Intel, the screen and the rest of the PC aren't in these rows.
+
+| | NPU | Graphics (Radeon 860M) | Processor |
+|---|---|---|---|
+| first answer after a start | 8.1 s | 3.9 s | 2.8 s |
+| short answer | 708 ms | 183 ms | 168 ms |
+| writing | 22.5 tokens/s | 25.0 tokens/s | 26.4 tokens/s |
+| reading 1,024 tokens | 1,412 ms | 1,509 ms | 4,335 ms |
+| job time | 8.08 s | 10.93 s | 14.27 s |
+| quality (of 24), pictures (of 4) | 22, 3 | 20, 3 | 20, 3 |
+| embedding texts | — | 1,614 tokens/s | 515 tokens/s |
+| keeping the model loaded | 22 mW (0.5 Wh/day) | too small to tell | too small to tell |
+| triage: each over rest | 26.4 J | 40.7 J | 88.6 J |
+| reply: each over rest | 27.5 J | 87.3 J | 79.4 J |
+| summary: each over rest | 48.7 J | 89.8 J | 128.5 J |
+| reading 1,024 tokens: each over rest | 31.1 J | 32.2 J | 87.5 J |
+| a picture: each over rest | 26.1 J | 12.1 J | 22.8 J |
+| embedding: a token over rest | — | 12.8 mJ | 44.1 mJ |
+| triage ×5: the chip | 171.3 J in 9.5 s | 247.0 J in 10.1 s | 533.3 J in 21.7 s |
+| reply ×5: the chip | 192.2 J in 13.2 s | 529.2 J in 21.6 s | 478.6 J in 19.5 s |
+| summary ×5: the chip | 340.4 J in 24.0 s | 538.0 J in 22.2 s | 767.4 J in 31.1 s |
+
+- **The NPU does the chat jobs for a third to two thirds of the graphics' energy**, and the best job time. It reads for the same as the Radeon (31 J against 32 J a 1,024-token read), and a picture costs it twice the Radeon's (26 J against 12 J). Its lead is smaller than on the X2 Elite (On a Snapdragon, above).
+- **FastFlowLM's processor side outweighs the NPU.** By part, each job's `cpu power` is 6.4–15.7 J, its `npu power` 1.1–5.7 J: a picture 14.9 J against 1.1 J, a 1,024-token read 15.7 J against 1.3 J. FastFlowLM's own processor work while the NPU runs is most of the route's cost, and is why the Radeon wins pictures. It is the first thing to cut on AMD.
+- **FastFlowLM streams, with usage.** Every NPU run's `run.streamed` and `run.usageReported` are true: one chunk a token, its counts in the last.
+- **Holding the model costs next to nothing**: 22 mW for FastFlowLM, where GenieX on the X2 costs the whole PC 1.1 W. llama.cpp loaded on the Radeon or the processor costs nothing the meter can tell.
+- **Speed is close for writing** (22.5–26.4 tokens a second); FastFlowLM's first answer after a start (8.1 s) and its short answer (708 ms) are the slowest, and the NPU answers two more quality items than llama.cpp does with the model's GGUF.
+- Two rests caught other work: the graphics' second run's rest with no model (10.1 W, against 4.0–4.6) and the processor's second run's rest with its model loaded. Each made only that run's "keeping it loaded" wrong. The medians leave them out.
+
 ### On Intel and AMD
 
 On a laptop with Windows' Energy Meter counters (`node src\kit\power-meter.ts` says), from a worktree of the Steward at kit 2.99.0 or later (Running it on a PC, step 1), plugged in, the lid open, the PC quiet (step 3) and its agents paused (step 4). The run keeps the PC awake with its screen on by itself, so the figures are an awake PC's, as the X2's are:
@@ -312,7 +366,7 @@ node src\kit\power-meter.ts
 node src\kit\npu-bench.ts --device NPU,GPU,CPU --runs 3 --energy --profile quick --yes 2>&1 | Tee-Object -FilePath npu-bench-devices.log
 ```
 
-On Intel the counters are RAPL's, the chip's own (`pkg`: its cores, graphics and NPU; On Intel, above), with no `system`: the energy rows are then the chip's, not the whole PC's, and the screen isn't in them. Without the counters, a Shelly plug (`--meter shelly:<address>`) gives the whole PC's rows; the battery gives speed only. Send back the summary (`npu-bench-summary-<maker>-<date>.json`), the nine reports, and the log, privately. On AMD the graphics and processor runs download Qwen3.5-2B's GGUF (1.9 GB) into the tools home's `models\unsloth\Qwen3.5-2B-GGUF`, which nothing else uses: remove it after. llama.cpp's builds (`servers\llama.cpp\llama.cpp-b11734-*`) are setup's own, and can stay.
+AMD's series is above (The AMD Ryzen AI 7 350, 2026-10-23). Intel's on kit 2.99.x, the three devices a round at a time, is still due: its figures above are kit 2.98.2's, each device's full run by itself. On Intel the counters are RAPL's, the chip's own (`pkg`: its cores, graphics and NPU; On Intel, above), with no `system`: the energy rows are then the chip's, not the whole PC's, and the screen isn't in them. On AMD the same (its `system power` reads a flat 1.5 W, so the package is the whole). Without the counters, a Shelly plug (`--meter shelly:<address>`) gives the whole PC's rows; the battery gives speed only. Send back the summary (`npu-bench-summary-<maker>-<date>.json`), the nine reports, and the log, privately. On AMD the graphics and processor runs download Qwen3.5-2B's GGUF (1.9 GB) into the tools home's `models\unsloth\Qwen3.5-2B-GGUF`, which nothing else uses: remove it after. llama.cpp's builds (`servers\llama.cpp\llama.cpp-b11734-*`) are setup's own, and can stay.
 
 ## The website
 
@@ -348,7 +402,7 @@ The same model on the Arc 140V, measured with the experiment harness rather than
 ## What's built
 
 1. **Shared parts out of the NPU check**: starting and stopping a server, asking, waiting for it to answer, and reading its memory move into `npu-server.ts`. The NPU check uses them as it does now and behaves the same.
-2. **Streamed requests**: `askStream` sends `stream: true` with `stream_options.include_usage`, reads the server's events, and returns the time to the first token, each token's time and the usage. No route declares whether its server streams: the benchmark asks every request streamed and sees what comes back. An answer that comes all at once, not as server-sent events, is read that way, and a run where any did is marked `not-streamed` (the report's `run.streamed` false); one whose stream carried no token counts is marked `no-usage` (`run.usageReported` false). OpenVINO Model Server streams with usage in its last chunk. This was checked on the Lunar Lake's NPU: one chunk a token, and the writing rate between tokens was 24.1–24.2 a second over 256 tokens, steady from one try to the next. Whether GenieX streams, and puts its usage in the last chunk, still has to be checked on the X2 Elite (its first run's `run.streamed` and `run.usageReported` say). FastFlowLM's too, once there's AMD hardware.
+2. **Streamed requests**: `askStream` sends `stream: true` with `stream_options.include_usage`, reads the server's events, and returns the time to the first token, each token's time and the usage. No route declares whether its server streams: the benchmark asks every request streamed and sees what comes back. An answer that comes all at once, not as server-sent events, is read that way, and a run where any did is marked `not-streamed` (the report's `run.streamed` false); one whose stream carried no token counts is marked `no-usage` (`run.usageReported` false). OpenVINO Model Server streams with usage in its last chunk. This was checked on the Lunar Lake's NPU: one chunk a token, and the writing rate between tokens was 24.1–24.2 a second over 256 tokens, steady from one try to the next. Whether GenieX streams, and puts its usage in the last chunk, still has to be checked on the X2 Elite (its first run's `run.streamed` and `run.usageReported` say). FastFlowLM 1.0.7 streams one chunk a token, its usage in the last (every run on the Ryzen AI 7 350, 2026-10-23).
 3. **The suite** as data (`npu-bench-suite.json`): settings, warm-ups and tries, the speed prompts, the three jobs, the quality items with their grades, the vision items and pictures, the gate.
 4. **Grading**: an exact match, a regular expression, a number, JSON fields.
 5. **Conditions**: plugged in or not, battery charge and discharge rate, Windows' power mode, how busy the processor is, the Windows build, the laptop's make and model (`Win32_ComputerSystem`).
@@ -374,5 +428,5 @@ Later, not in the first version: a **Measure this PC** button in Manor's Acceler
 ## Open questions
 
 - **The jobs' mix.** The three jobs' sizes are a guess at the agents' work. The token tally counts what agents send from kit 2.66.0 on; a week of it on the owner's PCs (`--mix 7`) sets the sizes before the suite's first release. They are the ranking, so this matters most.
-- **Energy.** To be published (decided). The battery's rate doesn't hold up on the Lunar Lake, so kit 2.98.0 reads Windows' Energy Meter counters where a PC has them, a Shelly plug, or a card's own reading. Kit 2.99.0 measures every route on its NPU, graphics and processor, and the embeddings (Comparing devices, above). Still to do: the same on an Intel and an AMD laptop with the counters, and the full profile's figures for the website.
-- **The gate's calibration** needs the three known-good routes measured first. AMD's route can't join the calibration until there's AMD hardware.
+- **Energy.** To be published (decided). The battery's rate doesn't hold up on the Lunar Lake, so kit 2.98.0 reads Windows' Energy Meter counters where a PC has them, a Shelly plug, or a card's own reading. Kit 2.99.0 measures every route on its NPU, graphics and processor, and the embeddings (Comparing devices, above). Still to do: the same on an Intel laptop with the counters (AMD's quick series is above, 2026-10-23), and the full profile's figures for the website.
+- **The gate's calibration** needs the three known-good routes measured first. AMD's route can join it now there's AMD hardware (the Ryzen AI 7 350): its runs so far are the quick profile's, which aren't ranked, so a full one is due first.

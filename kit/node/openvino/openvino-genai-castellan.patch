@@ -1,0 +1,37 @@
+diff --git a/src/cpp/src/visual_language/pipeline.cpp b/src/cpp/src/visual_language/pipeline.cpp
+index c92ad52..489358d 100644
+--- a/src/cpp/src/visual_language/pipeline.cpp
++++ b/src/cpp/src/visual_language/pipeline.cpp
+@@ -349,6 +349,9 @@ public:
+         if (!m_is_chat_conversation) {
+             reset_language_state();
+             m_language.get_tensor("attention_mask").set_shape({1, 0});
++            // A request that failed part-way leaves its prompt tokens in the cache state, which only a finished
++            // generate clears; left there, they make every later request fail its tokenized history check.
++            m_inputs_embedder->get_cache_state().reset_state();
+         }
+ 
+         setup_generation_config(generation_config);
+@@ -913,7 +916,21 @@ private:
+         std::optional<int64_t> rope_delta;
+         std::tie(position_ids, rope_delta) = m_inputs_embedder->get_position_ids(inputs_embeds_size, history_size);
+ 
+-        const auto& lm_extra_inputs = m_inputs_embedder->get_lm_extra_inputs();
++        const auto& embedder_extra_inputs = m_inputs_embedder->get_lm_extra_inputs();
++        // NPUW's chunked prefill slices visual_pos_masks along the prompt, so on NPU the one-element mask a
++        // text-only prompt gets (Qwen3-VL) must be widened to the whole prompt, all false.
++        std::unordered_map<std::string, ov::Tensor> npu_extra_inputs;
++        const auto masks = embedder_extra_inputs.find("visual_pos_masks");
++        const size_t prompt_len = history_size + inputs_embeds_size;
++        const bool widen_masks = m_is_npu && masks != embedder_extra_inputs.end() && masks->second &&
++                                 masks->second.get_shape().back() == 1 && prompt_len > 1;
++        if (widen_masks) {
++            npu_extra_inputs = embedder_extra_inputs;
++            ov::Tensor whole_prompt(ov::element::boolean, {masks->second.get_shape().at(0), prompt_len});
++            std::fill_n(whole_prompt.data<bool>(), whole_prompt.get_size(), false);
++            npu_extra_inputs["visual_pos_masks"] = std::move(whole_prompt);
++        }
++        const auto& lm_extra_inputs = widen_masks ? npu_extra_inputs : embedder_extra_inputs;
+ 
+         auto per_layer_callback = m_inputs_embedder->get_per_layer_embeddings_callback();
+ 

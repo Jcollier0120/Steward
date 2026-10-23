@@ -13,7 +13,7 @@ const P = await import('./fixture/src/kit/npu-reports.ts');
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 
 const intel = V.NPU_CATALOG.routes.intel;
-const ON_INTEL = { vendor: 'intel', pciDevice: null, server: intel.server, version: intel.version, model: 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov' } as const;
+const ON_INTEL = { vendor: 'intel', pciDevice: null, server: intel.server, version: intel.version, model: 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov' } as const;
 const spread = (pcs: number, median: number | null, slow: number | null) => ({ pcs, median, slow });
 // As the Exchequer writes a speed no PC measured: null.
 const NO_SPEEDS = { tokensPerSecond: null, coldMs: null, warmMs: null, readMsPer1k: null };
@@ -49,7 +49,7 @@ test("the summary into a patch: verified from 3 PCs with under 1 in 5 failing, t
   // 200 s start half again is 300 s; 8 tokens a second needs 250 ms a token, under the 300 it has, so that one stays.
   assert.deepEqual(panther.timeouts, { requestBaseMs: 55_000, requestPerTokenMs: 300, coldLoadMs: 300_000 });
   assert.deepEqual(panther.measured, { pcs: 4, server: intel.server, model: ON_INTEL.model, tokensPerSecond: 11.4, coldStartS: 150, at: '2026-11-02' });
-  assert.match(panther.basis, /^Not measured: NPU 5 .* Measured on 4 PCs by their owners' reports \(OpenVINO Model Server 2026\.4\.1, Castellan-AI\/Qwen3-4B-Instruct-2507-int4-cw-ov\), NPU drivers 32\.0\.100\.5540 to 32\.0\.100\.5612, 2026-10-20 to 2026-11-02: writes 11\.4 tokens a second \(the slowest tenth 8\.0\);/);
+  assert.match(panther.basis, /^Not measured: NPU 5 .* Measured on 4 PCs by their owners' reports \(OpenVINO Model Server 2026\.4\.1, Castellan-AI\/Qwen3-VL-2B-Instruct-int8-sym-ov\), NPU drivers 32\.0\.100\.5540 to 32\.0\.100\.5612, 2026-10-20 to 2026-11-02: writes 11\.4 tokens a second \(the slowest tenth 8\.0\);/);
   // Wildcat Lake: verified on 3 PCs; no timeouts without a cold start, and no speed for the site.
   assert.deepEqual(Object.keys((r.patch as any).routes.intel.generations['wildcat-lake']), ['verified', 'basis']);
   assert.match((r.patch as any).routes.intel.generations['wildcat-lake'].basis, /writes 9\.0 tokens a second \(the slowest tenth 6\.0\); a short answer warm in 0\.9 s \(1\.0 s\)\.$/);

@@ -11,6 +11,9 @@ after(() => rmSync(home, { recursive: true, force: true, maxRetries: 20, retryDe
 const { trimmedOnceLoaded, reportsLoaded } = await import('./fixture/src/kit/accelerators.ts');
 const { trimScript, trimWorkingSet, workingSetDll } = await import('./fixture/src/kit/working-set.ts');
 const { locksDir } = await import('./fixture/src/kit/lock.ts');
+const { smartAppControlState } = await import('./fixture/src/kit/app-control.ts');
+// The tests that compile and load a DLL of their own need Windows, and Smart App Control off (kit 2.104.0).
+const ownDll = process.platform !== 'win32' || (smartAppControlState() === 'on' && 'Smart App Control is on: it blocks the DLL this test compiles, which nothing signs');
 
 test("only FastFlowLM's server is trimmed once loaded: flm, by its program, wherever it is and however it's written", () => {
   assert.equal(trimmedOnceLoaded(['%USERPROFILE%\\.manor\\accelerators\\servers\\fastflowlm-1.0.7\\flm.exe', 'serve', 'qwen3.5:2b']), true);
@@ -45,7 +48,7 @@ test('KIT_SERVER_TRIM=0, or a PC that isn\'t Windows: nothing is tried', async (
   if (process.platform !== 'win32') assert.equal(await trimWorkingSet(process.pid, {}), null);
 });
 
-test('on Windows, a process holding 300 MB it no longer touches is trimmed to a few, and a gone one says so', { skip: process.platform !== 'win32' }, async () => {
+test('on Windows, a process holding 300 MB it no longer touches is trimmed to a few, and a gone one says so', { skip: ownDll }, async () => {
   const { spawn } = await import('node:child_process');
   const { powershell, stopPowerShellWorker } = await import('./fixture/src/kit/ps.ts');
   const source = readFileSync(new URL('./fixture/src/kit/working-set.cs', import.meta.url), 'utf8');

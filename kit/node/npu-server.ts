@@ -6,7 +6,8 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { chatBody, expandEnv, failedWithOk, fitPicture, listsWhenLoaded, reportsLoaded, serverEnv, visionBody } from './accelerators.ts';
 import type { Accelerator, AcceleratorEntry } from './accelerator-config.ts';
-import { startApart } from './apart.ts';
+import { alive, startApart } from './apart.ts';
+import { type Block, blockedExit, blockedExitSay, blockedIn, blockedSay, exitCodeSay, type ReadLog, type SacState, smartAppControlOutsideTests } from './app-control.ts';
 import { runPowerShell } from './detect.ts';
 import { type NpuPlan, runProgram } from './npu-vendors.ts';
 import { download, type NpuIo, setUpNpu, unpack } from './setup.ts';
@@ -22,6 +23,11 @@ import { download, type NpuIo, setUpNpu, unpack } from './setup.ts';
 export interface RunningServer {
   pid: number | undefined;
   stop: () => Promise<void>;
+  /**
+   * Whether it has exited (kit 2.104.0): its exit code where it's known (a plain child's), null where it isn't (one
+   * started apart, watched by its process id); undefined while it runs, and from a tool's fake that doesn't say.
+   */
+  exited?: () => { code: number | null } | undefined;
 }
 
 const taskkill = (pid: number) =>
@@ -48,18 +54,47 @@ export async function startServer(entry: AcceleratorEntry, logFile: string): Pro
   const fd = openSync(logFile, 'a');
   const env = serverEnv({ env: ep.env });
   let pid: number | undefined;
+  let apart = false;
+  let gone: { code: number | null } | undefined;
   try {
     pid = (await startApart(cmd, args, { cwd: os.homedir(), env, out: fd })) ?? undefined;
+    apart = pid !== undefined;
     if (pid === undefined) {
       const child = spawn(cmd, args, { detached: true, stdio: ['ignore', fd, fd], windowsHide: true, cwd: os.homedir(), env });
-      child.on('error', (e) => appendFileSync(logFile, `couldn't start ${cmd}: ${e.message}\n`));
+      child.on('error', (e) => {
+        gone ??= { code: null };
+        appendFileSync(logFile, `couldn't start ${cmd}: ${e.message}\n`);
+      });
+      child.on('exit', (code) => (gone = { code }));
       child.unref();
       pid = child.pid;
     }
   } finally {
     closeSync(fd);
   }
-  return { pid, stop: () => (pid ? taskkill(pid) : Promise.resolve()) };
+  // One started apart is watched by its process id: its exit code isn't known.
+  const exited = () => gone ?? (apart && pid && !alive(pid) ? { code: null } : undefined);
+  return { pid, stop: () => (pid ? taskkill(pid) : Promise.resolve()), exited };
+}
+
+/**
+ * Why a server a tool started exited before it answered (kit 2.104.0), in words: its exit code where it's known, what
+ * Windows' application control blocked of it since the start (a block's 0xC0E90002 said so where the log names no
+ * file), and its log's last lines. The NPU check and the benchmark say it at once, rather than waiting out their
+ * 20 minutes for an answer: on WEASELDEV03 (2026-10-23) FastFlowLM exited at once under Smart App Control, its log
+ * empty, and the benchmark waited for it all the same.
+ */
+export async function exitedSay(entry: AcceleratorEntry, code: number | null, o: { since: number; logFile: string; logFrom: number; read?: ReadLog; sac?: SacState | null }): Promise<{ say: string; blocked: Block[] }> {
+  const cmd = expandEnv(entry.chat!.startCommand![0]);
+  const program = path.win32.basename(cmd);
+  const blocked = await blockedIn(path.dirname(cmd), Date.now() - o.since + 5_000, o.read);
+  const why = blockedSay(blocked, program) ?? (blockedExit(code) ? blockedExitSay(program, o.sac ?? smartAppControlOutsideTests()) : null);
+  let tail = '';
+  try {
+    tail = readFileSync(o.logFile).subarray(o.logFrom).toString('utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(-3).join(' / ').slice(-400);
+  } catch {}
+  const exit = code === null ? 'exited' : `exited (${exitCodeSay(code)})`;
+  return { say: `${why ? `${why}. ` : ''}${program} ${exit} before it answered; ${tail ? `its log ends: ${tail}` : 'its log is empty'} (${o.logFile})`, blocked };
 }
 
 /** A log's length in bytes, or 0: where what a server prints next begins. */
@@ -324,10 +359,14 @@ export function serverClient(acc: Accelerator, o: { http?: typeof fetch; now?: (
       return !refusedConnection(e);
     }
   };
-  /** How long until it answers (with its model loaded), or null past the deadline. */
-  const untilAnswers = async (deadlineMs: number) => {
+  /**
+   * How long until it answers (with its model loaded), or null past the deadline, or as soon as `gone` says the server
+   * has exited (kit 2.104.0: RunningServer.exited): nothing it could answer from is left.
+   */
+  const untilAnswers = async (deadlineMs: number, gone?: () => boolean) => {
     const t0 = now();
     while (now() - t0 < deadlineMs) {
+      if (gone?.()) return null;
       if (await answers(2_000)) return Math.round(now() - t0);
       await new Promise((res) => setTimeout(res, 500));
     }

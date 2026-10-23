@@ -91,3 +91,31 @@ test("the processor variant a running llama-server loaded, from tasklist, where 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a block by its exit (kit 2.104.0): 0xC0E90002 however Node or Windows gives it, said in hexadecimal; nothing else is one', async () => {
+  const { BLOCKED_EXIT, blockedExit, blockedExitSay, exitCodeSay, saysBlockedExit, smartAppControlOutsideTests } = await import('./fixture/src/kit/app-control.ts');
+  assert.equal(BLOCKED_EXIT, 3236495362);
+  assert.equal(blockedExit(3236495362), true, "Node's exit code for it");
+  assert.equal(blockedExit(-1058471934), true, 'a signed 32-bit reading');
+  for (const code of [0, 1, 0xc0000005, null, undefined]) assert.equal(blockedExit(code), false, String(code));
+  assert.equal(exitCodeSay(3236495362), '0xC0E90002');
+  assert.equal(exitCodeSay(-1073741819), '0xC0000005');
+  assert.equal(exitCodeSay(1), '1');
+  assert.equal(exitCodeSay(null), 'no exit code');
+  for (const said of ['flm.exe exited (code 3236495362) while starting', 'exit 0xC0E90002', 'exited -1058471934']) assert.equal(saysBlockedExit(said), true, said);
+  for (const said of ['exited (code 32364953620)', 'exit 0xc0e900021', 'exited 1']) assert.equal(saysBlockedExit(said), false, said);
+  assert.equal(blockedExitSay('flm.exe', 'on'), "Windows' Smart App Control blocked flm.exe as it started (exit 0xC0E90002): its maker doesn't sign it, and Smart App Control blocks unsigned files it doesn't know");
+  for (const sac of ['off', 'evaluation', null] as const) assert.equal(blockedExitSay('flm.exe', sac), "Windows blocked flm.exe as it started (exit 0xC0E90002), because its maker doesn't sign it (Smart App Control, or a policy like it)", String(sac));
+  assert.equal(smartAppControlOutsideTests(), null, "a test run never asks this PC's setting");
+});
+
+test("the blocks that stop a llama.cpp build (kit 2.104.0): any file but a processor variant; and a block's path as Node gives it", async () => {
+  const { localPath, stoppingBlocks } = await import('./fixture/src/kit/app-control.ts');
+  const b = (file: string) => ({ file: `${FOLDER}\\${file}`, policy: null });
+  assert.deepEqual(stoppingBlocks([b('ggml-cpu-ivybridge.dll'), b('GGML-CPU-haswell.dll')]), [], 'ggml keeps another variant');
+  assert.deepEqual(stoppingBlocks([b('ggml-cpu-ivybridge.dll'), b('llama-server.exe'), b('ggml-vulkan.dll'), b('ggml-cpu.dll')]).map((x: any) => x.file.split('\\').pop()), ['llama-server.exe', 'ggml-vulkan.dll', 'ggml-cpu.dll']);
+  assert.equal(localPath('\\Device\\HarddiskVolume3\\Users\\Arnold\\.manor\\x.dll', FOLDER), 'C:\\Users\\Arnold\\.manor\\x.dll');
+  assert.equal(localPath('\\Device\\HarddiskVolume7\\tools\\x.dll', 'D:\\tools'), 'D:\\tools\\x.dll', "the drive the folder's on");
+  assert.equal(localPath('\\??\\C:\\Users\\x.dll', FOLDER), 'C:\\Users\\x.dll');
+  assert.equal(localPath('C:/Users/x.dll', FOLDER), 'C:\\Users\\x.dll');
+});

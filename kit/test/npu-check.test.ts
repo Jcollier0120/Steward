@@ -44,7 +44,7 @@ function fakeOvms(port: number, o: { cap: number; dieOverCap?: boolean; answer?:
       let body = '';
       req.on('data', (c) => (body += c));
       req.on('end', () => {
-        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov"}]}');
+        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov"}]}');
         const j = JSON.parse(body);
         seen.push(j);
         const prompt = j.messages.map((m: any) => m.content).join(' ');
@@ -184,9 +184,10 @@ test('on an Intel NPU: setup timed, every measurement taken, the report kept, an
   assert.equal((report.npu as any).pciDevice, '643E');
   assert.equal((report.npu as any).generation, 'lunar-lake');
   // The model was pulled with OpenVINO's own command; nothing was downloaded (the program was there).
-  assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov')));
-  assert.equal(by.setup.data.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size);
-  // Qwen3-4B-Instruct-2507 doesn't think, so isn't told /no_think; a think block (the fake writes one) is stripped all the same.
+  assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov')));
+  // The model, and Castellan's build of OpenVINO GenAI that its pictures need (kit 2.103.0).
+  assert.equal(by.setup.data.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + V.NPU_CATALOG.routes.intel.pluginPatch!.patched.size);
+  // Qwen3-VL-2B-Instruct doesn't think, so isn't told /no_think; a think block (the fake writes one) is stripped all the same.
   assert.doesNotMatch(s.fake.seen[0].messages.at(-1).content, /\/no_think/);
   assert.match(by['first-answer'].say, /answered "ready" \(with an empty think block, stripped\)/);
   // Under the cap answers; past it is refused plainly, and the server keeps answering.
@@ -219,7 +220,7 @@ test("the NPU's report (npu-report.ts): kept after a check on this PC's NPU, wit
   assert.match(r.chip.cpu, /Ultra 7 258V$/);
   assert.match(r.chip.npu, /AI Boost$/);
   const intel = V.routeFor(V.NPU_CATALOG.routes.intel, 'lunar-lake');
-  assert.deepEqual(r.route, { server: intel.server, version: intel.version, model: 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov', cap: intel.maxContextTokens, verified: true });
+  assert.deepEqual(r.route, { server: intel.server, version: intel.version, model: 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov', cap: intel.maxContextTokens, verified: true });
   assert.equal(r.ok, true);
   assert.equal(r.failed, null);
   const by = Object.fromEntries(report.steps.map((x: any) => [x.step, x]));
@@ -322,7 +323,7 @@ test("a route's own embedding server: set up beside the server, started by the k
   const { code, report } = await C.npuCheck(opts);
   assert.equal(code, 0, s.lines.join('\n'));
   assert.deepEqual(report.steps.map((x: any) => x.step).slice(-2), ['kit-test', 'embed']);
-  assert.deepEqual(got, ['download llama-b11125-bin-win-opencl-adreno-arm64.zip', 'unpack', 'overlay 13', 'download Qwen3-Embedding-0.6B-Q8_0.gguf']);
+  assert.deepEqual(got, ['download openvino_genai-2026.4.1.0-castellan.1.dll', 'download llama-b11125-bin-win-opencl-adreno-arm64.zip', 'unpack', 'overlay 13', 'download Qwen3-Embedding-0.6B-Q8_0.gguf']);
   const embed = report.steps.at(-1) as any;
   assert.equal(embed.ok, true);
   assert.equal(embed.data.dims, 1024);
@@ -330,7 +331,7 @@ test("a route's own embedding server: set up beside the server, started by the k
   assert.match(embed.say, /the kit started llama\.cpp and had a vector in .* a query took \d+ ms and a chunk of code \d+ ms \(1024 dimensions\)/);
   assert.equal(inputs[0], 'where is the push notification token registered');
   assert.ok(inputs[1].length > 1500, 'a chunk about the size Reeve indexes');
-  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + q.download!.size + q.model.size);
+  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + V.NPU_CATALOG.routes.intel.pluginPatch!.patched.size + q.download!.size + q.model.size);
 });
 
 test("Intel's embedding server: a second OpenVINO Model Server, nothing downloaded for it but its model, which it pulls", async () => {
@@ -357,12 +358,12 @@ test("Intel's embedding server: a second OpenVINO Model Server, nothing download
   const { code, report } = await C.npuCheck(opts);
   assert.equal(code, 0, s.lines.join('\n'));
   assert.deepEqual(report.steps.map((x: any) => x.step).slice(-2), ['kit-test', 'embed']);
-  assert.deepEqual(downloads, [], 'the program is the route\'s, already here');
+  assert.deepEqual(downloads, ['openvino_genai-2026.4.1.0-castellan.1.dll'], 'the program is the route\'s, already here: only its chat\'s GenAI build is downloaded');
   assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov') && a.includes('embeddings')), JSON.stringify(s.ran));
   const embed = report.steps.at(-1) as any;
   assert.equal(embed.ok, true);
   assert.match(embed.say, /the kit started OpenVINO Model Server and had a vector in .* \(1024 dimensions\)/);
-  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + V.NPU_CATALOG.routes.intel.embedServer!.model.size);
+  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + V.NPU_CATALOG.routes.intel.pluginPatch!.patched.size + V.NPU_CATALOG.routes.intel.embedServer!.model.size);
 });
 
 test('a server that dies on a request past its cap fails the cap step, and is started again for the rest', async () => {
@@ -398,9 +399,9 @@ test('a rehearsal of another maker’s route needs a scratch REEVE_HOME; a missi
   };
   const r = await C.npuCheck({ ...s.opts, io: { ...s.opts.io, setup } });
   assert.match(r.report.steps.find((x: any) => x.step === 'requirements')!.say, /needs the Microsoft Visual C\+\+ runtime 14\.44, which setup puts beside it \(3 MB, no administrator\)/);
-  assert.deepEqual(got, [rt.file]);
+  assert.deepEqual(got, [rt.file, 'openvino_genai-2026.4.1.0-castellan.1.dll']);
   for (const f of rt.files) assert.equal(readFileSync(path.join(dir, f), 'utf8'), 'from Microsoft', f);
-  assert.equal(r.report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, rt.size + s.catalog.routes.intel.models[0].size);
+  assert.equal(r.report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, rt.size + s.catalog.routes.intel.pluginPatch!.patched.size + s.catalog.routes.intel.models[0].size);
   assert.equal(r.code, 0, s.lines.join('\n'));
 });
 
@@ -910,6 +911,50 @@ test('a server already on the route\'s port: on the NPU the check refuses, in a 
   assert.deepEqual(await C.routeOnFreePorts(route, true, async (p) => !held.has(p)), { held: [18183, 18184] });
   // Nothing held: the route as it is.
   assert.equal(((await C.routeOnFreePorts(route, true, async () => true)) as any).route, route);
+});
+
+test("a server that exits before it answers fails the start at once, with its exit and its log's last lines (kit 2.104.0)", async () => {
+  // Found on WEASELDEV03 (2026-10-23): FastFlowLM exited at once under Smart App Control (0xC0E90002), its log empty,
+  // and the benchmark waited out its 20 minutes for an answer all the same.
+  const s = await scene();
+  let stopped = 0;
+  const logFile = path.join(s.tools, 'servers', 'logs', 'npu-check-intel.log');
+  const t0 = Date.now();
+  const { code, report } = await C.npuCheck({
+    ...s.opts,
+    io: {
+      ...s.opts.io,
+      start: async () => {
+        s.fake.starts++;
+        mkdirSync(path.dirname(logFile), { recursive: true });
+        writeFileSync(logFile, 'loading the model\nfailed to open the NPU\n', { flag: 'a' });
+        return { pid: 4242, stop: async () => void stopped++, exited: () => ({ code: 3236495362 }) };
+      },
+    },
+  });
+  const start = report.steps.find((x: any) => x.step === 'start')!;
+  assert.equal(code, 1);
+  assert.equal(start.ok, false);
+  assert.ok(Date.now() - t0 < 60_000, 'not the 20 minutes');
+  assert.equal(start.say, `Windows blocked ovms.exe as it started (exit 0xC0E90002), because its maker doesn't sign it (Smart App Control, or a policy like it). ovms.exe exited (0xC0E90002) before it answered; its log ends: loading the model / failed to open the NPU (${logFile})`);
+  assert.equal(start.data!.exited, 3236495362);
+  assert.deepEqual(start.data!.blocked, [], 'the log is never asked in a test run');
+  assert.equal(s.fake.starts, 1, 'started once');
+});
+
+test("startServer says when its server has exited, and with what code; while it runs, it hasn't (kit 2.104.0)", async () => {
+  const dir = path.join(home, 'exits');
+  mkdirSync(dir, { recursive: true });
+  const entry = (script: string) => ({ id: 'npu', chat: { baseUrl: 'http://127.0.0.1:1', model: 'm', startCommand: [process.execPath, '-e', script] } });
+  const quits = await C.startServer(entry('process.exit(7)') as any, path.join(dir, 'quits.log'));
+  await until(() => quits.exited?.(), 30_000, 'the server to have exited');
+  assert.deepEqual(quits.exited!(), { code: 7 });
+  const runs = await C.startServer(entry('setTimeout(() => {}, 60000)') as any, path.join(dir, 'runs.log'));
+  try {
+    assert.equal(runs.exited!(), undefined);
+  } finally {
+    await runs.stop();
+  }
 });
 
 test('portFree: a port something listens on is not free; once closed it is', async () => {

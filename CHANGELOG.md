@@ -2,6 +2,56 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.186
+
+**It hands out the kit 2.106.0: the manor can say how big a model it has tested on each kind of NPU, and the Smith suggests none bigger.**
+
+### What's new
+
+- **A tested size for each kind of NPU.** The Smith suggests newer models for your NPU to try. From its version 0.8.87 it suggests none bigger than the model your NPU runs now, unless the manor has tested a bigger size on that kind of NPU and found it worth trying. The kit now carries that tested size, so the manor can raise it for one kind of NPU in an update of its own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.184
+
+**It hands out the kit 2.104.0: when Windows' Smart App Control blocks a model server, setup says so in plain words, and the staff use what runs instead.**
+
+### What's new
+
+- **Setup copes with Smart App Control.** Where Windows' Smart App Control is on, it can stop a model server whose maker doesn't sign it as it starts: AMD's NPU server, FastFlowLM, is one. Setup now tries each server, recognises the block, and goes on to the next one that runs, the graphics card and then the processor. The accelerators' page says which, in plain words. When none runs, it says Smart App Control blocks the staff's local models on this PC.
+- **A record of what was blocked**, file by file, so those files can be signed.
+
+### What changed
+
+- **The NPU check and the benchmark stop at once when a model server quits.** They used to wait 20 minutes for an answer from a server that had already exited. Now they stop and say why: what Windows blocked, the exit code and the server's last lines.
+- **AMD's energy figures** are in the benchmark's notes. On a Ryzen AI 7 350 the NPU does the chat jobs for a third to two thirds of the graphics card's energy, but a picture costs it twice as much: its server's own work on the processor outweighs the NPU's.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Setup never changes Windows' Smart App Control setting.
+
+## 0.36.183
+
+**It hands out the kit 2.103.0: on an Intel Core Ultra PC, the NPU now reads pictures as well as chat, and answers faster.**
+
+### What's new
+
+- **Intel's NPU reads pictures.** Its model is now Qwen3-VL-2B, which answers both chat and questions about pictures, so screenshots no longer go to the graphics card or the processor. On a Core Ultra 5 225U it does the benchmark's three jobs in 12.9 s, against 27.4 s for the 4B it replaces, writes 17.9 tokens a second against 13.2, and reads a small picture in about a second.
+- **It reads the fine print as the processor does.** The model's copy on Hugging Face is Castellan's, with one step rewritten that Intel's NPU support skipped: without it, the NPU misread clear numbers in a picture (4837 for 4827). Now it answers them as the processor does.
+
+### What changed
+
+- **Castellan's build of one OpenVINO file.** OpenVINO's own build failed Qwen3-VL on Intel's NPU. Setup downloads Castellan's signed build of that file (7.5 MB) and keeps Intel's beside it.
+- **It takes more memory than the 4B.** Once it has read a full-size screenshot it holds about 1 GB more (4.8 GB). So a 16 GB Lunar Lake or Panther Lake PC moves its search (embeddings) off the NPU, to the graphics card or the processor, and a 12 GB Intel PC no longer chats on the NPU. A 16 GB Core Ultra 200U or 200H keeps both on the NPU and its graphics, as before.
+- **Set up local AI now moves an NPU to its new model.** Before, it left an NPU that was already set up on its old model, however often it was pressed. Now, once the manor has looked at the NPU with the new kit and found a newer model needing a download, Set up local AI downloads and tests it. A Snapdragon X2 still on the 4B moves to its 2B the same way (1.9 GB), and a first-generation X Elite that fell back to the 4B tries its 2B again, keeping the 4B quietly should it fail again.
+- **The 4B's files are deleted** three days after nothing on the PC uses them, by the rule the kit 2.101.0 brought.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An Intel PC already set up moves to the new model the next time its local AI is set up (Set up local AI) after the manor has looked at its NPU, which it does by itself soon after the update. That downloads 2.5 GB. If the new model fails its test there, the PC keeps the old one.
+
 ## 0.36.182
 
 **It hands out the kit 2.102.0: one text reader for every employee that reads text in pictures, which reads PDFs exactly and no longer loses a file over a bullet point.**

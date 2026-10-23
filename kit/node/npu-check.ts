@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
 import { atVersion, calibrate, CALIBRATION, generationOf, installedVersion, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, pinnedRoute, planNpu, type Played, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, smallPc, UNKNOWN_GENERATION } from './npu-vendors.ts';
-import { loadFailure, logLength, longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
+import { exitedSay, loadFailure, logLength, longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
 import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { npuReportFile, npuReportFromCheck, rememberNpuReport, reporterId } from './npu-report.ts';
 import { fillerPrompt, kitVersion, mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
@@ -495,8 +495,12 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   // A first start on the NPU compiles the model: allow far more than the route's cold load.
   const firstStartLimit = Math.max(20 * 60_000, coldMs * 5);
   const logFrom = logLength(logFile);
+  const startedAt = Date.now();
   let server = await start(entry, logFile);
-  const up = await untilAnswers(firstStartLimit);
+  // A server that exits before it answers is said at once (kit 2.104.0), with why: Windows blocking it, its exit, its log.
+  const exited = () => !!server.exited?.();
+  const up = await untilAnswers(firstStartLimit, exited);
+  const early = up === null && exited() ? await exitedSay(entry, server.exited!()!.code, { since: startedAt, logFile, logFrom }) : null;
   // Answering isn't holding a model: FastFlowLM serves on after its model failed to load, and says so at /api/ps.
   const holds = up === null ? null : await client.loaded();
   const whyNot = holds === false ? loadFailure(logFile, logFrom) : null;
@@ -505,12 +509,14 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     ok: up !== null && holds !== false,
     ms: up ?? undefined,
     say:
-      up === null
+      early
+        ? early.say
+        : up === null
         ? `${route.server} didn't answer in ${firstStartLimit / 60_000} minutes: see ${logFile}`
         : holds === false
           ? `${route.server} answered /v1/models but holds no model: it failed to load${whyNot ? ` (${whyNot})` : ''}; see ${logFile}`
           : `${route.server} answered /v1/models${lists || holds ? ' with its model loaded' : ''}`,
-    data: { pid: server.pid, logFile, ...(holds === false ? { loadFailure: whyNot } : {}) },
+    data: { pid: server.pid, logFile, ...(holds === false ? { loadFailure: whyNot } : {}), ...(early ? { exited: server.exited!()!.code, blocked: early.blocked.map((b) => b.file) } : {}) },
   });
   try {
     if (up === null || holds === false) return finish(1);
@@ -571,7 +577,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     if (tried.some((t) => !t.stillUp)) {
       await server.stop();
       server = await start(entry, logFile);
-      await untilAnswers(firstStartLimit);
+      await untilAnswers(firstStartLimit, exited);
     }
 
     const t0 = now();
@@ -590,7 +596,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
       return finish(1);
     }
     server = await start(entry, logFile);
-    const up2 = await untilAnswers(firstStartLimit);
+    const up2 = await untilAnswers(firstStartLimit, exited);
     const again = up2 === null ? null : await ask('Reply with the single word: ready', 16, firstStartLimit).catch(() => null);
     const loadMs = up2 === null || !again?.ok || !saysReady(again.raw) ? null : up2 + again.ms;
     add({ step: 'restart', ok: loadMs !== null && loadMs <= coldMs, ms: loadMs ?? undefined, say: loadMs !== null ? `started again and answered in ${(loadMs / 1000).toFixed(0)} s (the route allows ${coldMs / 1000} s for a cold load)` : 'it didn’t answer after a start again', data: { loadMs } });

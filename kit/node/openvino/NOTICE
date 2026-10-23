@@ -1,0 +1,16 @@
+openvino_genai-2026.4.1.0-castellan.1.dll
+
+This is a modified build of OpenVINO GenAI, Copyright (C) 2023-2026 Intel Corporation,
+licensed under the Apache License, Version 2.0 (LICENSE, beside this file).
+
+It is built from openvinotoolkit/openvino.genai at tag 2026.4.1.0 (commit ab01d1771e4) with the changes in
+openvino-genai-castellan.patch, made by Castellan in October 2026, which changes one file,
+src/cpp/src/visual_language/pipeline.cpp:
+
+1. A non-chat generate() resets the inputs embedder's cache state when it starts, so a request that failed
+   part-way no longer makes every later request fail its tokenized history check.
+2. On NPU, a text-only prompt's one-element visual_pos_masks (Qwen3-VL) is widened to the whole prompt, all
+   false, because NPUW's chunked prefill slices it along the prompt.
+
+It is not Intel's release, and Intel has not reviewed or endorsed it. Third-party components carried in the
+build are listed in OpenVINO GenAI's third-party-programs.txt.
