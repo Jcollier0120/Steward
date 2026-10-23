@@ -30,13 +30,13 @@ test("Castellan's catalogs by name: castellan-<route>-…; the route they're for
 
 test("the change: each wanted catalog Windows lacks, only as it was signed; the route's older ones removed, another route's left", () => {
   const read = (f: string) => (f === `${KIT}\\${FLM.file}` ? body : null);
-  const c = catalogChange([FLM], 'amd', { installed: ['castellan-amd-fastflowlm-1.0.5.cat', 'castellan-qualcomm-geniex-0.9.1.cat'], from: KIT, read });
+  const c = catalogChange([FLM], ['amd'], { installed: ['castellan-amd-fastflowlm-1.0.5.cat', 'castellan-qualcomm-geniex-0.9.1.cat'], from: KIT, read });
   assert.deepEqual(c, { add: [{ name: FLM.file, file: `${KIT}\\${FLM.file}` }], remove: ['castellan-amd-fastflowlm-1.0.5.cat'], problems: [] });
   assert.deepEqual(changeSteps(c), ['add', `${KIT}\\${FLM.file}`, 'remove', 'castellan-amd-fastflowlm-1.0.5.cat']);
-  assert.deepEqual(catalogChange([FLM], 'amd', { installed: ['CASTELLAN-AMD-FASTFLOWLM-1.0.7.CAT'], from: KIT, read }), { add: [], remove: [], problems: [] }, 'held already, whatever its case');
-  assert.deepEqual(catalogChange([FLM], 'amd', { installed: [], from: KIT, read: () => null }).problems, [`the kit has no ${FLM.file}`]);
-  assert.deepEqual(catalogChange([FLM], 'amd', { installed: [], from: KIT, read: () => Buffer.from('another catalog') }).problems, [`${FLM.file} isn't the catalog that was signed`]);
-  assert.deepEqual(catalogChange([], 'amd', { installed: ['castellan-amd-fastflowlm-1.0.7.cat'], from: KIT, read }).remove, ['castellan-amd-fastflowlm-1.0.7.cat'], 'a route that wants none any more has its own removed');
+  assert.deepEqual(catalogChange([FLM], ['amd'], { installed: ['CASTELLAN-AMD-FASTFLOWLM-1.0.7.CAT'], from: KIT, read }), { add: [], remove: [], problems: [] }, 'held already, whatever its case');
+  assert.deepEqual(catalogChange([FLM], ['amd'], { installed: [], from: KIT, read: () => null }).problems, [`the kit has no ${FLM.file}`]);
+  assert.deepEqual(catalogChange([FLM], ['amd'], { installed: [], from: KIT, read: () => Buffer.from('another catalog') }).problems, [`${FLM.file} isn't the catalog that was signed`]);
+  assert.deepEqual(catalogChange([], ['amd'], { installed: ['castellan-amd-fastflowlm-1.0.7.cat'], from: KIT, read }).remove, ['castellan-amd-fastflowlm-1.0.7.cat'], 'a route that wants none any more has its own removed');
 });
 
 test("the elevated command: the helper and its steps single-quoted, an apostrophe doubled, its exit code passed on", () => {
@@ -70,7 +70,7 @@ function elevated(code: number, lines: string[]) {
 
 test('setup asks Windows once where Smart App Control is on or weighing it, never where it is off, and not when every catalog is there', async () => {
   const lines: string[] = [];
-  const base = { route: 'amd', log: (l: string) => lines.push(l), from: KIT, readCatalog: () => body, helper: HELPER, castellan: null, logFile: 'C:\\x\\catalogs.log' };
+  const base = { routes: ['amd'], log: (l: string) => lines.push(l), from: KIT, readCatalog: () => body, helper: HELPER, castellan: null, logFile: 'C:\\x\\catalogs.log' };
   for (const sac of ['off', null] as const) {
     const e = elevated(0, []);
     const d = await ensureCatalogs([FLM], { ...base, sac, installed: [], runner: e.runner, read: e.read });

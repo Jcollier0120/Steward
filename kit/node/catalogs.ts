@@ -62,11 +62,11 @@ export interface CatalogChange {
 }
 
 /**
- * The change that leaves Windows holding the route's `wanted` catalogs: each it lacks, from the kit's folder, but only
- * the very file that was signed (its pinned size and SHA-256); the route's other catalogs of Castellan's (an older
- * version's) removed. Another route's, and everyone else's, are left alone.
+ * The change that leaves Windows holding the `wanted` catalogs: each it lacks, from the kit's folder, but only the very
+ * file that was signed (its pinned size and SHA-256); the other catalogs of Castellan's for `routes` (an older
+ * version's, or a route that wants none any more) removed. Another route's, and everyone else's, are left alone.
  */
-export function catalogChange(wanted: NpuSignedCatalog[], route: string, o: { installed: string[]; from?: string; read?: (file: string) => Buffer | null }): CatalogChange {
+export function catalogChange(wanted: NpuSignedCatalog[], routes: string[], o: { installed: string[]; from?: string; read?: (file: string) => Buffer | null }): CatalogChange {
   const from = o.from ?? CATALOGS_DIR;
   const read =
     o.read ??
@@ -88,7 +88,8 @@ export function catalogChange(wanted: NpuSignedCatalog[], route: string, o: { in
     else if (body.length !== c.size || createHash('sha256').update(body).digest('hex') !== c.sha256) change.problems.push(`${c.file} isn't the catalog that was signed`);
     else change.add.push({ name: c.file, file });
   }
-  change.remove = o.installed.filter((n) => routeOf(n) === route.toLowerCase() && !want.has(n.toLowerCase()));
+  const theirs = new Set(routes.map((r) => r.toLowerCase()));
+  change.remove = o.installed.filter((n) => theirs.has(routeOf(n) ?? '') && !want.has(n.toLowerCase()));
   return change;
 }
 
@@ -181,8 +182,8 @@ export interface CatalogsDone {
 }
 
 export interface EnsureCatalogsOptions extends Omit<ElevatedHelperOptions, 'log'> {
-  /** The route they're for (npu-vendors.json's key: amd), whose older catalogs go. */
-  route: string;
+  /** The routes they're for (npu-vendors.json's key, amd; cuda for NVIDIA's runtime), whose older catalogs go. */
+  routes: string[];
   sac: SacState | null;
   log: (line: string) => void;
   /** Where the helper's lines go (the accelerators' folder's catalogs.log). */
@@ -194,16 +195,16 @@ export interface EnsureCatalogsOptions extends Omit<ElevatedHelperOptions, 'log'
 }
 
 /**
- * Leaves Windows holding the route's `wanted` catalogs where Smart App Control is on or Windows is weighing it, through
- * one administrator prompt when anything changes: the missing ones installed, the route's older ones removed. Nothing
- * where it's off or unknown, or when every one is there. Never throws: a server it couldn't cover is blocked as before,
- * and setup says so.
+ * Leaves Windows holding the `wanted` catalogs where Smart App Control is on or Windows is weighing it, through one
+ * administrator prompt when anything changes: the missing ones installed, the routes' older ones removed. Nothing where
+ * it's off or unknown, or when every one is there. Never throws: a server it couldn't cover is blocked as before, and
+ * setup says so.
  */
 export async function ensureCatalogs(wanted: NpuSignedCatalog[], o: EnsureCatalogsOptions): Promise<CatalogsDone> {
   const none: CatalogsDone = { done: 'off', added: [], removed: [], problems: [] };
   if (o.sac !== 'on' && o.sac !== 'evaluation') return none;
   try {
-    const change = catalogChange(wanted, o.route, { installed: o.installed ?? installedCatalogs(), from: o.from, read: o.readCatalog });
+    const change = catalogChange(wanted, o.routes, { installed: o.installed ?? installedCatalogs(), from: o.from, read: o.readCatalog });
     if (!change.add.length && !change.remove.length) return { ...none, done: change.problems.length ? 'not-in-kit' : 'there', problems: change.problems };
     const covers = wanted.filter((c) => change.add.some((a) => a.name === c.file)).map((c) => c.covers);
     o.log(

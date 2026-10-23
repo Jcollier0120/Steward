@@ -20,7 +20,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseDetection, parseNpus, hardwareOf } = await import('./fixture/src/kit/detect.ts');
-const { planSetup, describePlan, runSetup, setUpNpu, installPatch, stopOtherModel, installerSaid, installerLogFile, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand, printReport, reportFrom } = await import('./fixture/src/kit/setup.ts');
+const { planSetup, describePlan, runSetup, setUpNpu, catalogsOnce, installPatch, stopOtherModel, installerSaid, installerLogFile, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand, printReport, reportFrom } = await import('./fixture/src/kit/setup.ts');
 const { orderAccelerators, readAccelerators, validateAccelerators, validateKeeperConfig } = await import('./fixture/src/kit/accelerator-config.ts');
 const core = await import('./fixture/src/kit/core/index.js');
 const { serverEnv } = await import('./fixture/src/kit/accelerators.ts');
@@ -1953,6 +1953,49 @@ test("FastFlowLM blocked as it pulls or answers (0xC0E90002, or the log's files)
   const plain = await setUpNpu(plan, tools, { ...fakeNpuIo({ answers: false }).io, blockedIn: async () => [] });
   assert.equal(plain.failed, 'test');
   assert.equal(plain.blocked, undefined);
+});
+
+// Castellan's catalogs (kit 2.108.0): FastFlowLM's files listed in a catalog Castellan signs, installed before any of
+// them runs, where Smart App Control is on.
+const flmCatalog = { serverVersion: '1.0.7', file: 'castellan-amd-fastflowlm-1.0.7.cat', size: 1, sha256: 'ab', covers: "FastFlowLM 1.0.7's 45 program files" };
+
+test("FastFlowLM's catalog: the route's own version's alone, asked for once and before anything of it is downloaded or run", async () => {
+  const tools = path.join(home, 'npu-catalog');
+  const catalog = { ...V.NPU_CATALOG, routes: { ...V.NPU_CATALOG.routes, amd: { ...V.NPU_CATALOG.routes.amd, catalogs: [{ ...flmCatalog, serverVersion: '1.0.5', file: 'castellan-amd-fastflowlm-1.0.5.cat' }, flmCatalog] } } };
+  const plan = V.planNpu({ support: parseNpus(NPU.strix, 'x64')[0], tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk(), catalog })!;
+  assert.deepEqual(plan.catalogs, [flmCatalog]);
+  assert.deepEqual(planFor(NPU.strix, 'x64', tools).catalogs, [], 'a route with none: none');
+  const f = fakeNpuIo();
+  const order: string[] = [];
+  const asks: unknown[] = [];
+  const log: string[] = [];
+  const io = {
+    ...f.io,
+    log: (l: string) => log.push(l),
+    download: async (d: { what: string }) => (order.push('download'), f.io.download(d)),
+    run: async (exe: string, args: string[]) => (order.push('run'), f.io.run(exe, args)),
+    smartAppControl: () => 'on' as const,
+    catalogs: async (wanted: { file: string }[], routes: string[], sac: string | null) => (order.push('catalogs'), asks.push([wanted.map((c) => c.file), routes, sac]), { done: 'changed' as const, added: [flmCatalog.file], removed: [], problems: [] }),
+  };
+  const s = await setUpNpu(plan, tools, io);
+  assert.ok(s.entry, s.problems.join('; '));
+  assert.equal(order[0], 'catalogs');
+  assert.deepEqual(asks, [[[flmCatalog.file], ['amd'], 'on']]);
+  assert.ok(log.includes(`Castellan's catalogs: added ${flmCatalog.file}`), log.join('\n'));
+});
+
+test("setup's catalogs once a run: asked again only for one it wasn't asked for, its line logged once", async () => {
+  const calls: string[][] = [];
+  const log: string[] = [];
+  const once = catalogsOnce({ log: (l: string) => log.push(l), catalogs: async (w: { file: string }[]) => (calls.push(w.map((c) => c.file)), { done: 'declined' as const, added: [], removed: [], problems: ["the administrator prompt was turned down or couldn't open"] }) });
+  const cuda = { ...flmCatalog, serverVersion: '12.4', file: 'castellan-cuda-cudart-12.4.cat', covers: "NVIDIA's CUDA runtime 12.4" };
+  await once([flmCatalog, cuda], ['amd', 'cuda'], 'on');
+  await once([flmCatalog], ['amd'], 'on');
+  assert.deepEqual(calls, [[flmCatalog.file, cuda.file]], 'turned down: not asked again in the run');
+  await once([{ ...cuda, file: 'castellan-cuda-cudart-12.6.cat' }], ['cuda'], 'on');
+  assert.equal(calls.length, 2);
+  assert.equal(catalogsOnce({ log: () => {}, catalogs: once }), once, 'one given is kept');
+  assert.equal(log.filter((l) => /^Castellan's catalogs weren't added/.test(l)).length, 2);
 });
 
 test("setup as a command, FastFlowLM blocked: the processor takes the NPU's work and the note says so; blocked too, the note says Windows blocks the staff's local models; blocked.json keeps the files", async () => {

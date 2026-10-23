@@ -114,6 +114,13 @@ export const LLAMA_PIN: { build: string; signed: string; files: Record<string, P
   },
 };
 
+/**
+ * Castellan's signed catalogs of what setup takes beside llama.cpp's builds as its maker ships it (catalogs.ts, kit
+ * 2.108.0): NVIDIA's CUDA runtime (CUDART_ZIP), which NVIDIA doesn't sign. Installed before a CUDA build first runs,
+ * where Smart App Control is on (runSetup).
+ */
+export const LLAMA_CATALOGS: NpuSignedCatalog[] = [];
+
 /** A pinned build as setup plans from it: a release whose assets are its files, each with its pinned digest. Nothing is asked of GitHub. */
 export function pinnedRelease(pin: typeof LLAMA_PIN = LLAMA_PIN): Release {
   return {
@@ -1335,10 +1342,17 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
   const entries: Accelerator[] = [];
   // What Windows blocked of the servers tried (the NPU's and each build's), file by file.
   const blocked: BlockedServerFile[] = [];
+  // Castellan's catalogs of everything this run may start (kit 2.108.0), before any of it runs: the NPU's server's, and
+  // NVIDIA's runtime beside a CUDA build (one the NPU's work may go to too), in one administrator prompt where Smart App
+  // Control is on.
+  const catalogs = catalogsOnce(io);
+  const cuda = plan.targets.some((t) => t.variant?.cudart && t.folder) || (plan.leftToNpu ?? []).some((l) => /nvidia/i.test(l.name));
+  const wanted = [...(plan.npu?.catalogs ?? []), ...(cuda ? LLAMA_CATALOGS : [])];
+  if (wanted.length) await catalogs(wanted, [...(plan.npu?.catalogs?.length ? [plan.npu.vendor] : []), ...(cuda && LLAMA_CATALOGS.length ? ['cuda'] : [])], (io.smartAppControl ?? smartAppControlOutsideTests)());
   // The NPU first: its entry is written only once its server has answered a test request.
   let npu: NpuSetup | undefined;
   if (plan.npu) {
-    npu = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), io);
+    npu = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), { ...io, catalogs });
     blocked.push(...(npu.blocked ?? []));
     problems.push(...npu.problems);
     if (npu.entry) entries.push({ ...npu.entry, name: core.deviceName(plan.npu.support.label) });
@@ -1477,8 +1491,34 @@ export interface NpuIo {
   blockedIn?: (folder: string, withinMs: number) => Promise<Block[]>;
   /** Smart App Control's state, for the words a block is said in (smartAppControlOutsideTests: none in a test run). */
   smartAppControl?: () => SacState | null;
-  /** Castellan's signed catalogs of the route's server installed where Smart App Control is on (catalogs.ts ensureCatalogs). */
-  catalogs?: (wanted: NpuSignedCatalog[], route: string, sac: SacState | null) => Promise<CatalogsDone>;
+  /**
+   * Castellan's signed catalogs installed where Smart App Control is on, and `routes`' older ones removed (catalogs.ts
+   * ensureCatalogs): the NPU's server's, NVIDIA's runtime's. Setup asks once a run (catalogsOnce).
+   */
+  catalogs?: (wanted: NpuSignedCatalog[], routes: string[], sac: SacState | null) => Promise<CatalogsDone>;
+}
+
+const ONCE = Symbol('catalogsOnce');
+
+/**
+ * Setup's catalogs (catalogs.ts, kit 2.108.0): `io.catalogs` (ensureCatalogs where it gives none), with its line logged,
+ * asked again only for a catalog it wasn't asked for before. So one run puts up one administrator prompt for everything
+ * it starts, and one turned down isn't put up again for the NPU's second models or the card set up in its place.
+ */
+export function catalogsOnce(io: NpuIo): NonNullable<NpuIo['catalogs']> {
+  const had = io.catalogs as (NpuIo['catalogs'] & { [ONCE]?: true }) | undefined;
+  if (had?.[ONCE]) return had;
+  const asked = new Set<string>();
+  let last: CatalogsDone | null = null;
+  const once = async (wanted: NpuSignedCatalog[], routes: string[], sac: SacState | null): Promise<CatalogsDone> => {
+    if (last && wanted.every((c) => asked.has(c.file.toLowerCase()))) return last;
+    for (const c of wanted) asked.add(c.file.toLowerCase());
+    last = await (had ?? ((w: NpuSignedCatalog[], r: string[], s: SacState | null) => ensureCatalogs(w, { routes: r, sac: s, log: io.log })))(wanted, routes, sac);
+    const said = catalogsSay(last);
+    if (said) io.log(said);
+    return last;
+  };
+  return Object.assign(once, { [ONCE]: true as const });
 }
 
 /**
@@ -1770,7 +1810,9 @@ function nowHere(n: NpuPlan, tools: string, exists: (p: string) => boolean): Npu
  * first try met goes in the log and in `fellBack`, never in the problems: the NPU still has chat, and nothing to
  * show as an error. The first try's outcome when the fallback fails as well.
  */
-export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<NpuSetup> {
+export async function setUpNpu(n: NpuPlan, tools: string, given: NpuIo): Promise<NpuSetup> {
+  // Its catalogs asked for once, whichever models it tries.
+  const io = { ...given, catalogs: catalogsOnce(given) };
   if (!n.fallback) return setUpNpuOnce(n, tools, io);
   const first = await setUpNpuOnce(n, tools, io, { seeRed: true });
   if (first.entry || !first.failed || !FALLBACK_STEPS.includes(first.failed)) return first;
@@ -1831,10 +1873,7 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
   // Castellan's signed catalog of the server's files (kit 2.108.0), before anything of it runs: where Smart App Control
   // is on, its maker's unsigned files would be blocked, and the catalog lets them run as the maker built them. One
   // administrator prompt at most; turned down, the server is blocked as before, and the step that ran it says so.
-  if (n.catalogs?.length) {
-    const said = catalogsSay(await (io.catalogs ?? ((w, route, s) => ensureCatalogs(w, { route, sac: s, log: io.log })))(n.catalogs, n.vendor, sac));
-    if (said) io.log(said);
-  }
+  if (n.catalogs?.length) await catalogsOnce(io)(n.catalogs, [n.vendor], sac);
   const env = serverEnv({ env: routeEnv(n.route, tools) });
   // Its files put in place, in the PC's shared folder one account at a time (inSharedTools): a server another account
   // installed meanwhile isn't installed again.
@@ -2842,7 +2881,10 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
       return { code: 1, plan };
     }
   }
-  const r = await runSetup(plan, file.raw, { log, ...o.io });
+  // One ask for catalogs for the whole command: its runs for the card and the processor too.
+  const base = { log, ...o.io };
+  const runIo = { ...base, catalogs: catalogsOnce(base) };
+  const r = await runSetup(plan, file.raw, runIo);
   // The NPU failing is no error: its work goes to the card or the processor, and its note says why, quietly.
   const npuDetails = new Set(r.npu?.problems ?? []);
   for (const p of r.problems) log(`${npuDetails.has(p) ? 'note' : 'problem'}: ${p}`);
@@ -2869,7 +2911,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
     const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the graphics card? [y/N] `) : false);
     if (go) {
-      const r2 = await runSetup(plan2, raw, { log, ...o.io });
+      const r2 = await runSetup(plan2, raw, runIo);
       for (const p of r2.problems) log(`problem: ${p}`);
       problems.push(...r2.problems);
       blocked.push(...(r2.blocked ?? []));
@@ -2889,7 +2931,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
     const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the processor? [y/N] `) : false);
     if (go) {
-      const r2 = await runSetup(plan2, raw, { log, ...o.io });
+      const r2 = await runSetup(plan2, raw, runIo);
       for (const p of r2.problems) log(`problem: ${p}`);
       problems.push(...r2.problems);
       blocked.push(...(r2.blocked ?? []));
