@@ -8,11 +8,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What changed
 
-- **Every program the staff's local models run is signed, so Windows' Smart App Control lets them run.** Where a model server's maker signs nothing, Castellan does: the Snapdragon NPU's embedding server comes from Castellan's signed copy, as the graphics card's and the processor's llama.cpp already do. FastFlowLM (AMD's NPU), GenieX (Qualcomm's) and NVIDIA's CUDA runtime are still downloaded from their makers, unchanged, and Castellan signs a list of their files. Where Smart App Control is on, setup adds that list to Windows, asking once for an administrator.
+- **Every program the staff's local models run is signed, so Windows' Smart App Control lets them run.** Where a model server's maker signs nothing, Castellan does: the Snapdragon NPU's embedding server comes from Castellan's signed copy, as the graphics card's and the processor's llama.cpp already do. GenieX, the Snapdragon NPU's server, is put together without its installer: Qualcomm's own files, downloaded from Qualcomm, with Castellan's signed copies of GenieX's own. FastFlowLM (AMD's NPU) and NVIDIA's CUDA runtime are still downloaded from their makers, unchanged, and Castellan signs a list of their files. Where Smart App Control is on, setup adds that list to Windows, asking once for an administrator.
 
 ### Before you update
 
-- Nothing: it updates itself as usual. Where Smart App Control is on, the next setup of an AMD or Snapdragon NPU, or of an NVIDIA card, asks once for an administrator. Setup never changes Windows' Smart App Control setting.
+- Nothing: it updates itself as usual. Where Smart App Control is on, the next setup of an AMD NPU or of an NVIDIA card asks once for an administrator; a Snapdragon's asks for none. A GenieX already installed is kept as it is. Setup never changes Windows' Smart App Control setting.
 
 ## 0.36.186
 

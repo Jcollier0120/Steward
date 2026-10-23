@@ -149,6 +149,11 @@ export interface NpuRoute {
   pluginPatch?: NpuPluginPatch;
   /** Castellan's signed catalogs of its server's files, a version each (NpuSignedCatalog): FastFlowLM's, whose maker signs none. */
   catalogs?: NpuSignedCatalog[];
+  /**
+   * Castellan's signed builds of its server, a version each (NpuSignedBuild): GenieX's, whose installer and own files
+   * aren't signed. Setup installs a version that has one from it, never running the installer.
+   */
+  signedBuilds?: NpuSignedBuild[];
   licence: string;
   /** Its maker's terms for the server and what it carries, named before it's downloaded (GenieX, the QAIRT runtime inside it). */
   terms?: MakerTerms[];
@@ -304,6 +309,38 @@ export interface NpuSignedCatalog extends PinnedFile {
   /** What it lists, in words: "FastFlowLM 1.0.7's 23 program files". */
   covers: string;
 }
+
+/**
+ * Castellan's signed build of one version of the route's server (kit 2.108.0), for a maker whose installer and own files
+ * aren't signed: Smart App Control blocks GenieX's installer as it unpacks its own setup program, and then its files.
+ * Setup takes the version's files from the maker's own zip of them, as the maker publishes it (GenieX's SDK zip, its
+ * QAIRT runtime signed by Qualcomm), puts them where the installer would, and lays Castellan's signed copies over the
+ * ones the maker leaves unsigned (its program among them), so nothing unsigned runs and no installer does.
+ */
+export interface NpuSignedBuild {
+  /** The server version it is: setup takes it only to install that version. */
+  serverVersion: string;
+  /** The maker's zip of the version's files, and the folder in it (its one wrapping folder taken off) that is the server's folder. */
+  files: NpuRoute['download'] & { folder: string };
+  /** Castellan's zip of the signed copies, in the server's folder's layout: laid over the maker's files. */
+  signed: NpuRoute['download'];
+  /**
+   * Each file it signed, by its path in the server's folder: the maker's file and its signed copy. A check of the
+   * maker's file by its hash (a pluginPatch's `stock` and `needs`) takes its signed copy as that file.
+   */
+  copies: Record<string, { stock: PinnedFile; signed: PinnedFile }>;
+  basis: string;
+}
+
+/** The route's signed build of its version, when it has one. */
+export const signedBuildOf = (route: NpuRoute): NpuSignedBuild | undefined => route.signedBuilds?.find((b) => b.serverVersion === route.version);
+
+/**
+ * Whether a file whose SHA-256 is `sha256` is the maker's whose SHA-256 is `want`: that file, or the signed copy of it
+ * in the route's signed build of its version (NpuSignedBuild.copies), the same file signed.
+ */
+export const sameFile = (route: NpuRoute | undefined, want: string, sha256: string): boolean =>
+  sha256 === want || (!!route && Object.values(signedBuildOf(route)?.copies ?? {}).some((c) => c.stock.sha256 === want && c.signed.sha256 === sha256));
 
 /**
  * A file of the route's server that the keeper replaces with the kit's own build of it (npu-patch.ts), only on its
@@ -1153,7 +1190,7 @@ export interface NpuPlan {
   exe: string;
   /** The server's program is already where it installs. */
   installed: boolean;
-  /** Its installer or zip, unless it's installed. */
+  /** Its installer or zip, unless it's installed or has a signed build (`build`). */
   download: NpuDownload | null;
   /** Each model it pulls, and whether it is already here (unknown counts as not). */
   models: (NpuModel & { have: boolean })[];
@@ -1168,6 +1205,11 @@ export interface NpuPlan {
   patch: (NpuPluginPatch & { dest: string; have: boolean }) | null;
   /** Castellan's signed catalogs of the server's files at the route's version (NpuSignedCatalog): setup installs them first where Smart App Control is on. */
   catalogs: NpuSignedCatalog[];
+  /**
+   * Castellan's signed build of the route's version (NpuSignedBuild), unless the server is installed: the maker's zip of
+   * its files and the signed copies, setup's in place of its installer (`download` is then null).
+   */
+  build: { files: NpuDownload & { folder: string }; signed: NpuDownload; into: string } | null;
   /**
    * The route's embedding server, when it has one: where it goes, and its zip and model unless they're here (its
    * model downloaded as a file, or pulled by the route's program: the arguments that pull it).
@@ -1222,7 +1264,10 @@ export function planNpu(o: {
   const exe = serverExe(route, o.tools, o.env);
   const installed = exists(exe);
   const dest = path.join(o.downloadsDir, route.download.file);
-  const download = installed ? null : { what: route.download.file, url: route.download.url, size: route.download.size, sha256: route.download.sha256, dest, have: false };
+  const sb = signedBuildOf(route);
+  const asDownload = (d: NpuRoute['download']) => ({ what: d.file, url: d.url, size: d.size, sha256: d.sha256, dest: path.join(o.downloadsDir, d.file), have: false });
+  const build = installed || !sb ? null : { files: { ...asDownload(sb.files), folder: sb.files.folder }, signed: asDownload(sb.signed), into: path.dirname(exe) };
+  const download = installed || build ? null : { what: route.download.file, url: route.download.url, size: route.download.size, sha256: route.download.sha256, dest, have: false };
   const models = route.models.map((m) => {
     const present = m.present ? expandRoute(m.present, { tools: o.tools, env: o.env }) : '';
     return { ...m, pull: m.pull.map((a) => expandRoute(a, { tools: o.tools, model: m.id, env: o.env })), have: !!present && exists(present) };
@@ -1246,6 +1291,7 @@ export function planNpu(o: {
   }
   const downloadBytes =
     (download ? download.size : 0) +
+    (build ? build.files.size + build.signed.size : 0) +
     (runtime ? runtime.size : 0) +
     (patch && !patch.have ? patch.patched.size : 0) +
     models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0) +
@@ -1254,7 +1300,7 @@ export function planNpu(o: {
     (embed?.modelPull ? embed.server.model.size : 0);
   const powerTool = route.powerTool ? { ...route.powerTool, exe: expandRoute(route.powerTool.exe, { tools: o.tools, env: o.env }) } : undefined;
   const catalogs = (route.catalogs ?? []).filter((c) => c.serverVersion === route.version);
-  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, patch, catalogs, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
+  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, build, runtime, patch, catalogs, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
 }
 
 /**
@@ -1264,7 +1310,7 @@ export function planNpu(o: {
  * when nothing they cover is downloaded: a PC set up already isn't asked again.
  */
 export function npuTerms(p: NpuPlan): MakerTerms[] {
-  const named = [...(p.download ? (p.route.terms ?? []) : []), ...[...p.models, ...(p.fallback?.models ?? [])].filter((m) => !m.have).flatMap((m) => m.terms ?? [])];
+  const named = [...(p.download || p.build ? (p.route.terms ?? []) : []), ...[...p.models, ...(p.fallback?.models ?? [])].filter((m) => !m.have).flatMap((m) => m.terms ?? [])];
   return named.filter((t, i) => !named.slice(i + 1).some((u) => u.url === t.url));
 }
 

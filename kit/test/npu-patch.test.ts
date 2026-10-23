@@ -305,6 +305,32 @@ test("0.9.3's patch only over 0.9.3's own files: a library that isn't 0.9.3's, o
   assert.equal(later.plugin(), STOCK_093);
 });
 
+test("a GenieX 0.9.3 put together from Castellan's signed build (kit 2.108.0): its signed copies count as GenieX's own, so the build goes in and the signed copy is kept", async () => {
+  const signed = (s: string) => `${s}, signed`;
+  const files: Record<string, string> = { 'llama_cpp\\geniex_plugin.dll': STOCK_093, ...Object.fromEntries(Object.entries(NEEDS_093).map(([k, v]) => [path.win32.join('llama_cpp', k), v])) };
+  const withBuild = (pc: ReturnType<typeof fakePc>, copies = files) => {
+    const c = pc.deps.catalog!;
+    c.routes.qualcomm.signedBuilds = [{ serverVersion: '0.9.3', files: { file: 'sdk.zip', url: 'https://x/sdk.zip', size: 1, sha256: 'a', folder: 'lib' }, signed: { file: 'signed.zip', url: 'https://x/signed.zip', size: 1, sha256: 'b' }, copies: Object.fromEntries(Object.entries(copies).map(([k, v]) => [k, { stock: pin(v), signed: pin(signed(v)) }])), basis: 'test' }];
+    return pc;
+  };
+  const pc = withBuild(fakePc({ plugin: signed(STOCK_093), needs: Object.fromEntries(Object.entries(NEEDS_093).map(([k, v]) => [k, signed(v)])), version: '0.9.3' }));
+  assert.deepEqual(await patchNpu(pc.deps), { did: 'patched' });
+  assert.equal(pc.plugin(), BUILD_091);
+  assert.equal(pc.stock(), signed(STOCK_093), 'the signed copy kept, to put back');
+  // Switched off: the signed copy back.
+  pc.config({ npuPatch: false });
+  assert.equal((await patchNpu(pc.deps)).did, 'off');
+  assert.equal(pc.plugin(), signed(STOCK_093));
+
+  // Without the signed build in the catalog, the same files are someone else's: left as they are.
+  const unknown = fakePc({ plugin: signed(STOCK_093), needs: NEEDS_093, version: '0.9.3' });
+  assert.deepEqual(await patchNpu(unknown.deps), { did: 'hands-off' });
+  assert.equal(unknown.plugin(), signed(STOCK_093));
+  // A signed copy of another file isn't GenieX's own: a library signed from 0.9.1's keeps 0.9.3's plugin.
+  const mixed = withBuild(fakePc({ plugin: STOCK_093, needs: { ...NEEDS_093, 'llama.dll': signed('llama 0.9.1') }, version: '0.9.3' }), { ...files, 'llama_cpp\\llama.dll': 'llama 0.9.1' });
+  assert.deepEqual(await patchNpu(mixed.deps), { did: 'stock', problems: ["GenieX's llama.dll isn't 0.9.3's"] });
+});
+
 test("an X2 whose GenieX can't say its version runs the X2's pin, 0.9.1 (what setup installs there): 0.9.1's build over 0.9.1's own", async () => {
   const pc = fakePc({ plugin: STOCK_091, needs: NEEDS_091, version: null });
   assert.deepEqual(await patchNpu(pc.deps), { did: 'patched' });

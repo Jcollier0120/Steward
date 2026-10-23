@@ -1135,7 +1135,8 @@ export function describePlan(p: SetupPlan): string[] {
   if (p.npu) {
     const n = p.npu;
     lines.push(`${n.support.label} (npu): ${n.route.server} ${n.route.version}, ${n.kinds.join(' and ')} on ${n.port}; ${n.models.map((m) => m.id).join(', ')}${untried(n.support)}`);
-    lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
+    if (n.build) lines.push(`  get  ${n.route.server} ${n.route.version} (${mb(n.build.files.size + n.build.signed.size)}, SHA-256 pinned): its maker's files, with Castellan's signed copies of its own; no installer`);
+    else lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
     if (n.runtime) lines.push(`  get  ${n.runtime.what} (${mb(n.runtime.size)}, SHA-256 pinned), beside ${path.win32.basename(n.exe)}: no administrator`);
     if (n.patch) lines.push(`  ${n.patch.have ? 'have' : 'get '} ${n.patch.what.split(':')[0]} (${mb(n.patch.patched.size)}, SHA-256 pinned), in place of the server's own ${n.patch.file}`);
     for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
@@ -1262,18 +1263,62 @@ export function unpack(zip: string, into: string): void {
   if (r.status !== 0) throw new Error(`tar couldn't unpack ${zip}: ${r.stderr || r.error?.message}`);
   // Some zips wrap their files in a folder.
   const entries = readdirSync(tmp);
-  const from = entries.length === 1 && statSync(path.join(tmp, entries[0])).isDirectory() ? path.join(tmp, entries[0]) : tmp;
+  putInPlace(entries.length === 1 && statSync(path.join(tmp, entries[0])).isDirectory() ? path.join(tmp, entries[0]) : tmp, into);
+  rmSync(tmp, { recursive: true, force: true });
+}
+
+/** Moves a folder made beside `into` there: whole, in one rename, where nothing is there yet; else each of its files and folders in, in place of the one there. */
+function putInPlace(from: string, into: string): void {
   if (!existsSync(into)) {
     mkdirSync(path.dirname(into), { recursive: true });
     renameSync(from, into);
-    rmSync(tmp, { recursive: true, force: true });
     return;
   }
   for (const e of readdirSync(from)) {
     rmSync(path.join(into, e), { recursive: true, force: true });
     renameSync(path.join(from, e), path.join(into, e));
   }
-  rmSync(tmp, { recursive: true, force: true });
+}
+
+/**
+ * Puts Castellan's signed build of the NPU's server in place of its installer (kit 2.108.0, NpuSignedBuild): the
+ * maker's zip of the version's files and Castellan's of the signed copies downloaded (each checked against its pinned
+ * SHA-256), the server's folder taken from the maker's, the signed copies laid over it file by file, and the folder put
+ * where the installer puts the server. Nothing of it runs while it's put together, and no installer runs at all. Null
+ * when it's in place, else what failed.
+ */
+export async function installSignedBuild(server: string, b: NonNullable<NpuPlan['build']>, io: Pick<NpuIo, 'log' | 'download' | 'unpack' | 'overlay'>): Promise<string | null> {
+  for (const d of [b.files, b.signed]) {
+    io.log(`downloading ${d.what} (${mb(d.size)})`);
+    try {
+      await (io.download ?? download)({ what: d.what, url: d.url, size: d.size, sha256: d.sha256, dest: d.dest, have: false }, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
+    } catch (e: any) {
+      return `${d.what}'s download failed: ${e?.message ?? e}`;
+    }
+  }
+  // Beside where it goes, so a build put together halfway never looks like the server.
+  const files = `${b.into}.files`;
+  const signed = `${b.into}.signed`;
+  const clear = () => {
+    for (const f of [files, signed]) rmSync(f, { recursive: true, force: true });
+  };
+  clear();
+  io.log(`putting ${server} together from ${b.files.what}, with Castellan's signed copies of its own files (no installer)`);
+  try {
+    (io.unpack ?? unpack)(b.files.dest, files);
+    (io.unpack ?? unpack)(b.signed.dest, signed);
+    const folder = path.join(files, b.files.folder);
+    if (!existsSync(folder)) throw new Error(`${b.files.what} has no ${b.files.folder} folder`);
+    const ours = readdirSync(signed, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => path.relative(signed, path.join(e.parentPath, e.name)));
+    (io.overlay ?? overlayFiles)(signed, folder, ours);
+    putInPlace(folder, b.into);
+  } catch (e: any) {
+    clear();
+    return `${server} couldn't be put together: ${e?.message ?? e}`;
+  }
+  clear();
+  for (const d of [b.files, b.signed]) rmSync(d.dest, { force: true });
+  return null;
 }
 
 /**
@@ -1604,6 +1649,7 @@ export function overlayFiles(from: string, into: string, files: string[]): numbe
     if (!s) throw new Error(`${src} isn't there`);
     const d = statSync(dst, { throwIfNoEntry: false });
     if (d && d.size === s.size && Math.abs(d.mtimeMs - s.mtimeMs) < 2_000) continue;
+    if (!d) mkdirSync(path.dirname(dst), { recursive: true });
     copyFileSync(src, dst);
     utimesSync(dst, s.atime, s.mtime);
     copied++;
@@ -1797,6 +1843,7 @@ function nowHere(n: NpuPlan, tools: string, exists: (p: string) => boolean): Npu
     ...n,
     installed,
     download: installed ? null : n.download,
+    build: installed ? null : n.build,
     runtime: n.runtime && installed && n.runtime.files.every((f) => exists(path.join(n.runtime!.into, f))) ? null : n.runtime,
     models: n.models.map((m) => ({ ...m, have: m.have || (!!m.present && exists(expandRoute(m.present, { tools }))) })),
     embed: e && { ...e, download: e.download && exists(e.exe) ? null : e.download, modelDownload: e.modelDownload && exists(e.modelDownload.dest) ? null : e.modelDownload, modelPull: e.modelPull && e.model && exists(e.model) ? null : e.modelPull },
@@ -1878,6 +1925,13 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
   // Its files put in place, in the PC's shared folder one account at a time (inSharedTools): a server another account
   // installed meanwhile isn't installed again.
   const placed = await inSharedTools(tools, io.log, async (shared): Promise<NpuSetup | null> => {
+    // Castellan's signed build in place of the maker's installer (kit 2.108.0: GenieX's, whose installer and own files
+    // aren't signed), so nothing unsigned runs where Smart App Control is on.
+    if (!n.installed && n.build && !(shared && exists(n.exe))) {
+      const why = await installSignedBuild(n.route.server, n.build, io);
+      if (why) return fail(why, 'install');
+      if (!exists(n.exe)) return fail(`${n.route.server} was put together, but ${n.exe} isn't there`, 'install');
+    }
     if (!n.installed && n.download && !(shared && exists(n.exe))) {
       const d: Download = { what: n.download.what, url: n.download.url, size: n.download.size, sha256: n.download.sha256, dest: n.download.dest, have: false };
       io.log(`downloading ${n.route.server} ${n.route.version} (${mb(d.size)})`);

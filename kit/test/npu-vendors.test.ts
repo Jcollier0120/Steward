@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os, { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -20,7 +21,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseDetection, parseNpus, hardwareOf } = await import('./fixture/src/kit/detect.ts');
-const { planSetup, describePlan, runSetup, setUpNpu, catalogsOnce, installPatch, stopOtherModel, installerSaid, installerLogFile, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand, printReport, reportFrom } = await import('./fixture/src/kit/setup.ts');
+const { planSetup, describePlan, runSetup, setUpNpu, catalogsOnce, installPatch, installSignedBuild, stopOtherModel, installerSaid, installerLogFile, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand, printReport, reportFrom } = await import('./fixture/src/kit/setup.ts');
 const { orderAccelerators, readAccelerators, validateAccelerators, validateKeeperConfig } = await import('./fixture/src/kit/accelerator-config.ts');
 const core = await import('./fixture/src/kit/core/index.js');
 const { serverEnv } = await import('./fixture/src/kit/accelerators.ts');
@@ -2002,6 +2003,132 @@ test("setup's catalogs once a run: asked again only for one it wasn't asked for,
   assert.equal(calls.length, 2);
   assert.equal(catalogsOnce({ log: () => {}, catalogs: once }), once, 'one given is kept');
   assert.equal(log.filter((l) => /^Castellan's catalogs weren't added/.test(l)).length, 2);
+});
+
+// Castellan's signed builds (kit 2.108.0): GenieX put together from Qualcomm's own zip of its files, with Castellan's
+// signed copies of the ones Qualcomm leaves unsigned laid over them, in place of its installer.
+const tar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+
+/** A real zip of `files` (path → text) in one wrapping folder, as the makers' zips are, and its pin. */
+function zipOf(dir: string, name: string, wrap: string, files: Record<string, string>): { zip: string; size: number; sha256: string } {
+  const src = path.join(dir, `${name}-src`);
+  for (const [f, text] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(src, wrap, f)), { recursive: true });
+    writeFileSync(path.join(src, wrap, f), text);
+  }
+  const zip = path.join(dir, `${name}.zip`);
+  execFileSync(tar, ['-a', '-c', '-f', zip, '-C', src, wrap]);
+  const bytes = readFileSync(zip);
+  return { zip, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+}
+
+/** GenieX 0.9.3's signed build over two small zips, a catalog that has it, and where it goes. */
+function signedBuildWorld(name: string) {
+  const dir = mkdtempSync(path.join(home, `${name}-`));
+  const local = path.join(dir, 'Local');
+  const sdk = zipOf(dir, 'sdk', 'sdk-windows-arm64', { 'bin\\genie-t2t-run.exe': 'a sample', 'include\\geniex.h': 'a header', 'lib\\geniex.dll': 'geniex', 'lib\\qairt\\QnnHtp.dll': "Qualcomm's, signed", 'lib\\llama_cpp\\geniex_plugin.dll': 'plugin' });
+  const ours = zipOf(dir, 'signed', 'geniex-0.9.3-castellan', { 'geniex.exe': 'geniex.exe, signed', 'geniex.dll': 'geniex, signed', 'llama_cpp\\geniex_plugin.dll': 'plugin, signed', 'notices\\GenieX-LICENSE.txt': 'BSD-3-Clause' });
+  const build = {
+    serverVersion: '0.9.3',
+    files: { file: 'geniex-sdk-windows-arm64-v0.9.3.zip', url: 'https://github.com/qualcomm/GenieX/releases/download/v0.9.3/geniex-sdk-windows-arm64-v0.9.3.zip', size: sdk.size, sha256: sdk.sha256, folder: 'lib' },
+    signed: { file: 'geniex-cli-windows-arm64-v0.9.3-castellan.zip', url: 'https://github.com/Castellan-AI/Manor-releases/releases/download/geniex-0.9.3-castellan/geniex-cli-windows-arm64-v0.9.3-castellan.zip', size: ours.size, sha256: ours.sha256 },
+    copies: {},
+    basis: 'these tests',
+  };
+  const catalog = { ...V.NPU_CATALOG, routes: { ...V.NPU_CATALOG.routes, qualcomm: { ...V.NPU_CATALOG.routes.qualcomm, signedBuilds: [build] } } };
+  const tools = path.join(dir, 'tools');
+  const downloads = path.join(tools, 'servers', 'downloads');
+  const did: string[] = [];
+  const download = async (d: { what: string; dest: string }) => {
+    did.push(`download ${d.what}`);
+    mkdirSync(path.dirname(d.dest), { recursive: true });
+    copyFileSync(d.what === build.files.file ? sdk.zip : ours.zip, d.dest);
+  };
+  return { local, env: { ...ENV, LOCALAPPDATA: local }, into: path.join(local, 'GenieX CLI'), build, catalog, tools, downloads, did, download };
+}
+
+test("GenieX's signed build: planned in place of its installer, at its own version alone, and not once GenieX is there", () => {
+  const w = signedBuildWorld('signed-plan');
+  const plan = (line: string, exists = disk()) => V.planNpu({ support: parseNpus(line, 'arm64')[0], tools: w.tools, downloadsDir: w.downloads, env: w.env, exists, catalog: w.catalog, serverVersion: null })!;
+  // The X Elite's pin, 0.9.3: its signed build, no installer.
+  const x = plan(NPU.x1);
+  assert.equal(x.route.version, '0.9.3');
+  assert.equal(x.download, null);
+  assert.deepEqual(x.build && [x.build.files.what, x.build.files.folder, x.build.signed.what, x.build.into], [w.build.files.file, 'lib', w.build.signed.file, w.into]);
+  assert.equal(x.build!.files.dest, path.join(w.downloads, w.build.files.file));
+  const without = V.planNpu({ support: parseNpus(NPU.x1, 'arm64')[0], tools: w.tools, downloadsDir: w.downloads, env: w.env, exists: disk(), serverVersion: null })!;
+  assert.equal(x.downloadBytes - without.downloadBytes, w.build.files.size + w.build.signed.size - without.download!.size, 'its two zips in place of the installer');
+  // The X2's pin, 0.9.1, has none: its installer, as before.
+  const x2 = plan(NPU.x2);
+  assert.equal(x2.build, null);
+  assert.equal(x2.download?.what, 'geniex-cli-setup-windows-arm64-v0.9.1.exe');
+  // GenieX there already: neither.
+  const there = plan(NPU.x1, disk([path.join(w.into, 'geniex.exe')]));
+  assert.deepEqual([there.download, there.build], [null, null]);
+  assert.ok(V.npuTerms(x).length, "Qualcomm's terms named before its files are downloaded");
+  assert.deepEqual(V.npuTerms(x), V.npuTerms(without), 'as before its installer');
+});
+
+test("GenieX's signed build set up: Qualcomm's lib folder with Castellan's signed copies over it, where the installer puts GenieX; no installer run, nothing left beside it", { skip: process.platform !== 'win32' && "tar.exe is Windows'" }, async () => {
+  const w = signedBuildWorld('signed-setup');
+  const plan = V.planNpu({ support: parseNpus(NPU.x1, 'arm64')[0], tools: w.tools, downloadsDir: w.downloads, env: w.env, exists: disk(), catalog: w.catalog, serverVersion: null, noEmbed: true })!;
+  const f = fakeNpuIo();
+  const { unpack: _unpack, overlay: _overlay, ...fakes } = f.io;
+  const io = { ...fakes, download: w.download, run: async (exe: string, args: string[]) => (w.did.push(`run ${path.win32.basename(exe)} ${args[0]}`), f.io.run(exe, args)), exists: (p: string) => (/geniex\.exe$/i.test(p) ? existsSync(p) : true) };
+  const s = await setUpNpu(plan, w.tools, io);
+  assert.ok(s.entry, s.problems.join('; '));
+  assert.deepEqual(w.did, [`download ${w.build.files.file}`, `download ${w.build.signed.file}`, 'run geniex.exe pull'], 'no installer');
+  const read = (f: string) => readFileSync(path.join(w.into, f), 'utf8');
+  assert.deepEqual(
+    ['geniex.exe', 'geniex.dll', 'qairt\\QnnHtp.dll', 'llama_cpp\\geniex_plugin.dll', 'notices\\GenieX-LICENSE.txt'].map(read),
+    ['geniex.exe, signed', 'geniex, signed', "Qualcomm's, signed", 'plugin, signed', 'BSD-3-Clause'],
+  );
+  assert.deepEqual(readdirSync(w.into).sort(), ['geniex.dll', 'geniex.exe', 'llama_cpp', 'notices', 'qairt'], "the SDK's lib folder alone: not its samples or headers");
+  assert.deepEqual(readdirSync(w.local), ['GenieX CLI'], 'nothing put together halfway left beside it');
+  assert.deepEqual(readdirSync(w.downloads), [], 'its zips removed');
+});
+
+test("a signed build that can't be put together says why and leaves nothing; one put where something is moves its files in and keeps the rest", { skip: process.platform !== 'win32' && "tar.exe is Windows'" }, async () => {
+  const w = signedBuildWorld('signed-fails');
+  const build = (catalog = w.catalog) => V.planNpu({ support: parseNpus(NPU.x1, 'arm64')[0], tools: w.tools, downloadsDir: w.downloads, env: w.env, exists: disk(), catalog, serverVersion: null })!.build!;
+  const io = { log: () => {}, download: w.download };
+  // Its download failing.
+  assert.equal(await installSignedBuild('GenieX', build(), { log: () => {}, download: async () => { throw new Error('404 Not Found'); } }), `${w.build.files.file}'s download failed: 404 Not Found`);
+  // A zip without the server's folder.
+  const q = w.catalog.routes.qualcomm;
+  const noLib = { ...w.catalog, routes: { ...w.catalog.routes, qualcomm: { ...q, signedBuilds: [{ ...w.build, files: { ...w.build.files, folder: 'libs' } }] } } };
+  assert.equal(await installSignedBuild('GenieX', build(noLib), io), `GenieX couldn't be put together: ${w.build.files.file} has no libs folder`);
+  assert.ok(!existsSync(w.local) || readdirSync(w.local).length === 0, 'nothing left where it goes');
+  // Over a folder that's there (a GenieX removed, its models kept): GenieX's files moved in, the rest left.
+  mkdirSync(path.join(w.into, 'models'), { recursive: true });
+  writeFileSync(path.join(w.into, 'models', 'kept.bin'), 'a model');
+  assert.equal(await installSignedBuild('GenieX', build(), io), null);
+  assert.equal(readFileSync(path.join(w.into, 'models', 'kept.bin'), 'utf8'), 'a model');
+  assert.equal(readFileSync(path.join(w.into, 'geniex.exe'), 'utf8'), 'geniex.exe, signed');
+  assert.deepEqual(readdirSync(w.local), ['GenieX CLI']);
+});
+
+test('every signed build in npu-vendors.json is whole: two pinned https zips, the server folder named, each copy pinned both ways, at a version the route runs', () => {
+  for (const [vendor, r] of Object.entries(V.NPU_CATALOG.routes)) {
+    const versions = new Set([r.version, ...(r.versions ?? []).map((v) => v.version), ...Object.values(r.generations).map((g) => g.serverPin?.version).filter(Boolean)]);
+    for (const b of r.signedBuilds ?? []) {
+      const at = `${vendor} ${b.serverVersion}`;
+      assert.ok(versions.has(b.serverVersion), `${at}: a version the route runs`);
+      for (const d of [b.files, b.signed]) {
+        assert.match(d.url, /^https:\/\//, at);
+        assert.match(d.sha256, /^[0-9a-f]{64}$/, at);
+        assert.ok(d.size > 0, at);
+        assert.ok(d.url.endsWith(`/${d.file}`), `${at}: ${d.file}`);
+      }
+      assert.ok(b.files.folder, at);
+      assert.ok(Object.keys(b.copies).length, `${at}: its copies`);
+      for (const [f, c] of Object.entries(b.copies)) {
+        assert.match(c.stock.sha256, /^[0-9a-f]{64}$/, `${at} ${f}`);
+        assert.match(c.signed.sha256, /^[0-9a-f]{64}$/, `${at} ${f}`);
+        assert.ok(c.signed.size > c.stock.size, `${at} ${f}: signed, it's bigger`);
+      }
+    }
+  }
 });
 
 test("setup as a command, FastFlowLM blocked: the processor takes the NPU's work and the note says so; blocked too, the note says Windows blocks the staff's local models; blocked.json keeps the files", async () => {

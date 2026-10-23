@@ -8,6 +8,8 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### What's new
 
+- **Castellan's signed builds** (`NpuSignedBuild`, a route's `signedBuilds`, a version each): GenieX without its installer, which Smart App Control blocks as it unpacks its own setup program. Setup downloads Qualcomm's own SDK zip of the version (its `files`, whose `lib` folder is the folder GenieX's installer fills, its QAIRT runtime signed by Qualcomm) and Castellan's zip of signed copies of GenieX's own unsigned files (`signed`), takes the folder from the first, lays the copies over it file by file and puts it where the installer puts GenieX (`installSignedBuild`, `NpuPlan.build`, in place of `download`). No installer runs and no administrator is asked. `copies` pins each signed file by its path, as Qualcomm ships it and signed; `sameFile` takes a signed copy as the file it was, so the X2's plugin patch (npu-patch.ts) goes in over a signed GenieX as over Qualcomm's, keeps the signed copy as `.stock`, and its `needs` are met by signed copies. A version without one installs as before.
+- `overlayFiles` makes the folder of each file it copies where it isn't there.
 - **Who signed each server's files** (`node/signatures.ts`): every .exe, .dll, .pyd and .node in the folder of each model server config.json starts, with the signature Windows finds on it (its maker's, Castellan's, a catalog's, or none) and its signer (`signatureInventory`, `inventorySay`). `node <agent>\src\kit\signatures.ts [--all] [--json]` prints this PC's. The NPU check shows it (`NpuCheckReport.signatures`, its log's Signatures line and each unsigned file), and setup keeps it in signatures.json beside blocked.json (`rememberSignatures`; `SetupOptions.signaturesFile`). A developer's view: nothing in it is a notice for the staff.
 - **Castellan's catalogs** (`node/catalogs.ts`, `node/catalog.cs`). A route's `catalogs` (`NpuSignedCatalog`: a server version, the file, its size and SHA-256, what it lists) are signed catalogs of its maker's unsigned files, carried in `node/catalogs/`. Setup installs the ones for the route's version in Windows' catalog database before anything of the server runs, and removes the route's older ones, through one administrator prompt, only where Smart App Control is on or in evaluation (`ensureCatalogs`, `NpuPlan.catalogs`, `NpuIo.catalogs`). The staff still download the server from its maker. `node <agent>\src\kit\catalogs.ts` lists the ones Windows holds; `remove` removes them; `test <file.cat> <folder>` checks that a catalog lets Windows load what Smart App Control blocks.
 - **The catalog helper**, `catalog` in prebuilt.ts' `HELPERS`: a console program that adds and removes catalogs and loads a file as Windows would to run it. It runs only from its signed copy: compiled on the PC, Smart App Control would block it too.
@@ -15,7 +17,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### Before you update
 
-- Nothing: take the kit as usual. A route without `catalogs` sets up as before, and nothing asks for an administrator where Smart App Control is off.
+- Nothing: take the kit as usual. A route without `catalogs` or `signedBuilds` sets up as before, and nothing asks for an administrator where Smart App Control is off. A GenieX already installed isn't changed: its installer's files stay as they are.
 
 ## 2.106.0
 

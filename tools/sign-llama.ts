@@ -278,14 +278,14 @@ async function main(): Promise<void> {
  * The release llama.cpp-<build> in the public releases repository, as a draft, from what signing wrote in `out`: its
  * signed zips, llama.cpp's licence beside them, their checksums and the notes.
  */
-export function draftRelease(gh: string, build: string, out: string): void {
-  const tag = signedLlamaTag(build);
+export function draftRelease(gh: string, build: string, out: string, o: { tag?: string; title?: string; first?: string } = {}): void {
+  const tag = o.tag ?? signedLlamaTag(build);
   if (spawnSync(gh, ['release', 'view', tag, '--repo', SIGNED_LLAMA_REPO], { windowsHide: true, stdio: 'ignore' }).status === 0) throw new Error(`${SIGNED_LLAMA_REPO} has ${tag} already: a build is signed once`);
   const notes = path.join(out, 'notes.md');
   const sums = path.join(out, 'checksums.sha256');
-  if (!existsSync(notes) || !existsSync(sums)) throw new Error(`${out} has no signed build: node tools/sign-llama.ts ${build} first`);
+  if (!existsSync(notes) || !existsSync(sums)) throw new Error(`${out} has no signed build: ${o.first ?? `node tools/sign-llama.ts ${build}`} first`);
   const files = [...readdirSync(out).filter((f) => /\.zip$/i.test(f) || /^LICENSE/i.test(f)).map((f) => path.join(out, f)), sums];
-  const r = spawnSync(gh, ['release', 'create', tag, ...files, '--repo', SIGNED_LLAMA_REPO, '--title', `llama.cpp ${build} (signed)`, '--notes-file', notes, '--latest=false', '--draft'], { stdio: 'inherit', windowsHide: true });
+  const r = spawnSync(gh, ['release', 'create', tag, ...files, '--repo', SIGNED_LLAMA_REPO, '--title', o.title ?? `llama.cpp ${build} (signed)`, '--notes-file', notes, '--latest=false', '--draft'], { stdio: 'inherit', windowsHide: true });
   if (r.status !== 0) throw new Error(`gh release create ${tag} failed`);
   console.log(`Drafted ${tag} in ${SIGNED_LLAMA_REPO}. Once a PC with Smart App Control on has run it: gh release edit ${tag} --repo ${SIGNED_LLAMA_REPO} --draft=false --latest=false`);
 }
