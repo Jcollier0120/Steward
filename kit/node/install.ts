@@ -82,6 +82,11 @@ export interface Release {
   form?: 'minified' | 'readable';
   /** The native files it carries (native.ts, kit 2.62.0): where, for which processors, and whether they're signed. */
   native?: NativeRelease;
+  /**
+   * Whether the Exchequer sells it, as its list said when it was published (kit 2.110.0): a sold agent checks the
+   * license itself (license-check.ts ownSale). None in a release from before, one not published, or when it couldn't say.
+   */
+  sold?: boolean;
 }
 
 export interface Ran {

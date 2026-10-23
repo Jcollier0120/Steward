@@ -2,6 +2,33 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.110.0
+
+**A sold agent doesn't run without a license for its PC. No license, one that can't be read or verified, or another PC's holds its rounds, as an ended trial does.**
+
+### What changed
+
+- **Closed when there's no license** (`license-check.ts`). A sold agent's rounds wait, and Run now with them, when licence.json is missing, can't be read, doesn't verify, or was made for another PC (states `missing`, `unreadable`, `bad-signature` and the new `another-pc`). Its page says "This PC holds no license for it: signing in brings it back" (`NO_LICENSE_TEXT`), and its pill says "No license". Its settings and data are kept, and a license lifts the hold at once. Before, anything the check couldn't judge ran. A paid, lapsed (the Freehold license) or pending license runs as before, as does a running trial.
+- **Its release says whether it's sold** (`release.json`'s `sold`; `ownSale`). `npm run release -- --publish` stamps it from the Exchequer's list (`saleOf`). A sold agent then checks whatever Manor's exchequer.json and staff.json say, so deleting one of Manor's files doesn't stop the check. A copy whose release doesn't say goes by Manor's files, as before: a release from before, a checkout, or one built while the Exchequer couldn't say.
+- **This PC's license** (`license.ts`: `deviceIdFor`, `machineGuid`, `readDeviceId`, `isThisPc`, `DEVICE_FILE`; `everyone.ts`: `sharedLicenseFolder`).
+  - A license's `sub` must be device.json's id, in Manor's folder or in an Everyone install's shared license folder, as Manor's readLicense has it.
+  - With no device.json, an id made from a PC (version 8) is made again from MachineGuid and the folder, so a licence.json copied from another PC on its own isn't this PC's.
+  - An id from before 2026-10-21 (random) with no device.json, or a PC whose MachineGuid can't be read, has nothing to check it by, and counts.
+  - reg.exe is run by its full path.
+- **The API**:
+  - `LicenseCheck.held` is new; `ended` is still the trial's end alone.
+  - `licenseHeld()` and `heldNote()` say either hold. `trialEnded()` and `trialEndedNote()` are their old names, and now say either too. `holdText(check)` gives a hold's words, and `holdPill(text)` its pill.
+  - `dutyStatus(duty, up, held)` takes the hold's words; true still means the trial's end.
+  - The ping's `license` has `held`.
+
+### What an agent must do
+
+- Nothing: release it on this kit. An agent whose Run now doesn't go through `every()` should check `licenseHeld()`, not `licenseNow().ended`.
+
+### Before you update
+
+- **On a PC that holds no license, the sold staff released on this kit wait.** That includes test PCs and developers' PCs: they need a license, and a complimentary one does. Manor already takes them off duty there (Manor#364); now the staff wait by themselves too.
+
 ## 2.108.0
 
 **Every program the staff's local models run is signed, by its maker or by Castellan, or listed in a catalog Castellan signs, so Windows' Smart App Control lets them run.**

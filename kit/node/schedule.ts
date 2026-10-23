@@ -1,7 +1,7 @@
 import { APP } from '../app.ts';
 import { stayAwake } from './awake.ts';
 import { duty } from './duty.ts';
-import { trialEnded } from './license-check.ts';
+import { licenseHeld } from './license-check.ts';
 import { isDemo } from './demo.ts';
 import { needsSettings } from './required.ts';
 import { offlineFailure } from './net.ts';
@@ -362,9 +362,9 @@ export function every(
       if (!stopped) wait();
       return;
     }
-    // The trial has ended (license-check.ts), or its required settings (required.ts) aren't filled in yet: none run,
+    // The trial has ended or this PC holds no license (license-check.ts), or its required settings (required.ts) aren't filled in yet: none run,
     // asked for or not, since it can't work. Said in round.json, never silent, and never a failure.
-    const held = trialEnded() ?? needsSettings()?.text ?? null;
+    const held = licenseHeld() ?? needsSettings()?.text ?? null;
     waiting = held;
     if (held) {
       if (stopped) return;
@@ -524,7 +524,7 @@ export function every(
     lastRunOffline: lastOffline,
     lastError,
     // A wait is kept off duty too, but no round comes of it until the agent is back on duty.
-    nextRunAt: stopped || running || !duty().onDuty || trialEnded() || needsSettings() ? null : iso(dueAt),
+    nextRunAt: stopped || running || !duty().onDuty || licenseHeld() || needsSettings() ? null : iso(dueAt),
     runningSince: iso(startedAt),
     waiting,
     firstRound: firstNow,
@@ -534,13 +534,13 @@ export function every(
   const handle = {
     /** Starts a run now; false when one is already under way, the trial has ended (license-check.ts), or its required settings are still to be filled in (required.ts). */
     runNow(): boolean {
-      if (running || trialEnded() || needsSettings()) return false;
+      if (running || licenseHeld() || needsSettings()) return false;
       void tick(true);
       return true;
     },
     /** Starts a scheduled round now, at the pace (the agent's own reason, not the person's); false as runNow() and off duty. */
     runSoon(): boolean {
-      if (running || stopped || trialEnded() || needsSettings() || !duty().onDuty) return false;
+      if (running || stopped || licenseHeld() || needsSettings() || !duty().onDuty) return false;
       void tick(false);
       return true;
     },
