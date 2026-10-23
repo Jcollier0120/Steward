@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.181
+
+**It hands out the kit 2.101.0: first-generation Snapdragon X Elite laptops get the faster small model, and the local AI deletes model files it no longer uses.**
+
+### What's new
+
+- **A faster local AI on the first Snapdragon X Elite and X Plus.** Their NPU now runs the same small model as the Snapdragon X2 (Qwen3-VL-2B), on GenieX 0.9.3. Tried on an X2 running the X Elite's own NPU code, it wrote its answers about 1.7 times as fast as the larger model it replaces, held under half the memory, and read pictures right. It also gets Castellan's build of GenieX's model plugin, so the processor no longer keeps about five cores busy while the NPU writes.
+- **The larger model stays as a safety net.** No X Elite has run the small model yet. So if it doesn't download, or doesn't answer properly when local AI is set up, setup puts the larger model (Qwen3-VL-4B) in its place on the same NPU. The laptop keeps chat and pictures on its NPU, and no error is shown.
+- **Model files that are no longer used are deleted.** Once nothing on the PC has used them for three days, the local AI deletes the model files its NPU setup has moved on from. On a Snapdragon laptop these are the graphics' extra copy of the small model (about 1.1 GB), the larger Qwen3-VL-4B (about 4.4 GB) and an older Qwen3-4B. A laptop that still uses one keeps it, and so does one you point at it again.
+
+### What changed
+
+- On a Snapdragon X2, the extra copy of the small model is now deleted by that same rule, three days after nothing uses it, as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each employee gets these with the kit 2.101.0. An X Elite or X Plus laptop set up before keeps the model it has; to move it to the small model, set up local AI again.
 ## 0.36.180
 
 **A new kit is no longer held back because an employee's test copied the words the kit just changed, or because of what happens to be on this PC.**

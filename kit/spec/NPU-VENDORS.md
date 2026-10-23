@@ -15,7 +15,7 @@ So each maker gets its own server, chosen for being OpenAI-compatible, installab
 
 | Maker | Server | Version | What it serves on the NPU | Install |
 |---|---|---|---|---|
-| Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.9.x on the X2 (it pins 0.9.1; 0.9.3 where the Smith's Use it put it), 0.8.0 on the X | chat, vision (one model: Qwen3-VL-2B-Instruct Q4_0 on the X2, Qwen3-VL-4B W4A16 on the X); embeddings, and on the X2 a reranker when asked for, on llama.cpp's server over GenieX's libraries | its Inno Setup installer, silent, per user, no administrator |
+| Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.9.x on the X2 (it pins 0.9.1; 0.9.3 where the Smith's Use it put it), 0.9.3 on the X (from kit 2.101.0; 0.8.0 where an earlier kit put it) | chat, vision (one model: Qwen3-VL-2B-Instruct Q4_0, on the X with Qwen3-VL-4B W4A16 as its fallback); embeddings, and on the X2 a reranker when asked for, on llama.cpp's server over GenieX's libraries | its Inno Setup installer, silent, per user, no administrator |
 | Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake, Wildcat Lake) | OpenVINO Model Server | 2026.4.1 | chat (Qwen3-4B-Instruct-2507, channel-wise INT4) | a zip, unpacked into the accelerators' folder |
 | AMD Ryzen AI 300 and later (XDNA 2) | FastFlowLM | 1.0.7 | chat, vision (one model: `qwen3.5:2b`, Qwen3.5-2B) | a portable zip, unpacked into the accelerators' folder |
 
@@ -226,8 +226,48 @@ Measured on the X2 Elite Extreme (2026-10-23, llama.cpp b11734, setup's flags), 
 | Answers right / pictures right | 22 of 24 / 4 of 4 | 22 of 24 / 4 of 4 | 22 of 24 / 4 of 4 | 22 of 24 / 4 of 4 |
 
 - **Setup** plans the card's and the processor's Qwen3-VL-2B from GenieX's copy when it is there, downloading only the projector; its plan says `have Qwen3-VL-2B-Instruct-Q4_0.gguf: the NPU's own copy, used where it is`. Without GenieX's copy (another Snapdragon, or GenieX hasn't pulled it yet), the Q4_K_M as before.
-- **A PC set up before**: the keeper's look (`refreshSmallModel`, each look, cheap) points the card's and the processor's `-m` at GenieX's copy, and logs it. Nothing is started or stopped: a server running keeps its file until its next start. The Q4_K_M is removed once nothing in `config.json` has named it for three days (`small-model.json` beside it says since when) and no running process names it: an agent that read `config.json` before may still start a server with it. Windows refusing the removal (a program still reads it) is tried again at a later look.
-- **Left as it is**: a Q4_K_M a person puts back in `config.json` (kept, never moved off again), a PC set up for everyone in the shared folder (another account can't read GenieX's cache in this one's profile), and a command that isn't llama-server's. Should GenieX's copy go while the Q4_K_M is still there, the card and the processor read the Q4_K_M again.
+- **A PC set up before**: the keeper's look (`refreshSmallModel`, each look, cheap) points the card's and the processor's `-m` at GenieX's copy, and logs it. Nothing is started or stopped: a server running keeps its file until its next start. The Q4_K_M is removed once nothing in `config.json` has named it for three days and no running process names it: an agent that read `config.json` before may still start a server with it. From kit 2.101.0 that removal is the keeper's look at the files the routes no longer run (below), the Q4_K_M first on Qualcomm's list; `small-model.json` keeps only what `refreshSmallModel` moved.
+- **Left as it is**: a Q4_K_M a person puts back in `config.json` (kept while it names it, never moved off again), a PC set up for everyone in the shared folder (another account can't read GenieX's cache in this one's profile), and a command that isn't llama-server's. Should GenieX's copy go while the Q4_K_M is still there, the card and the processor read the Q4_K_M again.
+
+### Qwen3-VL-2B on the first-generation X, the 4B its fallback (kit 2.101.0)
+
+From kit 2.101.0 the first-generation Snapdragon X (X Elite, X Plus; Hexagon v73) runs Qwen3-VL-2B too: the X2's Q4_0 GGUF through GenieX's llama.cpp plugin, its language model and its pictures on the Hexagon. The owner's choice: the 2B had been better all round on the X2 (Qwen3-VL-2B on every Snapdragon X2, above). It is the `snapdragon-x` generation's own `models`, and the generation pins GenieX 0.9.3 (`serverPin`), which setup installs on a new X.
+
+- **Why the 2B, and why GenieX 0.9.3.** Qualcomm AI Hub builds no Qwen3-VL-2B for the X Elite's chip: its release (v0.65.0) has only unsloth's universal GGUF, for GenieX's llama.cpp plugin. GenieX 0.9.3 (QAIRT 2.50, llama.cpp e467e5b) carries llama.cpp's signed Hexagon code for every Hexagon from v73 (`libggml-htp-v73.so` to `-v81.so`, with its catalog), and reads pictures on the Hexagon's second session. It runs AI Hub's current X Elite build of the 4B as well (v0.65.0, built with QAIRT 2.50.0), which replaced the build the kit had pinned (no longer published): the 4B's X Elite pins are that build's now, the earlier build's kept beside them. On GenieX 0.9.0 and later the X gets Castellan's build of the plugin, as the X2 does (each version's `pluginPatch` names `"snapdragon-x": "snapdragon-x2"`), so its processor's threads sleep while the NPU works (GENIEX_PATCH_POLL, A later GenieX on the PC, below): about five cores fewer busy while it writes.
+- **Measured** on the X2 Elite Extreme playing an X (2026-10-23, GenieX 0.9.3 with Castellan's build, `GGML_HEXAGON_ARCH=v73`, its own data folder naming the X Elite's chip, a private port in the NPU's turn; llama.cpp's log showed the v73 library loaded and the pictures read on the Hexagon's second session), npu-bench's quality items and pictures:
+
+  | | 2B, the X's v73 code | 2B, the X2's v81 | 4B, AI Hub's X Elite build |
+  |---|---|---|---|
+  | First answer after a start | 2.2 s | 2.0 s | 8.1 s |
+  | Tokens written a second | 71.2 | 72.9 | 41.1 |
+  | Quality items | 21 of 24 | 22 of 24 | 22 of 24 |
+  | npu-bench's pictures | 4 of 4, median 413 ms | 4 of 4, 398 ms | 3 of 4 |
+  | Setup's red picture | seen red | seen red | seen red |
+  | Processor busy while writing | 0.05 cores | 0.07 cores | 1.02 cores |
+  | Working set | 2.69 GB | 2.68 GB | 5.92 GB |
+
+  That is the X's code on an X2's NPU, never an X's speed (45 TOPS against 80) or memory. Against the 4B played the same way, the 2B wrote 1.7 times as fast and held under half the memory.
+- **The 4B is its fallback** (the generation's `fallback`; `routeFor` and `planNpu` take a `fallback` option): no X has run the 2B yet. Setup's plan for an X carries the 4B beside it (`NpuPlan.fallback`), and says so: `should it not answer properly on this NPU: qualcomm/Qwen3-VL-4B-Instruct:W4A16 (…) in its place`. `setUpNpu` tries the 2B first, its test requiring the red picture seen red (`seeRed`). Should its pull, its pinned files, its test or its measuring fail once GenieX is in place, setup stops the 2B's server in the NPU's turn and sets the 4B up on the same GenieX, tested as before. The X keeps chat and pictures on the NPU, and no problem is shown: what the 2B met goes in setup's log and in the result's `fellBack`, and the report names the 4B. Only should the 4B fail too does setup say why (the 2B's failure). A failure before the models (GenieX's download, its installer) is said as before, with no fallback.
+- **A PC set up before** is left as it is. The keeper's NPU refresh keeps an X on the 4B (it reads the entry's model against the generation's fallback), and never pulls the 2B in the background: setup (Set up local AI) run again tries the 2B first. An X an earlier kit set up has GenieX 0.8.0, which setup doesn't replace: there it tries the 2B as 0.8.0 runs it, its pictures on the Adreno (`--vit-compute GPUOpenCL`) with GenieX's own plugin, and falls back should that fail. Its 4B is AI Hub's earlier build, which the pin still accepts (`earlier`: a build pinned before, passing where it's whole; a pull now must give the current one), so the fallback finds it in place. Neither has run on an X (Verified, and not).
+
+### Model files the routes no longer run (kit 2.101.0)
+
+Each route in `npu-vendors.json` lists the model files and folders it no longer runs (`retired`, npu-vendors.ts' `NpuRetired`): a `path` (with `{tools}` and `%VARIABLES%`), a `match` for the files in that folder it names or else the folder itself, the GenieX `model` id it was served by, the kit version that retired it (`since`), and `why`. The keeper's look (`removeRetiredModels`, retired.ts, after `refreshSmallModel`) removes each one nothing has used for three days (`RETIRED_GRACE_MS`):
+
+- **Where**: a route's list applies on a PC that has its server installed, or whose NPU entry runs it.
+- **Used**: while any string in `config.json` names it (its path, its file or folder name, or the model id its server serves it by), or a running model server's command line does. A PC that never moved off it keeps it, and so does one a person points at it again.
+- **When**: first seen unnamed, it is recorded (`retired-models.json` beside `config.json`) and logged; named again, it is kept and its count starts over; three days unnamed and no running server naming it, it is removed and logged with its size, a folder first renamed aside (`<folder>.removing`) so a server never finds half of it. Windows refusing (a program has it open) is tried at a later look; with the process list unread nothing is removed that look; with `config.json` unreadable nothing is looked at.
+- **Never** in the PC's shared folder (an Everyone install), whose files other accounts read.
+
+Qualcomm's list:
+
+| Retired | Since kit | Why |
+|---|---|---|
+| `{tools}\models\Qwen3VL-2B-Instruct-Q4_K_M.gguf`, under either repository's name | 2.100.0 | the graphics' and the processor's copy: they read GenieX's Q4_0 now (One copy of Qwen3-VL-2B, above) |
+| GenieX's `models\qualcomm\Qwen3-VL-4B-Instruct` | 2.101.0 | AI Hub's 4B, the route's model before the generations' 2B; an X that fell back to it names it, and keeps it |
+| GenieX's `models\qualcomm\Qwen3-4B-Instruct-2507` | 2.101.0 | the model of the install's own GenieX entry (`GENIEX_CHAT_MODEL`) until kit 2.100.0 |
+
+A route adds a file when it stops running it. Every PC reads the list, so one that still uses a file keeps it.
 
 ### Memory on a 16 GB Intel PC (the NPU 3720)
 
@@ -689,7 +729,7 @@ Each Snapdragon generation's `hexagonArch` (`v73`, `v81`) and `aiHubChipset` in 
 
 It refuses before anything is set up: a newer Snapdragon on an older one (`snapdragon-x2` on an X, whose v73 Hexagon can't run v81 code), `snapdragon-8cx` (no server runs it), and a generation the route hasn't. `npu-bench --generation snapdragon-x` plays it the same way. Its report says `run.played`, carries a `played` mark and is never ranked; on any NPU but a Snapdragon the benchmark refuses `--generation`.
 
-To play an X on an X2, stop the manor's NPU servers first (the check refuses a port that's held). If an X Elite build of Qwen3-VL-4B is at hand, copy it into `{tools}\played\snapdragon-x\geniex\models\qualcomm\Qwen3-VL-4B-Instruct` to save its 4.4 GB download (its pins say whether it's the right build). Then run:
+To play an X on an X2, stop the manor's NPU servers first (the check refuses a port that's held). From kit 2.101.0 the X plays its Qwen3-VL-2B, pulled into the played folder (1.9 GB), as GenieX 0.9.3 runs it, with GenieX's llama.cpp plugin on v73 code too (`GGML_HEXAGON_ARCH` in GenieX's environment). For its fallback, AI Hub's X Elite build of the 4B, copy one at hand into `{tools}\played\snapdragon-x\geniex\models\qualcomm\Qwen3-VL-4B-Instruct` to save its 4.4 GB download (its pins say whether it's the right build). Then run:
 
 ```
 node <agent>\src\kit\npu-check.ts --generation snapdragon-x --yes
@@ -772,11 +812,13 @@ node <agent>\src\kit\npu-bench.ts --generation snapdragon-x --yes
   | vision | 3 of 4 | 2 of 4 |
 
   The played run's cached load was 9.5 s. A quick run tries each measurement only 3 times, and the reply and summary jobs varied by more than 15%, so the two are alike within its noise.
+- Qwen3-VL-2B and AI Hub's current X Elite build of the 4B on GenieX 0.9.3 (2026-10-23), the X's models from kit 2.101.0: Qwen3-VL-2B on the first-generation X, above.
 
 **Checked from source or the release, not run**: OpenVINO Model Server 2026.4.1's zip (its SHA-256, its layout, its `/v1/models` and `/v1/chat/completions` routes in its source at that tag); FastFlowLM 1.0.7's `flm validate --json`, from its source and `flm.exe`: it looks for PCI `17F0` alone, so it can't vouch for an AMD NPU setup doesn't know (Detection, above).
 
 **Unverified on hardware**, each needing a run on a real PC:
 - GenieX's silent install on a clean PC (the flags are Inno Setup's standard ones);
+- Qwen3-VL-2B on a real first-generation X (kit 2.101.0): its speed, memory and pictures there, and on GenieX 0.8.0, which an X an earlier kit set up keeps (its pictures on the Adreno). The 4B is its fallback for that reason;
 - a real first-generation Snapdragon X, which the X2 only plays: GenieX's own V73 QAIRT runtime (played, the X's build ran on the X2's v81 runtime; GenieX's v73 runtime wasn't tried on the X2, for the risk of a bluescreen), the X's own speed (45 TOPS against the X2's 80), its memory, and the embedding server's `-c 4096 -ub 512` on its Hexagon (v73). On a 16 GB X Elite, GenieX (5.8 GB) and the embedding server (2.0 GB from kit 2.75.1, 4.4 GB before) beside it hold about 8 GB of the 16, and setup's memory check doesn't weigh them yet (Qualcomm's route has no `memoryGb`): whether a 16 GB X keeps both is the owner's to decide;
 - Qwen3-VL-2B (Qwen3-VL-2B on every Snapdragon X2, above) on a real 16 GB X2: its pull from Hugging Face through setup, and the Adreno's first OpenCL compile on a fresh PC. On the 48 GB X2 Elite, `npu-bench --small-pc` ran the kit's own command and checked its pinned files (pulled already), and its pictures were read beside the card's own llama-server on the Adreno (kit 2.78.8, Verified on hardware). Neither full run was ranked, for the reply job's spread on whole times, and a run under kit 2.78.0's rule (a job judged at one answer length) is still to come;
 - a real 16 GB Snapdragon running chat, pictures and embeddings on the NPU beside the manor's agents. The X2 Elite ran them under a 16 GB PC's memory (a ballast: Memory on a 16 GB Snapdragon), but the 7.8 GB its NPU may hold is still worked out, since Windows sets it from the memory the PC starts with;

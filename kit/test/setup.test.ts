@@ -1316,7 +1316,8 @@ test('a new build folder is unpacked whole, in one rename; into a folder that is
 
 // ---------------------------------------------------------------- the Snapdragon's models (kit 2.100.0)
 
-const { npuChatFile, npuMissing, readSmallModel, refreshSmallModel, SMALL_MODEL_GRACE_MS, smallModelFile, withNpuChatFile } = await import('./fixture/src/kit/setup.ts');
+const { npuChatFile, npuMissing, readSmallModel, refreshSmallModel, smallModelFile, withNpuChatFile } = await import('./fixture/src/kit/setup.ts');
+const { RETIRED_GRACE_MS } = await import('./fixture/src/kit/retired.ts');
 const SNAPDRAGON_CARD = 'gpu-qualcomm-r-adreno-tm-x2-90-gpu';
 const rerankHf = async (repo: string) =>
   repo === 'ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF' ? parseHfFiles({ siblings: [{ rfilename: 'qwen3-reranker-0.6b-q8_0.gguf', size: 639153184, lfs: { sha256: '0b' } }] }) : hf(repo);
@@ -1420,7 +1421,7 @@ test("one copy of Qwen3-VL-2B on a Snapdragon: the card and the processor read G
   assert.ok(plain.models.some((x) => x.file === 'Qwen3VL-2B-Instruct-Q4_K_M.gguf' && !x.path));
 });
 
-test("the keeper's look on a Snapdragon set up before: the card and the processor read GenieX's copy; the Q4_K_M goes once nothing has read it for three days, never while a server runs it", async () => {
+test("the keeper's look on a Snapdragon set up before: the card and the processor read GenieX's copy; the Q4_K_M is left for removeRetiredModels (retired.test.ts)", async () => {
   const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'small-model-'));
   const config = path.join(home, 'config.json');
   const models = path.join(home, 'models');
@@ -1443,40 +1444,30 @@ test("the keeper's look on a Snapdragon set up before: the card and the processo
   writeFileSync(config, JSON.stringify(raw, null, 2));
   const t0 = Date.parse('2026-10-23T12:00:00Z');
   const log: string[] = [];
-  let running: string[] = [];
-  let asked = 0;
-  const look = (now: number) => refreshSmallModel({ configFile: config, kit: '2.100.0', home, now: () => now, fileSize: size, running: async () => (asked++, running), log: (l) => log.push(l) });
+  const look = (now: number) => refreshSmallModel({ configFile: config, kit: '2.100.0', home, now: () => now, fileSize: size, log: (l) => log.push(l) });
   const modelOf = (id: string) => {
     const cmd = JSON.parse(readFileSync(config, 'utf8')).accelerators.find((a: any) => a.id === id).chat.startCommand;
     return cmd[cmd.indexOf('-m') + 1];
   };
 
-  assert.deepEqual(await look(t0), { changed: [SNAPDRAGON_CARD, 'cpu'], removed: [] });
+  assert.deepEqual(await look(t0), { changed: [SNAPDRAGON_CARD, 'cpu'] });
   assert.deepEqual([modelOf(SNAPDRAGON_CARD), modelOf('cpu')], [portablePath(at), portablePath(at)]);
   const written = JSON.parse(readFileSync(config, 'utf8'));
   assert.equal(written.mine, 1, 'the rest of config.json as it was');
   assert.deepEqual(written.accelerators[0].embed, embed);
   assert.ok(written.accelerators[0].chat.startCommand.includes('--mmproj'), 'the projector stays');
-  assert.match(log[0], /^gpu-qualcomm-r-adreno-tm-x2-90-gpu, cpu: chat and vision now read the NPU's own copy of qwen3-vl-2b-instruct, Qwen3-VL-2B-Instruct-Q4_0\.gguf \(kit 2\.100\.0\)/);
+  assert.match(log[0], /^gpu-qualcomm-r-adreno-tm-x2-90-gpu, cpu: chat and vision now read the NPU's own copy of qwen3-vl-2b-instruct, Qwen3-VL-2B-Instruct-Q4_0\.gguf \(kit 2\.100\.0\).*the Q4_K_M goes once nothing has read it for 3 days$/);
   assert.deepEqual(readSmallModel(config), { file: at, retired: [{ path: q4km, since: new Date(t0).toISOString() }] });
-  // Looks after: nothing to change, nothing due; Windows' process list isn't asked.
-  assert.deepEqual(await look(t0 + 60_000), { changed: [], removed: [] });
-  assert.deepEqual(await look(t0 + SMALL_MODEL_GRACE_MS - 1), { changed: [], removed: [] });
-  assert.equal(asked, 0);
+  // Looks after: nothing to change, and the Q4_K_M never removed here, however long it waits (removeRetiredModels removes it).
+  assert.deepEqual(await look(t0 + 60_000), { changed: [] });
+  assert.deepEqual(await look(t0 + 2 * RETIRED_GRACE_MS), { changed: [] });
   assert.ok(existsSync(q4km));
-  // Three days on, a server still runs it (started before): kept.
-  running = [`"C:\\l\\llama-server.exe" --port 18191 -m ${q4km}`];
-  assert.deepEqual(await look(t0 + SMALL_MODEL_GRACE_MS), { changed: [], removed: [] });
-  assert.ok(existsSync(q4km));
-  // Nothing runs it: removed, and said so.
-  running = [];
-  assert.deepEqual(await look(t0 + SMALL_MODEL_GRACE_MS + 60_000), { changed: [], removed: [q4km] });
-  assert.ok(!existsSync(q4km));
-  assert.match(log.at(-1)!, /^removed Qwen3VL-2B-Instruct-Q4_K_M\.gguf \(0\.00 GB\): nothing has read it for 3 days, since the cards and the processor read the NPU's own copy, Qwen3-VL-2B-Instruct-Q4_0\.gguf$/);
+  // Once it's gone, its record goes too.
+  rmSync(q4km);
+  assert.deepEqual(await look(t0 + 2 * RETIRED_GRACE_MS + 60_000), { changed: [] });
   assert.deepEqual(readSmallModel(config)!.retired, []);
-  assert.deepEqual(await look(t0 + SMALL_MODEL_GRACE_MS + 120_000), { changed: [], removed: [] });
 
-  // A person who puts the Q4_K_M back keeps it: never moved off again, nor removed.
+  // A person who puts the Q4_K_M back keeps it: never moved off again.
   writeFileSync(q4km, 'q4km');
   writeFileSync(config, JSON.stringify(raw, null, 2));
   rmSync(smallModelFile(config));
@@ -1484,11 +1475,11 @@ test("the keeper's look on a Snapdragon set up before: the card and the processo
   const mine = JSON.parse(readFileSync(config, 'utf8'));
   mine.accelerators[1].chat.startCommand = server(18193, []);
   writeFileSync(config, JSON.stringify(mine, null, 2));
-  assert.deepEqual(await look(t0 + 60_000), { changed: [], removed: [] });
+  assert.deepEqual(await look(t0 + 60_000), { changed: [] });
   assert.equal(modelOf('cpu'), q4km);
   assert.equal(modelOf(SNAPDRAGON_CARD), portablePath(at));
   assert.deepEqual(readSmallModel(config)!.kept, [q4km]);
-  assert.deepEqual(await look(t0 + 2 * SMALL_MODEL_GRACE_MS), { changed: [], removed: [] });
+  assert.deepEqual(await look(t0 + 2 * RETIRED_GRACE_MS), { changed: [] });
   assert.ok(existsSync(q4km));
 
   // GenieX's copy gone while the Q4_K_M is still kept: they read the Q4_K_M again.
@@ -1496,17 +1487,17 @@ test("the keeper's look on a Snapdragon set up before: the card and the processo
   rmSync(smallModelFile(config));
   await look(t0);
   copy = false;
-  assert.deepEqual(await look(t0 + 60_000), { changed: [SNAPDRAGON_CARD, 'cpu'], removed: [] });
+  assert.deepEqual(await look(t0 + 60_000), { changed: [SNAPDRAGON_CARD, 'cpu'] });
   assert.deepEqual([modelOf(SNAPDRAGON_CARD), modelOf('cpu')], [q4km, q4km]);
   assert.match(log.at(-1)!, /: chat and vision read Qwen3VL-2B-Instruct-Q4_K_M\.gguf again \(kit 2\.100\.0\): the NPU's copy they read, Qwen3-VL-2B-Instruct-Q4_0\.gguf, is gone$/);
-  assert.deepEqual(await look(t0 + 2 * SMALL_MODEL_GRACE_MS), { changed: [], removed: [] });
+  assert.deepEqual(await look(t0 + 2 * RETIRED_GRACE_MS), { changed: [] });
   assert.ok(existsSync(q4km));
 
   // The PC's shared folder (an Everyone install): left as it is.
   copy = true;
   writeFileSync(config, JSON.stringify(raw, null, 2));
   await inEveryone(async (tools) => {
-    assert.deepEqual(await refreshSmallModel({ configFile: config, kit: '2.100.0', home: tools, fileSize: size, log: () => {} }), { changed: [], removed: [] });
+    assert.deepEqual(await refreshSmallModel({ configFile: config, kit: '2.100.0', home: tools, fileSize: size, log: () => {} }), { changed: [] });
   });
   assert.equal(modelOf('cpu'), q4km);
   // withNpuChatFile: llama-server reading the Q4_K_M only.

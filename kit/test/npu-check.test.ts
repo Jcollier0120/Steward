@@ -779,6 +779,7 @@ async function snapdragonScene(npu: string) {
   q.port = port;
   q.embedServer!.port = ePort;
   delete q.models[0].pinned; // its pull is a fake that leaves no files: the played folder's pins are checked in npu-vendors.test.ts
+  delete q.generations['snapdragon-x'].models![0].pinned; // the X Elite's Qwen3-VL-2B (kit 2.101.0), the same
   const tools = mkdtempSync(path.join(home, 'tools-'));
   const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(localappdata|userprofile)$/i.test(k)));
   Object.assign(env, { REEVE_HOME: home, LOCALAPPDATA: path.join(tools, 'local'), USERPROFILE: path.join(tools, 'profile') });
@@ -837,7 +838,7 @@ async function snapdragonScene(npu: string) {
   return { tools, fake, ran, started, tested, inputs, lines, opts };
 }
 
-test("--generation snapdragon-x on an X2: the X Elite played whole (AI Hub's X Elite build from a folder of its own, the embeddings on Hexagon v73), verifying nothing", async () => {
+test("--generation snapdragon-x on an X2: the X Elite played whole (its Qwen3-VL-2B from a folder of its own, GenieX and the embeddings on Hexagon v73), verifying nothing", async () => {
   const s = await snapdragonScene(X2);
   const { code, report } = await C.npuCheck({ ...s.opts, generation: 'snapdragon-x' });
   assert.equal(code, 0, s.lines.join('\n'));
@@ -853,16 +854,19 @@ test("--generation snapdragon-x on an X2: the X Elite played whole (AI Hub's X E
   assert.deepEqual(JSON.parse(readFileSync(path.join(dir, 'config.json'), 'utf8')), { chipset: 'qualcomm-snapdragon-x-elite' });
   assert.equal(existsSync(path.join(s.tools, 'profile', '.cache', 'geniex')), false);
   // GenieX pulled its model into that folder: --data-dir before the command, and GENIEX_DATADIR as well.
-  assert.deepEqual(s.ran.map((r) => [r.args.slice(0, 4), r.datadir]), [[['--data-dir', dir, 'pull', 'qualcomm/Qwen3-VL-4B-Instruct:W4A16'], dir]]);
-  // Started on it, each time, as the kit's own start does (its entry's paths as config.json keeps them).
+  assert.deepEqual(s.ran.map((r) => [r.args.slice(0, 4), r.datadir]), [[['--data-dir', dir, 'pull', 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0'], dir]]);
+  // Started on it, each time, as the kit's own start does (its entry's paths as config.json keeps them), its llama.cpp
+  // plugin on the X's v73 code.
   assert.equal(s.started.length, 2, 'a first start, and a start again');
   for (const e of s.started) {
     assert.deepEqual(e.chat.startCommand.slice(1, 4), ['--data-dir', portablePath(dir), 'serve']);
     assert.equal(e.chat.env.GENIEX_DATADIR, portablePath(dir));
+    assert.equal(e.chat.env.GGML_HEXAGON_ARCH, 'v73');
   }
-  // The embeddings: llama.cpp's Hexagon backend told to run the X's v73 code, as the kit starts it.
+  // The embeddings: llama.cpp's Hexagon backend told to run the X's v73 code, as the kit starts it, through the build
+  // that loads GenieX 0.9's libraries (the X Elite pins 0.9.3).
   const embedEntry = s.tested.at(-1);
-  assert.deepEqual(embedEntry.embed.env, { ADSP_LIBRARY_PATH: portablePath(path.join(s.tools, 'servers', 'llama.cpp', 'b11125-hexagon')), GGML_HEXAGON_ARCH: 'v73' });
+  assert.deepEqual(embedEntry.embed.env, { ADSP_LIBRARY_PATH: portablePath(path.join(s.tools, 'servers', 'llama.cpp', 'b11645-hexagon')), GGML_HEXAGON_ARCH: 'v73' });
   assert.equal(report.steps.at(-1)!.ok, true);
   assert.equal(s.inputs.length, 2);
 });

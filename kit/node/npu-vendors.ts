@@ -59,9 +59,14 @@ export interface NpuModel {
   /**
    * Per generation: the files a pull leaves, each with its size and SHA-256, checked after the pull. `*` is every
    * generation the route takes, for a model that is the same file on each (OpenVINO's, compiled on the PC itself).
+   * `earlier`: the files of builds pinned before, still accepted where a PC pulled one then (kit 2.101.0: AI Hub's
+   * earlier X Elite build of the 4B, which it no longer publishes); a pull now must give `files`.
    */
-  pinned?: Record<string, { dir: string; files: Record<string, { size: number; sha256: string }> }>;
+  pinned?: Record<string, { dir: string; files: PinnedFiles; earlier?: PinnedFiles[] }>;
 }
+
+/** A model's files by name, each with its size and SHA-256. */
+export type PinnedFiles = Record<string, { size: number; sha256: string }>;
 
 export interface NpuRoute {
   server: string;
@@ -128,6 +133,12 @@ export interface NpuRoute {
   rerankServer?: NpuRerankServer;
   /** Its models off the NPU, for the benchmark's graphics and processor runs where its server runs on the NPU only (NpuOffNpu). */
   offNpu?: NpuOffNpu;
+  /**
+   * The model files and folders it no longer runs (kit 2.101.0), which the keeper removes (retired.ts' removeRetiredModels)
+   * on a PC whose NPU runs this route, once nothing in config.json and no running server has named one for a while. A PC
+   * that never moved off one names it, and keeps it.
+   */
+  retired?: NpuRetired[];
   vision?: string;
   licence: string;
   /** Its maker's terms for the server and what it carries, named before it's downloaded (GenieX, the QAIRT runtime inside it). */
@@ -172,10 +183,18 @@ export interface NpuGeneration {
   basis?: string;
   /**
    * The models it runs instead of the route's, on every PC of the generation whatever its memory: the Snapdragon X2's
-   * Qwen3-VL-2B, its pictures on the Adreno with GenieX 0.8.0 and on the Hexagon with 0.9, where the first-generation X
-   * keeps the route's 4B. routeFor puts them in the route's place.
+   * Qwen3-VL-2B, its pictures on the Adreno with GenieX 0.8.0 and on the Hexagon with 0.9, and from kit 2.101.0 the
+   * first-generation X's too (with the route's 4B its `fallback`). routeFor puts them in the route's place.
    */
   models?: NpuModel[];
+  /**
+   * What setup sets up when its own `models` fail on the PC (kit 2.101.0): the route's models of these ids, on the same
+   * server. The first-generation X Elite's Qwen3-VL-2B has run only as its Hexagon code played on an X2, so where it
+   * doesn't download, or its test (an answer, and a red picture seen red) fails, the route's Qwen3-VL-4B is set up in its
+   * place, tested as before. The keeper's refresh keeps an entry that runs one of them on it: only setup tries the
+   * generation's own again.
+   */
+  fallback?: { models: string[]; basis: string };
   /**
    * The models it runs instead of its own (or the route's) on a PC with little memory (smallPc: under
    * idleStop.smallPcGb), and why. routeFor puts them in the route's place when it's told the PC is small. No generation
@@ -199,7 +218,8 @@ export interface NpuGeneration {
   /**
    * Its own pinned version of the route's server, in the route's place (pinnedRoute): what setup installs on it, and
    * what it runs where the PC's own can't be asked. The Snapdragon X2's GenieX 0.9.1, which reads its pictures on the
-   * Hexagon, where the first-generation X keeps the route's 0.8.0. A PC that has another version runs that one.
+   * Hexagon, and the first-generation X's 0.9.3, which both its Qwen3-VL-2B and AI Hub's current 4B build for it (QAIRT
+   * 2.50, as 0.9.3's) were measured on. A PC that has another version runs that one.
    */
   serverPin?: { version: string; download: NpuRoute['download']; basis: string };
 }
@@ -221,10 +241,30 @@ export interface NpuServerVersion {
   embedServer?: Partial<Pick<NpuEmbedServer, 'version' | 'download' | 'into' | 'exe' | 'env'>>;
   /**
    * The kit's build of one of the server's files for this version, by generation (npu-patch.ts): in place of the
-   * generation's own `pluginPatch`, which is for the route's pinned version. A generation it doesn't name gets none.
+   * generation's own `pluginPatch`, which is for the route's pinned version. A generation it doesn't name gets none; one
+   * named by another generation's id gets that one's build (the first-generation X Elite the X2's: the same file).
    */
-  pluginPatch?: Record<string, NpuPluginPatch>;
+  pluginPatch?: Record<string, NpuPluginPatch | string>;
   basis: string;
+}
+
+/**
+ * A model file or folder a route no longer runs (NpuRoute.retired): `path`, a file or a folder (%USERPROFILE% and
+ * {tools} filled in), or with `match` the folder holding the files. It counts as named while config.json or a running
+ * server's command line holds its path, its name, or `model`.
+ */
+export interface NpuRetired {
+  path: string;
+  /**
+   * The files in `path` that are retired, by name (a regular expression, case ignored): a model setup took from whichever
+   * of several repositories had it, under that one's name (SMALL_SPEC's Q4_K_M).
+   */
+  match?: string;
+  /** The id its server served it by (GenieX's, OpenVINO's), when config.json names it by id rather than by path. */
+  model?: string;
+  /** The kit that retired it. */
+  since: string;
+  why: string;
 }
 
 /** A file pinned by its size and SHA-256. */
@@ -765,8 +805,11 @@ export function serverVersionOf(route: NpuRoute): NpuServerVersion | undefined {
  */
 export function pluginPatchOf(route: NpuRoute, generation: string | null | undefined): NpuPluginPatch | undefined {
   const v = serverVersionOf(route);
-  if (v) return generation && v.pluginPatch && Object.hasOwn(v.pluginPatch, generation) ? v.pluginPatch[generation] : undefined;
-  return generationOf(route, generation)?.pluginPatch;
+  if (!v) return generationOf(route, generation)?.pluginPatch;
+  const own = (g: string | null | undefined) => (g && v.pluginPatch && Object.hasOwn(v.pluginPatch, g) ? v.pluginPatch[g] : undefined);
+  const p = own(generation);
+  // Another generation's build, by its id (never a chain of them).
+  return typeof p === 'string' ? (typeof own(p) === 'object' ? (own(p) as NpuPluginPatch) : undefined) : p;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -787,18 +830,25 @@ function ownModels(route: NpuRoute): boolean {
  * UNKNOWN_GENERATION, the route's most cautious (unknownGeneration). The generation's own models in the route's place
  * (a Snapdragon X2's Qwen3-VL-2B), and on a PC with little memory (`small`: smallPc of its memory) its smallPc models
  * over those. A caller's own models stay (the Smith's try of another model): a generation's go only in place of the
- * route's own, as npu-vendors.json has them (ownModels). Then what the route's server version changes (`versions`, by
- * serverVersionOf): a model's own arguments, its embedding server's build. The route itself when none of these apply.
+ * route's own, as npu-vendors.json has them (ownModels). Told `fallback`, the route's own models its generation falls
+ * back to (NpuGeneration.fallback) in place of its own: what setup tries when those fail, and what a PC set up with them
+ * keeps running. Then what the route's server version changes (`versions`, by serverVersionOf): a model's own
+ * arguments, its embedding server's build. The route itself when none of these apply.
  */
-export function routeFor(route: NpuRoute, generation: string | null | undefined, small = false): NpuRoute {
+export function routeFor(route: NpuRoute, generation: string | null | undefined, small = false, o: { fallback?: boolean } = {}): NpuRoute {
   const g = generationOf(route, generation);
   const own = ownModels(route);
-  if (own && g?.models) route = { ...route, models: g.models };
-  if (own && small && g?.smallPc) route = { ...route, models: g.smallPc.models };
+  const fallback = own && o.fallback && g?.fallback ? route.models.filter((m) => g.fallback!.models.includes(m.id)) : [];
+  if (fallback.length) route = { ...route, models: fallback };
+  else if (own && g?.models) route = { ...route, models: g.models };
+  if (own && small && g?.smallPc && !fallback.length) route = { ...route, models: g.smallPc.models };
   const v = serverVersionOf(route);
   if (v) {
     const models = route.models.map((m) => (v.serve?.[m.id] ? { ...m, serve: [...v.serve[m.id]] } : m));
-    route = { ...route, models, ...(route.embedServer && v.embedServer ? { embedServer: { ...route.embedServer, ...v.embedServer } } : {}) };
+    // Its embedding server's environment merged, the version's values first: a route given again keeps what a caller
+    // added (playedRoute's GGML_HEXAGON_ARCH, for a played X Elite's GenieX 0.9.3).
+    const es = route.embedServer && v.embedServer ? { ...route.embedServer, ...v.embedServer, ...(v.embedServer.env ? { env: { ...route.embedServer.env, ...v.embedServer.env } } : {}) } : null;
+    route = { ...route, models, ...(es ? { embedServer: es } : {}) };
   }
   if (!g || (!g.timeouts && !g.caps && !g.maxContextTokens && !g.args && !g.embedArgs && !g.memoryGb)) return route;
   const replaced = (args: string[], values: Record<string, string> | undefined) => {
@@ -876,9 +926,10 @@ export function playGeneration(
 
 /**
  * The route as it plays an older Snapdragon (Played): GenieX's serve and pulls with its own data folder (`--data-dir`
- * before the command, and GENIEX_DATADIR), its models found and their pins checked there, and the embedding server
- * given GGML_HEXAGON_ARCH, the played Hexagon (never empty: llama.cpp reads an empty one as arch 0). The route's other
- * values are the played generation's (routeFor, before this).
+ * before the command, and GENIEX_DATADIR), its models found and their pins checked there, and GenieX and the embedding
+ * server given GGML_HEXAGON_ARCH, the played Hexagon (never empty: llama.cpp reads an empty one as arch 0), which a
+ * GGUF model's llama.cpp plugin reads as the embedding server's does. The route's other values are the played
+ * generation's (routeFor, before this).
  */
 export function playedRoute(route: NpuRoute, p: Played): NpuRoute {
   const real = GENIEX_DATA_DIR.toLowerCase();
@@ -894,7 +945,7 @@ export function playedRoute(route: NpuRoute, p: Played): NpuRoute {
   return {
     ...route,
     serve: [...dir, ...route.serve],
-    env: { ...route.env, GENIEX_DATADIR: p.dataDir },
+    env: { ...route.env, GENIEX_DATADIR: p.dataDir, GGML_HEXAGON_ARCH: p.hexagonArch },
     models,
     ...(es ? { embedServer: { ...es, env: { ...es.env, GGML_HEXAGON_ARCH: p.hexagonArch } } } : {}),
   };
@@ -1073,6 +1124,11 @@ export interface NpuPlan {
   powerTool?: NpuPowerTool;
   /** Bytes still to download: the server's, its runtime's and the models', the embedding server's included. */
   downloadBytes: number;
+  /**
+   * What setup sets up if this plan's models fail (its generation's `fallback`: the first-generation X Elite's Qwen3-VL-4B
+   * where its 2B fails), planned the same way; setup's planSetup adds it.
+   */
+  fallback?: NpuPlan;
 }
 
 /**
@@ -1099,6 +1155,8 @@ export function planNpu(o: {
    * else as its generation pins it (pinnedRoute), and that installed where it isn't. Left out, the route is planned as given.
    */
   serverVersion?: string | null;
+  /** Its generation's fallback models in place of its own (routeFor's `fallback`): a PC set up with them, or setup's second try. */
+  fallback?: boolean;
 }): NpuPlan | null {
   if (!o.support.supported || !o.support.vendor) return null;
   const exists = o.exists ?? existsSync;
@@ -1106,7 +1164,7 @@ export function planNpu(o: {
   // version (setup, the refresh), the route as this PC runs it: at that version, else its generation's pin, which setup
   // installs (pinnedRoute). Otherwise the route as given: a caller's own, already at its version (npu-check's, a Smith try's).
   const given = (o.catalog ?? NPU_CATALOG).routes[o.support.vendor];
-  const generic = routeFor(o.serverVersion === undefined ? given : atVersion(pinnedRoute(given, o.support.generation), o.serverVersion), o.support.generation, o.small);
+  const generic = routeFor(o.serverVersion === undefined ? given : atVersion(pinnedRoute(given, o.support.generation), o.serverVersion), o.support.generation, o.small, { fallback: o.fallback });
   const route: NpuRoute = o.noEmbed ? { ...generic, embedServer: undefined, models: generic.models.filter((m) => !(m.kinds.length === 1 && m.kinds[0] === 'embed')) } : generic;
   const exe = serverExe(route, o.tools, o.env);
   const installed = exists(exe);
@@ -1144,11 +1202,12 @@ export function planNpu(o: {
 
 /**
  * The maker's terms that come with what the plan downloads: the server's when it's to be installed, each model's that
- * isn't here yet. Each document once, where it's last named, so one both name (Qualcomm's Responsible AI License) comes
- * after everything it applies to. None when nothing they cover is downloaded: a PC set up already isn't asked again.
+ * isn't here yet, and its fallback's (NpuPlan.fallback), which setup downloads only if its own fail. Each document once,
+ * where it's last named, so one both name (Qualcomm's Responsible AI License) comes after everything it applies to. None
+ * when nothing they cover is downloaded: a PC set up already isn't asked again.
  */
 export function npuTerms(p: NpuPlan): MakerTerms[] {
-  const named = [...(p.download ? (p.route.terms ?? []) : []), ...p.models.filter((m) => !m.have).flatMap((m) => m.terms ?? [])];
+  const named = [...(p.download ? (p.route.terms ?? []) : []), ...[...p.models, ...(p.fallback?.models ?? [])].filter((m) => !m.have).flatMap((m) => m.terms ?? [])];
   return named.filter((t, i) => !named.slice(i + 1).some((u) => u.url === t.url));
 }
 
@@ -1204,25 +1263,41 @@ export function sha256File(file: string): Promise<string> {
 /**
  * Checks a pulled model's files against their pinned sizes and SHA-256s, for this generation (a model compiled for
  * the NPU is a different build on each), else for every generation (`*`). Empty when they all match, or none are
- * pinned for it.
+ * pinned for it, or they are wholly a build pinned before (`earlier`); otherwise what differs from the pinned build.
  */
 export async function checkPinned(m: Pick<NpuModel, 'id' | 'pinned'>, generation: string | null, o: { tools: string; env?: Record<string, string | undefined>; hash?: (f: string) => Promise<string> } ): Promise<string[]> {
   const pin = (generation ? m.pinned?.[generation] : undefined) ?? m.pinned?.['*'];
   if (!pin) return [];
   const dir = expandRoute(pin.dir, { tools: o.tools, env: o.env });
-  const problems: string[] = [];
-  for (const [name, want] of Object.entries(pin.files)) {
-    const f = path.join(dir, name);
-    let size = -1;
-    try {
-      size = statSync(f).size;
-    } catch {}
-    if (size !== want.size) {
-      problems.push(`${m.id}: ${name} is ${size < 0 ? 'missing' : `${size} bytes, not ${want.size}`}`);
-      continue;
+  const differ = async (files: PinnedFiles): Promise<string[]> => {
+    const problems: string[] = [];
+    for (const [name, want] of Object.entries(files)) {
+      const f = path.join(dir, name);
+      let size = -1;
+      try {
+        size = statSync(f).size;
+      } catch {}
+      if (size !== want.size) {
+        problems.push(`${m.id}: ${name} is ${size < 0 ? 'missing' : `${size} bytes, not ${want.size}`}`);
+        continue;
+      }
+      const sum = await (o.hash ?? sha256File)(f);
+      if (sum !== want.sha256) problems.push(`${m.id}: ${name}'s SHA-256 ${sum} isn't the pinned ${want.sha256}`);
     }
-    const sum = await (o.hash ?? sha256File)(f);
-    if (sum !== want.sha256) problems.push(`${m.id}: ${name}'s SHA-256 ${sum} isn't the pinned ${want.sha256}`);
+    return problems;
+  };
+  const problems = await differ(pin.files);
+  if (!problems.length) return [];
+  // An earlier build only where every file is at its size: the sizes rule the others out without reading 4 GB again.
+  for (const files of pin.earlier ?? []) {
+    const sized = Object.entries(files).every(([name, want]) => {
+      try {
+        return statSync(path.join(dir, name)).size === want.size;
+      } catch {
+        return false;
+      }
+    });
+    if (sized && !(await differ(files)).length) return [];
   }
   return problems;
 }
