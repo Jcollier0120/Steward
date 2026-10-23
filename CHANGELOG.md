@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.182
+
+**It hands out the kit 2.102.0: one text reader for every employee that reads text in pictures, which reads PDFs exactly and no longer loses a file over a bullet point.**
+
+### What's new
+
+- **One text reader for four employees.** The Clerk, the Scribe, Reeve and the Warrener can now all read text in screenshots, scans and PDFs the same way, through the kit. Reeve gets each word's place on the picture, and the Warrener its quick look at a picture or a PDF's first page. Each employee moves to it in its own update. This prepares the next step: reading text with a small model on your PC's NPU, which will come to all four at once.
+- **PDFs are read from their own text.** Most PDFs (statements, invoices, letters) carry their text. It's now read straight from the file, exactly and in a fraction of the time, instead of being turned into pictures and read by OCR. Only scanned pages are still OCRed, and a PDF with both is read page by page.
+- **A check of how well text is read.** It draws a few dozen screenshots, web pages and documents whose words are known, and measures how many lines are read exactly, how fast, and with how much memory. It's how the coming model will be judged against Windows' own OCR on every kind of PC.
+
+### What changed
+
+- **A bullet point no longer costs a whole file.** On some PCs, a "•" in a picture made the reader's answer unreadable, and the file was left out with no text at all. Now any character comes through.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each employee gets this with the kit 2.102.0. A PDF that was read by OCR before may give slightly different (now exact) text the next time it's read.
+
 ## 0.36.181
 
 **It hands out the kit 2.101.0: first-generation Snapdragon X Elite laptops get the faster small model, and the local AI deletes model files it no longer uses.**

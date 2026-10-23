@@ -2,6 +2,31 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.102.0
+
+**One text reader for the Clerk, the Scribe, Reeve and the Warrener: PDFs read from their own text, word boxes for Reeve, answers that no console can garble, and a check any PC can run.**
+
+### What's new
+
+- **One reader, for all four** (spec/OCR.md). `ocr.ts` keeps `ocrFiles` as it was, so the Clerk and the Scribe take it unchanged, and adds what the others need:
+  - `boxes`: each page read in `layout` (`OcrPage`: `file`, `page`, `width`, `height`, `lines`, `source`), each line's words with their boxes (`OcrLine`, `OcrWord`: `t`, `x`, `y`, `w`, `h`) in the picture's own pixels. A PDF page's are in the page as rendered at `pdfScale`, from the text layer or the engine alike (on a display scaled above 100%, Windows renders bigger, and the engine's boxes are scaled back).
+  - `ocrImages(files, { scale, batch, tmpRoot })`, Reeve's: each picture's `{ file, width, height, lines }`, or its `error`. Pictures are read as stored, as Reeve's reader did (`orient: false`).
+  - `scale: 'auto'` (2 below 1,000 pixels, else 1) and `pdfMaxPages: 1`, the Warrener's peek. OneDrive's online-only files are left unread (`cloudOnly`), PDFs now checked before Node opens them.
+  - `orient` (default true): photos turned as their EXIF says.
+  - `source` (`'text'`, `'ocr'` or `'mixed'`) and `engine` (`OCR_ENGINE`, `'windows'` for now) on each result. The engine sits behind the API: the NPU's model, next, changes no staff code.
+- **PDFs that carry their text are read from it** (`pdf-text.ts`, `readPdfText`, `needsOcr`), exactly and without rendering: about 60 ms for a PDF against 500 to 700 ms rendered and OCRed. Only the pages without text (scans, text drawn as shapes) are OCRed; a PDF of both is read page by page. Encrypted PDFs and those over 64 MB are OCRed whole, as before. It is the kit's own, on Node's zlib: no dependency, and nothing more in each agent's `src/kit` than its 1,300 lines (pdf.js would bring megabytes). `pdfText: false` OCRs every page, as before.
+- **The reader's check** (`ocr-check.ts`, with `ocr-fixtures.ps1` and `spec/ocr-check.json`): `node src/kit/ocr-check.ts [--scale 1,2] [--runs 3] [--out report.json]`. It draws the Snapdragon Dev Manager's 25 bench pictures (the same figures as the baseline), the same strings drawn by Edge at 100 to 200%, a PDF with a text layer and a scanned one, and a held-out set of strings and fonts no model may be trained on. Then it reports, per engine and per group, characters and words right, lines read exactly, ms a picture, processor time and peak memory. Windows OCR's figures on a Snapdragon X2 are in spec/OCR.md.
+- `pdf-make.ts`: small PDFs with known text, or a JPEG page, for tests and the check.
+
+### What changed
+
+- **Answers in ASCII.** `ocr.ps1` writes everything outside printable ASCII as `\uXXXX`. Where PowerShell's output was the console's code page (437), a bullet became a bell character, which broke the answer's line, so that file went unread. `parseAnswers` also reads a line with a raw control character, and gives a line that still won't parse as that file's error rather than dropping it.
+- `OCR_SCRIPT`, the engine's script as ocr.ts sends it, is exported (for the check).
+
+### Before you update
+
+- Nothing for the Clerk and the Scribe: `ocrFiles` answers as before, with `source` and `engine` added. A PDF with a text layer now gives its exact text, which may differ from what OCR made of it (an agent that compares text across runs sees it change once). Reeve and the Warrener can drop their own readers for `ocrImages` and `ocrFiles`.
+
 ## 2.101.0
 
 **The first-generation Snapdragon X runs Qwen3-VL-2B, with the 4B as its fallback, and the keeper removes the model files the NPU's routes no longer run.**
