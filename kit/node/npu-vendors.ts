@@ -211,6 +211,15 @@ export interface NpuGeneration {
    */
   smallPc?: { models: NpuModel[]; basis: string };
   /**
+   * The biggest model, in billions of parameters, a manager has tested on this generation's NPU and found worth letting
+   * a customer try (kit 2.106.0), and how it was tested (`basis`). The Smith's scout offers newer models up to this
+   * size, or up to the size of the model the NPU runs now if that's bigger, and never more than the PC's memory allows
+   * (Smith 0.8.87). Without it, nothing bigger than the model it runs is offered. A bigger model may answer better, but
+   * it's slower, holds more memory and draws more power on the NPU, so the size is lifted only on a measured need. The
+   * kit doesn't use it itself. No generation sets one yet.
+   */
+  testedUpTo?: { params: number; basis: string };
+  /**
    * Its speed as its owners' reports measured it (npu-reports.ts, spec/NPU-REPORTS.md), for the website: the medians
    * of the PCs that passed, on the server and model named. Only while those are the route's does the site show it.
    */

@@ -17,6 +17,20 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing: take the kit as usual. A route without `catalogs` sets up as before, and nothing asks for an administrator where Smart App Control is off.
 
+## 2.106.0
+
+**A generation of an NPU can say the biggest model size a manager has tested on it; the Smith offers no bigger.**
+
+### What changed
+
+- **`NpuGeneration.testedUpTo`** (`{ params, basis }`) is new: the biggest model, in billions of parameters, a manager has tested on that generation's NPU and found worth letting customers try, and how it was tested. The kit doesn't read it. The Smith's scout (Smith 0.8.87) offers newer models up to the larger of this and the size of the model the NPU runs now, within what the PC's memory allows. Without it, nothing bigger than the model the NPU runs is offered. To lift the cap for one NPU, set it in a kit after benchmarking that size; no Smith release is needed.
+- No generation sets it yet. spec/NPU-VENDORS.md ("Bigger models the Smith offers") says why and how.
+- The catalog's test checks any `testedUpTo` it finds: a size above zero, and a basis.
+
+### What an agent must do
+
+- Nothing. Only the Smith reads the field, and it reads it in a way that also works with earlier kits.
+
 ## 2.104.0
 
 **Setup knows when Windows' Smart App Control blocks a model server, and goes on to the next one that runs; the NPU check and the benchmark stop at once when their server exits.**

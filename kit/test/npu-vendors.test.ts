@@ -286,6 +286,12 @@ test('every route in npu-vendors.json is whole: a pinned https download, an inst
       assert.deepEqual(validateAccelerators({ accelerators: [se] }), [], `${vendor} ${id}`);
       assert.deepEqual(validateKeeperConfig({ accelerators: [se] }), [], `${vendor} ${id}`);
     }
+    // The size a manager tested on a generation (testedUpTo, kit 2.106.0, for the Smith's offers): billions of
+    // parameters, as model names say them, and how it was tested. None is set yet.
+    for (const [id, g] of Object.entries(r.generations)) {
+      if (!g.testedUpTo) continue;
+      assert.ok(Number.isFinite(g.testedUpTo.params) && g.testedUpTo.params > 0 && g.testedUpTo.basis, `${vendor} ${id}`);
+    }
   }
 });
 
