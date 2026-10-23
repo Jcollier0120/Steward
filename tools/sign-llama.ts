@@ -6,6 +6,9 @@
  *   node tools/sign-llama.ts [b<number>] --publish   and the release llama.cpp-<build> in the public releases repository, as a
  *                                                    draft: setup takes it once it's published (gh release edit --draft=false),
  *                                                    after a PC with Smart App Control on has run it
+ *   node tools/sign-llama.ts b<number> --variants=opencl-adreno-arm64   those builds alone (kit 2.108.0): an older build a
+ *                                                    route pins for one server, as the Snapdragon NPU's embedding servers
+ *                                                    b11645 and b11125, each zip's pin in downloads.json beside it
  *
  * ggml-org signs none of its builds, and Windows' Smart App Control blocks unsigned files it doesn't know (the kit's
  * app-control.ts): on 2026-10-19 the gaming desktop's blocked one of b11734's processor variants. Setup takes llama.cpp
@@ -19,7 +22,8 @@
  * Certum certificate, whose key is in Certum's cloud: SimplySign Desktop must be connected, and only the x64 signtool
  * can reach it (SimplySign's provider has no Arm64 build). NVIDIA's CUDA runtime (CUDART_ZIP) is neither signed nor
  * copied: its files are NVIDIA's, unsigned as NVIDIA ships them and the same in every build (Smart App Control let them
- * run on the desktop where it blocked ggml's), so the kit takes it from ggml-org's release as it is.
+ * run on the desktop where it blocked ggml's), so the kit takes it from ggml-org's release as it is, with Castellan's
+ * signed catalog of it (tools/sign-binaries.ts, kit 2.108.0) where Smart App Control is on.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -114,6 +118,20 @@ export function releaseNotes(build: string, built: Built[], cudart: ReleaseAsset
   ].join('\n');
 }
 
+/** A signed zip as a route pins its download (npu-vendors.json's `download`): its file, where the release has it, its size and SHA-256. */
+export function downloadPin(build: string, b: Pick<Built, 'zip' | 'size' | 'sha256'>): { file: string; url: string; size: number; sha256: string } {
+  const file = path.basename(b.zip);
+  return { file, url: `https://github.com/${SIGNED_LLAMA_REPO}/releases/download/${signedLlamaTag(build)}/${file}`, size: b.size, sha256: b.sha256 };
+}
+
+/** The builds asked for with --variants=a,b (every build the kit uses when it isn't given); one the kit doesn't use is a stop. */
+export function variantsAsked(args: string[]): string[] {
+  const asked = args.find((a) => a.startsWith('--variants='))?.slice('--variants='.length).split(',').filter(Boolean) ?? [];
+  const unknown = asked.filter((v) => !LLAMA_VARIANTS.includes(v));
+  if (unknown.length) throw new Error(`not a build the kit uses: ${unknown.join(', ')} (${LLAMA_VARIANTS.join(', ')})`);
+  return asked.length ? asked : [...LLAMA_VARIANTS];
+}
+
 /**
  * setup.ts' LLAMA_PIN for the build signed here, to paste into the kit: each signed zip's size and SHA-256, and NVIDIA's
  * runtime's as ggml-org's release publishes it (its digest, checked on the download here), fetched from there.
@@ -181,6 +199,9 @@ async function main(): Promise<void> {
   const publish = args.includes('--publish');
   const gh = spawnSync('gh', ['--version'], { windowsHide: true }).status === 0 ? 'gh' : 'C:\\tools\\gh\\bin\\gh.exe';
   const asked = args.find((a) => /^b\d+$/.test(a));
+  const variants = variantsAsked(args);
+  const some = variants.length < LLAMA_VARIANTS.length;
+  if (some && !asked) throw new Error('--variants signs an older build a route pins: name it (b<number>)');
   const api = (p: string) => JSON.parse(execFileSync(gh, ['api', p], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true }));
   const release: Release = parseReleases([api(`repos/${LLAMA_REPO}/releases/${asked ? `tags/${asked}` : 'latest'}`)])[0];
   const build = release.tag;
@@ -191,20 +212,22 @@ async function main(): Promise<void> {
   const work = path.join(out, 'work');
   rmSync(out, { recursive: true, force: true });
   mkdirSync(work, { recursive: true });
-  console.log(`llama.cpp ${build}: ${LLAMA_VARIANTS.length} builds into ${out}`);
+  console.log(`llama.cpp ${build}: ${variants.length} builds into ${out}`);
 
-  // NVIDIA's runtime first: looked at, not copied.
-  const cudart = release.assets.find((a) => a.name === CUDART_ZIP);
-  if (!cudart) throw new Error(`${build} has no ${CUDART_ZIP}`);
-  await fetchZip(cudart, path.join(work, cudart.name));
-  unpack(path.join(work, cudart.name), path.join(work, 'cudart'));
-  const runtime = toSign(signatures(peFiles(path.join(work, 'cudart')), work));
-  if (runtime.bad.length) throw new Error(`${CUDART_ZIP}: ${runtime.bad.map((b) => `${path.basename(b.path)} (${b.status})`).join(', ')}`);
-  console.log(`${CUDART_ZIP}: ${runtime.sign.length + runtime.signedBefore.length} files, ${runtime.sign.length} of them unsigned as NVIDIA ships them; the kit takes it from ggml-org as it is`);
+  // NVIDIA's runtime first, with the CUDA build: looked at, not copied.
+  const cudart = variants.some((v) => v.startsWith('cuda')) ? release.assets.find((a) => a.name === CUDART_ZIP) : undefined;
+  if (variants.some((v) => v.startsWith('cuda'))) {
+    if (!cudart) throw new Error(`${build} has no ${CUDART_ZIP}`);
+    await fetchZip(cudart, path.join(work, cudart.name));
+    unpack(path.join(work, cudart.name), path.join(work, 'cudart'));
+    const runtime = toSign(signatures(peFiles(path.join(work, 'cudart')), work));
+    if (runtime.bad.length) throw new Error(`${CUDART_ZIP}: ${runtime.bad.map((b) => `${path.basename(b.path)} (${b.status})`).join(', ')}`);
+    console.log(`${CUDART_ZIP}: ${runtime.sign.length + runtime.signedBefore.length} files, ${runtime.sign.length} of them unsigned as NVIDIA ships them; the kit takes it from ggml-org as it is, with Castellan's catalog of it`);
+  }
 
   const built: Built[] = [];
   let license: string | null = null;
-  for (const variant of LLAMA_VARIANTS) {
+  for (const variant of variants) {
     const name = assetName(build, variant);
     const original = release.assets.find((a) => a.name === name);
     if (!original) throw new Error(`${build} has no ${name}`);
@@ -237,15 +260,32 @@ async function main(): Promise<void> {
   writeFileSync(sums, built.map((b) => `${b.sha256}  ${path.basename(b.zip)}\n`).join(''));
   const notes = path.join(out, 'notes.md');
   writeFileSync(notes, releaseNotes(build, built, cudart, license ?? path.basename(licenseFile)));
+  // Each signed zip as a route pins its download (npu-vendors.json's embedServer.download), and the kit's LLAMA_PIN.
+  const downloads = path.join(out, 'downloads.json');
+  writeFileSync(downloads, `${JSON.stringify(built.map((b) => downloadPin(build, b)), null, 2)}\n`);
   const pin = path.join(out, 'llama-pin.ts');
-  writeFileSync(pin, pinSnippet(build, built, cudart));
+  if (cudart && !some) writeFileSync(pin, pinSnippet(build, built, cudart));
   rmSync(work, { recursive: true, force: true });
-  console.log(`The kit's pin of this build (setup.ts' LLAMA_PIN), to put in the kit once it's published: ${pin}`);
+  console.log(existsSync(pin) ? `The kit's pin of this build (setup.ts' LLAMA_PIN), to put in the kit once it's published: ${pin}` : `Each zip's pin as a route's download, to put in the kit once it's published: ${downloads}`);
   if (!publish) {
-    console.log(`Signed. To publish: node tools/sign-llama.ts ${build} --publish`);
+    console.log(`Signed. To publish: node tools/sign-llama.ts ${build}${some ? ` --variants=${variants.join(',')}` : ''} --publish`);
     return;
   }
-  const r = spawnSync(gh, ['release', 'create', tag, ...built.map((b) => b.zip), ...(existsSync(licenseFile) ? [licenseFile] : []), sums, '--repo', SIGNED_LLAMA_REPO, '--title', `llama.cpp ${build} (signed)`, '--notes-file', notes, '--latest=false', '--draft'], { stdio: 'inherit', windowsHide: true });
+  draftRelease(gh, build, out);
+}
+
+/**
+ * The release llama.cpp-<build> in the public releases repository, as a draft, from what signing wrote in `out`: its
+ * signed zips, llama.cpp's licence beside them, their checksums and the notes.
+ */
+export function draftRelease(gh: string, build: string, out: string): void {
+  const tag = signedLlamaTag(build);
+  if (spawnSync(gh, ['release', 'view', tag, '--repo', SIGNED_LLAMA_REPO], { windowsHide: true, stdio: 'ignore' }).status === 0) throw new Error(`${SIGNED_LLAMA_REPO} has ${tag} already: a build is signed once`);
+  const notes = path.join(out, 'notes.md');
+  const sums = path.join(out, 'checksums.sha256');
+  if (!existsSync(notes) || !existsSync(sums)) throw new Error(`${out} has no signed build: node tools/sign-llama.ts ${build} first`);
+  const files = [...readdirSync(out).filter((f) => /\.zip$/i.test(f) || /^LICENSE/i.test(f)).map((f) => path.join(out, f)), sums];
+  const r = spawnSync(gh, ['release', 'create', tag, ...files, '--repo', SIGNED_LLAMA_REPO, '--title', `llama.cpp ${build} (signed)`, '--notes-file', notes, '--latest=false', '--draft'], { stdio: 'inherit', windowsHide: true });
   if (r.status !== 0) throw new Error(`gh release create ${tag} failed`);
   console.log(`Drafted ${tag} in ${SIGNED_LLAMA_REPO}. Once a PC with Smart App Control on has run it: gh release edit ${tag} --repo ${SIGNED_LLAMA_REPO} --draft=false --latest=false`);
 }
