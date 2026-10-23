@@ -15,9 +15,13 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **The catalog helper**, `catalog` in prebuilt.ts' `HELPERS`: a console program that adds and removes catalogs and loads a file as Windows would to run it. It runs only from its signed copy: compiled on the PC, Smart App Control would block it too.
 - **One administrator prompt a run.** Setup asks for every catalog the run may need before anything of it runs (`catalogsOnce`): the NPU's server's and, beside a CUDA build of llama.cpp, NVIDIA's runtime's (`LLAMA_CATALOGS`, route `cuda`). It asks again only for a catalog it wasn't asked for, so a prompt turned down isn't put up again for the NPU's second models or for the card set up in its place. `NpuIo.catalogs` takes the routes whose older catalogs go (`routes: string[]`).
 
+### What changed
+
+- **The Snapdragon X2 pins GenieX 0.9.3** (its `serverPin`, 0.9.1 before), as the first X does since kit 2.101.0, so one GenieX and one signed build serve both. 0.9.3 is 0.9.1 with `/status` and a signed catalog for its Hexagon libraries: the same llama.cpp e467e5b, plugin source and b11645 embedding server, and the plugin patch's 0.9.3 entry (0.9.1's build over 0.9.3's own) was measured on an X2 running it. Setup puts 0.9.3 on a new X2; the NPU check and the benchmark run an X2 whose GenieX can't say its version as 0.9.3; the reports count an X2's speeds at 0.9.3.
+
 ### Before you update
 
-- Nothing: take the kit as usual. A route without `catalogs` or `signedBuilds` sets up as before, and nothing asks for an administrator where Smart App Control is off. A GenieX already installed isn't changed: its installer's files stay as they are.
+- Nothing: take the kit as usual. A route without `catalogs` or `signedBuilds` sets up as before, and nothing asks for an administrator where Smart App Control is off. A GenieX already installed isn't changed: its installer's files stay as they are, and an X2 on GenieX 0.9.1 keeps running 0.9.1 with 0.9.1's build (the Smith offers it 0.9.3).
 
 ## 2.106.0
 

@@ -22,20 +22,26 @@ test("sign-binaries' sources: FastFlowLM and NVIDIA's runtime by catalog, the em
   }
   // One entry a build, though two GenieX versions run b11645.
   assert.equal(s.filter((x) => x.build === 'b11645').length, 1);
-  // GenieX at each version a generation installs (0.9.1 on the X2, 0.9.3 on the X Elite), from Qualcomm's SDK zip; not 0.8.0, which none installs new.
-  for (const v of ['0.9.1', '0.9.3']) {
-    const g = by.get(`geniex-${v}`);
-    assert.equal(g?.how, 'signed-build', v);
-    assert.deepEqual(g?.download, GENIEX_SDK[v]);
-    assert.deepEqual([g?.folder, g?.exe, g?.signed], ['lib', 'geniex.exe', { tag: `geniex-${v}-castellan`, zip: `geniex-cli-windows-arm64-v${v}-castellan.zip` }]);
-    assert.equal(g?.catalog, undefined);
-  }
-  assert.equal(by.get('geniex-0.8.0'), undefined);
-  assert.deepEqual(s.filter((x) => x.how === 'signed-build').map((x) => x.version), ['0.9.1', '0.9.3']);
+  // GenieX at the version both generations install (0.9.3, kit 2.108.0), once, from Qualcomm's SDK zip; not 0.8.0 nor 0.9.1, which none installs new.
+  const g = by.get('geniex-0.9.3');
+  assert.equal(g?.how, 'signed-build');
+  assert.deepEqual(g?.download, GENIEX_SDK['0.9.3']);
+  assert.deepEqual([g?.folder, g?.exe, g?.signed], ['lib', 'geniex.exe', { tag: 'geniex-0.9.3-castellan', zip: 'geniex-cli-windows-arm64-v0.9.3-castellan.zip' }]);
+  assert.equal(g?.catalog, undefined);
+  for (const v of ['0.8.0', '0.9.1']) assert.equal(by.get(`geniex-${v}`), undefined, v);
+  assert.deepEqual(s.filter((x) => x.how === 'signed-build').map((x) => x.version), ['0.9.3']);
   // A generation pinned to a GenieX with no SDK pin is a stop, not a source left out.
   const cat = structuredClone(NPU_CATALOG);
   cat.routes.qualcomm.generations['snapdragon-x'].serverPin!.version = '0.9.9';
   assert.throws(() => sources(cat), /GenieX 0\.9\.9: a generation installs it, and GENIEX_SDK has no pin of its SDK zip/);
+  // FastFlowLM at a version another branch's kit pins, beside this kit's: one sitting for both, its catalog for that kit.
+  const later = { version: '1.0.10', kit: 'kit 2.109.0', file: 'fastflowlm_1.0.10_windows_amd64.zip', url: 'https://github.com/ROCm/FastFlowLM/releases/download/v1.0.10/fastflowlm_1.0.10_windows_amd64.zip', size: 41000000, sha256: 'AB'.repeat(32) };
+  const both = sources(NPU_CATALOG, LLAMA_PIN, [later]);
+  assert.deepEqual(both.filter((x) => x.name === 'FastFlowLM').map((x) => [x.version, x.catalog, x.kit]), [['1.0.7', 'castellan-amd-fastflowlm-1.0.7.cat', undefined], ['1.0.10', 'castellan-amd-fastflowlm-1.0.10.cat', 'kit 2.109.0']]);
+  const f10 = both.find((x) => x.version === '1.0.10')!;
+  assert.deepEqual(f10.download, { file: later.file, url: later.url, size: later.size, sha256: 'ab'.repeat(32) });
+  assert.match(hostOf(f10), /^kit 2\.109\.0, kit\\node\\catalogs\\castellan-amd-fastflowlm-1\.0\.10\.cat \(made in this sitting for that kit, not this one\)$/);
+  assert.equal(sources(NPU_CATALOG, LLAMA_PIN, [{ ...later, version: '1.0.7' }]).filter((x) => x.name === 'FastFlowLM').length, 1, "the route's own version once");
   // Every catalog's name is one catalogs.ts takes as Castellan's.
   for (const x of s.filter((y) => y.catalog)) assert.match(x.catalog!, /^castellan-[a-z0-9][a-z0-9.-]*\.cat$/);
   assert.ok(s.every((x) => /^[0-9a-f]{64}$/.test(x.download.sha256) && x.download.size > 0), 'each download pinned');
@@ -67,19 +73,24 @@ test("sign-binaries' list and pins: each file's SHA-256 and what's done with it,
   const all = sources();
   const flm = all.find((s) => s.id.startsWith('fastflowlm'))!;
   const copy = all.find((s) => s.how === 'signed-copy')!;
-  const [g091, g093] = ['geniex-0.9.1', 'geniex-0.9.3'].map((id) => all.find((s) => s.id === id)!);
+  const g093 = all.find((s) => s.id === 'geniex-0.9.3')!;
+  // A later version whose geniex.exe isn't to hand yet.
+  const g094 = { ...g093, id: 'geniex-0.9.4', version: '0.9.4' };
   const file = (p: string, action: 'sign' | 'catalog' | 'as-is', signer: string | null = null) => ({ path: p, size: 10, sha256: 'ab'.repeat(32), version: null, signer, status: signer ? 'Valid' : 'NotSigned', action });
   const listed: Listed[] = [
     { ...flm, host: hostOf(flm), files: [file('flm.exe', 'catalog'), file('qwen3_npu.dll', 'catalog'), file('msvcp140.dll', 'as-is', 'Microsoft Corporation')] },
     { ...copy, host: hostOf(copy), files: [file('llama-server.exe', 'sign')] },
     { ...g093, host: hostOf(g093), files: [file('geniex.exe', 'sign'), file('llama_cpp\\llama.dll', 'sign'), file('qairt\\QnnHtp.dll', 'as-is', 'Qualcomm Technologies, Inc')] },
-    { ...g091, host: hostOf(g091), files: [], missing: 'a PC with it installed gives its folder' },
+    { ...g094, host: hostOf(g094), files: [], missing: 'a PC with it installed gives its folder' },
   ];
   assert.match(hostOf(copy), /^https:\/\/github\.com\/Jcollier0120\/Manor-releases\/releases\/download\/llama\.cpp-b\d+\/llama-b\d+-bin-win-opencl-adreno-arm64\.zip$/);
   assert.equal(hostOf(g093), 'https://github.com/Jcollier0120/Manor-releases/releases/download/geniex-0.9.3-castellan/geniex-cli-windows-arm64-v0.9.3-castellan.zip');
   assert.match(hostOf(flm), /kit\\node\\catalogs\\castellan-amd-fastflowlm-1\.0\.7\.cat/);
   const md = listMarkdown(listed, AS_IS, '2026-10-23');
   assert.match(md, /Nothing here is signed or published until the owner approves it/);
+  assert.match(md, /- Castellan's catalogs \(FastFlowLM 1\.0\.7\): unproven\. .* The test on the Intel PC with Smart App Control on, after the sitting/);
+  assert.match(md, /- GenieX's signed build: .* hasn't run yet on a Snapdragon with Smart App Control on/);
+  assert.doesNotMatch(listMarkdown([listed[1]], AS_IS, '2026-10-23'), /catalogs \(|signed build:/, 'said only of what the sitting makes');
   assert.match(md, /\| FastFlowLM \| 1\.0\.7 \| catalog castellan-amd-fastflowlm-1\.0\.7\.cat \| 2 to list, 1 its maker signed \|/);
   assert.match(md, /\| flm\.exe \|  \| 10 \| (ab){32} \| nobody \| listed \|/);
   assert.match(md, /\| msvcp140\.dll \|  \| 10 \| (ab){32} \| Microsoft Corporation \| left as it is \|/);

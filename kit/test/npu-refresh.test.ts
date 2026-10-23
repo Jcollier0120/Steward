@@ -654,8 +654,8 @@ test("an X2 the Smith's Use it moved to GenieX 0.9.1: its command kept, never pu
   const old = await refreshNpu(on('0.8.0').deps);
   assert.equal(old.did, 'refreshed');
   assert.ok(old.changes!.includes('--vit-compute GPUOpenCL added'), old.changes!.join(', '));
-  // A GenieX that can't say its version may be 0.8.0 (an X2 set up before kit 2.88.1) or 0.9.1 (one set up since, or
-  // moved): its command kept as it is, nothing written, so a later look asks again.
+  // A GenieX that can't say its version may be 0.8.0 (an X2 set up before kit 2.88.1), 0.9.1 or 0.9.3 (one set up since,
+  // or moved): its command kept as it is, nothing written, so a later look asks again.
   const unsaid = on(null);
   assert.deepEqual(await refreshNpu(unsaid.deps), { did: 'unknown-version' });
   assert.deepEqual(unsaid.npu().chat, used.chat);

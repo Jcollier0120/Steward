@@ -68,6 +68,8 @@ export interface Source {
   /** catalog: catalogs.ts' castellan-<route>-<server>-<version>.cat. */
   route?: string;
   catalog?: string;
+  /** catalog: the kit that pins this version, where it isn't this one: its catalog goes there, not in this kit. */
+  kit?: string;
   /**
    * signed-build: the folder in the maker's zip that is the server's folder, the program its zip lacks (taken from the
    * maker's installed copy of that version), and the signed copies' zip and its release.
@@ -101,34 +103,41 @@ const DL = 'https://github.com';
 
 /**
  * Qualcomm's SDK zips of GenieX, by version, pinned by their release's digests: its lib folder is the folder GenieX's
- * installer fills, file for file, but for geniex.exe. 0.8.0, the route's own version, is none: no generation installs
- * it new (each pins a 0.9 release), and a PC on it keeps the copy it has.
+ * installer fills, file for file, but for geniex.exe. 0.8.0, the route's own version, and 0.9.1, the X2's pin until kit
+ * 2.108.0, are none: no generation installs them new (both pin 0.9.3), and a PC on one keeps the copy it has.
  */
 export const GENIEX_SDK: Record<string, Pinned> = {
-  '0.9.1': { file: 'geniex-sdk-windows-arm64-v0.9.1.zip', url: `${DL}/qualcomm/GenieX/releases/download/v0.9.1/geniex-sdk-windows-arm64-v0.9.1.zip`, size: 91542153, sha256: '2ed2bf63f042086c525b442081ed8d7ad4ff76bcce8bad6eeabe1cf38cc0a1b5' },
   '0.9.3': { file: 'geniex-sdk-windows-arm64-v0.9.3.zip', url: `${DL}/qualcomm/GenieX/releases/download/v0.9.3/geniex-sdk-windows-arm64-v0.9.3.zip`, size: 91519631, sha256: '3edffa6e64878dfb68ea45116c37550a286e01d0c5066c28e8673cdfd4840446' },
 };
 
 /** GenieX's signed copies, by version: their zip, in the server's folder's layout, and its release. */
 export const geniexSigned = (version: string) => ({ tag: `geniex-${version}-castellan`, zip: `geniex-cli-windows-arm64-v${version}-castellan.zip` });
 
-/** The kit's sources that need signing or a catalog, as npu-vendors.json and LLAMA_PIN pin them. */
-export function sources(cat: NpuCatalog = NPU_CATALOG, pin: typeof LLAMA_PIN = LLAMA_PIN): Source[] {
+/**
+ * FastFlowLM releases that a kit on another branch pins (the AMD route's version there), catalogued in the same sitting
+ * as this kit's so that the owner connects SimplySign once. Each zip is pinned as its release publishes it; the run
+ * lists its files. Their catalogs and pins are for that kit (pins.json names it), not copied into this one.
+ */
+export const FASTFLOWLM_ALSO: (Pinned & { version: string; kit: string })[] = [];
+
+/** The kit's sources that need signing or a catalog, as npu-vendors.json and LLAMA_PIN pin them, and `also`. */
+export function sources(cat: NpuCatalog = NPU_CATALOG, pin: typeof LLAMA_PIN = LLAMA_PIN, also = FASTFLOWLM_ALSO): Source[] {
   const out: Source[] = [];
+  const flm = (version: string, download: Pinned, kit?: string): Source => ({
+    id: `fastflowlm-${version}`,
+    name: 'FastFlowLM',
+    version,
+    what: "the AMD NPU's server",
+    licence: "FastFlowLM's own: its program MIT, its NPU kernels free to use and pass on unmodified only. The catalog copies none of it: the staff download it from ROCm's release, as now.",
+    how: 'catalog',
+    download,
+    route: 'amd',
+    catalog: `castellan-amd-fastflowlm-${version}.cat`,
+    ...(kit ? { kit } : {}),
+  });
   const amd = cat.routes.amd;
-  if (amd?.download) {
-    out.push({
-      id: `fastflowlm-${amd.version}`,
-      name: 'FastFlowLM',
-      version: amd.version,
-      what: "the AMD NPU's server",
-      licence: "FastFlowLM's own: its program MIT, its NPU kernels free to use and pass on unmodified only. The catalog copies none of it: the staff download it from ROCm's release, as now.",
-      how: 'catalog',
-      download: pinned(amd.download),
-      route: 'amd',
-      catalog: `castellan-amd-fastflowlm-${amd.version}.cat`,
-    });
-  }
+  if (amd?.download) out.push(flm(amd.version, pinned(amd.download)));
+  for (const { version, kit, ...download } of also) if (!out.some((s) => s.id === `fastflowlm-${version}`)) out.push(flm(version, pinned(download), kit));
   const cudart = pin.files[CUDART_ZIP];
   if (cudart?.url) {
     const v = /cuda-(\d+\.\d+)/.exec(CUDART_ZIP)?.[1] ?? 'cuda';
@@ -194,6 +203,7 @@ function pinned(d: { file?: string; url: string; size?: number; sha256?: string 
 export function hostOf(s: Source): string {
   if (s.how === 'signed-copy') return `${DL}/${SIGNED_LLAMA_REPO}/releases/download/${signedLlamaTag(s.build!)}/${s.download.file}`;
   if (s.how === 'signed-build') return `${DL}/${SIGNED_LLAMA_REPO}/releases/download/${s.signed!.tag}/${s.signed!.zip}`;
+  if (s.kit) return `${s.kit}, kit\\node\\catalogs\\${s.catalog} (made in this sitting for that kit, not this one)`;
   return `the kit, kit\\node\\catalogs\\${s.catalog} (added to Windows' catalogs where Smart App Control is on)`;
 }
 
@@ -273,6 +283,21 @@ export function listMarkdown(listed: Listed[], asIs: { what: string; signer: str
       const n = s.files.filter((f) => f.action !== 'as-is').length;
       return `| ${s.name} | ${s.version} | ${howSaid(s)} | ${s.missing ? 'not read yet' : `${n} to ${s.how === 'catalog' ? 'list' : 'sign'}, ${s.files.length - n} its maker signed`} | ${hostOf(s)} |`;
     }),
+    '',
+    '## Under Smart App Control: what is proven',
+    '',
+    "- Castellan's signed copies (its Authenticode signature in each file): proven. Castellan's OpenVINO GenAI build ran so on an Intel PC with Smart App Control on, and its llama.cpp b11734 copies on an AMD PC.",
+    ...(listed.some((s) => s.how === 'signed-build')
+      ? ["- GenieX's signed build: its files are signed copies like the others, but it hasn't run yet on a Snapdragon with Smart App Control on (put together without its installer, it ran on the X2's NPU with Smart App Control off)."]
+      : []),
+    ...(listed.some((s) => s.how === 'catalog')
+      ? [
+          `- Castellan's catalogs (${listed
+            .filter((s) => s.how === 'catalog')
+            .map((s) => `${s.name} ${s.version}`)
+            .join(', ')}): unproven. A catalog is a second way Windows takes a signature, which Smart App Control hasn't been seen to honour yet. The test on the Intel PC with Smart App Control on, after the sitting (\`catalogs.ts test\`: each file blocked without the catalog, loaded with it), proves it or not.`,
+        ]
+      : []),
     '',
     '## Signed by their makers, or by Castellan already: as they are',
     '',
@@ -560,11 +585,11 @@ async function sitting(installed: Map<string, string>): Promise<void> {
   const kitCats = path.join(root, 'kit', 'node', 'catalogs');
   mkdirSync(kitCats, { recursive: true });
   const catPins = made.map((m) => {
-    copyFileSync(m.cat, path.join(kitCats, m.s.catalog!));
-    return { route: m.s.route, pin: catalogPin(m.s, { size: statSync(m.cat).size, sha256: sha256(m.cat) }) };
+    if (!m.s.kit) copyFileSync(m.cat, path.join(kitCats, m.s.catalog!));
+    return { route: m.s.route, pin: catalogPin(m.s, { size: statSync(m.cat).size, sha256: sha256(m.cat) }), ...(m.s.kit ? { kit: m.s.kit } : {}) };
   });
   writeFileSync(path.join(OUT, 'pins.json'), `${JSON.stringify([...catPins, ...buildPins], null, 2)}\n`);
-  console.log(`Signed and checked. The catalogs are in ${kitCats}; GenieX's signed builds in artifacts\\geniex\\<version>\\; every pin in ${path.join(OUT, 'pins.json')}; the signed copies' download pins in artifacts\\llama\\<build>\\downloads.json.`);
+  console.log(`Signed and checked. This kit's catalogs are in ${kitCats}, another kit's in ${cats}; GenieX's signed builds in artifacts\\geniex\\<version>\\; every pin in ${path.join(OUT, 'pins.json')}; the signed copies' download pins in artifacts\\llama\\<build>\\downloads.json.`);
   console.log("To publish the signed copies and builds, after the owner's OK on the list: node tools/sign-binaries.ts --publish");
 }
 

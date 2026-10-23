@@ -94,14 +94,14 @@
           "hexagonArch": "v81",
           "aiHubChipset": "qualcomm-snapdragon-x2-elite",
           "serverPin": {
-            "version": "0.9.1",
+            "version": "0.9.3",
             "download": {
-              "file": "geniex-cli-setup-windows-arm64-v0.9.1.exe",
-              "url": "https://github.com/qualcomm/GenieX/releases/download/v0.9.1/geniex-cli-setup-windows-arm64-v0.9.1.exe",
-              "size": 70519444,
-              "sha256": "0cffc8532c1d48cdfac757667025b7fd2f2e8a8184026944410a764337ad67c0"
+              "file": "geniex-cli-setup-windows-arm64-v0.9.3.exe",
+              "url": "https://github.com/qualcomm/GenieX/releases/download/v0.9.3/geniex-cli-setup-windows-arm64-v0.9.3.exe",
+              "size": 70470238,
+              "sha256": "886d9f1a48cf6c1694338a13fc66be9d28e7fc5a3a5970d49b63de554a6ce17a"
             },
-            "basis": "Measured on the X2 Elite with Qwen3-VL-2B Q4_0, 2026-10-18 (spec/NPU-VENDORS.md, A later GenieX on the PC): GenieX 0.9.1 reads its pictures on the Hexagon's second session in a median 1.50 s against 0.8.0's 4.49 s on the Adreno (34 of 35 screen questions against 33, 21 of 21 photos on both), and leaves the Adreno free; with Castellan's build for 0.9.1 (the route's versions) it holds what 0.8.0 does at rest (1.62 GB working set after a chat), and gives its first answer after a start in 3.5 s (3.1). Chat 72.5 tokens a second (73.0). The first-generation X pins 0.9.3 (kit 2.101.0), which its models were measured on. The installer's size and SHA-256 as GitHub and GenieX's own .sha256 publish them, checked on a download"
+            "basis": "GenieX 0.9.3 from kit 2.108.0, as the first-generation X pins it: the version Castellan's signed build is of (the route's signedBuilds), so an X2 is set up without GenieX's installer, which Smart App Control blocks. 0.9.3 is 0.9.1 with a /status endpoint and a signed catalog for its Hexagon libraries: the same llama.cpp (e467e5b) and plugin source, and the same b11645 embedding server (the route's 0.9.3 entry), so it runs as 0.9.1 did, measured on the X2 Elite with Qwen3-VL-2B Q4_0 (2026-10-18, spec/NPU-VENDORS.md, A later GenieX on the PC): pictures on the Hexagon's second session in a median 1.50 s against 0.8.0's 4.49 s on the Adreno, chat at 72.5 tokens a second. Castellan's plugin build over 0.9.3 was measured on the X2 Elite too (2026-10-22, the 0.9.3 entry's pluginPatch): four pictures of four right, a 2.72 GB working set against GenieX's own plugin's 3.54, the processor 0.08 cores busy against 5.22. A PC on 0.9.1 (kit 2.98.0 to 2.107.0) runs it as it is. The installer's size and SHA-256 as GitHub and GenieX's own .sha256 publish them, checked on a download (2026-10-23)"
           },
           "pluginPatch": {
             "what": "Castellan's build of GenieX 0.8.0's llama.cpp plugin: qualcomm/GenieX v0.8.0 with three commits of Castellan's (kit node/geniex/README.md), signed with Castellan's certificate. The model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row (its compute buffer on the NPU 128 MiB, not 601); the vision encoder loads with the first picture, and is freed again after 60 s without one; and GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens",

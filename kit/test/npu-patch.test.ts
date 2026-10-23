@@ -331,12 +331,16 @@ test("a GenieX 0.9.3 put together from Castellan's signed build (kit 2.108.0): i
   assert.deepEqual(await patchNpu(mixed.deps), { did: 'stock', problems: ["GenieX's llama.dll isn't 0.9.3's"] });
 });
 
-test("an X2 whose GenieX can't say its version runs the X2's pin, 0.9.1 (what setup installs there): 0.9.1's build over 0.9.1's own", async () => {
-  const pc = fakePc({ plugin: STOCK_091, needs: NEEDS_091, version: null });
+test("an X2 whose GenieX can't say its version runs the X2's pin, 0.9.3 (what setup puts together there, kit 2.108.0): 0.9.1's build over 0.9.3's own", async () => {
+  const pc = fakePc({ plugin: STOCK_093, needs: NEEDS_093, version: null });
   assert.deepEqual(await patchNpu(pc.deps), { did: 'patched' });
   assert.equal(pc.plugin(), BUILD_091);
-  assert.equal(pc.stock(), STOCK_091);
-  // 0.8.0's files there, its version unsaid: nothing put in over a plugin that isn't 0.9.1's.
+  assert.equal(pc.stock(), STOCK_093);
+  // 0.9.1's files there, its version unsaid: nothing put in over a plugin that isn't 0.9.3's.
+  const was = fakePc({ plugin: STOCK_091, needs: NEEDS_091, version: null });
+  assert.deepEqual(await patchNpu(was.deps), { did: 'hands-off' });
+  assert.equal(was.plugin(), STOCK_091);
+  // 0.8.0's files there, its version unsaid: the same.
   const older = fakePc({ version: null });
   assert.deepEqual(await patchNpu(older.deps), { did: 'hands-off' });
   assert.equal(older.plugin(), STOCK);
