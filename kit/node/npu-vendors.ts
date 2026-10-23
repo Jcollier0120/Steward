@@ -4,6 +4,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeF
 import os from 'node:os';
 import path from 'node:path';
 import { type AcceleratorEntry, type Endpoint, OWN_MEMORY_GB, type Quirk, type ServeKind } from './accelerator-config.ts';
+import type { WorkOrder } from './accelerators.ts';
 
 /**
  * The NPU on every Copilot+ PC (spec/NPU-VENDORS.md): which maker's NPU this is and which generation, whether the
@@ -164,6 +165,18 @@ export interface NpuMeasuredSpeeds {
   at: string;
 }
 
+/** The work a generation's `order` may order: what requests are routed for (a reranker isn't). */
+export type OrderedWork = 'chat' | 'vision' | 'embed';
+
+/** One work's order on a generation (its `order`), and the figures behind it. */
+export interface NpuWorkOrder {
+  /** The kinds of device, first preferred: npu, gpu, cpu, each at most once. */
+  devices: ('npu' | 'gpu' | 'cpu')[];
+  /** A device whose server is up goes before one whose server isn't, the order kept otherwise. */
+  runningFirst?: boolean;
+  basis: string;
+}
+
 /** One generation of a maker's NPU. */
 export interface NpuGeneration {
   label: string;
@@ -217,6 +230,15 @@ export interface NpuGeneration {
    * kit doesn't use it itself. No generation sets one yet.
    */
   testedUpTo?: { params: number; basis: string };
+  /**
+   * Where each work runs best on PCs of this generation, by its measured energy (kit 2.109.0): the kinds of device, first
+   * preferred, and the figures behind them (`basis`, the device named beside each figure). A work it leaves out goes to
+   * the NPU first (the auto order). Setup writes it into config.json as `workOrder` (workOrderFor), which requests follow
+   * (the core's candidates), and its fallback when the NPU can't be set up follows it too (fallbackDevices). AMD's Ryzen
+   * AI 300 sends pictures to the Radeon, and to the NPU only when FastFlowLM is up and the Radeon's server isn't
+   * (`runningFirst`, the owner's choice, 2026-10-23).
+   */
+  order?: Partial<Record<OrderedWork, NpuWorkOrder>>;
   /**
    * Its speed as its owners' reports measured it (npu-reports.ts, spec/NPU-REPORTS.md), for the website: the medians
    * of the PCs that passed, on the server and model named. Only while those are the route's does the site show it.
@@ -596,6 +618,31 @@ export function generationOf(route: NpuRoute, id: string | null | undefined): Np
   if (!id) return undefined;
   if (Object.hasOwn(route.generations, id)) return route.generations[id];
   return id === UNKNOWN_GENERATION ? (unknownGeneration(route) ?? undefined) : undefined;
+}
+
+/** The order with no figures to go by: the NPU first, then a graphics card, then the processor (the auto order). */
+export const NPU_FIRST: readonly ('npu' | 'gpu' | 'cpu')[] = Object.freeze(['npu', 'gpu', 'cpu']);
+
+/**
+ * config.json's `workOrder` for PCs of this generation (kit 2.109.0): its `order`, each work's devices and runningFirst,
+ * without the figures; null when it records none, and every work goes to the NPU first.
+ */
+export function workOrderFor(route: NpuRoute, generation: string | null | undefined): WorkOrder | null {
+  const order = generationOf(route, generation)?.order;
+  if (!order) return null;
+  const out: WorkOrder = {};
+  for (const [w, o] of Object.entries(order) as [OrderedWork, NpuWorkOrder][]) out[w] = { devices: [...o.devices], ...(o.runningFirst ? { runningFirst: true } : {}) };
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * Where a work goes when the NPU can't take it (setup's fallback: Smart App Control blocked its server, or its test
+ * failed): the devices after the NPU in its generation's order for it, else a graphics card, then the processor.
+ */
+export function fallbackDevices(route: NpuRoute | null | undefined, generation: string | null | undefined, work: OrderedWork): ('gpu' | 'cpu')[] {
+  const devices = (route && generationOf(route, generation)?.order?.[work]?.devices) || NPU_FIRST;
+  const rest = devices.filter((d): d is 'gpu' | 'cpu' => d !== 'npu');
+  return [...rest, ...(['gpu', 'cpu'] as const).filter((d) => !rest.includes(d))];
 }
 
 /** Compares dotted version numbers (a driver's): negative, 0 or positive, as a before, the same as, or after b. */

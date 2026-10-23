@@ -17,7 +17,7 @@ So each maker gets its own server, chosen for being OpenAI-compatible, installab
 |---|---|---|---|---|
 | Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.9.x on the X2 (it pins 0.9.1; 0.9.3 where the Smith's Use it put it), 0.9.3 on the X (from kit 2.101.0; 0.8.0 where an earlier kit put it) | chat, vision (one model: Qwen3-VL-2B-Instruct Q4_0, on the X with Qwen3-VL-4B W4A16 as its fallback); embeddings, and on the X2 a reranker when asked for, on llama.cpp's server over GenieX's libraries | its Inno Setup installer, silent, per user, no administrator |
 | Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake, Wildcat Lake) | OpenVINO Model Server | 2026.4.1 | chat, vision (one model: Qwen3-VL-2B, symmetric INT8, on Castellan's build of OpenVINO GenAI) | a zip, unpacked into the accelerators' folder |
-| AMD Ryzen AI 300 and later (XDNA 2) | FastFlowLM | 1.0.7 | chat, vision (one model: `qwen3.5:2b`, Qwen3.5-2B) | a portable zip, unpacked into the accelerators' folder |
+| AMD Ryzen AI 300 and later (XDNA 2) | FastFlowLM | 1.0.10 (kit 2.109.0; 1.0.7 before) | chat, vision (one model: `qwen3.5:2b`, Qwen3.5-2B) | a portable zip, unpacked into the accelerators' folder |
 
 Second choices, if a route fails on hardware: Foundry Local for Snapdragon and Intel; Lemonade Server (AMD's, Apache-2.0, which itself runs FastFlowLM) for AMD.
 
@@ -341,6 +341,8 @@ So the route has the quirk `sides-of-32`. Before a picture goes to FastFlowLM, t
 
 Enlarging such a picture to 720 px tall fixes a square too, at twice the tokens, but not a wide one: 1280×360 enlarged to 2560×720 still misread ("ITALY 487"). A picture whose size the kit can't read from its header (WebP) goes as it is. FastFlowLM 1.0.8's and 1.0.9's notes mention no fix. When a later version reads these right, the route drops the quirk.
 
+**1.0.10 still misreads them** (kit 2.109.0, 2026-10-23, Qwen3.5-2B, the same tally picture sent as it is): 512×512, 640×640, 1280×720 and 1024×576 wrong ("FALLY", "TALLY", "taly492", "taly"), 513×513 and 1281×721 right. So the quirk stays. **llama.cpp's Qwen3-VL-2B misread the same four too** (b11734 Vulkan on the Radeon 860M, Q4_K_M and its Q8_0 projector, the model setup gives a graphics card: "Taly487", "Taly 487", "TALY 47", "Taly 87") and read the same two right, once each on one PC. The kit doesn't nudge a card's pictures: that's to measure on other cards and pictures first, against the X2's finding that a pixel's resample blurs small screen text (Qwen3-VL-2B on every Snapdragon X2, above).
+
 ## Detection
 
 Detection asks Windows for the devices it lists as **Neural processors** (the `ComputeAccelerator` device class, as Heiward's `NpuHardware.cs` reads it), with their maker, PnP device id and driver (`DETECT_PS`, its `npu2|…` line). A PC whose Windows lists none is asked for a Hexagon driver as before.
@@ -403,6 +405,36 @@ Manor's **Set up local AI**, `smith accelerators setup` and the Settings pages' 
 An NPU entry a person configured is left alone unless `npu` is asked for by name. One on the route's own server that the keeper's look left for setup (`needs-setup`: this kit's command for it needs a download, as a new model does) is set up again from kit 2.103.0, and kept should the new one fail its test (A later kit's command, below). The GenieX entry an older install wrote by default is replaced by a set-up one, and dropped on a PC whose NPU the manor can't use.
 
 The entry carries everything an agent and the keeper need: the server's `startCommand` (with its port), its `env` where the server needs one (OpenVINO Model Server's `PYTHONHOME` and `PATH`, as its `setupvars` script sets them), the caps, the timeouts and the quirks.
+
+### Each work's order on a generation (kit 2.109.0)
+
+The NPU first was the rule for every work (ACCELERATORS.md, Choosing an accelerator). A generation may now record, as `order` in `npu-vendors.json`, the device each work spends least energy on, then the next, with the figures behind it (`basis`, the device named beside each figure). Setup writes it into config.json as `workOrder` (the devices and `runningFirst` alone, npu-vendors.ts' `workOrderFor`), whether or not the NPU could be set up. Requests follow it (the core's `candidates`), and so does setup's fallback when the NPU can't take a work (Smart App Control blocked FastFlowLM, or its test failed): the work goes to the devices after the NPU in its order (`fallbackDevices`), a graphics card and then the processor unless the order puts the processor first. A work the order leaves out goes to the NPU first, as before, and a generation with none writes none. Each field is optional, so an older kit (the Smith pins 2.99.1) reads the catalog and config.json as before, without it. A PC set up before gets it the next time setup runs (on AMD, setting FastFlowLM 1.0.10 up is that time: the keeper's look leaves it for setup).
+
+Only AMD's Ryzen AI 300 (XDNA 2) records one. The Snapdragon's NPU spends least on every work. Intel's stays NPU first until its pictures and embeddings are measured.
+
+**AMD's figures.** A Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), the package meter (Windows' Energy Meter, `rapl_package0_pkg`: the chip's energy, there being no whole-PC part), each job over the PC at rest. npu-bench's quick profile, three runs on each device, medians, kit 2.99.1, 2026-10-23 (NPU-BENCHMARK.md):
+
+| Job | NPU (FastFlowLM 1.0.7, Qwen3.5-2B) | Radeon 860M (llama.cpp b11734 Vulkan) | Processor (llama.cpp b11734) | The order |
+|---|---|---|---|---|
+| Triage | 26.4 J | 40.7 J | 88.6 J | chat: NPU, Radeon, processor |
+| Reply | 27.5 J | 87.3 J | 79.4 J | |
+| Summary | 48.7 J | 89.8 J | 128.5 J | |
+| Read 1,024 tokens | 31.1 J | 32.2 J | 87.5 J | |
+| A picture | 26.1 J | 12.1 J | 22.8 J | vision: Radeon, NPU, processor, a running server first |
+| Embeddings, a token | none on this route | 12.8 mJ | 44.1 mJ | embed: Radeon, processor |
+
+The Radeon and the processor ran Qwen3.5-2B Q4_0 (and its F16 projector) there, and Qwen3-Embedding-0.6B Q8_0 for embeddings. FastFlowLM 1.0.10 is the same within noise (NPU-BENCHMARK.md). Embeddings on AMD already went to the Radeon: FastFlowLM's embedding model is EmbeddingGemma, which the manor avoids (Licences), so setup gives them to a card or the processor, and the order records why the Radeon comes first.
+
+**A picture from a stopped server.** Setup gives a graphics card Qwen3-VL-2B for pictures (Q4_K_M and its Q8_0 projector, on one server with its chat), not that series' Qwen3.5-2B, and a card's servers rest after 5 minutes unused on a PC under 20 GB. So the same PC, FastFlowLM 1.0.10, NPU driver 32.0.20102.4480, three interleaved rounds, means (range), 2026-10-23:
+
+| | Radeon 860M, Qwen3-VL-2B | Radeon 860M, Qwen3.5-2B Q4_0 | NPU, FastFlowLM 1.0.10 |
+|---|---|---|---|
+| Its server started, and one picture | 66 J in 3.9 s (55–86 J; 86 its first load ever) | 73 J in 4.4 s (69–76 J) | 177 J in 10.8 s (164–192 J) |
+| Each picture after that, warm | 10.4 J in 0.47 s (10.0–10.7 J) | 13.7 J in 0.64 s | 26.6 J in 1.28 s |
+| Its server's memory | 2.8 GB | 2.8 GB | 3.8 GB |
+| The suite's four pictures, twice each | 8 of 8 right | | 6 of 8 (its 472 read as 13) |
+
+So pictures go to the Radeon first. Starting its server costs about 56 J over a warm picture there. With FastFlowLM already up, a lone picture costs less on the NPU (26.6 J against 66), and the Radeon wins its start back only from the fourth picture in a row. **The owner's choice** (2026-10-23): the Radeon, unless FastFlowLM is up and the Radeon's server isn't (`runningFirst`). A picture's request looks at each candidate's server first (accelerators.ts' `serversUp`: a GET of its `/v1/models`, all at once, waiting 0.5 s at most and starting nothing; a refused connection is down, any other answer or none is up), and puts those up first, the order kept otherwise. The NPU first that way is the NPU first as ever: the only candidate, waited for when busy. A picture that starts the Radeon's server leaves it holding its 2.8 GB beside FastFlowLM's 3.8 GB until the keeper stops it. With Manor's "Use the graphics card for models when there's an NPU" off, the Radeon isn't set up for pictures, and they stay on the NPU.
 
 ## Ports
 
@@ -738,7 +770,7 @@ The kit itself doesn't read `testedUpTo`. No generation sets one yet. The first 
 | Castellan's build of OpenVINO GenAI (`openvino_genai.dll`, the kit's `node/openvino/`, downloaded from Manor-releases) | Apache-2.0, OpenVINO GenAI's | A modified build that Castellan redistributes, signed with its certificate. GenAI's licence, a NOTICE saying what changed and that it isn't Intel's release, the patch, and GenAI's third-party programs list go with it, in the kit and in the release. |
 | The Microsoft Visual C++ runtime DLLs beside it | Visual Studio's "Distributable Code" terms | Microsoft lets an application carry these DLLs in its own folder; here each PC downloads them from Microsoft, so Castellan doesn't redistribute them either: **have it reviewed**. |
 | OpenVINO's model exports | the base model's (Apache-2.0 for Qwen3) | |
-| FastFlowLM | MIT (its code and CLI); its NPU kernels free for any use, including commercial | It asks for "Powered by FastFlowLM" in the product's notices: add it to the third-party notices. |
+| FastFlowLM (1.0.10, kit 2.109.0) | MIT for its runtime, orchestration and CLI (`LICENSE_RUNTIME.txt`); AMD's FastFlowLM NPU Binary License for its NPU kernels and prebuilt engine libraries (`LICENSE_BINARY.txt`: free for any use, commercial included, redistributed only unmodified and with that licence beside them) | Both, and its `THIRD_PARTY_NOTICES.txt`, are in its zip; 1.0.7's `TERMS.md` is gone. Its README asks to be acknowledged in the product: the third-party notices say "Powered by [FastFlowLM](https://github.com/ROCm/FastFlowLM)". |
 | Qwen3-4B-Instruct-2507, Qwen3-VL-4B-Instruct, Qwen3-VL-2B-Instruct, Qwen3-Embedding-0.6B, Qwen3.5-2B | Apache-2.0 | |
 | unsloth/Qwen3-VL-2B-Instruct-GGUF (a 16 GB X2's model) | Apache-2.0, the base model's | A format conversion and Q4_0 quantization of Qwen's weights, nothing else. |
 | Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov and Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov, on Hugging Face | Apache-2.0, the base model's | Castellan's own exports, so Castellan publishes them: with the base model's LICENSE, and a model card saying what was changed and how, as Apache-2.0 asks: the weights converted and compressed, and in the 2B's, the picture size its configs allow. |

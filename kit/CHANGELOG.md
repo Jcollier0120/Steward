@@ -2,6 +2,29 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.109.0
+
+**AMD's NPU server is FastFlowLM 1.0.10. A generation can say which device each work spends least on, and on AMD's Ryzen AI 300 pictures go to the Radeon.**
+
+### What changed
+
+- **FastFlowLM 1.0.10** is AMD's route's server (`npu-vendors.json`: its zip, 30,484,687 bytes, SHA-256 `a7063890d7b91037a07f381a396a0d7787ebdb69e1b03280971faf0a80f35b73`, 296 files). It does the same as 1.0.7 within noise: three interleaved runs of each on a Ryzen AI 7 350's NPU, means, triage 25.0 J against 26.2, a reply 24.6 against 29.4, a summary 47.4 against 51.7, reading 1,024 tokens 31.5 against 31.1, writing 22.9 tokens a second against 22.5 (spec/NPU-BENCHMARK.md). Its NPU check passed every step, and its timeouts stay.
+- **Its licences**: the MIT License for its runtime, orchestration and CLI (`LICENSE_RUNTIME.txt`), and AMD's FastFlowLM NPU Binary License for its NPU kernels and engine libraries (`LICENSE_BINARY.txt`: any use, commercial included, redistributed only unmodified with that licence). Both are in its zip with `THIRD_PARTY_NOTICES.txt`. The route's `licence` says so, with the credit its README asks for: "Powered by [FastFlowLM](https://github.com/ROCm/FastFlowLM)".
+- **It still misreads a picture with a side of a whole number of 32 px**, so `sides-of-32` stays. llama.cpp's Qwen3-VL-2B on the Radeon 860M misread the same four sizes (spec/NPU-VENDORS.md); the kit doesn't nudge a card's pictures yet.
+- **1.0.7's folder is retired**: `{tools}\servers\fastflowlm-1.0.7` in the route's `retired`, removed three days after nothing names it (kit 2.101.0's rule). The models in `%USERPROFILE%\.flm\models` serve both, and stay.
+- **`NpuGeneration.order`** (optional): for `chat`, `vision` and `embed`, the kinds of device that work spends least energy on, first preferred (`devices`: `npu`, `gpu`, `cpu`, each once), `runningFirst`, and a `basis` with the figures. `workOrderFor(route, generation)` gives it without its bases (null for none), and `fallbackDevices(route, generation, work)` the devices after the NPU (a card, then the processor, unless the order says otherwise). Only AMD's XDNA 2 has one: chat on the NPU, the Radeon, the processor; pictures on the Radeon, the NPU, the processor, a running server first; embeddings on the Radeon, the processor.
+- **config.json's `workOrder`**, a keeper key (`KEEPER_KEYS`, `ACCELERATOR_KEYS`): those orders, as setup writes them. `parseAccelerators` reads it only when `acceleratorOrder` is "auto" (the core's `readWorkOrder`), leaving out a work written wrong, and `validateAccelerators` names it.
+- **`candidates` follows the work's order** (the core, and its vectors): the fitting accelerators in that work's devices' order, any it leaves out after them (`workOrdered`), and with `runningFirst`, those whose server is up first (the state's `running`). The NPU first then applies as before. The node `candidates` takes `workOrder` and `running(id)`. `serversUp(accs, work, workOrder, look?)` asks each server of that work whether it's up (a GET of its `/v1/models`, all at once, 0.5 s at most: `UP_PROBE_MS`), only when that work's order goes by it. `Npu` asks before each request (its `serversUp` option replaces it in tests). Manor's gpuWithNpu off still keeps a card out.
+- **Why pictures go to the Radeon on AMD** (a Ryzen AI 7 350, 2026-10-23): a warm picture costs the Radeon 10.4 J (Qwen3-VL-2B, llama.cpp) against the NPU's 26.6 J (FastFlowLM 1.0.10), and the Radeon read 8 of 8 against the NPU's 6. But starting the Radeon's server and one picture costs 66 J. So a picture goes to the NPU only when FastFlowLM is up and the Radeon's server isn't (the owner's choice). Then the Radeon's server, once started, holds its 2.8 GB beside FastFlowLM's 3.8 GB until the keeper stops it.
+- **Setup writes `workOrder`** from the NPU's generation, whether its NPU was set up or blocked (`withWorkOrder`), and removes it where there's none. When the NPU can't take a work, its fallback follows the order (`fallbackDevices`): a work whose order puts the processor before a card goes to the processor.
+- spec/NPU-VENDORS.md (Each work's order on a generation; the sides of 32 px on 1.0.10 and on llama.cpp's Qwen3-VL-2B; Licences), ACCELERATORS.md (`workOrder`; Choosing an accelerator), NPU-BENCHMARK.md (FastFlowLM 1.0.10 against 1.0.7).
+
+### Before you update
+
+- Nothing for most agents: take the kit as usual. Every new field is optional, so an older kit (the Smith pins 2.99.1) reads the catalog and config.json as before. A `candidates` caller without `workOrder` gets the order it got before.
+- An AMD PC gets 1.0.10, and its order, the next time setup runs: the keeper's look finds 1.0.10 missing and leaves it for setup. A PC on any other NPU gets no `workOrder`.
+- Reeve's own routing (`src/routing.ts`) doesn't read `workOrder` yet. On AMD his embeddings go to the Radeon first by the auto order anyway.
+
 ## 2.106.0
 
 **A generation of an NPU can say the biggest model size a manager has tested on it; the Smith offers no bigger.**

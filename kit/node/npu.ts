@@ -32,6 +32,7 @@ import {
   ServerNotRunning,
   servedRecently,
   serves,
+  serversUp,
   theAccelerator,
   turnFor,
   turnsWithoutEntry,
@@ -313,15 +314,18 @@ export class Npu {
   private cfg: AcceleratorConfig | { error: string };
   private withNpu: () => boolean;
   private embedGivesWay: (acc: Accelerator) => Promise<unknown>;
+  private serversUp: typeof serversUp;
 
   /**
    * `o.gpuWithNpu`: Manor's switch as a check gives it, in place of Manor's settings read afresh each time.
    * `o.embedGivesWay`: what a chat or vision request on the NPU does first, in its turn (embedGivesWay below; tests give their own).
+   * `o.serversUp`: whose servers are up, for a work whose order goes by it (accelerators.ts' serversUp; tests give their own).
    */
-  constructor(cfg: AcceleratorConfig | NpuConfig | { error: string } = loadAccelerators(), o: { gpuWithNpu?: () => boolean; embedGivesWay?: (acc: Accelerator) => Promise<unknown> } = {}) {
+  constructor(cfg: AcceleratorConfig | NpuConfig | { error: string } = loadAccelerators(), o: { gpuWithNpu?: () => boolean; embedGivesWay?: (acc: Accelerator) => Promise<unknown>; serversUp?: typeof serversUp } = {}) {
     this.cfg = 'error' in cfg || 'accelerators' in cfg ? cfg : fromNpuConfig(cfg);
     this.withNpu = o.gpuWithNpu ?? (() => gpuWithNpu().on);
     this.embedGivesWay = o.embedGivesWay ?? ((acc) => embedGivesWay(acc));
+    this.serversUp = o.serversUp ?? serversUp;
     if (!('error' in this.cfg)) for (const a of this.cfg.accelerators) known.add(a.id);
   }
 
@@ -356,7 +360,8 @@ export class Npu {
     const serving = this.accelerators.filter((a) => serves(a, work));
     if (!serving.length) return 0;
     const games = readGames();
-    const { list } = candidates(serving, { work, tokens: 0, lane: 'background' }, { failure: readFailure, games: gamesStale(games) ? null : games, deferredMs });
+    const workOrder = 'error' in this.cfg ? null : this.cfg.workOrder;
+    const { list } = candidates(serving, { work, tokens: 0, lane: 'background' }, { failure: readFailure, games: gamesStale(games) ? null : games, deferredMs, workOrder });
     return Math.max(...(list.length ? list : serving).map((a) => core.capFor(a, work))) - maxTokens;
   }
 
@@ -456,6 +461,9 @@ export class Npu {
     const refused = core.tooBig(serving, promptTokens, maxTokens, work);
     if (refused) throw new NpuError(refused);
     const games = lane === 'background' && serving.some((a) => a.kind === 'gpu') ? await currentGames(cfg.accelerators) : null;
+    // The work's own order, where its NPU's generation has one (config.json's workOrder): by whose servers are up, when it
+    // goes by that (AMD's pictures: the Radeon, unless only FastFlowLM is up).
+    const running = await this.serversUp(serving, work, cfg.workOrder);
     // Each candidate's turn for this work: its own, or another device's its server runs on (an endpoint's `turn`).
     const turnOn = (a: Accelerator) => turnFor(a, work, cfg.accelerators);
     const turnIdOf = (id: string) => {
@@ -472,7 +480,7 @@ export class Npu {
       const { list, skipped, npuFirst } = candidates(
         serving.filter((a) => !tried.has(a.id)),
         { work, tokens, lane },
-        { failure: readFailure, games, deferredMs: lane === 'background' ? (id) => deferredMs(turnIdOf(id)) : undefined },
+        { failure: readFailure, games, deferredMs: lane === 'background' ? (id) => deferredMs(turnIdOf(id)) : undefined, workOrder: cfg.workOrder, running },
       );
       if (!list.length) {
         if (loadingOn && !first) {

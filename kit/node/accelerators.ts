@@ -40,7 +40,7 @@ export type Work = core.Work;
 
 /**
  * `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path.
- * `sides-of-32`: a picture's side of a whole number of 32 px is made a pixel longer first (FastFlowLM 1.0.7: fitPicture).
+ * `sides-of-32`: a picture's side of a whole number of 32 px is made a pixel longer first (FastFlowLM 1.0.7 and 1.0.10: fitPicture).
  */
 export const QUIRKS: string[] = [...core.QUIRKS];
 
@@ -537,17 +537,19 @@ export const MAX_AHEAD = RULES.accelerators.maxAhead;
 
 export type Need = core.Need;
 export type Skipped = core.Skipped;
+export type WorkOrder = core.WorkOrder;
 
 /**
  * The candidates for a request, in order: they serve its kind, its size fits their cap, they haven't
  * failed in the last 10 minutes (unless every one that would do has: then they all may, as a last
  * resort), a game isn't using them (background work only), and this agent isn't leaving them alone
- * after a line that was too long (`deferredMs`).
+ * after a line that was too long (`deferredMs`). The config's `workOrder` for its kind, when it has one, orders them
+ * first, with `running` (serversUp) for its runningFirst.
  */
 export function candidates(
   accs: Accelerator[],
   need: Need,
-  state: { failure?: (id: string) => Failure | null; games?: Games | null; deferredMs?: (id: string) => number; now?: number } = {},
+  state: { failure?: (id: string) => Failure | null; games?: Games | null; deferredMs?: (id: string) => number; now?: number; workOrder?: WorkOrder | null; running?: (id: string) => boolean } = {},
 ): { list: Accelerator[]; skipped: Skipped[]; npuFirst: boolean } {
   const asked = accs.filter((a) => core.serves(a, need.work));
   return core.candidates(RULES, accs, need, {
@@ -555,7 +557,24 @@ export function candidates(
     games: state.games ?? null,
     deferredMs: state.deferredMs ? Object.fromEntries(asked.map((a) => [a.id, state.deferredMs!(a.id)])) : undefined,
     nowMs: state.now ?? Date.now(),
+    ...(state.workOrder ? { workOrder: state.workOrder } : {}),
+    ...(state.running ? { running: Object.fromEntries(asked.map((a) => [a.id, state.running!(a.id)])) } : {}),
   });
+}
+
+/** How long a look at whether a server is up waits: a server that isn't refuses at once, and one that takes longer is up. */
+export const UP_PROBE_MS = 500;
+
+/**
+ * Whose servers for this work are up (running: ready, or busy loading or answering), by id, when the work's order goes by
+ * it (`workOrder`'s runningFirst); else none is asked and the answer is undefined. One look each, all at once, starting
+ * nothing.
+ */
+export async function serversUp(accs: Accelerator[], work: Work, workOrder: WorkOrder | null | undefined, look: (baseUrl: string) => Promise<ServerState> = (b) => probe(b, UP_PROBE_MS)): Promise<((id: string) => boolean) | undefined> {
+  if (!workOrder?.[work]?.runningFirst) return undefined;
+  const up = new Map<string, boolean>();
+  await Promise.all(accs.filter((a) => core.serves(a, work)).map(async (a) => up.set(a.id, (await look(a[work]!.baseUrl)) !== 'down')));
+  return (id) => up.get(id) ?? false;
 }
 
 /** An accelerator's lock folders, one per slot: `locks\npu` for the NPU, `locks\<id>`, `<id>.2` … for the others. */
@@ -1090,8 +1109,8 @@ export function pictureSize(b: Buffer): { width: number; height: number } | null
 }
 
 /**
- * The size a server with `sides-of-32` should get a picture at, or null when it reads it right as it is. FastFlowLM 1.0.7
- * misreads a picture with a side of a whole number of 32 px (its models' patches, 16 px merged in twos) when it doesn't
+ * The size a server with `sides-of-32` should get a picture at, or null when it reads it right as it is. FastFlowLM (1.0.7,
+ * and 1.0.10 still) misreads a picture with a side of a whole number of 32 px (its models' patches, 16 px merged in twos) when it doesn't
  * shrink the picture itself, which its --img-pre-resize 2 (the default, the AMD route's) does only above 720 px tall.
  * Made a pixel longer, such a side is resampled by the model's own resize, and read right: spec/NPU-VENDORS.md has the
  * measurements. Pure.

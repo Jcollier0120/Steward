@@ -292,7 +292,49 @@ test('every route in npu-vendors.json is whole: a pinned https download, an inst
       if (!g.testedUpTo) continue;
       assert.ok(Number.isFinite(g.testedUpTo.params) && g.testedUpTo.params > 0 && g.testedUpTo.basis, `${vendor} ${id}`);
     }
+    // A generation's order for each work (kit 2.109.0): routed work only, its devices each once, its figures beside it,
+    // and as config.json's workOrder it reads back whole and checks clean.
+    for (const [id, g] of Object.entries(r.generations)) {
+      if (!g.order) continue;
+      for (const [w, o] of Object.entries(g.order)) {
+        const at = `${vendor} ${id} ${w}`;
+        assert.ok(['chat', 'vision', 'embed'].includes(w), at);
+        assert.ok(o.devices.length && o.devices.every((d) => ['npu', 'gpu', 'cpu'].includes(d)) && new Set(o.devices).size === o.devices.length, at);
+        assert.ok(o.runningFirst === undefined || typeof o.runningFirst === 'boolean', at);
+        assert.ok(o.basis.length > 40 && /\d J|mJ/.test(o.basis), `${at}: its figures`);
+      }
+      const wo = V.workOrderFor(r, id);
+      assert.deepEqual(validateKeeperConfig({ workOrder: wo }), [], `${vendor} ${id}`);
+      assert.deepEqual(core.readWorkOrder(wo), wo, `${vendor} ${id}`);
+    }
   }
+});
+
+test("each work's order by generation (kit 2.109.0): AMD's Ryzen AI 300 sends pictures to the Radeon unless only FastFlowLM is up; the others the NPU first", () => {
+  const amd = V.NPU_CATALOG.routes.amd;
+  assert.deepEqual(V.workOrderFor(amd, 'xdna2'), {
+    chat: { devices: ['npu', 'gpu', 'cpu'] },
+    vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true },
+    embed: { devices: ['gpu', 'cpu'] },
+  });
+  // Every other generation records none: the NPU first for every work, Intel's included.
+  for (const [vendor, r] of Object.entries(V.NPU_CATALOG.routes))
+    for (const id of Object.keys(r.generations)) if (!(vendor === 'amd' && id === 'xdna2')) assert.equal(V.workOrderFor(r, id), null, `${vendor} ${id}`);
+  assert.equal(V.workOrderFor(amd, null), null);
+  // Where the NPU's work goes when the NPU can't take it: the devices after it in the order, else a card, then the processor.
+  assert.deepEqual(V.fallbackDevices(amd, 'xdna2', 'vision'), ['gpu', 'cpu']);
+  assert.deepEqual(V.fallbackDevices(amd, 'xdna2', 'embed'), ['gpu', 'cpu']);
+  assert.deepEqual(V.fallbackDevices(V.NPU_CATALOG.routes.intel, 'lunar-lake', 'chat'), ['gpu', 'cpu']);
+  assert.deepEqual(V.fallbackDevices(null, null, 'chat'), ['gpu', 'cpu']);
+  const cpuFirst = { ...amd, generations: { ...amd.generations, xdna2: { ...amd.generations.xdna2, order: { embed: { devices: ['cpu', 'npu'] as ('npu' | 'cpu')[], basis: 'a test' } } } } };
+  assert.deepEqual(V.fallbackDevices(cpuFirst, 'xdna2', 'embed'), ['cpu', 'gpu']);
+  // config.json's check: what isn't an order is named.
+  assert.deepEqual(validateAccelerators({ workOrder: { vision: { devices: ['gpu', 'gpu'] }, rerank: { devices: ['cpu'] }, chat: { devices: ['npu'], runningFirst: 'yes' } } }), [
+    'workOrder.vision.devices must list npu, gpu and cpu, each at most once, first preferred',
+    'workOrder.rerank: only chat, vision and embed have an order',
+    'workOrder.chat.runningFirst must be true or false',
+  ]);
+  assert.deepEqual(validateAccelerators({ workOrder: ['gpu'] }), ['workOrder must be an object of chat, vision and embed, each its devices in order']);
 });
 
 test('config entries per vendor: one server on its own port, its caps and timeouts, and the kit reads them back', () => {
@@ -1978,6 +2020,8 @@ test("setup as a command, FastFlowLM blocked: the processor takes the NPU's work
   };
   const cpu = await run('blocked-cpu', false);
   assert.ok(cpu.log.some((l) => /^The processor takes the NPU's chat/.test(l)), cpu.log.join('\n'));
+  // The NPU's generation's order is written all the same (kit 2.109.0): the processor and any card go by it.
+  assert.deepEqual(cpu.written.workOrder, V.workOrderFor(V.NPU_CATALOG.routes.amd, 'xdna2'));
   assert.ok(cpu.written.accelerators.find((a: any) => a.id === 'cpu')?.chat, JSON.stringify(cpu.written));
   assert.ok(!cpu.written.accelerators.some((a: any) => a.kind === 'npu'));
   assert.match(cpu.note!, /^The NPU \(.+\) isn't used: Windows' Smart App Control blocks its model server, as its maker doesn't sign it\. The staff use the processor instead\.$/);
