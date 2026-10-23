@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.108.0
+
+**Every program the staff's local models run is signed, by its maker or by Castellan, or listed in a catalog Castellan signs, so Windows' Smart App Control lets them run.**
+
+### What's new
+
+- **Who signed each server's files** (`node/signatures.ts`): every .exe, .dll, .pyd and .node in the folder of each model server config.json starts, with the signature Windows finds on it (its maker's, Castellan's, a catalog's, or none) and its signer (`signatureInventory`, `inventorySay`). `node <agent>\src\kit\signatures.ts [--all] [--json]` prints this PC's. The NPU check shows it (`NpuCheckReport.signatures`, its log's Signatures line and each unsigned file), and setup keeps it in signatures.json beside blocked.json (`rememberSignatures`; `SetupOptions.signaturesFile`). A developer's view: nothing in it is a notice for the staff.
+- **Castellan's catalogs** (`node/catalogs.ts`, `node/catalog.cs`). A route's `catalogs` (`NpuSignedCatalog`: a server version, the file, its size and SHA-256, what it lists) are signed catalogs of its maker's unsigned files, carried in `node/catalogs/`. Setup installs the ones for the route's version in Windows' catalog database before anything of the server runs, and removes the route's older ones, through one administrator prompt, only where Smart App Control is on or in evaluation (`ensureCatalogs`, `NpuPlan.catalogs`, `NpuIo.catalogs`). The staff still download the server from its maker. `node <agent>\src\kit\catalogs.ts` lists the ones Windows holds; `remove` removes them; `test <file.cat> <folder>` checks that a catalog lets Windows load what Smart App Control blocks.
+- **The catalog helper**, `catalog` in prebuilt.ts' `HELPERS`: a console program that adds and removes catalogs and loads a file as Windows would to run it. It runs only from its signed copy: compiled on the PC, Smart App Control would block it too.
+
+### Before you update
+
+- Nothing: take the kit as usual. A route without `catalogs` sets up as before, and nothing asks for an administrator where Smart App Control is off.
+
 ## 2.104.0
 
 **Setup knows when Windows' Smart App Control blocks a model server, and goes on to the next one that runs; the NPU check and the benchmark stop at once when their server exits.**

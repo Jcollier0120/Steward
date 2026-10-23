@@ -147,6 +147,8 @@ export interface NpuRoute {
    * GenAI's, which Qwen3-VL needs on Intel's NPUs (npu-patch.ts).
    */
   pluginPatch?: NpuPluginPatch;
+  /** Castellan's signed catalogs of its server's files, a version each (NpuSignedCatalog): FastFlowLM's, whose maker signs none. */
+  catalogs?: NpuSignedCatalog[];
   licence: string;
   /** Its maker's terms for the server and what it carries, named before it's downloaded (GenieX, the QAIRT runtime inside it). */
   terms?: MakerTerms[];
@@ -278,6 +280,20 @@ export interface NpuRetired {
 export interface PinnedFile {
   size: number;
   sha256: string;
+}
+
+/**
+ * Castellan's signed catalog of one version of the route's server (catalogs.ts, kit 2.108.0): the hashes of its maker's
+ * unsigned program files, which the kit carries (kit\node\catalogs\) and setup installs in Windows' catalog database
+ * where Smart App Control is on or weighing it, so they run as the maker built them, from the maker's own download.
+ * `file` is its name there too: castellan-<route>-<server>-<version>.cat.
+ */
+export interface NpuSignedCatalog extends PinnedFile {
+  /** The server version whose files it lists: installed only where the route runs that version. */
+  serverVersion: string;
+  file: string;
+  /** What it lists, in words: "FastFlowLM 1.0.7's 23 program files". */
+  covers: string;
 }
 
 /**
@@ -1141,6 +1157,8 @@ export interface NpuPlan {
    * server version: where it's kept, and whether it's there. Setup puts it in place of the server's own before testing.
    */
   patch: (NpuPluginPatch & { dest: string; have: boolean }) | null;
+  /** Castellan's signed catalogs of the server's files at the route's version (NpuSignedCatalog): setup installs them first where Smart App Control is on. */
+  catalogs: NpuSignedCatalog[];
   /**
    * The route's embedding server, when it has one: where it goes, and its zip and model unless they're here (its
    * model downloaded as a file, or pulled by the route's program: the arguments that pull it).
@@ -1226,7 +1244,8 @@ export function planNpu(o: {
     (embed?.modelDownload?.size ?? 0) +
     (embed?.modelPull ? embed.server.model.size : 0);
   const powerTool = route.powerTool ? { ...route.powerTool, exe: expandRoute(route.powerTool.exe, { tools: o.tools, env: o.env }) } : undefined;
-  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, patch, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
+  const catalogs = (route.catalogs ?? []).filter((c) => c.serverVersion === route.version);
+  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, patch, catalogs, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
 }
 
 /**

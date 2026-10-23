@@ -9,14 +9,16 @@ import { type Block, blockedExit, blockedExitSay, blockedIn, blockedSay, cpuVari
 export { cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
 import { blockedFile, type BlockedServerFile, chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberBlocked, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, type Endpoint, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, isSharedTools, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
+import { type CatalogsDone, catalogsSay, ensureCatalogs } from './catalogs.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
 import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage } from './npu-vendors.ts';
+import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage } from './npu-vendors.ts';
 import { RETIRED_GRACE_MS } from './retired.ts';
+import { rememberSignatures, signaturesFile } from './signatures.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -1475,6 +1477,8 @@ export interface NpuIo {
   blockedIn?: (folder: string, withinMs: number) => Promise<Block[]>;
   /** Smart App Control's state, for the words a block is said in (smartAppControlOutsideTests: none in a test run). */
   smartAppControl?: () => SacState | null;
+  /** Castellan's signed catalogs of the route's server installed where Smart App Control is on (catalogs.ts ensureCatalogs). */
+  catalogs?: (wanted: NpuSignedCatalog[], route: string, sac: SacState | null) => Promise<CatalogsDone>;
 }
 
 /**
@@ -1824,6 +1828,13 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
     const reason = `${sac === 'on' ? "Windows' Smart App Control" : "Windows' application control"} blocks its model server, as its maker doesn't sign it`;
     return { ...fail(why, 'not-supported', reason), blocked };
   };
+  // Castellan's signed catalog of the server's files (kit 2.108.0), before anything of it runs: where Smart App Control
+  // is on, its maker's unsigned files would be blocked, and the catalog lets them run as the maker built them. One
+  // administrator prompt at most; turned down, the server is blocked as before, and the step that ran it says so.
+  if (n.catalogs?.length) {
+    const said = catalogsSay(await (io.catalogs ?? ((w, route, s) => ensureCatalogs(w, { route, sac: s, log: io.log })))(n.catalogs, n.vendor, sac));
+    if (said) io.log(said);
+  }
   const env = serverEnv({ env: routeEnv(n.route, tools) });
   // Its files put in place, in the PC's shared folder one account at a time (inSharedTools): a server another account
   // installed meanwhile isn't installed again.
@@ -2759,6 +2770,8 @@ export interface SetupOptions {
   npuReportFile?: string | null;
   /** Where what Windows blocked is kept (blockedFile(), kit 2.104.0; tests give their own, and a given detection keeps none). */
   blockedFile?: string | null;
+  /** Where who signed the servers' files is kept (signaturesFile(), kit 2.108.0; tests give their own, and a given detection keeps none). */
+  signaturesFile?: string | null;
   /** The app running setup, for the NPU's report ("manor 0.16.200"). */
   app?: string;
   /** Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu() read now, when left out). */
@@ -2904,6 +2917,9 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   }
   // The NPU's command is this kit's now: a keeper on an older kit leaves it alone (npu-refresh.ts).
   if (entries.some((e) => e.kind === 'npu')) rememberNpuRefresh(configFile, { kit: kitVersion(), at: new Date().toISOString(), did: 'set-up' });
+  // Who signed each program file the servers now run, for a round of signing (signatures.ts, kit 2.108.0).
+  const signaturesAt = o.signaturesFile !== undefined ? o.signaturesFile : o.detection ? null : signaturesFile();
+  if (signaturesAt) await rememberSignatures(raw, signaturesAt, { env: o.env, sac: detection.smartAppControl ?? null });
   const read = readAccelerators(raw);
   const order = orderAccelerators(read.accelerators, read.order).map((a) => a.id);
   const changed = [...entries.map((e) => e.id), ...(plan.dropNpu ? ['npu removed'] : [])];
