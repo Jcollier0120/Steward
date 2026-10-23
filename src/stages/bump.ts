@@ -21,6 +21,8 @@ import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
 import { keepWhole, ranWhole } from '../whole.ts';
 import { trialPassOf } from './trialpass.ts';
+import { applyFixes, copiedKitValues, fixesLine, kitChangesFor, type Copied, type CopyFix } from './copied.ts';
+import { freshProfile, trialProfileEnv, trialProfileOf } from './trialprofile.ts';
 import { withRepo } from './slots.ts';
 import { standIn, type StoodIn } from './standin.ts';
 import { seneschalTurn, TURN_HELD_ENV, type SeneschalAnswer, type SeneschalShard } from '../kit/seneschal.ts';
@@ -273,6 +275,8 @@ export type ChecksOptions = {
    * (shardSteps), and the employee's other test steps run in the first shard alone.
    */
   shard?: SeneschalShard;
+  /** A trial's scratch profile (trialprofile.ts): its test steps run there, made afresh for the run; its install and fill as before. */
+  profile?: string;
 };
 
 /** How a run whose packages Settings held begins its answer. */
@@ -312,7 +316,10 @@ export async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOpti
     else if (step.trim() === 'npm test') steps.push(async () => wholeTestSteps(dir));
     else steps.push(step);
   }
-  for (const s of steps) for (const step of typeof s === 'string' ? [s] : await s()) {
+  // A trial's test steps in a scratch profile of their own, empty each run (trialprofile.ts): never what this PC holds.
+  if (o.profile) freshProfile(o.profile);
+  const profiled = o.profile ? trialProfileEnv(o.profile, { ...process.env, ...o.env }) : {};
+  for (const [i, s] of steps.entries()) for (const step of typeof s === 'string' ? [s] : await s()) {
     if (!limited && (!picks || o.affected!.chose !== undefined)) {
       limited = true;
       const t = o.timeLimit!(checkKind(picks ? o.affected : undefined), picks ? o.affected!.files : undefined);
@@ -326,7 +333,7 @@ export async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOpti
     const t0 = Date.now();
     // Its tests' throwaway commits signed with nobody's key and no upkeep after them (kit/unsigned-git.ts): never pushed,
     // and each would start ssh-keygen and git maintenance.
-    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...(held ? { [TURN_HELD_ENV]: '1' } : {}), ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: true, ...(left !== undefined ? { limitMs: left } : {}) });
+    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...(i >= before.length ? profiled : {}), ...(held ? { [TURN_HELD_ENV]: '1' } : {}), ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: true, ...(left !== undefined ? { limitMs: left } : {}) });
     o.say(`${step}: ${r.code === 0 ? 'ok' : r.timedOut ? 'stopped at its time limit' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
     if (r.code !== 0) {
       const output = `${r.out}\n${r.err}`;
@@ -587,7 +594,7 @@ export const WITHOUT_THE_KIT = 'fails its checks without kit';
  * where esbuild follows no link), and Reeve for 4 tests failing on its main: each held the kit, and every Steward PR
  * behind it, though none was the kit's doing.
  */
-async function withoutTheKit(ctx: Ctx, e: Employee, dir: string, o: { say: (line: string) => void; affected?: AffectedScope }): Promise<string | null> {
+async function withoutTheKit(ctx: Ctx, e: Employee, dir: string, o: { say: (line: string) => void; affected?: AffectedScope; profile?: string }): Promise<string | null> {
   try {
     await git(ctx.run, dir, 'reset', '--quiet', '--hard', 'HEAD');
     await git(ctx.run, dir, 'clean', '-fdxq', '-e', 'node_modules');
@@ -598,6 +605,26 @@ async function withoutTheKit(ctx: Ctx, e: Employee, dir: string, o: { say: (line
   o.say('its checks without the kit, as its main has it, to see whether the kit is why they fail');
   // Run here, whatever passed elsewhere: the question is whether this PC fails its main.
   return runChecks(ctx, e, dir, { ...o, here: true, doing: 'its checks without the kit' });
+}
+
+/**
+ * What a failed run's tests expected that the kit changed (copied.ts), read from the failed step's whole output
+ * (checksLogOf). Where every test it failed is one of them and each can be brought up to the kit, the fixes are written
+ * into the worktree (`fixes`, and the `files` they changed); otherwise nothing is written, and `seen` names them for
+ * the failure. Null when there are none, or the kit's diff can't be had.
+ */
+async function copiedIn(ctx: Ctx, dir: string, o: { from: string; kit: string; kitFrom?: string | null }): Promise<{ seen: Copied[]; fixes?: CopyFix[]; files?: string[] } | null> {
+  let output: string;
+  try {
+    output = readFileSync(checksLogOf(dir), 'utf8');
+  } catch {
+    return null;
+  }
+  if (!/^\s*not ok \d/m.test(output)) return null;
+  const kit = await kitChangesFor(ctx, o).catch(() => null);
+  const found = kit ? copiedKitValues(output, kit, dir) : null;
+  if (!found?.seen.length) return null;
+  return found.fixes ? { seen: found.seen, fixes: found.fixes, files: applyFixes(dir, found.fixes) } : { seen: found.seen };
 }
 
 /** What a bump's refusal says when its branch is on origin with a PR (or a commit that isn't the bump's): the words work.ts reads. */
@@ -737,31 +764,41 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const tried = o.trial || fold || o.kitFrom ? null : await trialPassOf(ctx, e, { kit: o.kit, base: baseCommit, ...(tool !== undefined ? { tool } : {}) }).catch(() => null);
   if (tried) say(`its checks not run again: ${tried}`);
   const task: CheckTask | undefined = o.trial ? { kind: 'kit-trial' } : undefined;
-  const first = tried ? null : o.checks ? await o.checks(dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` }) : await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task });
+  // A trial's tests in a scratch profile (trialprofile.ts), the same one for its checks without the kit; trial.ts removes it after.
+  const profile = o.trial ? trialProfileOf(dir) : undefined;
+  const first = tried ? null : o.checks ? await o.checks(dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, profile }) : await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task, profile });
   if (first && o.checks) return result(e, 'failed', first, { base: baseCommit, checks: true });
+  // Its tests expected what the kit said before, where the kit now says otherwise (copied.ts): brought up to the kit,
+  // the run that follows is theirs, in place of the second try. Its failure stands as any other.
+  const found = first ? await copiedIn(ctx, dir, { from: pin.kit, kit: o.kit, kitFrom: o.kitFrom }) : null;
+  const copies = found?.fixes ? { fixes: found.fixes, files: found.files! } : null;
+  const brought = copies ? ` once its tests were brought up to the kit (${fixesLine(copies.fixes)})` : '';
+  // Copied, but not to be brought up here (another failure beside them, or a text not written once in its assertion): named in the failure.
+  const unfixed = found && !copies ? `; its tests expect what kit ${pin.kit} said, which kit ${o.kit} changed: ${fixesLine(found.seen)}` : '';
   if (first) {
-    say(`its checks once more (${first})`);
-    const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task });
+    say(copies ? `its tests expected what kit ${pin.kit} said, which kit ${o.kit} changed (${fixesLine(copies.fixes)}): brought up to it, its checks run again` : `its checks once more (${first})`);
+    const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task, profile });
     // A trial's failed step kept apart, before its checks without the kit write theirs beside the worktree.
     const kept = again && o.trial ? keepTrialLog(ctx.settings, e, o.kit, dir) : null;
     // A trial's failure isn't the kit's when the agent fails the very same way without it, on its main as it is. Failing
     // otherwise there (its own kit couldn't be fetched, say) says nothing, and the failure stands.
-    const alone = again && o.trial ? await withoutTheKit(ctx, e, dir, { say, affected: scope }) : null;
+    const alone = again && o.trial ? await withoutTheKit(ctx, e, dir, { say, affected: scope, profile }) : null;
     if (alone && alone === again) return result(e, 'skipped', `${WITHOUT_THE_KIT} ${o.kit} too, so not the kit's doing: ${alone}`, { base: baseCommit });
     if (alone) say(`without the kit it fails otherwise (${alone}): the failure stands`);
-    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${kept?.log ?? checksLogOf(dir)}`, { version: next, base: baseCommit, checks: true, ...(alone ? { without: alone } : {}), ...(kept?.errors.length ? { errors: kept.errors } : {}) });
+    if (again) return result(e, 'failed', `${again}${copies ? ` (the first time, before its tests were brought up to the kit (${fixesLine(copies.fixes)}): ${first})` : again === first ? ', twice' : ` (the first time: ${first})`}${unfixed}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${kept?.log ?? checksLogOf(dir)}`, { version: next, base: baseCommit, checks: true, ...(alone ? { without: alone } : {}), ...(kept?.errors.length ? { errors: kept.errors } : {}) });
   }
+  const copiesOf = copies ? { copies: copies.fixes.map((f) => fixesLine([f])) } : {};
   // Only the tests the kit reaches ran: its rollout's bump runs the same ones, so the trial's pass is kept all the same.
   const partial = !!scope?.chose && scope.chose !== 'the whole suite';
-  if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${partial ? ` (${scope!.chose})` : ''}${first ? ` on a second try (the first: ${first})` : ''}`, { version: next, base: baseCommit, ...(partial ? { partial } : {}) });
-  const secondTry = tried ? ` in the kit's trial (${tried}), not run again` : first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';
+  if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${partial ? ` (${scope!.chose})` : ''}${copies ? brought : first ? ` on a second try (the first: ${first})` : ''}`, { version: next, base: baseCommit, ...(partial ? { partial } : {}), ...copiesOf });
+  const secondTry = tried ? ` in the kit's trial (${tried}), not run again` : copies ? brought : first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';
 
-  await git(run, dir, 'add', '--', 'kit.json', CHANGELOG, ...e.versionFiles, ...(toolChanged ? [TOOL] : []));
+  await git(run, dir, 'add', '--', 'kit.json', CHANGELOG, ...e.versionFiles, ...(toolChanged ? [TOOL] : []), ...(copies?.files ?? []));
   const toolLine = toolChanged ? ` ${TOOL} is the Steward's.` : '';
   const what = fold
     ? `kit.json pins the Steward's kit ${o.kit} (this PR, #${fold.number}, brought ${pin.kit}: the newer kit goes onto it rather than a PR of its own); the version stays ${next}, and ${CHANGELOG}'s entry for it covers every kit since ${from}.`
     : `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit}); the version is ${next} in ${e.versionFiles.join(', ')}, and ${CHANGELOG} has its entry.`;
-  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `${what}${toolLine} Made by steward bump.${tried ? ` Its checks passed in the kit's trial from the same commit (${tried}), so they weren't run again.` : first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
+  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `${what}${toolLine} Made by steward bump.${tried ? ` Its checks passed in the kit's trial from the same commit (${tried}), so they weren't run again.` : copies ? ` Its tests expected what kit ${pin.kit} said, which kit ${o.kit} changed, and are brought up to it: ${fixesLine(copies.fixes)}. Its checks passed with them.` : first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
   const full = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
   const commit = full.slice(0, 7);
   // Passed with the kit's release, as anyone can fetch it: the Surveyor's GET /api/tested (tested.ts). Not a trial's kit
