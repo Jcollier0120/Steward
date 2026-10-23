@@ -1919,3 +1919,93 @@ test('a Snapdragon, whose NPU serves all three: its card is set up whole, as bef
   assert.equal(off.leftToNpu, undefined);
   assert.equal(off.downloadBytes, on.downloadBytes);
 });
+
+// Smart App Control (kit 2.104.0): FastFlowLM 1.0.7's libraries are unsigned, and on WEASELDEV03 (2026-10-22) Windows
+// stopped flm.exe at once (0xC0E90002) to pull and to serve. Setup tries it, knows the block, and goes on to what runs.
+/** A Code Integrity block of `file` in `folder`, as the log names it: by volume, not drive. */
+const blockOf = (folder: string, file: string) => ({ file: `\\Device\\HarddiskVolume3${folder.slice(2)}\\${file}`, policy: 'VerifiedAndReputableDesktop' });
+
+test("FastFlowLM blocked as it pulls or answers (0xC0E90002, or the log's files): no NPU entry, not-supported, the files kept to sign; another failure as before", async () => {
+  const tools = path.join(home, 'npu-blocked');
+  const plan = planFor(NPU.strix, 'x64', tools);
+  const flm = path.dirname(plan.exe);
+  // Its pull exits 0xC0E90002, and the log can't say which file: Smart App Control named where it's on.
+  const pulls = fakeNpuIo();
+  const pulled = await setUpNpu(plan, tools, { ...pulls.io, run: async (exe: string, args: string[]) => (args[0] === 'pull' ? { code: 3236495362, out: '' } : pulls.io.run(exe, args)), blockedIn: async () => [], smartAppControl: () => 'on' as const });
+  assert.equal(pulled.entry, undefined);
+  assert.equal(pulled.failed, 'not-supported');
+  assert.deepEqual(pulled.blocked, []);
+  assert.deepEqual(pulled.problems, ["npu: Windows' Smart App Control blocked FastFlowLM as it started (exit 0xC0E90002): its maker doesn't sign it, and Smart App Control blocks unsigned files it doesn't know. config.json gets no NPU entry; its work goes to the graphics card or the processor"]);
+  assert.match(pulled.note!, /isn't used: Windows' Smart App Control blocks its model server, as its maker doesn't sign it\./);
+  // Its test request fails as it starts, and the log names the files in its folder: each kept, by its path.
+  const asked: string[] = [];
+  const tests = fakeNpuIo({ answers: false });
+  const tested = await setUpNpu(plan, tools, { ...tests.io, blockedIn: async (folder: string) => (asked.push(folder), [blockOf(flm, 'llama_npu.dll'), blockOf(flm, 'qwen3vl_flash.dll')]) });
+  assert.deepEqual(asked, [flm]);
+  assert.equal(tested.failed, 'not-supported');
+  assert.deepEqual(tested.blocked, [
+    { file: path.join(flm, 'llama_npu.dll'), policy: 'VerifiedAndReputableDesktop', server: 'FastFlowLM' },
+    { file: path.join(flm, 'qwen3vl_flash.dll'), policy: 'VerifiedAndReputableDesktop', server: 'FastFlowLM' },
+  ]);
+  assert.match(tested.problems[0], /^npu: Windows' Smart App Control blocked llama_npu\.dll and qwen3vl_flash\.dll, part of FastFlowLM/);
+  assert.match(tested.note!, /Windows' application control blocks its model server/, 'Smart App Control by name only where it reads on');
+  // A failure Windows had no part in fails its step, as before.
+  const plain = await setUpNpu(plan, tools, { ...fakeNpuIo({ answers: false }).io, blockedIn: async () => [] });
+  assert.equal(plain.failed, 'test');
+  assert.equal(plain.blocked, undefined);
+});
+
+test("setup as a command, FastFlowLM blocked: the processor takes the NPU's work and the note says so; blocked too, the note says Windows blocks the staff's local models; blocked.json keeps the files", async () => {
+  const run = async (name: string, cpuBlocked: boolean) => {
+    const tools = path.join(home, name);
+    const file = path.join(home, `${name}-config.json`);
+    const noteFile = path.join(home, `${name}-note.json`);
+    const blockedFile = path.join(home, `${name}-blocked.json`);
+    writeFileSync(file, '{}');
+    const detection = { ...parseDetection(`${NPU.strix}\n${X64('AMD Ryzen AI 9 HX 370 w/ Radeon 890M')}`), smartAppControl: 'on' as const };
+    const npu = fakeNpuIo({ answers: false });
+    const log: string[] = [];
+    const blockedIn = async (folder: string) =>
+      /fastflowlm/i.test(folder) ? [blockOf(folder, 'llama_npu.dll')] : cpuBlocked && /llama\.cpp/i.test(folder) ? [blockOf(folder, 'ggml-cpu-zen4.dll'), blockOf(folder, 'llama-server.exe')] : [];
+    const r = await setupCommand({ ids: [], detection, releases: async () => RELEASES, hfFiles: hf, configFile: file, home: tools, env: ENV, yes: true, npuNoteFile: noteFile, blockedFile, log: (l: string) => log.push(l), io: { ...npu.io, exists: (p: string) => disk()(p) || npu.io.exists(p), listDevices: async () => '', blockedIn } });
+    return { r, log, written: JSON.parse(readFileSync(file, 'utf8')), note: A.readNpuNote(noteFile)?.note, kept: A.readBlocked(blockedFile) };
+  };
+  const cpu = await run('blocked-cpu', false);
+  assert.ok(cpu.log.some((l) => /^The processor takes the NPU's chat/.test(l)), cpu.log.join('\n'));
+  assert.ok(cpu.written.accelerators.find((a: any) => a.id === 'cpu')?.chat, JSON.stringify(cpu.written));
+  assert.ok(!cpu.written.accelerators.some((a: any) => a.kind === 'npu'));
+  assert.match(cpu.note!, /^The NPU \(.+\) isn't used: Windows' Smart App Control blocks its model server, as its maker doesn't sign it\. The staff use the processor instead\.$/);
+  assert.equal(cpu.kept!.smartAppControl, 'on');
+  assert.deepEqual(cpu.kept!.blocked.map((b) => [path.win32.basename(b.file), b.server]), [['llama_npu.dll', 'FastFlowLM']]);
+  assert.ok(!/turn|off/i.test(cpu.note!.replace("isn't used", '')), 'never a word on turning Smart App Control off');
+
+  const none = await run('blocked-all', true);
+  assert.equal(none.r.code, 1, 'nothing set up');
+  assert.ok(none.log.some((l) => /^problem: cpu: Windows' Smart App Control blocked llama-server\.exe, part of llama\.cpp.*The processor's llama\.cpp can't run, so .+ isn't set up$/.test(l)), none.log.join('\n'));
+  assert.ok(!(none.written.accelerators ?? []).some((a: any) => a.id === 'cpu'));
+  assert.equal(none.note, "Windows' Smart App Control blocks the staff's local models on this PC: it stopped each model server setup tried as it started, as their makers don't sign them.");
+  assert.deepEqual(none.kept!.blocked.map((b) => [path.win32.basename(b.file), b.server]), [['llama_npu.dll', 'FastFlowLM'], ['llama-server.exe', 'llama.cpp']], "a processor variant alone isn't kept: ggml loads another");
+});
+
+test('what chats in the NPU\'s place, in words; blocked.json written whole and cleared once nothing is blocked; detection asks Smart App Control', async () => {
+  const { chatInstead, npuBlockedNote } = await import('./fixture/src/kit/setup.ts');
+  const ep = { baseUrl: 'http://127.0.0.1:1', model: 'm' };
+  const cards = [{ id: 'gpu-radeon', name: 'AMD Radeon(TM) 890M Graphics' }];
+  assert.match(chatInstead([{ id: 'npu', kind: 'npu', chat: ep }, { id: 'gpu-radeon', kind: 'gpu', chat: ep }] as any, { cards } as any)!, /^the graphics card \(.*890M.*\)$/);
+  assert.equal(chatInstead([{ id: 'cpu', kind: 'cpu', chat: ep }] as any, { cards: [] } as any), 'the processor');
+  assert.equal(chatInstead([{ id: 'npu', kind: 'npu', chat: ep }, { id: 'gpu-radeon', kind: 'gpu' }] as any, { cards } as any), null, 'a card that serves no chat');
+  assert.equal(npuBlockedNote('Ryzen AI 300', 'evaluation', 'the processor'), "The NPU (Ryzen AI 300) isn't used: Windows' application control blocks its model server, as its maker doesn't sign it. The staff use the processor instead.");
+
+  const file = path.join(home, 'blocked-record.json');
+  const b = { file: 'C:\\t\\flm\\llama_npu.dll', policy: null, server: 'FastFlowLM' };
+  A.rememberBlocked([b, { ...b, file: b.file.toUpperCase() }], 'on', file);
+  const kept = A.readBlocked(file)!;
+  assert.deepEqual([kept.smartAppControl, kept.blocked], ['on', [b]], 'one per file, in any case');
+  assert.ok(!Number.isNaN(Date.parse(kept.at)));
+  A.rememberBlocked([], 'off', file);
+  assert.equal(existsSync(file), false, 'cleared once setup ran with nothing blocked');
+  assert.equal(A.readBlocked(file), null);
+
+  const { detect } = await import('./fixture/src/kit/detect.ts');
+  if (process.platform === 'win32') assert.equal((await detect(async () => X64('AMD Ryzen AI 9 HX 370'), () => 'on')).smartAppControl, 'on');
+});

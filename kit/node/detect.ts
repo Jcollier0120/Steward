@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { type Accelerator, acceleratorId, autoOrder, OWN_MEMORY_GB } from './accelerator-config.ts';
 import type { Hardware } from './accelerators.ts';
+import { type SacState, smartAppControlOutsideTests } from './app-control.ts';
 import * as core from './core/index.js';
 import { type NpuSupport, npuSupport } from './npu-vendors.ts';
 
@@ -59,6 +60,12 @@ export interface Detection {
   ramBytes: number;
   /** What couldn't be asked, one line each. */
   problems: string[];
+  /**
+   * Windows' Smart App Control (kit 2.104.0): on, in evaluation, or off; null where it can't be read, and in a test run.
+   * Where it's on, a model server whose maker doesn't sign it may be blocked as it starts, whoever makes it: setup tries
+   * each in turn and goes on to the next that runs (setupCommand), and says so in plain words.
+   */
+  smartAppControl?: SacState | null;
 }
 
 /** Microsoft's own adapters: the Basic Render Driver (WARP), the Remote Display Adapter, Hyper-V's. */
@@ -332,9 +339,9 @@ export function hardwareOf(d: Detection): Hardware | null {
 }
 
 /** Asks this PC. */
-export async function detect(run: (script: string) => Promise<string> = runPowerShell): Promise<Detection> {
+export async function detect(run: (script: string) => Promise<string> = runPowerShell, sac: () => SacState | null = smartAppControlOutsideTests): Promise<Detection> {
   if (process.platform !== 'win32') return { cards: [], npu: null, geniex: null, cpu: null, ramBytes: 0, problems: ['only Windows is asked'] };
-  return parseDetection(await run(DETECT_PS), findGeniex());
+  return { ...parseDetection(await run(DETECT_PS), findGeniex()), smartAppControl: sac() };
 }
 
 /** What was detected, as accelerators (no endpoints yet), in the auto order: what `setup` and the Settings page start from. */

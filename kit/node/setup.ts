@@ -5,9 +5,9 @@ import { homedir, totalmem } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { type Block, blockedIn, blockedSay, cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
+import { type Block, blockedExit, blockedExitSay, blockedIn, blockedSay, cpuVariantLoaded, keepCpuVariant, localPath, type SacState, saysBlockedExit, smartAppControlOutsideTests, stoppingBlocks } from './app-control.ts';
 export { cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
-import { chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
+import { blockedFile, type BlockedServerFile, chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberBlocked, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, type Endpoint, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, isSharedTools, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
@@ -1322,21 +1322,22 @@ export interface SetupIo extends NpuIo {
   download?: (d: Download, progress: (done: number, total: number) => void) => Promise<void>;
   unpack?: (zip: string, into: string) => void;
   listDevices?: (server: string) => Promise<string>;
-  /** Windows' application control's blocks in a folder (app-control.ts blockedIn). */
-  blockedIn?: (folder: string, withinMs: number) => Promise<Block[]>;
 }
 
 /**
  * Downloads what the plan lacks, finds each card's llama.cpp device, and returns config.json's new
  * content (mergeEntries) with an entry per accelerator it set up. The caller writes it.
  */
-export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: SetupIo): Promise<{ raw: Record<string, any>; entries: Accelerator[]; problems: string[]; npu?: NpuSetup; rerank?: string[] }> {
+export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: SetupIo): Promise<{ raw: Record<string, any>; entries: Accelerator[]; problems: string[]; npu?: NpuSetup; rerank?: string[]; blocked?: BlockedServerFile[] }> {
   const problems: string[] = [];
   const entries: Accelerator[] = [];
+  // What Windows blocked of the servers tried (the NPU's and each build's), file by file.
+  const blocked: BlockedServerFile[] = [];
   // The NPU first: its entry is written only once its server has answered a test request.
   let npu: NpuSetup | undefined;
   if (plan.npu) {
     npu = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), io);
+    blocked.push(...(npu.blocked ?? []));
     problems.push(...npu.problems);
     if (npu.entry) entries.push({ ...npu.entry, name: core.deviceName(plan.npu.support.label) });
   }
@@ -1369,6 +1370,12 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
     // Each build is asked once: its devices, and the processor variant ggml chose, the only one it keeps.
     const asked = Date.now();
     const listing = await (io.listDevices ?? listDevices)(server);
+    // What Windows' application control blocked of the build as it listed its devices (app-control.ts): a processor
+    // variant alone leaves it running on another (keepCpuVariant); anything else stops it (stoppingBlocks), and is kept
+    // in blocked.json for a round of signing (kit 2.104.0).
+    const blocks = await (io.blockedIn ?? blockedIn)(t.folder, Date.now() - asked + 60_000);
+    const stopping = stoppingBlocks(blocks);
+    const keepStopping = () => blocked.push(...stopping.map((b) => ({ ...b, file: localPath(b.file, t.folder!), server: 'llama.cpp' })));
     const removed = keepCpuVariant(t.folder, cpuVariantLoaded(listing));
     if (removed.length) io.log(`${t.name}: llama.cpp runs ${cpuVariantLoaded(listing)} on this processor; its ${removed.length} other processor variants are removed, so no start loads them again`);
     if (t.variant.backend) {
@@ -1376,11 +1383,17 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
       device = matchDevice({ name: t.name }, devices, t.variant.backend);
       if (!device) {
         // Windows' Smart App Control may have blocked part of it (app-control.ts): said first, when its log says so.
-        const blocked = blockedSay(await (io.blockedIn ?? blockedIn)(t.folder, Date.now() - asked + 60_000), 'llama.cpp');
-        problems.push(`${t.id}: ${blocked ? `${blocked}. ` : ''}llama-server --list-devices names no device for ${t.name} (it lists ${devices.map((d) => `${d.name}: ${d.description}`).join('; ') || 'none'})`);
+        const said = blockedSay(blocks, 'llama.cpp');
+        keepStopping();
+        problems.push(`${t.id}: ${said ? `${said}. ` : ''}llama-server --list-devices names no device for ${t.name} (it lists ${devices.map((d) => `${d.name}: ${d.description}`).join('; ') || 'none'})`);
         continue;
       }
       t.device = device;
+    } else if (stopping.length) {
+      // The processor's build lists no device to tell by: the log alone says Windows stopped it.
+      keepStopping();
+      problems.push(`${t.id}: ${blockedSay(stopping, 'llama.cpp')}. The processor's llama.cpp can't run, so ${t.name} isn't set up`);
+      continue;
     }
     const models: EntryInput['models'] = {};
     for (const k of t.kinds) {
@@ -1414,7 +1427,7 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
       io.log(`${plan.npuRerank.label}: reranks on ${plan.npuRerank.port}`);
     } else rerankLeft = bad.map((b) => `${plan.npuRerank!.label}'s reranker: ${b}`);
   }
-  return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems, ...(npu ? { npu } : {}), ...(rerankLeft ? { rerank: rerankLeft } : {}) };
+  return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems, ...(npu ? { npu } : {}), ...(rerankLeft ? { rerank: rerankLeft } : {}), ...(blocked.length ? { blocked } : {}) };
 }
 
 /** What the NPU was set up to serve (chat, embeddings, its reranker) and its entry lacks: its test failed for them. */
@@ -1458,6 +1471,10 @@ export interface NpuIo {
   measure?: (entry: AcceleratorEntry) => Promise<NpuMeasuring | { problems: string[] } | null>;
   /** The clock the first start is timed by, in milliseconds. Not `now`: an agent's own io that extends NpuIo may have a `now` of its own (the Smith's trial does, returning a Date). */
   clockMs?: () => number;
+  /** Windows' application control's blocks in a folder (app-control.ts blockedIn): the NPU's server's, and each llama.cpp build's. */
+  blockedIn?: (folder: string, withinMs: number) => Promise<Block[]>;
+  /** Smart App Control's state, for the words a block is said in (smartAppControlOutsideTests: none in a test run). */
+  smartAppControl?: () => SacState | null;
 }
 
 /**
@@ -1693,6 +1710,33 @@ export interface NpuSetup {
    * names those models), and what failed first. The entry, note and speeds are the fallback's.
    */
   fellBack?: { route: NpuRoute; models: string[]; failed: NpuFailStep; problems: string[] };
+  /**
+   * What Windows' application control blocked of its servers as setup started them (kit 2.104.0), file by file: its
+   * model server's (then it has no entry, `failed` is `not-supported`, and the note says Windows blocks it), or its
+   * embedding server's alone (the entry keeps chat). Kept in blocked.json (rememberBlocked).
+   */
+  blocked?: BlockedServerFile[];
+}
+
+/**
+ * The note when Windows blocked the NPU's model server as it started (kit 2.104.0), once setup knows where its work
+ * went: Smart App Control by name where it's on, and what the staff use instead; or, when nothing setup tried runs,
+ * that Windows blocks the staff's local models on this PC. Never a word on turning Smart App Control off: that's the
+ * person's own setting to keep.
+ */
+export function npuBlockedNote(label: string, sac: SacState | null, instead: string | null): string {
+  const who = sac === 'on' ? "Windows' Smart App Control" : "Windows' application control";
+  if (!instead) return `${who} blocks the staff's local models on this PC: it stopped each model server setup tried as it started, as their makers don't sign them.`;
+  return `The NPU (${label}) isn't used: ${who} blocks its model server, as its maker doesn't sign it. The staff use ${instead} instead.`;
+}
+
+/** What chats in the NPU's place, in words (npuBlockedNote): a graphics card by its name, or the processor; null when nothing does. */
+export function chatInstead(configured: Pick<Accelerator, 'id' | 'kind' | 'chat'>[], detection: Pick<Detection, 'cards'>): string | null {
+  const a = configured.find((x) => x.kind !== 'npu' && serves(x as Accelerator, 'chat'));
+  if (!a) return null;
+  if (a.kind === 'cpu') return 'the processor';
+  const card = detection.cards.find((c) => c.id === a.id);
+  return card ? `the graphics card (${core.deviceName(card.name)})` : 'the graphics card';
 }
 
 /** The steps whose failure setup meets with the generation's fallback models (NpuPlan.fallback): its server itself was set up. */
@@ -1763,6 +1807,23 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
     note: npuNoteFor(label, 'chat', reason),
     failed: step,
   });
+  const sac = (io.smartAppControl ?? smartAppControlOutsideTests)();
+  // What Windows' application control blocked in a server's folder since `since` (Date.now()), as files to sign.
+  const blocksIn = async (folder: string, since: number, server: string): Promise<BlockedServerFile[]> =>
+    stoppingBlocks(await (io.blockedIn ?? blockedIn)(folder, Date.now() - since + 60_000)).map((b) => ({ ...b, file: localPath(b.file, folder), server }));
+  /**
+   * A step that failed because Windows blocked the model server as it ran (kit 2.104.0: FastFlowLM under Smart App
+   * Control, whose unsigned libraries stop flm.exe at once, to serve or to pull): the log's files in its folder since
+   * the step began, or its exit of 0xC0E90002. Null when neither says so: the step failed as before.
+   */
+  const blockedStep = async (since: number, code: number | null, said: string): Promise<NpuSetup | null> => {
+    const blocked = await blocksIn(path.dirname(n.exe), since, n.route.server);
+    if (!blocked.length && !blockedExit(code) && !saysBlockedExit(said)) return null;
+    const why = blockedSay(blocked, n.route.server) ?? blockedExitSay(n.route.server, sac);
+    io.log(`${why}: the NPU isn't used, and its work goes to the graphics card or the processor`);
+    const reason = `${sac === 'on' ? "Windows' Smart App Control" : "Windows' application control"} blocks its model server, as its maker doesn't sign it`;
+    return { ...fail(why, 'not-supported', reason), blocked };
+  };
   const env = serverEnv({ env: routeEnv(n.route, tools) });
   // Its files put in place, in the PC's shared folder one account at a time (inSharedTools): a server another account
   // installed meanwhile isn't installed again.
@@ -1813,8 +1874,9 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
     for (const m of n.models) {
       if (!m.have) {
         io.log(`downloading ${m.id} (${mb(m.size)}) with ${n.route.server}; this takes a while`);
+        const pulled = Date.now();
         const r = await run(n.exe, m.pull, { timeoutMs: 3 * 3600_000, env });
-        if (r.code !== 0) return fail(`${n.route.server} couldn't download ${m.id} (exit ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''})`, 'pull', "its model couldn't be downloaded");
+        if (r.code !== 0) return (await blockedStep(pulled, r.code, r.out)) ?? fail(`${n.route.server} couldn't download ${m.id} (exit ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''})`, 'pull', "its model couldn't be downloaded");
       }
       const bad = await checkPinned(m, n.support.generation, { tools, hash: io.hash });
       if (bad.length) return fail(`${m.id} isn't the build that was checked: ${bad.join('; ')}`, 'checksum', "its model couldn't be downloaded whole");
@@ -1845,9 +1907,10 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
   // Whether the test started the server: its time to the answers is a cold start only then (the report's coldMs).
   let started = undefined as boolean | undefined;
   const t0 = now();
+  const tested = Date.now();
   const problems = await (io.testNpu ?? ((e: AcceleratorEntry, t?: { seeRed?: boolean }) => testNpuEntry(e, { onReady: (r) => (started = r.started), seeRed: t?.seeRed })))(entry, o.seeRed ? { seeRed: true } : undefined);
   const coldMs = Math.round(now() - t0);
-  if (problems.length) return fail(`${n.route.server} didn't answer its test request: ${problems.join('; ')}`, testStep(problems), plainReason(problems, 'chat'));
+  if (problems.length) return (await blockedStep(tested, null, problems.join('; '))) ?? fail(`${n.route.server} didn't answer its test request: ${problems.join('; ')}`, testStep(problems), plainReason(problems, 'chat'));
   // Every NPU is measured for its report; a generation nobody has measured also gets this PC's own timeouts from it,
   // rather than the route's guess, and is kept out when it fails them. A verified one is used as before whatever they say.
   const speeds: NpuSpeeds = { ...NO_SPEEDS, coldMs: started === false ? null : coldMs };
@@ -1874,12 +1937,17 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
       );
     }
   }
+  let blocked: BlockedServerFile[] = [];
   if (embedAt && n.embed) {
     io.log(`asking ${n.embed.server.server} for a test embedding on the NPU`);
+    const asked = Date.now();
     const bad = await (io.testEmbed ?? ((e: AcceleratorEntry) => testNpuEmbed(e, { dims: n.embed!.server.model.dims })))(entry);
     if (bad.length) {
       delete entry.embed;
-      noEmbed(`${n.embed.server.server}, its embedding server, didn't answer its test request: ${bad.join('; ')}`, plainReason(bad, 'embed'));
+      // Windows may have blocked the embedding server alone (a Snapdragon's is llama.cpp's Hexagon build): said so, and kept.
+      blocked = await blocksIn(path.dirname(n.embed.exe), asked, n.embed.server.server);
+      const why = blockedSay(blocked, n.embed.server.server);
+      noEmbed(`${n.embed.server.server}, its embedding server, didn't answer its test request: ${why ? `${why}. ` : ''}${bad.join('; ')}`, why ? `${sac === 'on' ? "Windows' Smart App Control" : "Windows' application control"} blocks its embedding server, as its maker doesn't sign it` : plainReason(bad, 'embed'));
       failed = 'embed';
     }
   }
@@ -1893,7 +1961,7 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
     io.log(`${path.win32.basename(power.exe)} couldn't start (exit ${power.code}): ${n.route.server} can't set the NPU's power mode`);
     note = [note, npuPowerNote(label, n.powerTool!.broken)].filter(Boolean).join(' ');
   }
-  return { entry, problems: later, ...(note ? { note } : {}), ...(measured ? { measured } : {}), ...(power ? { power } : {}), ...(failed ? { failed } : {}), speeds };
+  return { entry, problems: later, ...(note ? { note } : {}), ...(measured ? { measured } : {}), ...(power ? { power } : {}), ...(failed ? { failed } : {}), speeds, ...(blocked.length ? { blocked } : {}) };
 }
 
 /** The test request's failure as its report's code: out of time, nonsense, or anything else. */
@@ -2689,6 +2757,8 @@ export interface SetupOptions {
    * by default; tests give their own, and with a given detection none is kept unless they do.
    */
   npuReportFile?: string | null;
+  /** Where what Windows blocked is kept (blockedFile(), kit 2.104.0; tests give their own, and a given detection keeps none). */
+  blockedFile?: string | null;
   /** The app running setup, for the NPU's report ("manor 0.16.200"). */
   app?: string;
   /** Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu() read now, when left out). */
@@ -2768,12 +2838,16 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   const problems = r.problems.filter((p) => !npuDetails.has(p));
   let raw = r.raw;
   let entries = r.entries;
+  // What Windows blocked of the servers tried, file by file: kept in blocked.json below (kit 2.104.0).
+  const blocked = [...(r.blocked ?? [])];
   // What the NPU couldn't do after all goes to a card that left it to the NPU: set up again now, for the work the NPU
   // turned out not to serve (the NPU's entry as written decides, as for requests), beside what the card does already.
   const missing = npuMissing(plan, entries);
   const cardsFor = (plan.leftToNpu ?? []).filter((l) => l.kinds.some((k) => missing.includes(k))).map((l) => l.id);
   // The NPU's pictures are its chat server's (Intel's Qwen3-VL-2B, kit 2.103.0): the card that takes its chat takes them too.
   const taken = ENDPOINT_KINDS.filter((k) => missing.includes(k) || (k === 'vision' && missing.includes('chat') && plan.npu?.kinds.includes('vision')));
+  // Windows blocked the card's build too (kit 2.104.0): the processor is tried next, as with no card.
+  let cardBlocked = false;
   if (missing.length && cardsFor.length) {
     const plan2 = await planSetup({ detection, ids: cardsFor, skipNpu: true, raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
     // An NPU entry kept from before (a 4B whose 2B failed) still chats: the card takes only what it plans.
@@ -2785,13 +2859,16 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
       const r2 = await runSetup(plan2, raw, { log, ...o.io });
       for (const p of r2.problems) log(`problem: ${p}`);
       problems.push(...r2.problems);
+      blocked.push(...(r2.blocked ?? []));
+      cardBlocked = !r2.entries.length && !!r2.blocked?.length;
       raw = r2.raw;
       entries = [...entries.filter((e) => !r2.entries.some((x) => x.id === e.id)), ...r2.entries];
     } else log(`Not downloading for the graphics card: the NPU's ${taken.join(' and ')} stay unserved until setup runs again.`);
   }
   // With no card to take it, what the NPU couldn't do goes to the processor: set up now, beside what it had. Its
-  // reranker always does: a card beside the NPU reranks only while Manor's gpuWithNpu is on.
-  else if (missing.length && (!entries.some((e) => e.kind === 'gpu') || missing.every((k) => k === 'rerank')) && detection.cpu) {
+  // reranker always does: a card beside the NPU reranks only while Manor's gpuWithNpu is on. So does what a card
+  // Windows blocked couldn't take.
+  if (missing.length && (!cardsFor.length || cardBlocked) && (cardBlocked || !entries.some((e) => e.kind === 'gpu') || missing.every((k) => k === 'rerank')) && detection.cpu) {
     const had = readAccelerators(raw).accelerators.find((a) => a.id === 'cpu');
     const cpuKinds = [...new Set([...ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had && serves(had, k)), ...missing])];
     log(`The processor takes the NPU's ${missing.join(' and ')} instead: setting it up for ${cpuKinds.join(' and ')}.`);
@@ -2802,14 +2879,19 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
       const r2 = await runSetup(plan2, raw, { log, ...o.io });
       for (const p of r2.problems) log(`problem: ${p}`);
       problems.push(...r2.problems);
+      blocked.push(...(r2.blocked ?? []));
       raw = r2.raw;
       entries = [...entries.filter((e) => !r2.entries.some((x) => x.id === e.id)), ...r2.entries];
     } else log(`Not downloading for the processor: the NPU's ${missing.join(' and ')} stay unserved until setup runs again.`);
   }
   // Why the NPU, or its embeddings, isn't used, kept for the accelerators' report: cleared once it's set up whole on
   // values setup knows. An NPU kept on guessed values says so, beside the plan's own note (its embeddings left off).
+  // One Windows blocked says what the staff use instead, now that setup has tried the rest (kit 2.104.0).
   const said = r.npu?.entry && r.npu.note && plan.npuPlain ? `${r.npu.note} ${plan.npuPlain}` : r.npu?.note;
-  const plain = plan.npu ? (said ?? plan.npuPlain ?? null) : plan.npuPlain;
+  const blockedNote = plan.npu && r.npu?.blocked && !r.npu.entry ? npuBlockedNote(plan.npu.support.label, detection.smartAppControl ?? null, chatInstead(readAccelerators(raw).accelerators, detection)) : undefined;
+  const plain = plan.npu ? (blockedNote ?? said ?? plan.npuPlain ?? null) : plan.npuPlain;
+  const blockedAt = o.blockedFile !== undefined ? o.blockedFile : o.detection ? null : blockedFile();
+  if (blockedAt) rememberBlocked(blocked, detection.smartAppControl ?? null, blockedAt);
   const noteFile = o.npuNoteFile ?? (o.detection ? null : npuNoteFile());
   if (plain !== undefined && noteFile) rememberNpuNote(plain, noteFile);
   if (plain) log(`note: ${plain}`);

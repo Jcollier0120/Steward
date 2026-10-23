@@ -19,6 +19,9 @@ const { every, firstRoundDone, roundFile } = await import('./fixture/src/kit/sch
 const { readJson } = await import('./fixture/src/kit/store.ts');
 const { pillOf, settlingText } = await import('./fixture/src/kit/page.ts');
 const { lookFor } = await import('./fixture/src/kit/look.ts');
+const { smartAppControlState } = await import('./fixture/src/kit/app-control.ts');
+// The tests that compile and load a DLL of their own need Windows, and Smart App Control off (kit 2.104.0).
+const ownDll = process.platform !== 'win32' || (smartAppControlState() === 'on' && 'Smart App Control is on: it blocks the DLL this test compiles, which nothing signs');
 
 const manorWith = (name: string, settings: unknown) => {
   const dir = path.join(home, name);
@@ -136,7 +139,7 @@ test("the manor's ceiling (kit 2.78.3): 85% of the processor and of memory, writ
   assert.equal(CEILING_WORDS, '85%');
 });
 
-test('on Windows, a process set gentle and back: efficiency mode, disk priority and the cap all take, and the worker joins its job', { skip: process.platform !== 'win32' }, async () => {
+test('on Windows, a process set gentle and back: efficiency mode, disk priority and the cap all take, and the worker joins its job', { skip: ownDll }, async () => {
   const { spawn } = await import('node:child_process');
   const { readFileSync: read } = await import('node:fs');
   const { powershell, stopPowerShellWorker } = await import('./fixture/src/kit/ps.ts');
@@ -156,7 +159,7 @@ test('on Windows, a process set gentle and back: efficiency mode, disk priority 
   }
 });
 
-test("on Windows, with the manor's ceiling, an agent's job is made inside it (kit 2.78.7)", { skip: process.platform !== 'win32' }, async () => {
+test("on Windows, with the manor's ceiling, an agent's job is made inside it (kit 2.78.7)", { skip: ownDll }, async () => {
   const { spawn } = await import('node:child_process');
   const { readFileSync: read } = await import('node:fs');
   const { powershell, stopPowerShellWorker } = await import('./fixture/src/kit/ps.ts');

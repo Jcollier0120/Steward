@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.104.0
+
+**Setup knows when Windows' Smart App Control blocks a model server, and goes on to the next one that runs; the NPU check and the benchmark stop at once when their server exits.**
+
+### What changed
+
+- **Smart App Control's state is detected** for every maker: `Detection.smartAppControl` (`on`, `evaluation`, `off`, or null where it can't be read, and always in a test run: `smartAppControlOutsideTests`, app-control.ts). `detect()` takes its reader as a second argument.
+- **A blocked start is known by its exit as well as by the log.** `BLOCKED_EXIT` (0xC0E90002, STATUS_SYSTEM_INTEGRITY_POLICY_VIOLATION), `blockedExit`, `saysBlockedExit`, `exitCodeSay` and `blockedExitSay`. FastFlowLM 1.0.7's flm.exe exits so at once under Smart App Control, printing nothing, to pull and to serve (a Ryzen AI 7 350, 2026-10-22); the Code Integrity log names the library it stopped at (`llama_npu.dll`, `qwen3_5vl_npu.dll`, `qwen3_5_omni_npu.dll`, `qwen3vl_flash.dll`). The keeper's start (`blockedFirst`) says so too where the log names no file.
+- **Setup tries the NPU's server anyway, then falls back.** When its pull or test request fails and the log names blocked files in its folder (events 3033 and 3077, read only), or it exited 0xC0E90002, the NPU fails as `not-supported`, `NpuSetup.blocked` lists the files, and its work goes to the graphics card or the processor as for any NPU that fails. Their llama.cpp build is tried in turn: a blocked file other than a processor variant (`stoppingBlocks`) stops it, said as a problem, and when the card's build is blocked the processor is tried next (`setupCommand`). Nothing is judged before it's tried.
+- **The note says where the work went** (`npuBlockedNote`, `chatInstead`): "The NPU (…) isn't used: Windows' Smart App Control blocks its model server, as its maker doesn't sign it. The staff use the processor instead." When nothing setup tried runs: "Windows' Smart App Control blocks the staff's local models on this PC: …". It never asks the person to turn Smart App Control off.
+- **blocked.json** (`blockedFile()`, beside npu-note.json): each file Windows blocked at setup's last run, with its policy and its server, and Smart App Control's state then (`rememberBlocked`, `readBlocked`), for a round of signing. It's cleared when setup runs with nothing blocked. `SetupOptions.blockedFile` puts it elsewhere; with a detection given, none is kept unless it says where.
+- **`blockedIn` moved from `SetupIo` to `NpuIo`**, which `SetupIo` extends; `NpuIo.smartAppControl` gives the state.
+- **npu-check and npu-bench stop when their server exits before it answers.** `RunningServer.exited()` says whether it has (its exit code for a plain child, null for one started apart, watched by its process id). `serverClient.untilAnswers(deadline, gone)` returns null at once when `gone()` says so, and `exitedSay` says why: the block, the exit code and the log's last three lines. The check's `start` step (its `data.exited` and `data.blocked`) and the benchmark's cold or cached load fail with it, where they waited out their 20 minutes or more. The benchmark's wait for its embedding server stops the same way.
+- **Tests that compile and load a DLL or launcher of their own** (pace's two with gentle-test.dll, working-set's, named's two launchers) skip with the reason while Smart App Control is on.
+- spec/NPU-BENCHMARK.md: AMD's three-way series (a Ryzen AI 7 350, 2026-10-23), its counters' names with their " power" suffix, `rapl_package0_pkg` as its whole, and FastFlowLM streaming with its usage.
+
+### Before you update
+
+- Nothing for most agents: take the kit as usual. An agent's own `SetupIo` with `blockedIn` keeps working, as `SetupIo` extends `NpuIo`. A fake `RunningServer` without `exited` waits as before.
+
 ## 2.103.0
 
 **Intel's NPU now answers questions about pictures as well as chat: Qwen3-VL-2B takes the 4B's place, on Castellan's build of OpenVINO GenAI.**

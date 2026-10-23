@@ -67,6 +67,15 @@ export function blocksIn(blocks: Block[], folder: string): Block[] {
 }
 
 /**
+ * A blocked file's path as Node gives it (C:\Users\…), from the log's (\Device\HarddiskVolume3\Users\…) and the folder
+ * it was found under (blocksIn), whose drive it's on.
+ */
+export function localPath(file: string, folder: string): string {
+  const rest = file.replace(/\//g, '\\').replace(/^\\Device\\HarddiskVolume\d+/i, '').replace(/^\\\?\?\\/, '');
+  return /^[a-z]:/i.test(rest) ? rest : `${path.win32.parse(path.win32.resolve(folder)).root.replace(/\\$/, '')}${rest}`;
+}
+
+/**
  * The files in `folder` (or below it) Windows' application control blocked in the last `withinMs`. None when it blocked
  * nothing there, off Windows, or when the log can't be read: a block is said only when the log says it.
  */
@@ -122,6 +131,55 @@ export function smartAppControlState(read: () => string | null = readSac, platfo
   const out = read();
   return out ? parseSacState(out) : null;
 }
+
+/**
+ * Smart App Control's state where a test run may not ask the real one (kit 2.104.0): null under node --test, as
+ * blockedIn's log is, so what a test plans or sets up never depends on this PC's setting. Detection and the NPU's set-up
+ * ask it so; a test passes its own.
+ */
+export const smartAppControlOutsideTests = (): SacState | null => (process.env.NODE_TEST_CONTEXT ? null : smartAppControlState());
+
+/**
+ * STATUS_SYSTEM_INTEGRITY_POLICY_VIOLATION (kit 2.104.0): how a program exits when Windows' application control blocks
+ * a library it loads as it starts. FastFlowLM 1.0.7's flm.exe exits so at once under Smart App Control, printing
+ * nothing, when it's started to serve or to pull a model (WEASELDEV03, 2026-10-22): the Code Integrity log names the
+ * library it stopped at (llama_npu.dll, qwen3_5vl_npu.dll, qwen3_5_omni_npu.dll, qwen3vl_flash.dll).
+ */
+export const BLOCKED_EXIT = 0xc0e90002;
+
+/** Whether an exit code is BLOCKED_EXIT, however it's given: Node's unsigned reading, or a signed 32-bit one. */
+export const blockedExit = (code: number | null | undefined): boolean => typeof code === 'number' && code >>> 0 === BLOCKED_EXIT;
+
+/**
+ * Whether a failure's words carry BLOCKED_EXIT (the start's "exited (code 3236495362)", blockedExitSay's "exit
+ * 0xC0E90002"): how a test request that started the server says it, where the log named no file.
+ */
+export const saysBlockedExit = (text: string): boolean =>
+  new RegExp(`0x${BLOCKED_EXIT.toString(16)}\\b|\\b${BLOCKED_EXIT}\\b|${BLOCKED_EXIT - 2 ** 32}\\b`, 'i').test(text);
+
+/** An exit code as Windows writes it: an NTSTATUS (0xC0E90002, 0xC0000005) in hexadecimal, any other as it is. */
+export function exitCodeSay(code: number | null | undefined): string {
+  if (typeof code !== 'number') return 'no exit code';
+  return code >>> 0 >= 0x80000000 ? `0x${(code >>> 0).toString(16).toUpperCase()}` : String(code);
+}
+
+/**
+ * Why `program` exited BLOCKED_EXIT as it started, when the log can't say which file (it can't be read, or named none in
+ * the program's folder): Smart App Control by name when it's on, else said with care.
+ */
+export function blockedExitSay(program: string, sac: SacState | null): string {
+  return sac === 'on'
+    ? `Windows' Smart App Control blocked ${program} as it started (exit ${exitCodeSay(BLOCKED_EXIT)}): its maker doesn't sign it, and Smart App Control blocks unsigned files it doesn't know`
+    : `Windows blocked ${program} as it started (exit ${exitCodeSay(BLOCKED_EXIT)}), because its maker doesn't sign it (Smart App Control, or a policy like it)`;
+}
+
+/**
+ * The blocks that stop a llama.cpp build from running (kit 2.104.0): any of its files but a processor variant. ggml loads
+ * every ggml-cpu-*.dll at each start and keeps the best it can load, so one variant blocked (the gaming desktop's
+ * ggml-cpu-ivybridge.dll) leaves the server running on another (keepCpuVariant); llama-server.exe, llama.dll or a
+ * backend's ggml-*.dll blocked leaves it with nothing.
+ */
+export const stoppingBlocks = (blocks: Block[]): Block[] => blocks.filter((b) => !/^ggml-cpu-.+\.dll$/i.test(path.win32.basename(b.file)));
 
 /**
  * Why `program` couldn't run, in the person's words, when Windows blocked part of it; null when it blocked nothing. Smart

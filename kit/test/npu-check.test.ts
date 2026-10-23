@@ -913,6 +913,50 @@ test('a server already on the route\'s port: on the NPU the check refuses, in a 
   assert.equal(((await C.routeOnFreePorts(route, true, async () => true)) as any).route, route);
 });
 
+test("a server that exits before it answers fails the start at once, with its exit and its log's last lines (kit 2.104.0)", async () => {
+  // Found on WEASELDEV03 (2026-10-23): FastFlowLM exited at once under Smart App Control (0xC0E90002), its log empty,
+  // and the benchmark waited out its 20 minutes for an answer all the same.
+  const s = await scene();
+  let stopped = 0;
+  const logFile = path.join(s.tools, 'servers', 'logs', 'npu-check-intel.log');
+  const t0 = Date.now();
+  const { code, report } = await C.npuCheck({
+    ...s.opts,
+    io: {
+      ...s.opts.io,
+      start: async () => {
+        s.fake.starts++;
+        mkdirSync(path.dirname(logFile), { recursive: true });
+        writeFileSync(logFile, 'loading the model\nfailed to open the NPU\n', { flag: 'a' });
+        return { pid: 4242, stop: async () => void stopped++, exited: () => ({ code: 3236495362 }) };
+      },
+    },
+  });
+  const start = report.steps.find((x: any) => x.step === 'start')!;
+  assert.equal(code, 1);
+  assert.equal(start.ok, false);
+  assert.ok(Date.now() - t0 < 60_000, 'not the 20 minutes');
+  assert.equal(start.say, `Windows blocked ovms.exe as it started (exit 0xC0E90002), because its maker doesn't sign it (Smart App Control, or a policy like it). ovms.exe exited (0xC0E90002) before it answered; its log ends: loading the model / failed to open the NPU (${logFile})`);
+  assert.equal(start.data!.exited, 3236495362);
+  assert.deepEqual(start.data!.blocked, [], 'the log is never asked in a test run');
+  assert.equal(s.fake.starts, 1, 'started once');
+});
+
+test("startServer says when its server has exited, and with what code; while it runs, it hasn't (kit 2.104.0)", async () => {
+  const dir = path.join(home, 'exits');
+  mkdirSync(dir, { recursive: true });
+  const entry = (script: string) => ({ id: 'npu', chat: { baseUrl: 'http://127.0.0.1:1', model: 'm', startCommand: [process.execPath, '-e', script] } });
+  const quits = await C.startServer(entry('process.exit(7)') as any, path.join(dir, 'quits.log'));
+  await until(() => quits.exited?.(), 30_000, 'the server to have exited');
+  assert.deepEqual(quits.exited!(), { code: 7 });
+  const runs = await C.startServer(entry('setTimeout(() => {}, 60000)') as any, path.join(dir, 'runs.log'));
+  try {
+    assert.equal(runs.exited!(), undefined);
+  } finally {
+    await runs.stop();
+  }
+});
+
 test('portFree: a port something listens on is not free; once closed it is', async () => {
   const srv = createServer();
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
