@@ -7,7 +7,9 @@ import { deflateSync } from 'node:zlib';
 import { type Accelerator, type AcceleratorEntry, type Quirk, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect, type GpuCard, runPowerShell } from './detect.ts';
 import { checkSchema } from './json-schema.ts';
+import { lockDirsOf } from './accelerators.ts';
 import { portFree, routeOnDevice, routeOnFreePorts } from './npu-check.ts';
+import { LockTimeout, QueueFull, withAcceleratorTurn } from './npu-queue.ts';
 import { patchTarget } from './npu-patch.ts';
 import { longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
 import { atVersion, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, pinnedRoute, planNpu, playedRoute, playedSay, playGeneration, pluginPatchOf, routeFor, serverExe, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
@@ -641,6 +643,9 @@ const QUIRK_SAYS: Record<Quirk, string> = {
   'sides-of-32': 'a picture 720 px tall or less with a side of a whole number of 32 px, that side a pixel longer (sides-of-32)',
 };
 
+/** How long each of the run's requests waits for the NPU's turn: an agent's request to finish, or a line of them. */
+export const BENCH_TURN = { waitMs: 10 * 60_000 };
+
 /** How much more than at rest working must draw for its energy to count: the battery's rate wobbles by about this much. */
 export const ENERGY_MIN_EXTRA = { milliwatts: 1_000, share: 0.1 };
 
@@ -988,6 +993,8 @@ export interface NpuBenchOptions {
     clearCache?: (dir: string) => void;
     /** The version of the route's server installed here (npu-vendors.ts' installedVersion by default). */
     serverVersion?: (route: NpuRoute) => Promise<string | null>;
+    /** Runs each request in the NPU's turn (BENCH_TURN): npu-queue.ts' withAcceleratorTurn by default. */
+    turn?: <T>(fn: () => Promise<T>) => Promise<T>;
     /** Whether nothing holds a port on 127.0.0.1 (npu-check.ts' portFree). */
     portFree?: (port: number) => Promise<boolean>;
     /** llama-server's --list-devices, for a graphics run off the NPU (setup.ts' listDevices). */
@@ -1247,338 +1254,350 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     }
   }
 
-  // 4. The server, measured.
-  // The entry carries the route's quirks, and the client's requests are the kit's own (chatBody, visionBody), so they
-  // take them as an agent's do: GenieX's nonce first in every request, which stops it reusing a shared prefix's state
-  // across the tries of one prompt (prefix-leak). Its pictures go as files (image-path), below.
-  const acc = readAccelerator(entry) as Accelerator;
-  if (acc.quirks.length) log(`${route.server}'s requests as the kit sends them: ${acc.quirks.map((q) => QUIRK_SAYS[q] ?? q).join('; ')}`);
-  const client = serverClient(acc, { http: o.io?.fetch, now });
-  const logFile = path.join(tools, 'servers', 'logs', `npu-bench-${vendor}.log`);
-  const start = o.io?.start ?? startServer;
-  if (await client.listening(5_000)) return finish(1, { code: 'start', say: `something already answers at ${client.ep.baseUrl} (the keeper's server?): stop it first, so the benchmark has the server to itself` });
-  const cacheArg = route.serve.indexOf('--cache_dir');
-  if (cacheArg >= 0) {
-    const dir = route.serve[cacheArg + 1].replace('{tools}', tools);
-    (o.io?.clearCache ?? ((p: string) => existsSync(p) && rmSync(p, { recursive: true, force: true })))(dir);
-  }
-  const coldMs = route.timeouts.coldLoadMs ?? 180_000;
-  const stepMs = Math.max(10 * 60_000, coldMs * 2);
-  const startLimit = Math.max(20 * 60_000, coldMs * 5);
-  const streamedSeen: boolean[] = [];
-  const usageSeen: boolean[] = [];
-  const ask = async (q: { prompt: string; maxTokens: number; image?: string }): Promise<Streamed> => {
-    const r = await client.askStream(q, stepMs);
-    if (r.ok) {
-      streamedSeen.push(r.streamed);
-      usageSeen.push(!!r.usage?.completion_tokens);
-    }
-    return r;
-  };
-  // Every read and job is asked fresh (freshPrompt): this run's tag, then a count, never the same twice.
-  type Question = { prompt: string; maxTokens: number };
-  const runTag = Math.random().toString(36).slice(2, 8);
-  let asked = 0;
-  const fresh = (q: Question) => (): Question => ({ ...q, prompt: freshPrompt(q.prompt, `bench ${runTag}-${++asked}`) });
-  const loadAndAnswer = async () => {
-    const t0 = now();
-    const up = await client.untilAnswers(startLimit);
-    if (up === null) return null;
-    const first = await ask({ prompt: suite.short.prompt, maxTokens: suite.short.maxTokens });
-    return first.ok && saysReady(first.raw) ? Math.round(now() - t0) : null;
-  };
-  let server = await start(entry, logFile);
+  // 4. The server, measured, each request in the NPU's turn as an agent's is (kit 2.98.2). The server is on the route's
+  // port on every device, which the keeper's reaper watches as the NPU's, and stops once nobody has taken the NPU's turn
+  // for its idle time: on a Core Ultra 5 225U it stopped the benchmark's own server 7 minutes into a run, and every
+  // question after failed. One turn held for the whole run wouldn't do: anyone else counts a holder stale after
+  // rules.json's lock.staleMs (10 minutes), and the reaper took it then.
+  const turn = o.io?.turn ?? (<T,>(fn: () => Promise<T>) => withAcceleratorTurn(lockDirsOf({ id: 'npu', slots: 1 }), () => fn(), { who: 'npu-bench', lane: 'interactive', ...BENCH_TURN }));
   try {
-    report.results.coldLoadMs = await loadAndAnswer();
-    log(`cold load: ${report.results.coldLoadMs === null ? `no correct answer (see ${logFile})` : `${(report.results.coldLoadMs / 1000).toFixed(1)} s to the first answer`}`);
-    if (report.results.coldLoadMs === null) return finish(1, { code: 'start', say: `${route.server} didn't load and answer "ready": see ${logFile}` });
-
-    // The model loaded and idle (--energy), just after the cold load: what keeping it loaded costs, against no model.
-    let loaded: Span | null = null;
-    if (meter && meter.kind !== 'battery') {
-      loaded = await atRest(meter);
-      const w = meter.whole;
-      log(`energy at rest, the model loaded: ${loaded ? partsSay(meter, loaded.milliwatts) : 'no reading'}${loaded && unloaded && w in loaded.milliwatts && w in unloaded.milliwatts ? `; keeping it loaded: ${watts(loaded.milliwatts[w] - unloaded.milliwatts[w])}` : ''}`);
-    }
-
-    /** A measurement: warm-ups, then the tries, each one value from its answer (null when it failed); `q` a question, or one fresh each time. */
-    const tryTimes = async (q: Question | (() => Question), value: (r: Streamed) => number | null, onEach?: (r: Streamed) => void) => {
-      const next = typeof q === 'function' ? q : () => q;
-      for (let i = 0; i < suite.warmups; i++) await ask(next());
-      const xs: number[] = [];
-      for (let i = 0; i < tries; i++) {
-        const r = await ask(next());
-        onEach?.(r);
-        const v = r.ok ? value(r) : null;
-        xs.push(v ?? Number.NaN);
+    return await (async () => {
+      // The entry carries the route's quirks, and the client's requests are the kit's own (chatBody, visionBody), so they
+      // take them as an agent's do: GenieX's nonce first in every request, which stops it reusing a shared prefix's state
+      // across the tries of one prompt (prefix-leak). Its pictures go as files (image-path), below.
+      const acc = readAccelerator(entry) as Accelerator;
+      if (acc.quirks.length) log(`${route.server}'s requests as the kit sends them: ${acc.quirks.map((q) => QUIRK_SAYS[q] ?? q).join('; ')}`);
+      const client = serverClient(acc, { http: o.io?.fetch, now });
+      const logFile = path.join(tools, 'servers', 'logs', `npu-bench-${vendor}.log`);
+      const start = o.io?.start ?? startServer;
+      if (await client.listening(5_000)) return finish(1, { code: 'start', say: `something already answers at ${client.ep.baseUrl} (the keeper's server?): stop it first, so the benchmark has the server to itself` });
+      const cacheArg = route.serve.indexOf('--cache_dir');
+      if (cacheArg >= 0) {
+        const dir = route.serve[cacheArg + 1].replace('{tools}', tools);
+        (o.io?.clearCache ?? ((p: string) => existsSync(p) && rmSync(p, { recursive: true, force: true })))(dir);
       }
-      return measure(xs, suite.steady.maxSpread);
-    };
-    report.results.short = await tryTimes(suite.short, (r) => (grade(suite.short.grade, r.answer) ? r.ms : null));
-    log(`short answer: ${report.results.short.median} ms`);
-    report.results.writeTokensPerSecond = await tryTimes(suite.write, (r) => r.tokensPerSecond ?? (r.usage?.completion_tokens ? r.usage.completion_tokens / (r.ms / 1000) : null));
-    log(`writing: ${report.results.writeTokensPerSecond.median} tokens a second`);
-    for (const n of suite.read.sizes) {
-      report.results.readFirstTokenMs[String(n)] = await tryTimes(fresh({ prompt: readPrompt(suite, n), maxTokens: suite.read.maxTokens }), (r) => r.firstTokenMs ?? r.ms);
-      log(`reading ${n} tokens: ${report.results.readFirstTokenMs[String(n)].median} ms to the first token`);
-    }
-    if (route.maxContextTokens * suite.read.capShare > Math.max(...suite.read.sizes)) {
-      const r = await ask(fresh({ prompt: readPrompt(suite, Math.round(route.maxContextTokens * suite.read.capShare) - suite.read.maxTokens), maxTokens: suite.read.maxTokens })());
-      report.results.readAtCap = { promptTokens: Number(r.usage?.prompt_tokens) || null, firstTokenMs: r.ok ? (r.firstTokenMs ?? r.ms) : null };
-      log(`reading near the cap (${report.results.readAtCap.promptTokens ?? '?'} of ${route.maxContextTokens} tokens): ${report.results.readAtCap.firstTokenMs ?? 'no answer'} ms to the first token`);
-    }
-    for (const job of suite.jobs) {
-      let passed = 0;
-      const answerTokens: (number | null)[] = [];
-      const firstTokenMs: (number | null)[] = [];
-      const m = await tryTimes(fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens }), (r) => r.ms, (r) => {
-        if (r.ok && grade(job.grade, r.answer)) passed++;
-        answerTokens.push(r.ok ? Number(r.usage?.completion_tokens) || null : null);
-        firstTokenMs.push(r.ok ? r.firstTokenMs : null);
-      });
-      report.results.jobs[job.id] = { ...jobMeasure(m.tries, answerTokens, firstTokenMs, suite.steady.maxSpread), passed };
-      log(`the ${job.id} job: ${m.median} ms, ${passed} of ${tries} answered correctly`);
-    }
-    const jobMedians = suite.jobs.map((j) => report.results.jobs[j.id]?.median);
-    report.results.jobTimeS = jobMedians.every((x) => typeof x === 'number') ? Number(((jobMedians as number[]).reduce((a, b) => a + b, 0) / 1000).toFixed(2)) : null;
-    log(`job time: ${report.results.jobTimeS ?? '—'} s`);
-
-    for (const item of suite.quality) {
-      const r = await ask({ prompt: promptOf(suite, item), maxTokens: item.maxTokens });
-      report.quality.items.push({ id: item.id, kind: item.kind ?? 'instruction', ok: r.ok && grade(item.grade, r.answer), answer: (r.ok ? r.answer : `(${r.error})`).slice(0, 120), ms: r.ms });
-    }
-    report.quality.passed = report.quality.items.filter((x) => x.ok).length;
-    report.quality.score = Number((report.quality.passed / report.quality.of).toFixed(3));
-    report.quality.mustPass = suite.quality.filter((x) => x.mustPass).every((x) => report.quality.items.find((i) => i.id === x.id)?.ok);
-    report.quality.gate = report.quality.mustPass && report.quality.score >= suite.gate.score;
-    log(`quality: ${report.quality.passed} of ${report.quality.of}${report.quality.mustPass ? '' : ', a must-pass question wrong'}${report.quality.items.some((x) => !x.ok) ? ` (wrong: ${report.quality.items.filter((x) => !x.ok).map((x) => x.id).join(', ')})` : ''}`);
-
-    if (acc.vision?.model && suite.vision.length) {
-      // A server that reads a local path (GenieX: image-path) gets each picture as a file, as an agent's pictures go to
-      // it; a `data:` URL is sent as it is, whatever the quirk says (imageUrl), and GenieX doesn't read one. FastFlowLM's
-      // (sides-of-32) are fitted as an agent's are (fitPicture, in serverClient): three of the suite's four have such sides.
-      const { imageOf, done } = pictureInputs(acc.quirks.includes('image-path'));
-      try {
-        // A warm-up, as every measurement has: GenieX holds one model at a time, and a server may load its vision part
-        // only for the first picture. Neither is a picture's time.
-        for (let i = 0; i < suite.warmups; i++) await ask({ prompt: suite.vision[0].prompt, maxTokens: suite.vision[0].maxTokens, image: imageOf(suite.vision[0]) });
-        const items: NonNullable<BenchReport['vision']>['items'] = [];
-        for (const v of suite.vision) {
-          const r = await ask({ prompt: v.prompt, maxTokens: v.maxTokens, image: imageOf(v) });
-          items.push({ id: v.id, ok: r.ok && grade(v.grade, r.answer), answer: (r.ok ? r.answer : `(${r.error})`).slice(0, 120), ms: r.ms });
+      const coldMs = route.timeouts.coldLoadMs ?? 180_000;
+      const stepMs = Math.max(10 * 60_000, coldMs * 2);
+      const startLimit = Math.max(20 * 60_000, coldMs * 5);
+      const streamedSeen: boolean[] = [];
+      const usageSeen: boolean[] = [];
+      const ask = async (q: { prompt: string; maxTokens: number; image?: string }): Promise<Streamed> => {
+        const r = await turn(() => client.askStream(q, stepMs));
+        if (r.ok) {
+          streamedSeen.push(r.streamed);
+          usageSeen.push(!!r.usage?.completion_tokens);
         }
-        report.vision = { passed: items.filter((x) => x.ok).length, of: items.length, items };
-        log(`vision: ${report.vision.passed} of ${report.vision.of}`);
-      } finally {
-        done();
-      }
-    }
+        return r;
+      };
+      // Every read and job is asked fresh (freshPrompt): this run's tag, then a count, never the same twice.
+      type Question = { prompt: string; maxTokens: number };
+      const runTag = Math.random().toString(36).slice(2, 8);
+      let asked = 0;
+      const fresh = (q: Question) => (): Question => ({ ...q, prompt: freshPrompt(q.prompt, `bench ${runTag}-${++asked}`) });
+      const loadAndAnswer = async () => {
+        const t0 = now();
+        const up = await client.untilAnswers(startLimit);
+        if (up === null) return null;
+        const first = await ask({ prompt: suite.short.prompt, maxTokens: suite.short.maxTokens });
+        return first.ok && saysReady(first.raw) ? Math.round(now() - t0) : null;
+      };
+      let server = await start(entry, logFile);
+      try {
+        report.results.coldLoadMs = await loadAndAnswer();
+        log(`cold load: ${report.results.coldLoadMs === null ? `no correct answer (see ${logFile})` : `${(report.results.coldLoadMs / 1000).toFixed(1)} s to the first answer`}`);
+        if (report.results.coldLoadMs === null) return finish(1, { code: 'start', say: `${route.server} didn't load and answer "ready": see ${logFile}` });
 
-    report.results.memory = server.pid ? await (o.io?.memory ?? processMemory)(server.pid) : null;
+        // The model loaded and idle (--energy), just after the cold load: what keeping it loaded costs, against no model.
+        let loaded: Span | null = null;
+        if (meter && meter.kind !== 'battery') {
+          loaded = await atRest(meter);
+          const w = meter.whole;
+          log(`energy at rest, the model loaded: ${loaded ? partsSay(meter, loaded.milliwatts) : 'no reading'}${loaded && unloaded && w in loaded.milliwatts && w in unloaded.milliwatts ? `; keeping it loaded: ${watts(loaded.milliwatts[w] - unloaded.milliwatts[w])}` : ''}`);
+        }
 
-    // A start again, from the compile cache.
-    await server.stop();
-    await client.untilGone();
-    server = await start(entry, logFile);
-    report.results.cachedLoadMs = await loadAndAnswer();
-    log(`cached load: ${report.results.cachedLoadMs === null ? 'no correct answer' : `${(report.results.cachedLoadMs / 1000).toFixed(1)} s`}`);
-
-    const jobById = (id: string) => suite.jobs.find((j) => j.id === id) ?? suite.jobs[0];
-    if (profile === 'full') {
-      // Holding speed: one job back to back, the first minute against the last.
-      const job = jobById(suite.holding.job);
-      const q = fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens });
-      const t0 = now();
-      const done: { at: number; ms: number }[] = [];
-      while (now() - t0 < suite.holding.minutes * 60_000) {
-        const r = await ask(q());
-        if (!r.ok) break;
-        done.push({ at: now() - t0, ms: r.ms });
-      }
-      const minute = (from: number, to: number) => measure(done.filter((x) => x.at >= from && x.at < to).map((x) => x.ms), 1).median;
-      const end = suite.holding.minutes * 60_000;
-      const first = minute(0, 60_000);
-      const last = minute(end - 60_000, end + 60_000);
-      report.results.holding = { minutes: suite.holding.minutes, firstMinuteMs: first, lastMinuteMs: last, held: first && last ? Number((first / last).toFixed(3)) : null };
-      log(`holding speed: ${report.results.holding.held === null ? '—' : `${Math.round(report.results.holding.held * 100)}% after ${suite.holding.minutes} minutes`}`);
-    }
-    if (meter) {
-      const m = meter;
-      const whole = m.whole;
-      const span = (x: { ms?: number; work?: () => Promise<void>; during?: () => Promise<void> }) => measureSpan(m, { now, sleep, ...x });
-      const chargingNow = m.kind === 'battery' ? false : await (o.io?.charging ?? charging)();
-      if (chargingNow && m.kind !== 'nvidia') log(`energy: the battery is charging, so the whole PC's figures (${whole}) carry its charge, and each part's don't: for whole-PC figures, run it with the battery full`);
-      const job = jobById(suite.energy.job);
-      const q = fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens });
-      const tokensOf = (r: Streamed) => (Number(r.usage?.prompt_tokens) || 0) + (Number(r.usage?.completion_tokens) || 0);
-      let jobs = 0;
-      let tokens = 0;
-      const rest = await atRest(m);
-      const load = await span({
-        ms: suite.energy.loadMinutes * 60_000,
-        during: async () => {
-          const r = await ask(q());
-          if (r.ok) {
-            jobs++;
-            tokens += tokensOf(r);
+        /** A measurement: warm-ups, then the tries, each one value from its answer (null when it failed); `q` a question, or one fresh each time. */
+        const tryTimes = async (q: Question | (() => Question), value: (r: Streamed) => number | null, onEach?: (r: Streamed) => void) => {
+          const next = typeof q === 'function' ? q : () => q;
+          for (let i = 0; i < suite.warmups; i++) await ask(next());
+          const xs: number[] = [];
+          for (let i = 0; i < tries; i++) {
+            const r = await ask(next());
+            onEach?.(r);
+            const v = r.ok ? value(r) : null;
+            xs.push(v ?? Number.NaN);
           }
-        },
-      });
-      if (rest && load && whole in rest.milliwatts && whole in load.milliwatts) {
-        const restMw = rest.milliwatts[whole];
-        const loadMw = load.milliwatts[whole];
-        const extraJoules = ((loadMw - restMw) / 1000) * load.seconds;
-        // Working that draws no clearly more than rest is the battery's reading wobbling, not the model's energy:
-        // on the Lunar Lake laptop the rate read 28 W at rest, nearly twice its real drain, and less working (NPU-BENCHMARK.md).
-        // A meter that keeps totals, or a plug's or a card's own reading, doesn't wobble so: any more than rest counts.
-        const clear = m.kind === 'battery' ? loadMw - restMw >= Math.max(ENERGY_MIN_EXTRA.milliwatts, restMw * ENERGY_MIN_EXTRA.share) : loadMw > restMw;
-        const e: NonNullable<BenchReport['results']['energy']> = { restMilliwatts: Math.round(restMw), loadMilliwatts: Math.round(loadMw), jobs, tokens, millijoulesPerToken: clear && tokens ? Number(((extraJoules * 1000) / tokens).toFixed(3)) : null };
-        report.results.energy = e;
-        if (clear) log(`energy: ${e.millijoulesPerToken} mJ a token (${Math.round(restMw)} mW at rest, ${Math.round(loadMw)} mW working)`);
-        else log(`energy: not counted: working read ${Math.round(loadMw)} mW against ${Math.round(restMw)} mW at rest, too little more for ${m.kind === 'battery' ? "the battery's reading" : 'the meter'} to tell the model's share`);
-        if (m.kind !== 'battery') {
-          const round = roundParts;
-          e.meter = { kind: m.kind, say: m.say, whole };
-          e.charging = chargingNow;
-          e.idle = { unloadedMilliwatts: unloaded ? round(unloaded.milliwatts) : null, loadedMilliwatts: loaded ? round(loaded.milliwatts) : null, keepLoadedMilliwatts: unloaded && loaded && whole in unloaded.milliwatts && whole in loaded.milliwatts ? Math.round(loaded.milliwatts[whole] - unloaded.milliwatts[whole]) : null };
-          e.restParts = round(rest.milliwatts);
-          e.loadParts = round(load.milliwatts);
-          e.batches = {};
-          const batches = e.batches;
-          // Fixed batches of the agents' work, each a stretch of its own, against the PC at rest just before: what one of
-          // each costs, by part. A batch's tries are fresh prompts, as every read and job is.
-          const batch = async (id: string, what: string, count: number, one: (i: number) => Promise<{ ok: boolean; tokens: number }>) => {
-            const b = await energyBatch(m, rest, count, one, { now, sleep, what, log });
-            if (b) batches[id] = b;
-          };
-          const count = suite.energy.batch?.[profile] ?? 0;
-          if (count) {
-            for (const j of suite.jobs)
-              await batch(j.id, `${j.id} jobs`, count, async () => {
-                const r = await ask(fresh({ prompt: promptOf(suite, j), maxTokens: j.maxTokens })());
-                return { ok: r.ok && grade(j.grade, r.answer), tokens: r.ok ? tokensOf(r) : 0 };
-              });
-            const size = Math.max(...suite.read.sizes);
-            await batch(`read-${size}`, `reads of ${size} tokens`, count, async () => {
-              const r = await ask(fresh({ prompt: readPrompt(suite, size), maxTokens: suite.read.maxTokens })());
-              return { ok: r.ok, tokens: r.ok ? tokensOf(r) : 0 };
-            });
-            if (acc.vision?.model && suite.vision.length) {
-              // One picture first, untimed, as for vision above: GenieX loads its vision part for a picture after text.
-              // No more than twice the suite's pictures: GenieX's DSP gives out after about a dozen vision loads in one
-              // process (ACCELERATORS.md), and a run's second process has sent none before this.
-              const pics = pictureInputs(acc.quirks.includes('image-path'));
-              try {
-                const v0 = suite.vision[0];
-                await ask({ prompt: v0.prompt, maxTokens: v0.maxTokens, image: pics.imageOf(v0) });
-                await batch('pictures', 'pictures', Math.min(count, suite.vision.length * 2), async (i) => {
-                  const v = suite.vision[i % suite.vision.length];
-                  const r = await ask({ prompt: v.prompt, maxTokens: v.maxTokens, image: pics.imageOf(v) });
-                  return { ok: r.ok && grade(v.grade, r.answer), tokens: r.ok ? tokensOf(r) : 0 };
+          return measure(xs, suite.steady.maxSpread);
+        };
+        report.results.short = await tryTimes(suite.short, (r) => (grade(suite.short.grade, r.answer) ? r.ms : null));
+        log(`short answer: ${report.results.short.median} ms`);
+        report.results.writeTokensPerSecond = await tryTimes(suite.write, (r) => r.tokensPerSecond ?? (r.usage?.completion_tokens ? r.usage.completion_tokens / (r.ms / 1000) : null));
+        log(`writing: ${report.results.writeTokensPerSecond.median} tokens a second`);
+        for (const n of suite.read.sizes) {
+          report.results.readFirstTokenMs[String(n)] = await tryTimes(fresh({ prompt: readPrompt(suite, n), maxTokens: suite.read.maxTokens }), (r) => r.firstTokenMs ?? r.ms);
+          log(`reading ${n} tokens: ${report.results.readFirstTokenMs[String(n)].median} ms to the first token`);
+        }
+        if (route.maxContextTokens * suite.read.capShare > Math.max(...suite.read.sizes)) {
+          const r = await ask(fresh({ prompt: readPrompt(suite, Math.round(route.maxContextTokens * suite.read.capShare) - suite.read.maxTokens), maxTokens: suite.read.maxTokens })());
+          report.results.readAtCap = { promptTokens: Number(r.usage?.prompt_tokens) || null, firstTokenMs: r.ok ? (r.firstTokenMs ?? r.ms) : null };
+          log(`reading near the cap (${report.results.readAtCap.promptTokens ?? '?'} of ${route.maxContextTokens} tokens): ${report.results.readAtCap.firstTokenMs ?? 'no answer'} ms to the first token`);
+        }
+        for (const job of suite.jobs) {
+          let passed = 0;
+          const answerTokens: (number | null)[] = [];
+          const firstTokenMs: (number | null)[] = [];
+          const m = await tryTimes(fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens }), (r) => r.ms, (r) => {
+            if (r.ok && grade(job.grade, r.answer)) passed++;
+            answerTokens.push(r.ok ? Number(r.usage?.completion_tokens) || null : null);
+            firstTokenMs.push(r.ok ? r.firstTokenMs : null);
+          });
+          report.results.jobs[job.id] = { ...jobMeasure(m.tries, answerTokens, firstTokenMs, suite.steady.maxSpread), passed };
+          log(`the ${job.id} job: ${m.median} ms, ${passed} of ${tries} answered correctly`);
+        }
+        const jobMedians = suite.jobs.map((j) => report.results.jobs[j.id]?.median);
+        report.results.jobTimeS = jobMedians.every((x) => typeof x === 'number') ? Number(((jobMedians as number[]).reduce((a, b) => a + b, 0) / 1000).toFixed(2)) : null;
+        log(`job time: ${report.results.jobTimeS ?? '—'} s`);
+
+        for (const item of suite.quality) {
+          const r = await ask({ prompt: promptOf(suite, item), maxTokens: item.maxTokens });
+          report.quality.items.push({ id: item.id, kind: item.kind ?? 'instruction', ok: r.ok && grade(item.grade, r.answer), answer: (r.ok ? r.answer : `(${r.error})`).slice(0, 120), ms: r.ms });
+        }
+        report.quality.passed = report.quality.items.filter((x) => x.ok).length;
+        report.quality.score = Number((report.quality.passed / report.quality.of).toFixed(3));
+        report.quality.mustPass = suite.quality.filter((x) => x.mustPass).every((x) => report.quality.items.find((i) => i.id === x.id)?.ok);
+        report.quality.gate = report.quality.mustPass && report.quality.score >= suite.gate.score;
+        log(`quality: ${report.quality.passed} of ${report.quality.of}${report.quality.mustPass ? '' : ', a must-pass question wrong'}${report.quality.items.some((x) => !x.ok) ? ` (wrong: ${report.quality.items.filter((x) => !x.ok).map((x) => x.id).join(', ')})` : ''}`);
+
+        if (acc.vision?.model && suite.vision.length) {
+          // A server that reads a local path (GenieX: image-path) gets each picture as a file, as an agent's pictures go to
+          // it; a `data:` URL is sent as it is, whatever the quirk says (imageUrl), and GenieX doesn't read one. FastFlowLM's
+          // (sides-of-32) are fitted as an agent's are (fitPicture, in serverClient): three of the suite's four have such sides.
+          const { imageOf, done } = pictureInputs(acc.quirks.includes('image-path'));
+          try {
+            // A warm-up, as every measurement has: GenieX holds one model at a time, and a server may load its vision part
+            // only for the first picture. Neither is a picture's time.
+            for (let i = 0; i < suite.warmups; i++) await ask({ prompt: suite.vision[0].prompt, maxTokens: suite.vision[0].maxTokens, image: imageOf(suite.vision[0]) });
+            const items: NonNullable<BenchReport['vision']>['items'] = [];
+            for (const v of suite.vision) {
+              const r = await ask({ prompt: v.prompt, maxTokens: v.maxTokens, image: imageOf(v) });
+              items.push({ id: v.id, ok: r.ok && grade(v.grade, r.answer), answer: (r.ok ? r.answer : `(${r.error})`).slice(0, 120), ms: r.ms });
+            }
+            report.vision = { passed: items.filter((x) => x.ok).length, of: items.length, items };
+            log(`vision: ${report.vision.passed} of ${report.vision.of}`);
+          } finally {
+            done();
+          }
+        }
+
+        report.results.memory = server.pid ? await (o.io?.memory ?? processMemory)(server.pid) : null;
+
+        // A start again, from the compile cache.
+        await server.stop();
+        await client.untilGone();
+        server = await start(entry, logFile);
+        report.results.cachedLoadMs = await loadAndAnswer();
+        log(`cached load: ${report.results.cachedLoadMs === null ? 'no correct answer' : `${(report.results.cachedLoadMs / 1000).toFixed(1)} s`}`);
+
+        const jobById = (id: string) => suite.jobs.find((j) => j.id === id) ?? suite.jobs[0];
+        if (profile === 'full') {
+          // Holding speed: one job back to back, the first minute against the last.
+          const job = jobById(suite.holding.job);
+          const q = fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens });
+          const t0 = now();
+          const done: { at: number; ms: number }[] = [];
+          while (now() - t0 < suite.holding.minutes * 60_000) {
+            const r = await ask(q());
+            if (!r.ok) break;
+            done.push({ at: now() - t0, ms: r.ms });
+          }
+          const minute = (from: number, to: number) => measure(done.filter((x) => x.at >= from && x.at < to).map((x) => x.ms), 1).median;
+          const end = suite.holding.minutes * 60_000;
+          const first = minute(0, 60_000);
+          const last = minute(end - 60_000, end + 60_000);
+          report.results.holding = { minutes: suite.holding.minutes, firstMinuteMs: first, lastMinuteMs: last, held: first && last ? Number((first / last).toFixed(3)) : null };
+          log(`holding speed: ${report.results.holding.held === null ? '—' : `${Math.round(report.results.holding.held * 100)}% after ${suite.holding.minutes} minutes`}`);
+        }
+        if (meter) {
+          const m = meter;
+          const whole = m.whole;
+          const span = (x: { ms?: number; work?: () => Promise<void>; during?: () => Promise<void> }) => measureSpan(m, { now, sleep, ...x });
+          const chargingNow = m.kind === 'battery' ? false : await (o.io?.charging ?? charging)();
+          if (chargingNow && m.kind !== 'nvidia') log(`energy: the battery is charging, so the whole PC's figures (${whole}) carry its charge, and each part's don't: for whole-PC figures, run it with the battery full`);
+          const job = jobById(suite.energy.job);
+          const q = fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens });
+          const tokensOf = (r: Streamed) => (Number(r.usage?.prompt_tokens) || 0) + (Number(r.usage?.completion_tokens) || 0);
+          let jobs = 0;
+          let tokens = 0;
+          const rest = await atRest(m);
+          const load = await span({
+            ms: suite.energy.loadMinutes * 60_000,
+            during: async () => {
+              const r = await ask(q());
+              if (r.ok) {
+                jobs++;
+                tokens += tokensOf(r);
+              }
+            },
+          });
+          if (rest && load && whole in rest.milliwatts && whole in load.milliwatts) {
+            const restMw = rest.milliwatts[whole];
+            const loadMw = load.milliwatts[whole];
+            const extraJoules = ((loadMw - restMw) / 1000) * load.seconds;
+            // Working that draws no clearly more than rest is the battery's reading wobbling, not the model's energy:
+            // on the Lunar Lake laptop the rate read 28 W at rest, nearly twice its real drain, and less working (NPU-BENCHMARK.md).
+            // A meter that keeps totals, or a plug's or a card's own reading, doesn't wobble so: any more than rest counts.
+            const clear = m.kind === 'battery' ? loadMw - restMw >= Math.max(ENERGY_MIN_EXTRA.milliwatts, restMw * ENERGY_MIN_EXTRA.share) : loadMw > restMw;
+            const e: NonNullable<BenchReport['results']['energy']> = { restMilliwatts: Math.round(restMw), loadMilliwatts: Math.round(loadMw), jobs, tokens, millijoulesPerToken: clear && tokens ? Number(((extraJoules * 1000) / tokens).toFixed(3)) : null };
+            report.results.energy = e;
+            if (clear) log(`energy: ${e.millijoulesPerToken} mJ a token (${Math.round(restMw)} mW at rest, ${Math.round(loadMw)} mW working)`);
+            else log(`energy: not counted: working read ${Math.round(loadMw)} mW against ${Math.round(restMw)} mW at rest, too little more for ${m.kind === 'battery' ? "the battery's reading" : 'the meter'} to tell the model's share`);
+            if (m.kind !== 'battery') {
+              const round = roundParts;
+              e.meter = { kind: m.kind, say: m.say, whole };
+              e.charging = chargingNow;
+              e.idle = { unloadedMilliwatts: unloaded ? round(unloaded.milliwatts) : null, loadedMilliwatts: loaded ? round(loaded.milliwatts) : null, keepLoadedMilliwatts: unloaded && loaded && whole in unloaded.milliwatts && whole in loaded.milliwatts ? Math.round(loaded.milliwatts[whole] - unloaded.milliwatts[whole]) : null };
+              e.restParts = round(rest.milliwatts);
+              e.loadParts = round(load.milliwatts);
+              e.batches = {};
+              const batches = e.batches;
+              // Fixed batches of the agents' work, each a stretch of its own, against the PC at rest just before: what one of
+              // each costs, by part. A batch's tries are fresh prompts, as every read and job is.
+              const batch = async (id: string, what: string, count: number, one: (i: number) => Promise<{ ok: boolean; tokens: number }>) => {
+                const b = await energyBatch(m, rest, count, one, { now, sleep, what, log });
+                if (b) batches[id] = b;
+              };
+              const count = suite.energy.batch?.[profile] ?? 0;
+              if (count) {
+                for (const j of suite.jobs)
+                  await batch(j.id, `${j.id} jobs`, count, async () => {
+                    const r = await ask(fresh({ prompt: promptOf(suite, j), maxTokens: j.maxTokens })());
+                    return { ok: r.ok && grade(j.grade, r.answer), tokens: r.ok ? tokensOf(r) : 0 };
+                  });
+                const size = Math.max(...suite.read.sizes);
+                await batch(`read-${size}`, `reads of ${size} tokens`, count, async () => {
+                  const r = await ask(fresh({ prompt: readPrompt(suite, size), maxTokens: suite.read.maxTokens })());
+                  return { ok: r.ok, tokens: r.ok ? tokensOf(r) : 0 };
                 });
-              } finally {
-                pics.done();
+                if (acc.vision?.model && suite.vision.length) {
+                  // One picture first, untimed, as for vision above: GenieX loads its vision part for a picture after text.
+                  // No more than twice the suite's pictures: GenieX's DSP gives out after about a dozen vision loads in one
+                  // process (ACCELERATORS.md), and a run's second process has sent none before this.
+                  const pics = pictureInputs(acc.quirks.includes('image-path'));
+                  try {
+                    const v0 = suite.vision[0];
+                    await ask({ prompt: v0.prompt, maxTokens: v0.maxTokens, image: pics.imageOf(v0) });
+                    await batch('pictures', 'pictures', Math.min(count, suite.vision.length * 2), async (i) => {
+                      const v = suite.vision[i % suite.vision.length];
+                      const r = await ask({ prompt: v.prompt, maxTokens: v.maxTokens, image: pics.imageOf(v) });
+                      return { ok: r.ok && grade(v.grade, r.answer), tokens: r.ok ? tokensOf(r) : 0 };
+                    });
+                  } finally {
+                    pics.done();
+                  }
+                }
+              }
+            }
+          } else log(m.kind === 'battery' ? 'energy: the battery gave no discharge rate' : `energy: ${m.say} gave no reading`);
+        }
+      } finally {
+        await server.stop();
+        await client.untilGone();
+      }
+
+      // 5. Embeddings (kit 2.99.0), once the chat server has stopped: the route's embedding server (the NPU's own, or on the
+      // run's device where it moves with it), or llama.cpp's beside the model off the NPU, started by itself as an agent's
+      // first request starts it. A query, and requests of the suite's texts (embedTexts, each request's its own), timed
+      // warm; with a meter, the PC at rest with it loaded (what keeping it loaded costs, against no model) and a batch of
+      // those requests.
+      const ee = entry.embed;
+      if (suite.embed && ee?.baseUrl && ee.startCommand?.length && ee.baseUrl !== entry.chat?.baseUrl) {
+        const se = suite.embed;
+        const ep = { baseUrl: ee.baseUrl, model: ee.model };
+        const http = o.io?.fetch ?? longFetch;
+        const embedLog = path.join(tools, 'servers', 'logs', `npu-bench-${vendor}-embed.log`);
+        const eAsk = (input: string | string[]) => turn(() => embedAsk(http, ep, input, stepMs, now));
+        const texts = () => embedTexts(suite, `embed ${runTag}-${++asked}`);
+        // Until it no longer takes connections, or 30 seconds.
+        const gone = async () => {
+          const t = now();
+          while (now() - t < 30_000) {
+            try {
+              await (await http(`${ep.baseUrl}/v1/models`, { signal: AbortSignal.timeout(1_000) })).text();
+            } catch (e) {
+              if (refusedConnection(e)) return;
+            }
+            await sleep(250);
+          }
+        };
+        const eServer = await start({ ...entry, chat: ee }, embedLog);
+        try {
+          // Until it gives a vector: a server loading its model answers 503, or not at all, meanwhile.
+          const t0 = now();
+          let first = await eAsk(se.query);
+          while (!first.ok && now() - t0 < Math.max(5 * 60_000, coldMs * 2)) {
+            await sleep(500);
+            first = await eAsk(se.query);
+          }
+          if (!first.ok) {
+            report.results.embed = null;
+            log(`embeddings: no vector after a start (${first.error}): see ${embedLog}`);
+          } else {
+            const loadMs = Math.round(now() - t0);
+            const tryEmbed = async (input: () => string | string[]) => {
+              for (let i = 0; i < suite.warmups; i++) await eAsk(input());
+              const ms: number[] = [];
+              const tk: number[] = [];
+              for (let i = 0; i < tries; i++) {
+                const r = await eAsk(input());
+                ms.push(r.ok ? r.ms : Number.NaN);
+                if (r.ok && r.tokens) tk.push(r.tokens);
+              }
+              return { m: measure(ms, suite.steady.maxSpread), tokens: medianOf(tk) };
+            };
+            const query = await tryEmbed(() => se.query);
+            const request = await tryEmbed(texts);
+            const perSecond = request.tokens && request.m.median ? Math.round(request.tokens / (request.m.median / 1000)) : null;
+            report.results.embed = { server: off ? off.server : `${route.embedServer?.server ?? route.server} ${route.embedServer?.version ?? route.version}`, model: ee.model, loadMs, queryMs: query.m, requestMs: request.m, texts: se.texts, tokens: request.tokens, tokensPerSecond: perSecond, dims: first.dims || null };
+            log(`embeddings: ${ee.model}'s first vector ${(loadMs / 1000).toFixed(1)} s after a start; a query ${query.m.median} ms; ${se.texts} texts ${request.m.median} ms (${request.tokens ?? '?'} tokens, ${perSecond ?? '?'} a second)`);
+            const energy = report.results.energy;
+            if (meter && meter.kind !== 'battery' && energy) {
+              const w = meter.whole;
+              const idle = await atRest(meter);
+              const keep = idle && unloaded && w in idle.milliwatts && w in unloaded.milliwatts ? Math.round(idle.milliwatts[w] - unloaded.milliwatts[w]) : null;
+              energy.embed = { loadedMilliwatts: idle ? roundParts(idle.milliwatts) : null, keepLoadedMilliwatts: keep };
+              log(`energy at rest, the embedding model loaded: ${idle ? partsSay(meter, idle.milliwatts) : 'no reading'}${keep !== null ? `; keeping it loaded: ${watts(keep)}` : ''}`);
+              const count = se.batch[profile];
+              if (idle && count) {
+                const b = await energyBatch(meter, idle, count, async () => {
+                  const r = await eAsk(texts());
+                  return { ok: r.ok, tokens: r.tokens ?? 0 };
+                }, { now, sleep, what: `embedding requests of ${se.texts} texts`, log });
+                if (b) (energy.batches ??= {}).embed = b;
               }
             }
           }
+        } finally {
+          await eServer.stop();
+          await gone();
         }
-      } else log(m.kind === 'battery' ? 'energy: the battery gave no discharge rate' : `energy: ${m.say} gave no reading`);
-    }
-  } finally {
-    await server.stop();
-    await client.untilGone();
-  }
-
-  // 5. Embeddings (kit 2.99.0), once the chat server has stopped: the route's embedding server (the NPU's own, or on the
-  // run's device where it moves with it), or llama.cpp's beside the model off the NPU, started by itself as an agent's
-  // first request starts it. A query, and requests of the suite's texts (embedTexts, each request's its own), timed
-  // warm; with a meter, the PC at rest with it loaded (what keeping it loaded costs, against no model) and a batch of
-  // those requests.
-  const ee = entry.embed;
-  if (suite.embed && ee?.baseUrl && ee.startCommand?.length && ee.baseUrl !== entry.chat?.baseUrl) {
-    const se = suite.embed;
-    const ep = { baseUrl: ee.baseUrl, model: ee.model };
-    const http = o.io?.fetch ?? longFetch;
-    const embedLog = path.join(tools, 'servers', 'logs', `npu-bench-${vendor}-embed.log`);
-    const eAsk = (input: string | string[]) => embedAsk(http, ep, input, stepMs, now);
-    const texts = () => embedTexts(suite, `embed ${runTag}-${++asked}`);
-    // Until it no longer takes connections, or 30 seconds.
-    const gone = async () => {
-      const t = now();
-      while (now() - t < 30_000) {
-        try {
-          await (await http(`${ep.baseUrl}/v1/models`, { signal: AbortSignal.timeout(1_000) })).text();
-        } catch (e) {
-          if (refusedConnection(e)) return;
-        }
-        await sleep(250);
-      }
-    };
-    const eServer = await start({ ...entry, chat: ee }, embedLog);
-    try {
-      // Until it gives a vector: a server loading its model answers 503, or not at all, meanwhile.
-      const t0 = now();
-      let first = await eAsk(se.query);
-      while (!first.ok && now() - t0 < Math.max(5 * 60_000, coldMs * 2)) {
-        await sleep(500);
-        first = await eAsk(se.query);
-      }
-      if (!first.ok) {
+      } else if (suite.embed) {
         report.results.embed = null;
-        log(`embeddings: no vector after a start (${first.error}): see ${embedLog}`);
-      } else {
-        const loadMs = Math.round(now() - t0);
-        const tryEmbed = async (input: () => string | string[]) => {
-          for (let i = 0; i < suite.warmups; i++) await eAsk(input());
-          const ms: number[] = [];
-          const tk: number[] = [];
-          for (let i = 0; i < tries; i++) {
-            const r = await eAsk(input());
-            ms.push(r.ok ? r.ms : Number.NaN);
-            if (r.ok && r.tokens) tk.push(r.tokens);
-          }
-          return { m: measure(ms, suite.steady.maxSpread), tokens: medianOf(tk) };
-        };
-        const query = await tryEmbed(() => se.query);
-        const request = await tryEmbed(texts);
-        const perSecond = request.tokens && request.m.median ? Math.round(request.tokens / (request.m.median / 1000)) : null;
-        report.results.embed = { server: off ? off.server : `${route.embedServer?.server ?? route.server} ${route.embedServer?.version ?? route.version}`, model: ee.model, loadMs, queryMs: query.m, requestMs: request.m, texts: se.texts, tokens: request.tokens, tokensPerSecond: perSecond, dims: first.dims || null };
-        log(`embeddings: ${ee.model}'s first vector ${(loadMs / 1000).toFixed(1)} s after a start; a query ${query.m.median} ms; ${se.texts} texts ${request.m.median} ms (${request.tokens ?? '?'} tokens, ${perSecond ?? '?'} a second)`);
-        const energy = report.results.energy;
-        if (meter && meter.kind !== 'battery' && energy) {
-          const w = meter.whole;
-          const idle = await atRest(meter);
-          const keep = idle && unloaded && w in idle.milliwatts && w in unloaded.milliwatts ? Math.round(idle.milliwatts[w] - unloaded.milliwatts[w]) : null;
-          energy.embed = { loadedMilliwatts: idle ? roundParts(idle.milliwatts) : null, keepLoadedMilliwatts: keep };
-          log(`energy at rest, the embedding model loaded: ${idle ? partsSay(meter, idle.milliwatts) : 'no reading'}${keep !== null ? `; keeping it loaded: ${watts(keep)}` : ''}`);
-          const count = se.batch[profile];
-          if (idle && count) {
-            const b = await energyBatch(meter, idle, count, async () => {
-              const r = await eAsk(texts());
-              return { ok: r.ok, tokens: r.tokens ?? 0 };
-            }, { now, sleep, what: `embedding requests of ${se.texts} texts`, log });
-            if (b) (energy.batches ??= {}).embed = b;
-          }
-        }
+        log(`embeddings: not measured: ${!off && !route.embedServer ? `${route.server}'s route has no embedding server${route.embeddings ? ` (${route.embeddings.split(/[:;.]/)[0]})` : ''}` : 'its embedding server wasn\'t set up'}`);
       }
-    } finally {
-      await eServer.stop();
-      await gone();
-    }
-  } else if (suite.embed) {
-    report.results.embed = null;
-    log(`embeddings: not measured: ${!off && !route.embedServer ? `${route.server}'s route has no embedding server${route.embeddings ? ` (${route.embeddings.split(/[:;.]/)[0]})` : ''}` : 'its embedding server wasn\'t set up'}`);
-  }
 
-  report.run.streamed = streamedSeen.length ? streamedSeen.every(Boolean) : null;
-  report.run.usageReported = usageSeen.length ? usageSeen.every(Boolean) : null;
-  if (report.conditions.awake) {
-    report.conditions.standby = await (o.io?.standby ?? standbyCount)(awakeSince);
-    if (report.conditions.standby) log(`the PC went into standby during the run, held awake as it was (a lid closed, the power button?): its figures aren't the awake PC's`);
+      report.run.streamed = streamedSeen.length ? streamedSeen.every(Boolean) : null;
+      report.run.usageReported = usageSeen.length ? usageSeen.every(Boolean) : null;
+      if (report.conditions.awake) {
+        report.conditions.standby = await (o.io?.standby ?? standbyCount)(awakeSince);
+        if (report.conditions.standby) log(`the PC went into standby during the run, held awake as it was (a lid closed, the power button?): its figures aren't the awake PC's`);
+      }
+      const r = finish(0);
+      log(r.report.ranked ? 'Ranked: it met every condition.' : `Not ranked: ${r.report.marks.map((m) => m.say).join('; ')}`);
+      return r;
+    })();
+  } catch (e) {
+    if (!(e instanceof LockTimeout || e instanceof QueueFull)) throw e;
+    return finish(1, { code: 'start', say: `a request waited ${BENCH_TURN.waitMs / 60_000} min for the NPU's turn: an agent holds it or waits for it (pause the keeper and the agents that ask the local models, then run it again)` });
   }
-  const r = finish(0);
-  log(r.report.ranked ? 'Ranked: it met every condition.' : `Not ranked: ${r.report.marks.map((m) => m.say).join('; ')}`);
-  return r;
 }
 
 // ------------------------------------------------------------------------------------------------

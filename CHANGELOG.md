@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.173
+## 0.36.175
 
 **It hands out the kit 2.99.0, whose NPU benchmark compares the NPU with the graphics and the processor on every kind of PC, and measures the staff's searches too.**
 
@@ -16,6 +16,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The benchmark no longer stops when the staff's own AI is running: it runs beside it, without disturbing it, and says the figures aren't for ranking.
 - Its energy figures wait for the PC to settle before each reading at rest, so the warmth of the work just done no longer makes a loaded model look free.
 - An energy run keeps the PC awake with its screen on until it ends, so its figures are always an awake PC's. A run that went into standby all the same, with the lid closed say, is marked and not ranked.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.174
+
+**It hands out the kit 2.98.2, whose NPU benchmark measures energy properly on an Intel PC and runs to the end without the local AI's housekeeping stopping it.**
+
+### What changed
+
+- **Energy on Intel.** On an Intel laptop, Windows' power readings are the processor chip's as a whole, its cores and its graphics. The benchmark took the graphics reading for the whole PC's, so its totals were far too low. It now takes the chip's.
+- **The benchmark keeps its model running.** The local AI's housekeeping stops a model nobody has used for a few minutes, and it didn't count the benchmark's own questions as use. It stopped the benchmark's model partway through every run, and every answer after that failed. The benchmark now asks the way the staff do, so the model stays up.
 
 ### Before you update
 
