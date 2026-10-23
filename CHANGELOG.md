@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.190
+
+**It hands out the kit 2.110.0: the staff you pay for run only on a PC that holds your license.**
+
+### What changed
+
+- **The Household and Workshop staff wait on a PC without your license.** That means a PC with no license, one that can't be read, or one made for another PC. Their rounds wait, and their page says signing in brings them back. Their settings and data are kept. Before, a PC that had lost its license kept them running; now they run only where your license is, as after a trial ends.
+- **A license that lapsed still runs what it has** (the Freehold license), as does one waiting for its first payment.
+- **The Steward is staff the license covers too.** On a PC with no license, its rounds wait.
+
+### Before you update
+
+- **Check that every PC running Castellan's paid staff holds a license**, test PCs included: a complimentary license does. Nothing changes on a PC that holds one.
+
 ## 0.36.188
 
 **It hands out the kit 2.108.0: every program the staff's local models run is signed, so Windows' Smart App Control lets them run.**

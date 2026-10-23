@@ -5,7 +5,7 @@ import { APP, dataDir, devCheckout, pageUrl, port } from '../app.ts';
 import { blockedIn, bySmartAppControl } from './app-control.ts';
 import { ago } from './page.ts';
 import { duty, setDuty, type Duty } from './duty.ts';
-import { licenseNow, licensePing, TRIAL_ENDED_TEXT } from './license-check.ts';
+import { holdText, licenseNow, licensePing, TRIAL_ENDED_TEXT } from './license-check.ts';
 import { namedBuilt, namedHold, namedId } from './named.ts';
 import { CEILING_ENV, ceilingCap } from './pace.ts';
 import { strictPages } from './page-access.ts';
@@ -196,13 +196,14 @@ export async function shutdown(): Promise<number> {
 /**
  * Whether it's running, since when it's stopped, and a line saying so, as Manor reads them: from its status command,
  * and from /api/ping (where the page is up, so running is on duty), so Manor needs no status command for an agent
- * whose page answers. Once the trial has ended (`trialEnded`, license-check.ts) it isn't running, whatever its duty,
- * and the line says why.
+ * whose page answers. Once its license holds it (`held`: license-check.ts holdText's words, the trial's end, or true
+ * for the trial's end as before) it isn't running, whatever its duty, and the line says why.
  */
-export function dutyStatus(d: Duty, up: boolean, trialEnded = false): { running: boolean; stoppedSince: string | null; summary: string } {
-  const running = d.onDuty && up && !trialEnded;
-  const summary = trialEnded
-    ? `${TRIAL_ENDED_TEXT}. Its rounds wait; its settings and data are kept.`
+export function dutyStatus(d: Duty, up: boolean, held: string | boolean | null = false): { running: boolean; stoppedSince: string | null; summary: string } {
+  const why = held === true ? TRIAL_ENDED_TEXT : held || null;
+  const running = d.onDuty && up && !why;
+  const summary = why
+    ? `${why}. Its rounds wait; its settings and data are kept.`
     : running
       ? 'On duty.'
       : !d.onDuty
@@ -215,7 +216,7 @@ export function dutyStatus(d: Duty, up: boolean, trialEnded = false): { running:
 export async function statusJson(): Promise<{ app: string; running: boolean; stoppedSince: string | null; summary: string; page: { url: string; up: boolean }; license?: unknown }> {
   const up = !!(await ping());
   const license = licenseNow();
-  return { app: APP.id, ...dutyStatus(duty(), up, license.ended), page: { url: pageUrl, up }, ...licensePing(license) };
+  return { app: APP.id, ...dutyStatus(duty(), up, holdText(license)), page: { url: pageUrl, up }, ...licensePing(license) };
 }
 
 /** One line, exit 0 when on duty and running and 3 when not; or with --json, Manor's JSON and exit 0. */
