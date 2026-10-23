@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.186
+
+**It hands out the kit 2.106.0: the manor can say how big a model it has tested on each kind of NPU, and the Smith suggests none bigger.**
+
+### What's new
+
+- **A tested size for each kind of NPU.** The Smith suggests newer models for your NPU to try. From its version 0.8.87 it suggests none bigger than the model your NPU runs now, unless the manor has tested a bigger size on that kind of NPU and found it worth trying. The kit now carries that tested size, so the manor can raise it for one kind of NPU in an update of its own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.184
 
 **It hands out the kit 2.104.0: when Windows' Smart App Control blocks a model server, setup says so in plain words, and the staff use what runs instead.**

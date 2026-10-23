@@ -709,6 +709,21 @@ Intel's route needs none: OpenVINO Model Server runs the same model on the graph
 
 AMD's `--reasoning-budget 0` is checked (2026-10-23, the pinned Q4_0 on b11734's `cpu-arm64` on the X2, the same llama.cpp as `cpu-x64`). With it, Qwen3.5-2B answered at once: "391" in 6 tokens, a sentence in 28, and no reasoning. Without it, the same questions took 296 and 400 tokens of thinking, and the second ran out before it answered.
 
+### Bigger models the Smith offers (kit 2.106.0)
+
+The Smith's scout looks on Hugging Face for newer models built for the NPU, and offers each one for a try.
+- **Until Smith 0.8.87** it offered any size the PC's memory allowed. That meant up to 14B on a 32 GB PC, including an X2 running its 2B. Nobody had tested those sizes on the NPU.
+- **Now** it offers models no bigger than the model the NPU runs now, unless a manager has tested a bigger size on that generation and found it worth letting customers try.
+
+That size is the generation's `testedUpTo` (`{ params, basis }`): the biggest model, in billions of parameters, and how it was tested.
+- The Smith offers up to the larger of `testedUpTo` and the size of the model the NPU runs now. It never offers more than the PC's memory allows.
+- On a generation the route doesn't know, the Smith takes the least that the supported generations have tested. It takes none until every one of them has a `testedUpTo`.
+- The card names the sizes it leaves out, and why.
+
+A bigger model may answer better, but on the NPU it's slower, holds more memory and draws more power. The manor's rule is the smallest model that serves, so a size is lifted only on a measured need: a manager benchmarks it on that NPU (NPU-BENCHMARK.md) and sets `testedUpTo` in a kit.
+
+The kit itself doesn't read `testedUpTo`. No generation sets one yet. The first X's 4B stays its fallback, and isn't offered as a try on an X running its 2B.
+
 ## Licences
 
 | What | Licence | Note |
