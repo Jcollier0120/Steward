@@ -1,5 +1,6 @@
-"""PP-OCRv6 tiny's recognizer as a PyTorch module to fine-tune: its ONNX graph (onnx2torch), cut before the 6,906-way
-head, with a head of our own over CHARSET whose rows start as the old head's rows for those characters.
+"""A PaddleOCR recognizer as a PyTorch module to fine-tune: its ONNX graph (onnx2torch), cut before its head (PP-OCRv6
+tiny's 6,906-way, or another candidate's), with a head of our own over CHARSET whose rows start as the old head's rows
+for those characters.
 
 Outputs logits [N, W/8, len(CHARSET) + 1], class 0 the CTC blank, class k the character CHARSET[k - 1].
 """
@@ -42,13 +43,37 @@ class RecNet(nn.Module):
         return self
 
 
+def load_graph(path: Path) -> onnx.ModelProto:
+    """The ONNX graph as onnx2torch takes it: an older export (PP-OCRv5's, opset 7) brought up to opset 13, its
+    Constant nodes made initializers, and every tensor's shape inferred."""
+    m = onnx.load(str(path))
+    if next(o.version for o in m.opset_import if o.domain in ('', 'ai.onnx')) >= 11:
+        return m
+    from onnx import version_converter
+    from onnxruntime.tools.symbolic_shape_infer import SymbolicShapeInference
+    m = version_converter.convert_version(m, 13)
+    keep = []
+    for n in m.graph.node:
+        if n.op_type == 'Constant':
+            t = next(a for a in n.attribute if a.name == 'value').t
+            t.name = n.output[0]
+            m.graph.initializer.append(t)
+        else:
+            keep.append(n)
+    del m.graph.node[:]
+    m.graph.node.extend(keep)
+    return SymbolicShapeInference.infer_shapes(m, auto_merge=True)
+
+
 def from_onnx(model_dir: Path, charset: str = CHARSET) -> RecNet:
     model_dir = Path(model_dir)
-    gm = convert(onnx.load(str(model_dir / 'inference.onnx')))
+    gm = convert(load_graph(model_dir / 'inference.onnx'))
     g = gm.graph
-    nodes = {n.name: n for n in g.nodes}
-    softmax = next(n for n in g.nodes if n.op == 'call_module' and 'Softmax' in str(n.target))
-    add_head = softmax.args[0].args[0]  # Identity <- Add(MatMul(feat, W), b)
+    # The head: Add(MatMul(feat, W), b) before the last softmax (a larger model has softmaxes in its attention too).
+    softmax = [n for n in g.nodes if n.op == 'call_module' and 'Softmax' in str(n.target)][-1]
+    add_head = softmax.args[0]
+    while not ('Add' in str(add_head.target) and 'MatMul' in str(getattr(add_head.args[0], 'target', ''))):
+        add_head = add_head.args[0]
     mat_mul = add_head.args[0]
     feat_node = mat_mul.args[0]
     w = getattr(gm.initializers, mat_mul.args[1].target.split('.')[-1]).detach().clone()
