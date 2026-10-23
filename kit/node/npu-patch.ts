@@ -5,7 +5,7 @@ import { type AcceleratorEntry, readConfigFile } from './accelerator-config.ts';
 import type { Detection } from './detect.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { NPU_REFRESH_RETRY_MS, NPU_REFRESH_TRIES, serverFailed, servers, stillAnswering } from './npu-refresh.ts';
-import { atVersion, compareVersions, expandRoute, hostedPatchFile, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuPluginPatch, type NpuRoute, pinnedRoute, pluginPatchOf, runsRoute, sha256File } from './npu-vendors.ts';
+import { atVersion, compareVersions, expandRoute, hostedPatchFile, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuPluginPatch, type NpuRoute, pinnedRoute, pluginPatchOf, runsRoute, sameFile, sha256File } from './npu-vendors.ts';
 
 /**
  * A file of the NPU's server replaced with the kit's own build of it (npu-vendors.ts' NpuPluginPatch): on the Snapdragon
@@ -219,9 +219,10 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
   const stockSum = patch?.stock.sha256 ?? had?.stock;
   const ownBuild = !!patch && now === patch.patched.sha256;
   const olderBuild = !ownBuild && !!had?.patched && now === had.patched;
-  const isStock = !!stockSum && now === stockSum;
+  // GenieX's own file, or Castellan's signed copy of it (kit 2.108.0: a GenieX put together from its signed build, NpuSignedBuild).
+  const isStock = !!stockSum && sameFile(route, stockSum, now);
   const backup = stockCopy(target);
-  const backupGood = async () => !!stockSum && existsSync(backup) && (await hash(backup)) === stockSum;
+  const backupGood = async () => !!stockSum && existsSync(backup) && sameFile(route, stockSum, await hash(backup));
   const sums = { ...(patch ? { patched: patch.patched.sha256 } : had?.patched ? { patched: had.patched } : {}), ...(stockSum ? { stock: stockSum } : {}) };
 
   // A file that is neither GenieX's pinned one nor a kit's build: GenieX updated, or someone's own. Left as it is.
@@ -238,8 +239,7 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
     if (patch.serverVersion !== route.version) return `the patch is for ${route.server} ${patch.serverVersion}, and this PC's is ${route.version}`;
     for (const [name, want] of Object.entries(patch.needs)) {
       const f = path.join(path.dirname(target), name);
-      const s = stateOf(f);
-      if (s?.size !== want.size || (await hash(f)) !== want.sha256) return `${route.server}'s ${path.basename(name)} isn't ${patch.serverVersion}'s`;
+      if (!stateOf(f) || !sameFile(route, want.sha256, await hash(f))) return `${route.server}'s ${path.basename(name)} isn't ${patch.serverVersion}'s`;
     }
     return null;
   };

@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.188
+
+**It hands out the kit 2.108.0: every program the staff's local models run is signed, so Windows' Smart App Control lets them run.**
+
+### What changed
+
+- **Every program the staff's local models run is signed, so Windows' Smart App Control lets them run.** Where a model server's maker signs nothing, Castellan does: the Snapdragon NPU's embedding server comes from Castellan's signed copy, as the graphics card's and the processor's llama.cpp already do. GenieX, the Snapdragon NPU's server, is put together without its installer: Qualcomm's own files, downloaded from Qualcomm, with Castellan's signed copies of GenieX's own. FastFlowLM (AMD's NPU) and NVIDIA's CUDA runtime are still downloaded from their makers, unchanged, and Castellan signs a list of their files. Where Smart App Control is on, setup adds that list to Windows, asking once for an administrator.
+- **A new Snapdragon X2 gets GenieX 0.9.3**, as the first Snapdragon X does, in place of 0.9.1: the same models, as quick, from the one signed GenieX.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Where Smart App Control is on, the next setup of an AMD NPU or of an NVIDIA card asks once for an administrator; a Snapdragon's asks for none. A GenieX already installed is kept as it is: a Snapdragon X2 on GenieX 0.9.1 keeps running it, and the Smith offers 0.9.3 there. Setup never changes Windows' Smart App Control setting.
+
 ## 0.36.186
 
 **It hands out the kit 2.106.0: the manor can say how big a model it has tested on each kind of NPU, and the Smith suggests none bigger.**

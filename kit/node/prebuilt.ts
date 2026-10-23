@@ -16,6 +16,7 @@ export const HELPERS = {
   awake: { ext: 'exe', type: 'WindowsApplication' },
   gentle: { ext: 'dll', type: 'Library' },
   'working-set': { ext: 'dll', type: 'Library' },
+  catalog: { ext: 'exe', type: 'ConsoleApplication' },
 } as const;
 export type Helper = keyof typeof HELPERS;
 

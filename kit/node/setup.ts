@@ -9,14 +9,16 @@ import { type Block, blockedExit, blockedExitSay, blockedIn, blockedSay, cpuVari
 export { cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
 import { blockedFile, type BlockedServerFile, chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberBlocked, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, type Endpoint, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, isSharedTools, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
+import { type CatalogsDone, catalogsSay, ensureCatalogs } from './catalogs.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
 import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage } from './npu-vendors.ts';
+import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage } from './npu-vendors.ts';
 import { RETIRED_GRACE_MS } from './retired.ts';
+import { rememberSignatures, signaturesFile } from './signatures.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -111,6 +113,15 @@ export const LLAMA_PIN: { build: string; signed: string; files: Record<string, P
     },
   },
 };
+
+/**
+ * Castellan's signed catalogs of what setup takes beside llama.cpp's builds as its maker ships it (catalogs.ts, kit
+ * 2.108.0): NVIDIA's CUDA runtime (CUDART_ZIP), which NVIDIA doesn't sign. Installed before a CUDA build first runs,
+ * where Smart App Control is on (runSetup).
+ */
+export const LLAMA_CATALOGS: NpuSignedCatalog[] = [
+  { serverVersion: '12.4', file: 'castellan-cuda-cudart-12.4.cat', covers: "NVIDIA's CUDA runtime 12.4's 3 unsigned program files", size: 10889, sha256: 'fa1928dff519d83cccdea138a66f46cde8478c74f17e70779b1907cfd5e25b57' },
+];
 
 /** A pinned build as setup plans from it: a release whose assets are its files, each with its pinned digest. Nothing is asked of GitHub. */
 export function pinnedRelease(pin: typeof LLAMA_PIN = LLAMA_PIN): Release {
@@ -1126,7 +1137,8 @@ export function describePlan(p: SetupPlan): string[] {
   if (p.npu) {
     const n = p.npu;
     lines.push(`${n.support.label} (npu): ${n.route.server} ${n.route.version}, ${n.kinds.join(' and ')} on ${n.port}; ${n.models.map((m) => m.id).join(', ')}${untried(n.support)}`);
-    lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
+    if (n.build) lines.push(`  get  ${n.route.server} ${n.route.version} (${mb(n.build.files.size + n.build.signed.size)}, SHA-256 pinned): its maker's files, with Castellan's signed copies of its own; no installer`);
+    else lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
     if (n.runtime) lines.push(`  get  ${n.runtime.what} (${mb(n.runtime.size)}, SHA-256 pinned), beside ${path.win32.basename(n.exe)}: no administrator`);
     if (n.patch) lines.push(`  ${n.patch.have ? 'have' : 'get '} ${n.patch.what.split(':')[0]} (${mb(n.patch.patched.size)}, SHA-256 pinned), in place of the server's own ${n.patch.file}`);
     for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
@@ -1253,18 +1265,62 @@ export function unpack(zip: string, into: string): void {
   if (r.status !== 0) throw new Error(`tar couldn't unpack ${zip}: ${r.stderr || r.error?.message}`);
   // Some zips wrap their files in a folder.
   const entries = readdirSync(tmp);
-  const from = entries.length === 1 && statSync(path.join(tmp, entries[0])).isDirectory() ? path.join(tmp, entries[0]) : tmp;
+  putInPlace(entries.length === 1 && statSync(path.join(tmp, entries[0])).isDirectory() ? path.join(tmp, entries[0]) : tmp, into);
+  rmSync(tmp, { recursive: true, force: true });
+}
+
+/** Moves a folder made beside `into` there: whole, in one rename, where nothing is there yet; else each of its files and folders in, in place of the one there. */
+function putInPlace(from: string, into: string): void {
   if (!existsSync(into)) {
     mkdirSync(path.dirname(into), { recursive: true });
     renameSync(from, into);
-    rmSync(tmp, { recursive: true, force: true });
     return;
   }
   for (const e of readdirSync(from)) {
     rmSync(path.join(into, e), { recursive: true, force: true });
     renameSync(path.join(from, e), path.join(into, e));
   }
-  rmSync(tmp, { recursive: true, force: true });
+}
+
+/**
+ * Puts Castellan's signed build of the NPU's server in place of its installer (kit 2.108.0, NpuSignedBuild): the
+ * maker's zip of the version's files and Castellan's of the signed copies downloaded (each checked against its pinned
+ * SHA-256), the server's folder taken from the maker's, the signed copies laid over it file by file, and the folder put
+ * where the installer puts the server. Nothing of it runs while it's put together, and no installer runs at all. Null
+ * when it's in place, else the step that failed and why.
+ */
+export async function installSignedBuild(server: string, b: NonNullable<NpuPlan['build']>, io: Pick<NpuIo, 'log' | 'download' | 'unpack' | 'overlay'>): Promise<{ step: 'download' | 'install'; why: string } | null> {
+  for (const d of [b.files, b.signed]) {
+    io.log(`downloading ${d.what} (${mb(d.size)})`);
+    try {
+      await (io.download ?? download)({ what: d.what, url: d.url, size: d.size, sha256: d.sha256, dest: d.dest, have: false }, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
+    } catch (e: any) {
+      return { step: 'download', why: `${d.what}'s download failed: ${e?.message ?? e}` };
+    }
+  }
+  // Beside where it goes, so a build put together halfway never looks like the server.
+  const files = `${b.into}.files`;
+  const signed = `${b.into}.signed`;
+  const clear = () => {
+    for (const f of [files, signed]) rmSync(f, { recursive: true, force: true });
+  };
+  clear();
+  io.log(`putting ${server} together from ${b.files.what}, with Castellan's signed copies of its own files (no installer)`);
+  try {
+    (io.unpack ?? unpack)(b.files.dest, files);
+    (io.unpack ?? unpack)(b.signed.dest, signed);
+    const folder = path.join(files, b.files.folder);
+    if (!existsSync(folder)) throw new Error(`${b.files.what} has no ${b.files.folder} folder`);
+    const ours = readdirSync(signed, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => path.relative(signed, path.join(e.parentPath, e.name)));
+    (io.overlay ?? overlayFiles)(signed, folder, ours);
+    putInPlace(folder, b.into);
+  } catch (e: any) {
+    clear();
+    return { step: 'install', why: `${server} couldn't be put together: ${e?.message ?? e}` };
+  }
+  clear();
+  for (const d of [b.files, b.signed]) rmSync(d.dest, { force: true });
+  return null;
 }
 
 /**
@@ -1333,10 +1389,17 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
   const entries: Accelerator[] = [];
   // What Windows blocked of the servers tried (the NPU's and each build's), file by file.
   const blocked: BlockedServerFile[] = [];
+  // Castellan's catalogs of everything this run may start (kit 2.108.0), before any of it runs: the NPU's server's, and
+  // NVIDIA's runtime beside a CUDA build (one the NPU's work may go to too), in one administrator prompt where Smart App
+  // Control is on.
+  const catalogs = catalogsOnce(io);
+  const cuda = plan.targets.some((t) => t.variant?.cudart && t.folder) || (plan.leftToNpu ?? []).some((l) => /nvidia/i.test(l.name));
+  const wanted = [...(plan.npu?.catalogs ?? []), ...(cuda ? LLAMA_CATALOGS : [])];
+  if (wanted.length) await catalogs(wanted, [...(plan.npu?.catalogs?.length ? [plan.npu.vendor] : []), ...(cuda && LLAMA_CATALOGS.length ? ['cuda'] : [])], (io.smartAppControl ?? smartAppControlOutsideTests)());
   // The NPU first: its entry is written only once its server has answered a test request.
   let npu: NpuSetup | undefined;
   if (plan.npu) {
-    npu = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), io);
+    npu = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), { ...io, catalogs });
     blocked.push(...(npu.blocked ?? []));
     problems.push(...npu.problems);
     if (npu.entry) entries.push({ ...npu.entry, name: core.deviceName(plan.npu.support.label) });
@@ -1460,6 +1523,8 @@ export interface NpuIo {
   testRerank?: (ep: Endpoint) => Promise<string[]>;
   /** Copies the route's server's files over the embedding server's (overlayFiles). */
   overlay?: (from: string, into: string, files: string[]) => number;
+  /** Puts a signed build together where its installer would put the server (installSignedBuild). */
+  installBuild?: typeof installSignedBuild;
   /** A file's SHA-256 (the pinned model files). */
   hash?: (file: string) => Promise<string>;
   /** Copies one file (the runtime's DLLs beside the server). */
@@ -1475,6 +1540,34 @@ export interface NpuIo {
   blockedIn?: (folder: string, withinMs: number) => Promise<Block[]>;
   /** Smart App Control's state, for the words a block is said in (smartAppControlOutsideTests: none in a test run). */
   smartAppControl?: () => SacState | null;
+  /**
+   * Castellan's signed catalogs installed where Smart App Control is on, and `routes`' older ones removed (catalogs.ts
+   * ensureCatalogs): the NPU's server's, NVIDIA's runtime's. Setup asks once a run (catalogsOnce).
+   */
+  catalogs?: (wanted: NpuSignedCatalog[], routes: string[], sac: SacState | null) => Promise<CatalogsDone>;
+}
+
+const ONCE = Symbol('catalogsOnce');
+
+/**
+ * Setup's catalogs (catalogs.ts, kit 2.108.0): `io.catalogs` (ensureCatalogs where it gives none), with its line logged,
+ * asked again only for a catalog it wasn't asked for before. So one run puts up one administrator prompt for everything
+ * it starts, and one turned down isn't put up again for the NPU's second models or the card set up in its place.
+ */
+export function catalogsOnce(io: NpuIo): NonNullable<NpuIo['catalogs']> {
+  const had = io.catalogs as (NpuIo['catalogs'] & { [ONCE]?: true }) | undefined;
+  if (had?.[ONCE]) return had;
+  const asked = new Set<string>();
+  let last: CatalogsDone | null = null;
+  const once = async (wanted: NpuSignedCatalog[], routes: string[], sac: SacState | null): Promise<CatalogsDone> => {
+    if (last && wanted.every((c) => asked.has(c.file.toLowerCase()))) return last;
+    for (const c of wanted) asked.add(c.file.toLowerCase());
+    last = await (had ?? ((w: NpuSignedCatalog[], r: string[], s: SacState | null) => ensureCatalogs(w, { routes: r, sac: s, log: io.log })))(wanted, routes, sac);
+    const said = catalogsSay(last);
+    if (said) io.log(said);
+    return last;
+  };
+  return Object.assign(once, { [ONCE]: true as const });
 }
 
 /**
@@ -1560,6 +1653,7 @@ export function overlayFiles(from: string, into: string, files: string[]): numbe
     if (!s) throw new Error(`${src} isn't there`);
     const d = statSync(dst, { throwIfNoEntry: false });
     if (d && d.size === s.size && Math.abs(d.mtimeMs - s.mtimeMs) < 2_000) continue;
+    if (!d) mkdirSync(path.dirname(dst), { recursive: true });
     copyFileSync(src, dst);
     utimesSync(dst, s.atime, s.mtime);
     copied++;
@@ -1753,6 +1847,7 @@ function nowHere(n: NpuPlan, tools: string, exists: (p: string) => boolean): Npu
     ...n,
     installed,
     download: installed ? null : n.download,
+    build: installed ? null : n.build,
     runtime: n.runtime && installed && n.runtime.files.every((f) => exists(path.join(n.runtime!.into, f))) ? null : n.runtime,
     models: n.models.map((m) => ({ ...m, have: m.have || (!!m.present && exists(expandRoute(m.present, { tools }))) })),
     embed: e && { ...e, download: e.download && exists(e.exe) ? null : e.download, modelDownload: e.modelDownload && exists(e.modelDownload.dest) ? null : e.modelDownload, modelPull: e.modelPull && e.model && exists(e.model) ? null : e.modelPull },
@@ -1766,7 +1861,9 @@ function nowHere(n: NpuPlan, tools: string, exists: (p: string) => boolean): Npu
  * first try met goes in the log and in `fellBack`, never in the problems: the NPU still has chat, and nothing to
  * show as an error. The first try's outcome when the fallback fails as well.
  */
-export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<NpuSetup> {
+export async function setUpNpu(n: NpuPlan, tools: string, given: NpuIo): Promise<NpuSetup> {
+  // Its catalogs asked for once, whichever models it tries.
+  const io = { ...given, catalogs: catalogsOnce(given) };
   if (!n.fallback) return setUpNpuOnce(n, tools, io);
   const first = await setUpNpuOnce(n, tools, io, { seeRed: true });
   if (first.entry || !first.failed || !FALLBACK_STEPS.includes(first.failed)) return first;
@@ -1824,10 +1921,21 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
     const reason = `${sac === 'on' ? "Windows' Smart App Control" : "Windows' application control"} blocks its model server, as its maker doesn't sign it`;
     return { ...fail(why, 'not-supported', reason), blocked };
   };
+  // Castellan's signed catalog of the server's files (kit 2.108.0), before anything of it runs: where Smart App Control
+  // is on, its maker's unsigned files would be blocked, and the catalog lets them run as the maker built them. One
+  // administrator prompt at most; turned down, the server is blocked as before, and the step that ran it says so.
+  if (n.catalogs?.length) await catalogsOnce(io)(n.catalogs, [n.vendor], sac);
   const env = serverEnv({ env: routeEnv(n.route, tools) });
   // Its files put in place, in the PC's shared folder one account at a time (inSharedTools): a server another account
   // installed meanwhile isn't installed again.
   const placed = await inSharedTools(tools, io.log, async (shared): Promise<NpuSetup | null> => {
+    // Castellan's signed build in place of the maker's installer (kit 2.108.0: GenieX's, whose installer and own files
+    // aren't signed), so nothing unsigned runs where Smart App Control is on.
+    if (!n.installed && n.build && !(shared && exists(n.exe))) {
+      const failed = await (io.installBuild ?? installSignedBuild)(n.route.server, n.build, io);
+      if (failed) return fail(failed.why, failed.step);
+      if (!exists(n.exe)) return fail(`${n.route.server} was put together, but ${n.exe} isn't there`, 'install');
+    }
     if (!n.installed && n.download && !(shared && exists(n.exe))) {
       const d: Download = { what: n.download.what, url: n.download.url, size: n.download.size, sha256: n.download.sha256, dest: n.download.dest, have: false };
       io.log(`downloading ${n.route.server} ${n.route.version} (${mb(d.size)})`);
@@ -2759,6 +2867,8 @@ export interface SetupOptions {
   npuReportFile?: string | null;
   /** Where what Windows blocked is kept (blockedFile(), kit 2.104.0; tests give their own, and a given detection keeps none). */
   blockedFile?: string | null;
+  /** Where who signed the servers' files is kept (signaturesFile(), kit 2.108.0; tests give their own, and a given detection keeps none). */
+  signaturesFile?: string | null;
   /** The app running setup, for the NPU's report ("manor 0.16.200"). */
   app?: string;
   /** Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu() read now, when left out). */
@@ -2829,7 +2939,10 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
       return { code: 1, plan };
     }
   }
-  const r = await runSetup(plan, file.raw, { log, ...o.io });
+  // One ask for catalogs for the whole command: its runs for the card and the processor too.
+  const base = { log, ...o.io };
+  const runIo = { ...base, catalogs: catalogsOnce(base) };
+  const r = await runSetup(plan, file.raw, runIo);
   // The NPU failing is no error: its work goes to the card or the processor, and its note says why, quietly.
   const npuDetails = new Set(r.npu?.problems ?? []);
   for (const p of r.problems) log(`${npuDetails.has(p) ? 'note' : 'problem'}: ${p}`);
@@ -2856,7 +2969,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
     const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the graphics card? [y/N] `) : false);
     if (go) {
-      const r2 = await runSetup(plan2, raw, { log, ...o.io });
+      const r2 = await runSetup(plan2, raw, runIo);
       for (const p of r2.problems) log(`problem: ${p}`);
       problems.push(...r2.problems);
       blocked.push(...(r2.blocked ?? []));
@@ -2876,7 +2989,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
     const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the processor? [y/N] `) : false);
     if (go) {
-      const r2 = await runSetup(plan2, raw, { log, ...o.io });
+      const r2 = await runSetup(plan2, raw, runIo);
       for (const p of r2.problems) log(`problem: ${p}`);
       problems.push(...r2.problems);
       blocked.push(...(r2.blocked ?? []));
@@ -2904,6 +3017,9 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   }
   // The NPU's command is this kit's now: a keeper on an older kit leaves it alone (npu-refresh.ts).
   if (entries.some((e) => e.kind === 'npu')) rememberNpuRefresh(configFile, { kit: kitVersion(), at: new Date().toISOString(), did: 'set-up' });
+  // Who signed each program file the servers now run, for a round of signing (signatures.ts, kit 2.108.0).
+  const signaturesAt = o.signaturesFile !== undefined ? o.signaturesFile : o.detection ? null : signaturesFile();
+  if (signaturesAt) await rememberSignatures(raw, signaturesAt, { env: o.env, sac: detection.smartAppControl ?? null });
   const read = readAccelerators(raw);
   const order = orderAccelerators(read.accelerators, read.order).map((a) => a.id);
   const changed = [...entries.map((e) => e.id), ...(plan.dropNpu ? ['npu removed'] : [])];

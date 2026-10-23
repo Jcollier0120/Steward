@@ -94,14 +94,14 @@
           "hexagonArch": "v81",
           "aiHubChipset": "qualcomm-snapdragon-x2-elite",
           "serverPin": {
-            "version": "0.9.1",
+            "version": "0.9.3",
             "download": {
-              "file": "geniex-cli-setup-windows-arm64-v0.9.1.exe",
-              "url": "https://github.com/qualcomm/GenieX/releases/download/v0.9.1/geniex-cli-setup-windows-arm64-v0.9.1.exe",
-              "size": 70519444,
-              "sha256": "0cffc8532c1d48cdfac757667025b7fd2f2e8a8184026944410a764337ad67c0"
+              "file": "geniex-cli-setup-windows-arm64-v0.9.3.exe",
+              "url": "https://github.com/qualcomm/GenieX/releases/download/v0.9.3/geniex-cli-setup-windows-arm64-v0.9.3.exe",
+              "size": 70470238,
+              "sha256": "886d9f1a48cf6c1694338a13fc66be9d28e7fc5a3a5970d49b63de554a6ce17a"
             },
-            "basis": "Measured on the X2 Elite with Qwen3-VL-2B Q4_0, 2026-10-18 (spec/NPU-VENDORS.md, A later GenieX on the PC): GenieX 0.9.1 reads its pictures on the Hexagon's second session in a median 1.50 s against 0.8.0's 4.49 s on the Adreno (34 of 35 screen questions against 33, 21 of 21 photos on both), and leaves the Adreno free; with Castellan's build for 0.9.1 (the route's versions) it holds what 0.8.0 does at rest (1.62 GB working set after a chat), and gives its first answer after a start in 3.5 s (3.1). Chat 72.5 tokens a second (73.0). The first-generation X pins 0.9.3 (kit 2.101.0), which its models were measured on. The installer's size and SHA-256 as GitHub and GenieX's own .sha256 publish them, checked on a download"
+            "basis": "GenieX 0.9.3 from kit 2.108.0, as the first-generation X pins it: the version Castellan's signed build is of (the route's signedBuilds), so an X2 is set up without GenieX's installer, which Smart App Control blocks. 0.9.3 is 0.9.1 with a /status endpoint and a signed catalog for its Hexagon libraries: the same llama.cpp (e467e5b) and plugin source, and the same b11645 embedding server (the route's 0.9.3 entry), so it runs as 0.9.1 did, measured on the X2 Elite with Qwen3-VL-2B Q4_0 (2026-10-18, spec/NPU-VENDORS.md, A later GenieX on the PC): pictures on the Hexagon's second session in a median 1.50 s against 0.8.0's 4.49 s on the Adreno, chat at 72.5 tokens a second. Castellan's plugin build over 0.9.3 was measured on the X2 Elite too (2026-10-22, the 0.9.3 entry's pluginPatch): four pictures of four right, a 2.72 GB working set against GenieX's own plugin's 3.54, the processor 0.08 cores busy against 5.22. A PC on 0.9.1 (kit 2.98.0 to 2.107.0) runs it as it is. The installer's size and SHA-256 as GitHub and GenieX's own .sha256 publish them, checked on a download (2026-10-23)"
           },
           "pluginPatch": {
             "what": "Castellan's build of GenieX 0.8.0's llama.cpp plugin: qualcomm/GenieX v0.8.0 with three commits of Castellan's (kit node/geniex/README.md), signed with Castellan's certificate. The model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row (its compute buffer on the NPU 128 MiB, not 601); the vision encoder loads with the first picture, and is freed again after 60 s without one; and GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens",
@@ -210,6 +210,187 @@
         "size": 65196910,
         "sha256": "fcc4d932f371a9b3ad3d08a1b34912fe21a7fdf7c54d47c869250b50d81ec734"
       },
+      "signedBuilds": [
+        {
+          "serverVersion": "0.9.3",
+          "files": {
+            "file": "geniex-sdk-windows-arm64-v0.9.3.zip",
+            "url": "https://github.com/qualcomm/GenieX/releases/download/v0.9.3/geniex-sdk-windows-arm64-v0.9.3.zip",
+            "size": 91519631,
+            "sha256": "3edffa6e64878dfb68ea45116c37550a286e01d0c5066c28e8673cdfd4840446",
+            "folder": "lib"
+          },
+          "signed": {
+            "file": "geniex-cli-windows-arm64-v0.9.3-castellan.zip",
+            "url": "https://github.com/Jcollier0120/Manor-releases/releases/download/geniex-0.9.3-castellan/geniex-cli-windows-arm64-v0.9.3-castellan.zip",
+            "size": 22485685,
+            "sha256": "6e1508ac73d5225ba686b7573a622c82a1737dd44d9ae2cb06f558c2a698f28e"
+          },
+          "copies": {
+            "geniex.dll": {
+              "stock": {
+                "size": 4987904,
+                "sha256": "691fcab1f4fe97ae96a77e3083df668f5305f4d9aa633185fca96a8dd0403ad0"
+              },
+              "signed": {
+                "size": 4998224,
+                "sha256": "16f79f04e63ca673d1cfdeb58f37e7a607447a5cbeda24f6b99e52fb9c480da1"
+              }
+            },
+            "geniex.exe": {
+              "stock": {
+                "size": 41647104,
+                "sha256": "0391794e4e60b5adb347eed20c0d0316d8c7a111a9b32543657f96dde6fbd772"
+              },
+              "signed": {
+                "size": 41657424,
+                "sha256": "584452d84a0ef8a22fc4c4d392175a452c32810ae5ab13cea6a2163c579812e4"
+              }
+            },
+            "llama_cpp\\geniex_plugin.dll": {
+              "stock": {
+                "size": 356864,
+                "sha256": "9612f66a0cc1a29b8f746697b808d62f49cfdd9328b94615b34f6ef1a6dae787"
+              },
+              "signed": {
+                "size": 367184,
+                "sha256": "d88e6037becb7047ac2a6888d81355fdbc685210f72914692489c8e0f6710da9"
+              }
+            },
+            "llama_cpp\\ggml-base.dll": {
+              "stock": {
+                "size": 670208,
+                "sha256": "7d1f6cd72f81b4797629689e09eb89a3cf19d683428b4a9604fe4be637e49c04"
+              },
+              "signed": {
+                "size": 680528,
+                "sha256": "5d00a6fe0fc83d3ae32520a66029c9d5793a882e93d8202bbf62bf8e9f7fee9f"
+              }
+            },
+            "llama_cpp\\ggml-cpu.dll": {
+              "stock": {
+                "size": 867840,
+                "sha256": "57d5887e23875b9bf0b3da8af832288c1d3801dd07b09d1f7b6d04b896a8170c"
+              },
+              "signed": {
+                "size": 878160,
+                "sha256": "11a1b117f60a0652cb520b160d7be102eb27617b3bc822ef6d5d064a8a068a1e"
+              }
+            },
+            "llama_cpp\\ggml-hexagon.dll": {
+              "stock": {
+                "size": 389120,
+                "sha256": "d59d0d6fcc03760214f662387683ab9de3011c163c6ef79fbb43ca665e649979"
+              },
+              "signed": {
+                "size": 399440,
+                "sha256": "4809293ffc52dd3717c3241cac273ae209297c7310c15f750f2b245ef0eba828"
+              }
+            },
+            "llama_cpp\\ggml-opencl.dll": {
+              "stock": {
+                "size": 3112960,
+                "sha256": "92f8bb45eb4df49885afaa7d82f14fe6c7e59b7d035b404f9009c0429ce06349"
+              },
+              "signed": {
+                "size": 3123280,
+                "sha256": "29796a6fe69e2c384bb38f0b4b22684ac429afda7e34de8def9fb1d95ba97259"
+              }
+            },
+            "llama_cpp\\ggml.dll": {
+              "stock": {
+                "size": 72192,
+                "sha256": "2daa509202f5cc9a3d323ae47c9570f67d0f8d516108f16592737efcca7fb167"
+              },
+              "signed": {
+                "size": 82512,
+                "sha256": "a9b5775d5c026000cfca55cf4d7de80eb0f7daed705b58ebf356f83d7ec1ecfe"
+              }
+            },
+            "llama_cpp\\llama-common.dll": {
+              "stock": {
+                "size": 5219840,
+                "sha256": "6c44239b00968dcc10e88d19ae85abf4fef7df5d57a94dc3e515c9285fcc994a"
+              },
+              "signed": {
+                "size": 5230160,
+                "sha256": "2fbadad1f2601fae00eace11d92bcd3fa5847ab2cd73ae809509ce96cf3b9906"
+              }
+            },
+            "llama_cpp\\llama.dll": {
+              "stock": {
+                "size": 3099136,
+                "sha256": "fb879ea821809e95b0f014b31d6c8b71ea9daa3576c4c2f3385890c871342fb6"
+              },
+              "signed": {
+                "size": 3109456,
+                "sha256": "5a200b3e56712fb7e420be1ddbb838464498ea5f358ef9426656755c41c96ee2"
+              }
+            },
+            "llama_cpp\\mtmd.dll": {
+              "stock": {
+                "size": 1550336,
+                "sha256": "7fef77166aff398682f3f118989d228da20dadc4e0662a35d75e987fff928917"
+              },
+              "signed": {
+                "size": 1560656,
+                "sha256": "f8277bc992f697ecf1dd97e8d0ce05341d3f534d84707cfff8aa834b5c111117"
+              }
+            },
+            "qairt\\geniex-proc-vision.dll": {
+              "stock": {
+                "size": 558592,
+                "sha256": "6301bcd8f9d7bb338ce6082db5dd75764cc86a4f3263ebc715e97fa740e6994c"
+              },
+              "signed": {
+                "size": 568912,
+                "sha256": "a11539ca6cfda4d2e2344f57f128e95b99ba228980dadd0764bb0514017f7b9c"
+              }
+            },
+            "qairt\\geniex-proc.dll": {
+              "stock": {
+                "size": 4553728,
+                "sha256": "a6662e779767d02046c2b2baa18c74732bae282f9785c2fb4363481947a35c24"
+              },
+              "signed": {
+                "size": 4564048,
+                "sha256": "0b12c2fcce546a29c1aa2796d26144420bd6195d55b1d2b9522ae59f5df075a0"
+              }
+            },
+            "qairt\\geniex_core.dll": {
+              "stock": {
+                "size": 1134080,
+                "sha256": "8b182a88cb9e9ae357b666c84fd32783103e61c8dd47d00900a4c886962a9818"
+              },
+              "signed": {
+                "size": 1144400,
+                "sha256": "b36ce3ed98b05d4ff9585ba1e80e55fb9257930d0be27854d385535fed7f1ddf"
+              }
+            },
+            "qairt\\geniex_plugin.dll": {
+              "stock": {
+                "size": 393728,
+                "sha256": "f9d137df6264a87b42873a2c1e89139b17614c90972ec4c57780082048779d40"
+              },
+              "signed": {
+                "size": 404048,
+                "sha256": "4aaa4ce019fc2c1a8ee6fac8bfc891fa822093b5526c9f4074fd0862e4b72f87"
+              }
+            },
+            "qairt\\geniex_vlm.dll": {
+              "stock": {
+                "size": 398848,
+                "sha256": "16651455de6e8e80bfaacc02a8a3d15bef756f358b5e25b80f1efb1deb142621"
+              },
+              "signed": {
+                "size": 409168,
+                "sha256": "4a7dcfc0349f420b3919ec8f80db39449edb15f8877b9fd672f13cb448429309"
+              }
+            }
+          },
+          "basis": "tools/sign-binaries.ts, 2026-10-23: GenieX CLI 0.9.3's 16 unsigned files (geniex.exe from its installer, the rest from geniex-sdk-windows-arm64-v0.9.3.zip), signed by Castellan and otherwise unchanged"
+        }
+      ],
       "install": {
         "kind": "inno",
         "args": [
@@ -243,9 +424,9 @@
             "version": "b11645",
             "download": {
               "file": "llama-b11645-bin-win-opencl-adreno-arm64.zip",
-              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11645/llama-b11645-bin-win-opencl-adreno-arm64.zip",
-              "size": 13263463,
-              "sha256": "231e50cdc87ae62b42d4d25c0cc4f937e36df40f8e3593719c23e976ae6eef04"
+              "url": "https://github.com/Jcollier0120/Manor-releases/releases/download/llama.cpp-b11645/llama-b11645-bin-win-opencl-adreno-arm64.zip",
+              "size": 13566094,
+              "sha256": "763a9ca5dca307fa4732d08811d6e45ef4b9801c8037529a595730434fe6e1b5"
             },
             "into": "{tools}\\servers\\llama.cpp\\b11645-hexagon",
             "exe": "{tools}\\servers\\llama.cpp\\b11645-hexagon\\llama-server.exe",
@@ -314,9 +495,9 @@
             "version": "b11645",
             "download": {
               "file": "llama-b11645-bin-win-opencl-adreno-arm64.zip",
-              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11645/llama-b11645-bin-win-opencl-adreno-arm64.zip",
-              "size": 13263463,
-              "sha256": "231e50cdc87ae62b42d4d25c0cc4f937e36df40f8e3593719c23e976ae6eef04"
+              "url": "https://github.com/Jcollier0120/Manor-releases/releases/download/llama.cpp-b11645/llama-b11645-bin-win-opencl-adreno-arm64.zip",
+              "size": 13566094,
+              "sha256": "763a9ca5dca307fa4732d08811d6e45ef4b9801c8037529a595730434fe6e1b5"
             },
             "into": "{tools}\\servers\\llama.cpp\\b11645-hexagon",
             "exe": "{tools}\\servers\\llama.cpp\\b11645-hexagon\\llama-server.exe",
@@ -537,9 +718,9 @@
         "version": "b11125",
         "download": {
           "file": "llama-b11125-bin-win-opencl-adreno-arm64.zip",
-          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11125/llama-b11125-bin-win-opencl-adreno-arm64.zip",
-          "size": 12848190,
-          "sha256": "9806ac40d46aacd1aa2ef6ea982054fb72e86cf28aec507b2d5e9bdb76ce20c1"
+          "url": "https://github.com/Jcollier0120/Manor-releases/releases/download/llama.cpp-b11125/llama-b11125-bin-win-opencl-adreno-arm64.zip",
+          "size": 13145105,
+          "sha256": "f3d4ae9b57246c71938f8de3407f91537024785243b4c080bee80e97ec219584"
         },
         "into": "{tools}\\servers\\llama.cpp\\b11125-hexagon",
         "exe": "{tools}\\servers\\llama.cpp\\b11125-hexagon\\llama-server.exe",
@@ -1124,6 +1305,15 @@
         "size": 40181694,
         "sha256": "0377e501afe3595d491cde1ff91923f225240053437d6e55b47c6e86fadc54d8"
       },
+      "catalogs": [
+        {
+          "serverVersion": "1.0.7",
+          "file": "castellan-amd-fastflowlm-1.0.7.cat",
+          "covers": "FastFlowLM 1.0.7's 45 unsigned program files",
+          "size": 19121,
+          "sha256": "140b5510f76fccc0e610c61da6ec8f0c0cdb4bb4ce2fac093d8216e6800b5f8d"
+        }
+      ],
       "install": {
         "kind": "zip",
         "into": "{tools}\\servers\\fastflowlm-1.0.7",
