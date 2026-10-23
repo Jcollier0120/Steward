@@ -12,6 +12,7 @@ import { checkoutOf, freshWorktree, interrupted, NOT_ON_KIT, workRootOf, type Ct
 import { kitReach } from './kitreach.ts';
 import { kitIdOf } from './seneschal.ts';
 import { apart, repoBusy, withRepo } from './slots.ts';
+import { removeProfile, trialProfileOf } from './trialprofile.ts';
 
 /**
  * The Steward as one of the Seneschal's workers (Steward 0.36.98, Seneschal 0.2.0). Beside the rounds (agent.ts), it
@@ -336,6 +337,7 @@ async function bumpedFor(h: Held, kit: { repo: string; dir: string; commit: stri
           } finally {
             try {
               await removeWorktree(ctx.run, repo, trialDirOf(ctx.settings, e), trialBranch(version));
+              removeProfile(trialProfileOf(trialDirOf(ctx.settings, e)));
             } catch (err) {
               line(`couldn't remove its trial: ${(err as Error).message}`);
             }

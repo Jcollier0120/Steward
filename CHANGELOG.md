@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.179
+## 0.36.181
 
 **It hands out the kit 2.101.0: first-generation Snapdragon X Elite laptops get the faster small model, and the local AI deletes model files it no longer uses.**
 
@@ -19,6 +19,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Each employee gets these with the kit 2.101.0. An X Elite or X Plus laptop set up before keeps the model it has; to move it to the small model, set up local AI again.
+## 0.36.180
+
+**A new kit is no longer held back because an employee's test copied the words the kit just changed, or because of what happens to be on this PC.**
+
+### What changed
+
+- **Tests that copied the kit's words.** Before a new kit is released, the Steward tries it on every employee. Several kits lately were held back, though nothing was broken, because an employee's test expected the exact words the kit had just changed (a label, a model's name) and got the new ones. Now, when every failing test expected a text the kit's change takes out and got the one it puts in, the Steward writes the new text into that test and runs the checks again. If they pass, the kit goes ahead. The employee's update then carries the corrected test, and its commit says which line changed and why.
+- **When the Steward can't correct it.** If the test builds the text some other way, or other tests fail beside it, nothing is changed: the kit waits as before, and the alarm names the copied text and where it is, so you can see what to update.
+- **Tests run in a profile of their own.** During a kit's trial, each employee's tests now see an empty user profile (home, AppData) instead of this PC's own. Before, a test could pass or fail depending on what this PC had installed or downloaded: kit 2.100.0 failed Reeve's setup test here only because of a model this PC had cached. Installed tools (npm, git, Rust, .NET, Python, Go, Playwright) are still found where they are, and nothing is downloaded again. A test that really needs the real profile fails without the new kit too, so it shows as that employee's own failure and doesn't hold the kit.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.36.177
 

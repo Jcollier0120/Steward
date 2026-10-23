@@ -41,6 +41,11 @@ export interface EmployeeResult {
   without?: string;
   /** A kit's trial that failed: the first distinct lines of the failed step's output that say what went wrong (run.ts's errorLines). */
   errors?: string[];
+  /**
+   * A kit's trial that passed once its tests, which expected what the kit said before, were brought up to it
+   * (copied.ts): each fix, `test/a.test.ts:12: 'old' → 'new'`. Its rollout's bump runs its checks and makes them again.
+   */
+  copies?: string[];
   /** Its release waits until this PC can sign (signing.ts): why it can't, in a line. Nothing failed. */
   signing?: string;
   /** Main's kit, still being tried on the agents or waiting for its whole suite (stages/self.ts): its version. A build's rollout waits for it. */
