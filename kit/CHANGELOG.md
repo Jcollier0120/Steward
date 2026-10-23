@@ -18,17 +18,24 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **A series, and its summary.** `--device NPU,GPU,CPU` runs several devices, a round at a time; `--runs <n>` runs each n times (`npuBenchSeries`). Each run writes its report; then `benchSummary` takes each device's medians (`castellan-npu-bench-summary/1`), and `summarySay` prints them as a table.
   - The summary has what keeping each model loaded costs a day (Wh/day), each batch's job over rest by part, and the whole PC's energy and time for each batch.
   - `--summary <report.json>...` sums up reports from separate runs.
-- **The kit's build of GenieX's plugin** (`kitPlugin`). Where GenieX's own plugin is still in place on an X2, the run takes a copy of GenieX in `{tools}\bench\` with the kit's build: GenieX's files are copied, its QAIRT folder is linked, and the copy is removed after (`removeCopy`, links first).
+- **The kit's build of GenieX's plugin** (`kitPlugin`). Where GenieX's own plugin is still in place on an X2, the run takes a copy of GenieX in `{tools}\bench\` with the kit's build: GenieX's files are copied, its QAIRT folder is linked, and the copy is removed after (`removeCopy`, links first), with the bench folder once it's empty.
   - The report's `run.plugin` says which plugin ran. A run on GenieX's own is marked `plugin` and not ranked.
 - **A held port is left to its server.** Where something holds a route's port (the keeper's server), the run takes ports beside it (`routeOnFreePorts`) and is marked `beside` (`conditions.beside`), rather than stopping.
 - **A busy processor is waited for**, up to `quiet.waitMinutes` (10), before a run starts.
+- **Each rest waits for the PC to settle** (`settle`). The whole PC's draw is read ten seconds at a time until two readings agree within 5% (`SETTLED`), for up to three minutes (the suite's `energy.settleSeconds` and `settleMinutes`). Only then is the rest read; the battery's is read as it is.
+  - On the X2, rests read straight after another device's run came out up to 7 W high, and a model loaded seemed to cost less than none.
+  - The summary shows a cost below nothing as "too small to tell".
+- **A run with `--energy` holds the PC awake with its screen on** (`holdAwake`), from its start to its end, as a video player does. No setting changes, and the hold ends however the run ends.
+  - With the screen off, Windows takes a PC into Modern Standby. The X2 rested there at 5.4 W against 9–10 W awake, so a run that crossed into it compared two different PCs.
+  - The report says so (`conditions.awake`), and how many times the PC went into standby all the same, from Windows' log (`conditions.standby`). More than none is marked `standby` and not ranked.
 - `energyBatch` is exported: a batch of work as one stretch on the meter.
 
 ### What changed
 
-- spec/npu-bench.schema.json: `conditions.beside`, `run.plugin`, `results.embed` and `energy.embed`, all optional. The suite stays `castellan-npu-bench/2`: nothing it asked before changed.
+- spec/npu-bench.schema.json: `conditions.beside`, `conditions.awake`, `conditions.standby`, `run.plugin`, `results.embed` and `energy.embed`, all optional. The suite stays `castellan-npu-bench/2`: nothing it asked before changed.
 - With `--yes`, a fresh Intel PC downloads the route's embedding model too (428 MB), and the prompt counts it.
 - spec/NPU-BENCHMARK.md: Comparing devices (how to run a series and read its summary, the X2 Elite's figures, and the commands for Intel and AMD); spec/NPU-VENDORS.md: Off the NPU.
+  - On the X2 Elite, the NPU does the agents' work for a third to a fifteenth of the energy the Adreno and the processor take, at much the same speed. A model held on the NPU costs the whole PC about 1.1–1.3 W at rest, mostly in the chip around it.
 
 ### Before you update
 

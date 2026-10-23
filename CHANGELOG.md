@@ -14,6 +14,8 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - The benchmark no longer stops when the staff's own AI is running: it runs beside it, without disturbing it, and says the figures aren't for ranking.
+- Its energy figures wait for the PC to settle before each reading at rest, so the warmth of the work just done no longer makes a loaded model look free.
+- An energy run keeps the PC awake with its screen on until it ends, so its figures are always an awake PC's. A run that went into standby all the same, with the lid closed say, is marked and not ranked.
 
 ### Before you update
 

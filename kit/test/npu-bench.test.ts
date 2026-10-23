@@ -175,7 +175,7 @@ const PLUGGED = { onBattery: false, batteryPercent: 80, powerMode: 'balanced', b
  * embeddings there. Intel's is a fake of its own (`embed`), on a port of its own; every server is started on the port
  * its entry says, so a run moved off a held port (`held`) or onto llama.cpp's finds its fake there.
  */
-async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number | (() => number); conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null; npu?: string; vendor?: 'intel' | 'qualcomm' | 'amd'; emi?: () => string; cards?: string; held?: (port: number) => boolean } = {}) {
+async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number | (() => number); conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null; npu?: string; vendor?: 'intel' | 'qualcomm' | 'amd'; emi?: () => string; cards?: string; held?: (port: number) => boolean; standby?: number | null } = {}) {
   const port = await freePort();
   const embedPort = await freePort();
   const vendor = o.vendor ?? 'intel';
@@ -204,6 +204,7 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
   const suite = structuredClone(SUITE);
   suite.holding.minutes = 0.002;
   suite.energy.restSeconds = 0.05;
+  suite.energy.settleSeconds = 0.05;
   suite.energy.loadMinutes = 0.002;
   suite.quiet.samples = 2;
   suite.quiet.waitMinutes = 0;
@@ -212,6 +213,10 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
   suite.steady.maxSpread = Infinity;
   const lines: string[] = [];
   const cleared: string[] = [];
+  // The PC held awake (holdAwake) and let go, each as a line, beside the server's requests so far; and the standby
+  // Windows' log gives (none unless a test says), asked since when.
+  const awake: string[] = [];
+  const standbySince: Date[] = [];
   // The battery reads higher once requests are arriving: working, against at rest.
   let seenAtRest = -1;
   const working = () => {
@@ -244,6 +249,11 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
       memory: async () => ({ workingSetBytes: 3.6 * 1024 ** 3, privateBytes: 1.2 * 1024 ** 3 }),
       conditions: async () => o.conditions ?? PLUGGED,
       cpuBusy: async () => (typeof o.busy === 'function' ? o.busy() : (o.busy ?? 4)),
+      awake: () => {
+        awake.push(`held, ${fake.seen.length} asked`);
+        return () => awake.push(`let go, ${fake.seen.length} asked`);
+      },
+      standby: async (since: Date) => (standbySince.push(since), o.standby === undefined ? 0 : o.standby),
       dischargeRate: async () => (o.rate ? o.rate(working()) : null),
       // No Energy Meter counters unless a test gives them: --energy falls back to the battery, as before kit 2.98.0.
       meter: { powerShell: async () => o.emi?.() ?? '' },
@@ -252,7 +262,7 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
       clearCache: (dir: string) => cleared.push(dir),
     },
   };
-  return { port, embedPort, catalog, tools, fake, embed, lines, cleared, opts };
+  return { port, embedPort, catalog, tools, fake, embed, lines, cleared, awake, standbySince, opts };
 }
 
 test('the suite: 24 graded questions, six of each kind, three must-pass, ids unique, and every prompt fits under the smallest cap', () => {
@@ -944,12 +954,14 @@ test('energy on a PC busy enough to hold the bench past its windows: a reading a
 
 /**
  * Windows' Energy Meter counters as a PC with them answers: the system 10 W at rest and 1 W more while a server runs,
- * and each request 5 J more, 2 J of it the NPU's; in picowatt-hours, at the counters' clock in ms.
+ * and each request 5 J more, 2 J of it the NPU's; in picowatt-hours, at the counters' clock in ms. With `heat`, the
+ * system draws that much more up to that many readings in (the meter's own check the first): the last run's warmth.
  */
-function fakeEmi(seen: () => number) {
+function fakeEmi(seen: () => number, heat?: { milliwatts: number; reads: number }) {
   const PWH_MJ = 3.6e-6;
   let t = performance.now();
   let counted = 0;
+  let reads = 0;
   const mj = { system: 0, npu: 0 };
   const state = { up: false };
   const read = () => {
@@ -958,7 +970,8 @@ function fakeEmi(seen: () => number) {
     t = now;
     const n = seen() - counted;
     counted = seen();
-    mj.system += (10_000 + (state.up ? 1_000 : 0)) * dt + 5_000 * n;
+    const hot = heat && ++reads <= heat.reads ? heat.milliwatts : 0;
+    mj.system += (10_000 + (state.up ? 1_000 : 0) + hot) * dt + 5_000 * n;
     mj.npu += (100 + (state.up ? 400 : 0)) * dt + 2_000 * n;
     return [`emi|SYSTEM|${Math.round(mj.system / PWH_MJ)}|${now}`, `emi|NPU|${Math.round(mj.npu / PWH_MJ)}|${now}`, 'emi|_Total|0|0'].join('\r\n');
   };
@@ -1022,6 +1035,77 @@ test('--energy plugged in, on a PC without the counters, measures nothing and sa
   assert.ok(s.lines.includes("energy: not measured: this PC has no Energy Meter counters and is plugged in: unplug it for the battery's reading, or give a meter (--meter shelly:<address> for a plug, --meter nvidia for a card)"), s.lines.join('\n'));
 });
 
+test('settle: the whole PC read a stretch at a time until two in a row agree, up to its minutes', async () => {
+  // A meter that keeps totals, on a clock of the test's own: each second's draw as `draw` says.
+  const on = (draw: ((s: number) => number) | null) => {
+    let t = 0;
+    const total = (ms: number) => {
+      let mj = 0;
+      for (let s = 0; s < ms / 1000; s++) mj += draw!(s) * Math.min(1, ms / 1000 - s);
+      return mj;
+    };
+    const meter = { kind: 'emi' as const, say: 'the counters', whole: 'system', totals: true, everyMs: 1_000, read: async () => (draw ? { at: t, totals: { system: total(t) } } : null) };
+    return { meter, now: () => t, sleep: async (ms: number) => void (t += ms) };
+  };
+  // Warm from the last run: 12 W, 7 W from 15 s, 5 W from 25 s. Ten-second stretches read 12, 9.5, 6, 5 and 5 W.
+  const warm = on((s) => (s < 15 ? 12_000 : s < 25 ? 7_000 : 5_000));
+  assert.deepEqual(await B.settle(warm.meter, { ...warm, seconds: 10, minutes: 3 }), { seconds: 50, settled: true, draws: [12_000, 9_500, 6_000, 5_000, 5_000] });
+  // Settled at once: two stretches, within 5%.
+  const calm = on((s) => (s < 10 ? 5_000 : 5_200));
+  assert.deepEqual(await B.settle(calm.meter, { ...calm, seconds: 10, minutes: 3 }), { seconds: 20, settled: true, draws: [5_000, 5_200] });
+  // Something on and off every ten seconds never settles: half a minute, three stretches, and it says so.
+  const busy = on((s) => (Math.floor(s / 10) % 2 ? 8_000 : 5_000));
+  assert.deepEqual(await B.settle(busy.meter, { ...busy, seconds: 10, minutes: 0.5 }), { seconds: 30, settled: false, draws: [5_000, 8_000, 5_000] });
+  // No reading: one stretch, and no more waiting.
+  const none = on(null);
+  assert.deepEqual(await B.settle(none.meter, { ...none, seconds: 10, minutes: 3 }), { seconds: 10, settled: false, draws: [] });
+});
+
+test('energy: each rest is read once the PC has settled, so the last run\'s warmth isn\'t taken for rest', async () => {
+  let emi: ReturnType<typeof fakeEmi> | null = null;
+  const s = await scene({ emi: () => emi!.read() });
+  // 5 W more until the third reading (the meter's check, then the first stretch's two ends): the first stretch only.
+  emi = fakeEmi(() => s.fake.seen.length + s.embed.seen.length, { milliwatts: 5_000, reads: 3 });
+  const r = await B.npuBench({ ...s.opts, profile: 'quick', energy: true });
+  assert.equal(r.code, 0, s.lines.join('\n'));
+  const e = r.report.results.energy!;
+  assert.ok(Math.abs(e.idle!.unloadedMilliwatts!.system - 10_000) <= 200, `at rest, no model: ${e.idle!.unloadedMilliwatts!.system}, not 15 W`);
+  assert.ok(s.lines.some((l) => /^energy: waited \d+ s for the PC to settle \(15\.\d W at first, 10\.\d W settled\)$/.test(l)), s.lines.join('\n'));
+  assert.ok(s.lines.indexOf("energy: the meter is Windows' Energy Meter counters (system, npu)") < s.lines.findIndex((l) => l.startsWith('energy: waited')), 'before the first rest');
+});
+
+test('energy: the PC is held awake with its screen on through the run, and a run that went into standby all the same is marked', async () => {
+  let emi: ReturnType<typeof fakeEmi> | null = null;
+  const s = await scene({ emi: () => emi!.read() });
+  emi = fakeEmi(() => s.fake.seen.length + s.embed.seen.length);
+  const t0 = Date.now();
+  const r = await B.npuBench({ ...s.opts, profile: 'quick', energy: true });
+  assert.equal(r.code, 0, s.lines.join('\n'));
+  // Held before anything was asked, let go once, after everything was.
+  assert.deepEqual(s.awake, ['held, 0 asked', `let go, ${s.fake.seen.length} asked`]);
+  assert.equal(r.report.conditions.awake, true);
+  assert.equal(r.report.conditions.standby, 0);
+  assert.equal(s.standbySince.length, 1);
+  assert.ok(s.standbySince[0].getTime() >= t0 - 1000 && s.standbySince[0].getTime() <= t0 + 60_000, 'asked since the hold');
+  assert.ok(!r.report.marks.some((m) => m.code === 'standby'));
+  assert.deepEqual(B.checkSchema(r.report, JSON.parse(readFileSync(new URL('../spec/npu-bench.schema.json', import.meta.url), 'utf8'))), []);
+
+  // Into standby once, all the same (a lid closed): marked, and not ranked.
+  const t = await scene({ emi: () => emi!.read(), standby: 1 });
+  emi = fakeEmi(() => t.fake.seen.length + t.embed.seen.length);
+  const u = await B.npuBench({ ...t.opts, profile: 'quick', energy: true });
+  assert.equal(u.code, 0, t.lines.join('\n'));
+  assert.equal(u.report.conditions.standby, 1);
+  assert.deepEqual(u.report.marks.find((m) => m.code === 'standby'), { code: 'standby', say: 'the PC went into standby during the run (once), where it rests at a fraction of its awake draw: shown, not ranked' });
+  assert.ok(t.lines.some((l) => l.startsWith('the PC went into standby during the run')), t.lines.join('\n'));
+
+  // Without --energy, nothing is held and Windows' log isn't read.
+  const v = await scene();
+  const w = await B.npuBench({ ...v.opts, profile: 'quick' });
+  assert.equal(w.code, 0, v.lines.join('\n'));
+  assert.deepEqual([v.awake, v.standbySince, w.report.conditions.awake, w.report.conditions.standby], [[], [], undefined, undefined]);
+});
+
 /**
  * GenieX "installed" in the scene's %LOCALAPPDATA% with its plugin as `installed` says, and its route's plugin patch made
  * small: GenieX's own build, the kit's (in a kit folder of the test's own), and the libraries it needs, each a few bytes.
@@ -1065,7 +1149,7 @@ test("GenieX's plugin as this PC runs it: the kit's build where it's in; else a 
   kp.done();
   assert.ok(!existsSync(copy), 'the copy goes after the run');
   assert.equal(readFileSync(path.join(g.dir, 'qairt', 'QnnHtp.dll'), 'utf8'), 'qairt', 'and what its link pointed at stays');
-  assert.deepEqual(readdirSync(path.join(s.tools, 'bench')), []);
+  assert.ok(!existsSync(path.join(s.tools, 'bench')), 'the bench folder too, holding no other copy');
 
   // A library the kit's build isn't made for, or no build in the kit: GenieX's own runs, and the run says why.
   writeFileSync(path.join(path.dirname(g.target), 'llama.dll'), 'a later llama');
@@ -1187,7 +1271,7 @@ test("the summary: each figure the median of a device's runs; keeping a model lo
       },
     },
   });
-  const s = B.benchSummary([run('NPU', 3000, 500, 4000, 1000), run('CPU', 9000, 40, 9000, 0), run('NPU', 1000, 300, 6000, 3000), run('NPU', 2000, 400, 5000, 2000)] as any);
+  const s = B.benchSummary([run('NPU', 3000, 500, 4000, 1000), run('CPU', 9000, -40, 9000, 0), run('NPU', 1000, 300, 6000, 3000), run('NPU', 2000, 400, 5000, 2000)] as any);
   assert.deepEqual(Object.keys(s.devices), ['NPU', 'CPU']);
   const npu = s.devices.NPU;
   assert.equal(npu.runs, 3);
@@ -1206,7 +1290,8 @@ test("the summary: each figure the median of a device's runs; keeping a model lo
   for (const [row, npuCell, cpuCell] of [
     ['server', 'GenieX 0.9.3', 'llama.cpp b11734 cpu-arm64'],
     ['first answer after a start', '2 s', '9 s'],
-    ['keeping the model loaded', '400 mW (9.6 Wh/day)', '40 mW (1 Wh/day)'],
+    // Less than nothing is the rests' wobble, not a saving.
+    ['keeping the model loaded', '400 mW (9.6 Wh/day)', 'too small to tell (-40 mW)'],
     ['triage: each over rest', '5.00 J', '9.00 J'],
     ['triage: the whole PC, the batch', '80.0 J in 8 s', '80.0 J in 8 s'],
   ]) assert.ok(lines.some((l) => new RegExp(`^${esc(row)} +${esc(npuCell)} +${esc(cpuCell)}$`).test(l)), `${row}\n${lines.join('\n')}`);

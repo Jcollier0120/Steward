@@ -576,6 +576,8 @@ Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embedd
 
 Intel's route needs none: OpenVINO Model Server runs the same model on the graphics and the processor (`--target_device`).
 
+AMD's `--reasoning-budget 0` is checked (2026-10-23, the pinned Q4_0 on b11734's `cpu-arm64` on the X2, the same llama.cpp as `cpu-x64`). With it, Qwen3.5-2B answered at once: "391" in 6 tokens, a sentence in 28, and no reasoning. Without it, the same questions took 296 and 400 tokens of thinking, and the second ran out before it answered.
+
 ## Licences
 
 | What | Licence | Note |

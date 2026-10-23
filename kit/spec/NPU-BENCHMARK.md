@@ -79,6 +79,10 @@ The suite is data, `npu-bench-suite.json` beside this file, with a version (`cas
    A whole-PC figure includes the screen and everything else, so the run records the screen's brightness (it doesn't change it). This is where an NPU should show what it's for: on Intel slower than its graphics card, but with far less power.
 
    From kit 2.99.0, the embedding model is measured the same way (11, below): the PC at rest with it loaded, against no model (`energy.embed`), and a batch of embedding requests (`batches.embed`, 20 on a full run, 5 on a quick one).
+
+   From kit 2.99.0, each rest is read once the PC has settled: its draw is read ten seconds at a time until two readings in a row agree within 5% (or 0.1 W), for up to three minutes (the suite's `settleSeconds` and `settleMinutes`), and the log says when it had to wait, or never settled. A rest read straight after other work reads high: on the X2, rests read just after another device's run came out up to 7 W over, so the model loaded seemed to cost less than no model. The battery's reading is read as it is, never settling.
+
+   From kit 2.99.0, a run with `--energy` holds the PC awake with its screen on from its start to its end, as a video player does (`holdAwake`: Windows is asked to, and lets go when the run ends however it ends; its settings stay as they are). With the screen off, Windows takes a PC into Modern Standby, and there the X2 rested at 5.4 W against 9–10 W awake: a run that crossed into it compared two different PCs. Windows' log then says whether the PC went into standby all the same (a lid closed, the power button): the report's `conditions.standby`, marked `standby` and not ranked when it did.
 10. **Vision** (where the model has it). Four questions about fixed pictures, graded, after one picture as a warm-up that isn't counted: GenieX holds one model at a time and loads its vision part for a picture, so the first picture's time would be that load's. Shown as its own column; it is not part of job time, because Intel's route has no vision yet.
 11. **Embeddings** (kit 2.99.0, where the route has an embedding model: Intel's and the Snapdragon's, and llama.cpp's beside the model off the NPU; AMD's NPU route has none). Once the chat server has stopped, the embedding server is started by itself, as an agent's first request starts it, and timed to its first vector. Then a query (`suite.embed.query`) and requests of 16 texts of about 1,500 characters each (an agent's chunks of a file), each request's texts new (`embedTexts`), a warm-up and then the tries as for the rest: each one's time, the tokens the server counted, and tokens a second. The server is stopped again before the run ends.
 
@@ -111,7 +115,7 @@ Before the five measured tries of each kind, there is one warm-up try, which isn
 
 ### How long a run takes
 
-Past setup: about 8 minutes for the quick run (loading, short answer, speeds, the jobs and quality, each three times instead of five, so it's shown but not ranked), and about 25 for the full run (five tries each, holding speed, and energy if asked for). The first start's compile adds about half a minute on Intel, and the embeddings (from kit 2.99.0) a minute or two, three more with `--energy`.
+Past setup: about 8 minutes for the quick run (loading, short answer, speeds, the jobs and quality, each three times instead of five, so it's shown but not ranked), and about 25 for the full run (five tries each, holding speed, and energy if asked for). The first start's compile adds about half a minute on Intel, and the embeddings (from kit 2.99.0) a minute or two, three more with `--energy`. With `--energy`, each of its four rests waits for the PC to settle first (kit 2.99.0): about twenty seconds on a quiet PC, up to three minutes on a busy one.
 
 ## The report
 
@@ -119,11 +123,11 @@ One JSON file per run, `castellan-npu-bench-report/1`, with its schema beside th
 
 - **suite**: version (`castellan-npu-bench/2`), kit version, profile (quick or full).
 - **pc**: the processor and its chip generation (as detection labels it, e.g. "Intel Core Ultra 7 256V, Lunar Lake"), the NPU's name, PCI device and driver version and date, RAM, Windows build, and the laptop's make and model (cooling and power limits differ between laptops with the same chip).
-- **conditions**: plugged in or battery, power mode, battery charge, how busy the processor was before the start, and (kit 2.99.0) `beside`: the route's ports another server held, so the run took others.
+- **conditions**: plugged in or battery, power mode, battery charge, how busy the processor was before the start, and (kit 2.99.0) `beside`: the route's ports another server held, so the run took others; with `--energy`, `awake` (the run held the PC awake, its screen on) and `standby` (how many times it went into Modern Standby all the same, from Windows' log).
 - **run**: device, server and version, model id, size and each file's SHA-256 (as `npu-vendors.json` pins them; a candidate's are measured once setup has pulled it, except on FastFlowLM's route: see `--candidate` in **What's built**), and whether it is shipped or a candidate. On a played run (`--generation`, below), `played`: the older Snapdragon's generation this NPU played. From kit 2.99.0, off the NPU on llama.cpp, the server is `llama.cpp b11734 (<its build>)` and the files are the GGUFs it ran (Comparing devices, below); and where the kit builds the server's plugin (GenieX's on an X2), `plugin`: the kit's build installed (`kit`), a copy of the server running it (`kit-copy`), the server's own (`server`, not ranked), or neither (`other`).
 - **results**: each measurement's five tries, their median and spread, and the job time. Each job also has each try's answer tokens (`answerTokens`) and first-token time (`firstTokenMs`), and its spread at one answer length (`spreadAtLength`). With `--energy`, `energy`: the power at rest and through the triage minutes, and millijoules a token; from kit 2.98.0, with a meter other than the battery, also the meter (`meter`, and the part that is the whole PC, `whole`), whether the battery was charging, each part's power at rest without the model and with it (`idle`, and what keeping it loaded costs, `keepLoadedMilliwatts`), each part's at rest and working (`restParts`, `loadParts`), and each batch (`batches`: how many, how long, the tokens, each part's energy and over rest, one's and a token's). From kit 2.99.0, `embed`: the embedding server and model, its time to the first vector (`loadMs`), a query's and a request's times (`queryMs`, `requestMs`), the texts a request, the tokens counted, tokens a second and the vectors' length (`dims`); null where it wasn't measured. And in `energy`, `embed`: each part at rest with the embedding model loaded, and what keeping it loaded costs, with its batch in `batches.embed`.
 - **quality**: each item's answer, its grade, the score, and whether the gate passed.
-- **marks**: anything that keeps it off the board (not streamed, estimated tokens, noisy, battery, gate failed, played, and from kit 2.99.0 `beside` and `plugin`), each with its reason in plain words.
+- **marks**: anything that keeps it off the board (not streamed, estimated tokens, noisy, battery, gate failed, played, and from kit 2.99.0 `beside`, `standby` and `plugin`), each with its reason in plain words.
 
 A series of runs (`--runs`, `--device NPU,GPU,CPU`, Comparing devices, below) writes each run's report and a **summary** beside them, `castellan-npu-bench-summary/1`: each device's figures, each the median of its runs.
 
@@ -152,7 +156,7 @@ npm run kit        # fills src\kit\ from kit\
 - Plugged in, for the speed run (energy is a second run, step 7).
 - Windows' default power mode, **Balanced** (Settings › System › Power & battery › Power mode). It is the one ranked, and on Intel's NPU Best performance changed nothing.
 - **The processor under 15% busy** before the start: the benchmark reads it ten times, 3 s apart, and marks the run `busy` above 15%. Close other programs and wait for Windows Update or a Defender scan to finish; Task Manager shows it.
-- The PC stays awake for the half hour: if its screen or sleep timeouts are shorter, lengthen them for the run (Settings › System › Power & battery › Screen, sleep & hibernate timeouts) and put them back after. Leave the brightness as it is: the report records it.
+- The PC stays awake for the half hour: if its screen or sleep timeouts are shorter, lengthen them for the run (Settings › System › Power & battery › Screen, sleep & hibernate timeouts) and put them back after. From kit 2.99.0 a run with `--energy` keeps the PC awake with its screen on by itself, until it ends, and changes no setting. Leave the brightness as it is: the report records it. Leave the lid open.
 
 **4. Nothing else on the NPU.** The benchmark needs the NPU to itself. From kit 2.99.0, where the keeper's server holds the route's port (GenieX 18181, OpenVINO Model Server 18183, FastFlowLM 18184, or an embedding server's), the benchmark leaves it running and takes ports beside it, but marks the run `beside` and doesn't rank it, since the keeper's server may be working meanwhile. Before kit 2.99.0 it stopped at once, exit 1. For a ranked run, with the owner's OK:
 
@@ -245,20 +249,48 @@ node src\kit\npu-bench.ts --device NPU,GPU,CPU --runs 3 --energy --yes 2>&1 | Te
 
 Speed and quality read as in a report. The energy rows need a meter other than the battery (the counters, a Shelly plug or a card's own reading), and are the whole PC's (the meter's `system`, or the plug's), so the screen and everything else are in them alike on every device:
 
-- **keeping the model loaded**: the PC at rest with the model loaded, less at rest with no model, and the same over a day (Wh/day): what the agents' habit of keeping their model loaded all day costs, used or not. **keeping the embedder loaded** is the same for the embedding model by itself.
+- **keeping the model loaded**: the PC at rest with the model loaded, less at rest with no model, and the same over a day (Wh/day): what the agents' habit of keeping their model loaded all day costs, used or not. **keeping the embedder loaded** is the same for the embedding model by itself. Below nothing, it reads **too small to tell**: the two rests varied by more than the model costs, which is no saving.
 - **`<batch>: each over rest`**: one job's energy over the PC at rest just before the batch (working less idle), and **a token over rest** the same a token. This is the work's own cost: the device that does a job for the fewest joules.
 - **`<batch>: the whole PC, the batch`**: everything the PC spent finishing the batch, rest included, and how long it took. A device that draws more but finishes sooner can spend less here than a slower, frugal one, because the PC's own draw runs on until the work is done: this is what a battery sees.
 - The summary's JSON also has each batch's job by part (`eachByPart`: the NPU's, the graphics', each processor cluster's, the memory's), which says where the energy went.
 
-Three runs, medians: one run's hiccup (a Defender scan, an update) moves no figure. The runs' own marks are listed with each device (`quick` for the quick profile; `beside` or `plugin` say a figure isn't what this PC does unhindered).
+Three runs, medians: one run's hiccup (a Defender scan, an update) moves no figure. The runs' own marks are listed with each device (`quick` for the quick profile; `beside` or `plugin` say a figure isn't what this PC does unhindered, and `standby` that a run's energy is partly a sleeping PC's).
 
 ### The Snapdragon X2 Elite, 2026-10-23
 
-X2_FIGURES
+Kit 2.99.0, the quick profile, three runs of each device a round at a time, medians (00:07–01:50, 1 h 43 min). The same model on each, Qwen3-VL-2B (unsloth's Q4_0 GGUF, the files GenieX holds), and the same embedding model, Qwen3-Embedding-0.6B (Q8_0). On the NPU, GenieX 0.9.3 running the kit's build of its plugin (a copy, `kit-copy`), with the NPU's own embedding server (llama.cpp b11645 on the Hexagon). On the Adreno and the processor, llama.cpp b11734's OpenCL and Arm64 builds. Plugged in, Windows' power mode Best performance (this PC's own), the screen on at 75% and held on by each run (no run went into standby), the manor and its servers paused, and the processor 4–6% busy at each start. The energy is the whole PC's (the counters' `system`).
+
+| | NPU | Graphics (Adreno) | Processor |
+|---|---|---|---|
+| first answer after a start | 2.1 s | 4.2 s | 1.6 s |
+| short answer | 59 ms | 28 ms | 19 ms |
+| writing | 70.5 tokens/s | 71.7 tokens/s | 91.3 tokens/s |
+| reading 1,024 tokens | 324 ms | 749 ms | 1,141 ms |
+| job time | 3.53 s | 4.51 s | 4.13 s |
+| quality (of 24), pictures (of 4) | 22, 4 | 22, 4 | 22, 4 |
+| embedding texts | 5,357 tokens/s | 3,274 tokens/s | 2,113 tokens/s |
+| keeping the model loaded | 1,130 mW (27.1 Wh/day) | too small to tell | too small to tell |
+| keeping the embedder loaded | 1,348 mW (32.4 Wh/day) | too small to tell | 90 mW (2.2 Wh/day) |
+| triage: each over rest | 9.6 J | 47.7 J | 118.2 J |
+| reply: each over rest | 13.5 J | 38.4 J | 62.9 J |
+| summary: each over rest | 34.0 J | 105.1 J | 198.1 J |
+| reading 1,024 tokens: each over rest | 7.3 J | 45.0 J | 111.9 J |
+| a picture: each over rest | 4.0 J | 11.7 J | 54.0 J |
+| embedding: a token over rest | 3.8 mJ | 12.4 mJ | 48.0 mJ |
+| triage ×5: the whole PC | 81.8 J in 3.1 s | 285.8 J in 4.6 s | 648.5 J in 6.2 s |
+| reply ×5: the whole PC | 107.7 J in 3.7 s | 236.0 J in 4.3 s | 346.0 J in 3.4 s |
+| summary ×5: the whole PC | 299.4 J in 12.2 s | 650.5 J in 12.8 s | 1,088.9 J in 10.7 s |
+| embedding ×5: the whole PC | 222.8 J in 7.0 s | 551.8 J in 11.3 s | 1,893.0 J in 16.3 s |
+
+- **The NPU does the agents' work for a third to a fifteenth of the energy.** Each job over rest costs the NPU 9.6–34 J, the Adreno 38–105 J and the processor 63–198 J. Embedding costs 3.8 mJ a token on the NPU, 12.4 on the Adreno and 48 on the processor. The whole PC spends the least on the NPU for every batch. That holds even where the processor finishes first (five replies in 3.4 s against 3.7 s, for 346 J against 108 J).
+- **Speed is close.** The processor writes fastest (91 tokens a second against 70–72) and answers short questions fastest. The NPU reads fastest, a 1,024-token read in a third of a second, and has the best job time. All three answer the same 22 of 24 questions and all four pictures right.
+- **A model held on the NPU costs about a watt doing nothing.** GenieX loaded costs the whole PC 1.1 W, and the NPU's embedding server 1.3 W (27–32 Wh a day). The NPU itself draws 0.13–0.15 W of it. The rest is the chip around it: `infra` 0.48 → 1.2 W, `soc` 1.3 → 2.0 W. llama.cpp loaded on the Adreno or the processor costs nothing the meter can tell. So the keeper's stopping the NPU's servers when nobody uses them saves about a watt for each.
+- **Awake, quiet, the X2 rests at 9.1–10.1 W** with the screen at 75%. A first series ran with the screen off, in Modern Standby, where it rests at 5.4 W. Its costs over rest came out within 15% of these (NPU triage 11.0 J, Adreno 50.0 J, processor 115.8 J), but its rests, and so what keeping a model loaded costs, didn't. Hence the hold awake (Energy, above).
+- Two runs' rests with no model caught a burst of other work: the NPU's first (35 W, the processor at 18 W) and the processor's third (11.7 W). Each made that run's "keeping it loaded" negative. The medians leave them out, which is what three runs are for.
 
 ### On Intel and AMD
 
-On a laptop with Windows' Energy Meter counters (`node src\kit\power-meter.ts` says), from a worktree of the Steward at kit 2.99.0 or later (Running it on a PC, step 1), plugged in, the PC quiet (step 3):
+On a laptop with Windows' Energy Meter counters (`node src\kit\power-meter.ts` says), from a worktree of the Steward at kit 2.99.0 or later (Running it on a PC, step 1), plugged in, the lid open, the PC quiet (step 3) and its agents paused (step 4). The run keeps the PC awake with its screen on by itself, so the figures are an awake PC's, as the X2's are:
 
 ```powershell
 node src\kit\power-meter.ts
@@ -320,7 +352,7 @@ The same model on the Arc 140V, measured with the experiment harness rather than
 9. **The token tally** (`token-tally.ts`): every chat and vision request an agent's kit answers is counted, by day, agent, work, lane and accelerator kind: how many, the prompt and answer tokens (the server's counts, or the kit's estimate where it gives none), the time, and how they spread over size buckets. Counts only, never what was asked or answered, kept on the PC in the accelerators folder (`usage\<day>\<agent>.json`) for 60 days, and sent nowhere. `npu-bench.ts --mix` prints them.
 
 10. **`power-meter.ts`** (kit 2.98.0): the four meters (Energy, above), a stretch's energy from them (`measureSpan`: a meter with totals read at its two ends, one without every so often), and, as a command, which meter this PC has and what each part draws over a few seconds (`--seconds`, 10 by default).
-11. **Devices, embeddings and series** (kit 2.99.0): a route's model off the NPU on llama.cpp (`planOffNpu`, `setUpOffNpu`, from the route's `offNpu`), the kit's build of GenieX's plugin from a copy of GenieX (`kitPlugin`), the embeddings (`embedTexts`), ports beside a held one, the wait for a quiet processor, and several runs with their summary (`npuBenchSeries`, `benchSummary`, `summarySay`). Tested with fake servers, downloads and meters: nothing real starts.
+11. **Devices, embeddings and series** (kit 2.99.0): a route's model off the NPU on llama.cpp (`planOffNpu`, `setUpOffNpu`, from the route's `offNpu`), the kit's build of GenieX's plugin from a copy of GenieX (`kitPlugin`), the embeddings (`embedTexts`), ports beside a held one, the wait for a quiet processor, each rest read once the PC has settled (`settle`), the PC held awake through an energy run and a run that went into standby all the same marked (`holdAwake`, `standbyCount`), and several runs with their summary (`npuBenchSeries`, `benchSummary`, `summarySay`). Tested with fake servers, downloads and meters: nothing real starts.
 
 Later, not in the first version: a **Measure this PC** button in Manor's Accelerators page; the website's import and pages (in the website's repository); uploads from other people.
 

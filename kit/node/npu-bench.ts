@@ -1,4 +1,5 @@
-import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,7 +80,7 @@ export interface Suite {
   gate: { score: number; calibrated: boolean };
   holding: { minutes: number; job: string };
   /** `batch`: how many of each job, read and picture in each energy batch, by profile (kit 2.98.0). */
-  energy: { restSeconds: number; loadMinutes: number; job: string; batch?: { quick: number; full: number } };
+  energy: { restSeconds: number; settleSeconds?: number; settleMinutes?: number; loadMinutes: number; job: string; batch?: { quick: number; full: number } };
   short: { prompt: string; maxTokens: number; grade: Grade };
   write: { prompt: string; maxTokens: number };
   read: { sizes: number[]; capShare: number; maxTokens: number; question: string };
@@ -331,7 +332,7 @@ export interface EnergyBatch {
 }
 
 export interface Mark {
-  /** quick, rehearsal, battery, busy, beside, plugin, not-streamed, no-usage, noisy, gate, job-failed, setup, start */
+  /** quick, rehearsal, battery, busy, beside, standby, plugin, not-streamed, no-usage, noisy, gate, job-failed, setup, start */
   code: string;
   say: string;
 }
@@ -348,6 +349,10 @@ export interface Conditions {
   model: string | null;
   /** The route's ports something else held at the start (kit 2.99.0: the keeper's own server, most likely), so the run took others. */
   beside?: number[];
+  /** The run held the PC awake with its screen on (holdAwake: --energy, kit 2.99.0). */
+  awake?: boolean;
+  /** How many times the PC went into Modern Standby during a run held awake (standbyCount), null where Windows' log couldn't be read. */
+  standby?: number | null;
 }
 
 export interface BenchReport {
@@ -428,6 +433,7 @@ export function marksFor(r: BenchReport, suite: Suite): Mark[] {
   if (r.conditions.onBattery) marks.push({ code: 'battery', say: 'it ran on the battery: speed is ranked plugged in (an energy figure from it still counts)' });
   if (r.conditions.cpuBusyPercent !== null && r.conditions.cpuBusyPercent > suite.quiet.cpuBusyMax) marks.push({ code: 'busy', say: `the processor was ${r.conditions.cpuBusyPercent}% busy before the start (no more than ${suite.quiet.cpuBusyMax}% for a ranked run)` });
   if (r.conditions.beside?.length) marks.push({ code: 'beside', say: `the manor's own server ran beside it (port ${r.conditions.beside.join(', ')}), so it ran on other ports: shown, not ranked` });
+  if (r.conditions.standby) marks.push({ code: 'standby', say: `the PC went into standby during the run (${r.conditions.standby === 1 ? 'once' : `${r.conditions.standby} times`}), where it rests at a fraction of its awake draw: shown, not ranked` });
   if (r.run.plugin === 'server') marks.push({ code: 'plugin', say: `${r.run.server?.replace(/ [\d.]+$/, '') ?? 'the server'} ran its own plugin, not the kit's build that this PC runs: shown, not ranked` });
   if (r.run.streamed === false) marks.push({ code: 'not-streamed', say: "the server didn't stream, so reading and writing are estimates" });
   if (r.run.usageReported === false) marks.push({ code: 'no-usage', say: "the server didn't report token counts, so they are estimates" });
@@ -488,6 +494,39 @@ async function cpuBusy(): Promise<number | null> {
     const out = await runPowerShell(`(Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'").PercentProcessorTime`, 20_000);
     const n = Number(out.trim());
     return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+// ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED, held until its input closes.
+const AWAKE_PS = `Add-Type -Name Awake -Namespace Kit -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);'
+[void][Kit.Awake]::SetThreadExecutionState([uint32]2147483651)
+[void][Console]::In.ReadToEnd()`;
+
+/**
+ * Keeps the PC awake with its screen on until let go (kit 2.99.0), as a video player does: a PowerShell that asks
+ * Windows to (SetThreadExecutionState) and holds it until its input closes, when the run lets go or however the run
+ * ends. Windows' own settings stay as they are. With the screen off, Windows takes a PC into Modern Standby, where the
+ * X2 rested at 5.4 W against 9–10 W awake: a run that crossed into it compared two different PCs.
+ */
+export function holdAwake(): () => void {
+  try {
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', AWAKE_PS], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
+    child.on('error', () => {});
+    child.stdin.on('error', () => {});
+    return () => child.stdin.end();
+  } catch {
+    return () => {};
+  }
+}
+
+/** How many times the PC went into Modern Standby since a time (Kernel-Power's event 506 in Windows' System log), null where it couldn't be read. */
+async function standbyCount(since: Date): Promise<number | null> {
+  try {
+    const out = await runPowerShell(`@(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power'; Id = 506; StartTime = [datetime]::Parse('${since.toISOString()}').ToLocalTime() } -ErrorAction SilentlyContinue).Count`, 30_000);
+    const n = Number(out.trim());
+    return out.trim() && Number.isFinite(n) ? n : null;
   } catch {
     return null;
   }
@@ -760,6 +799,10 @@ export function removeCopy(dir: string): void {
     } catch {}
   }
   rmSync(dir, { recursive: true, force: true });
+  // The bench folder too, once it holds no other copy: a run leaves the tools home as it found it.
+  try {
+    rmdirSync(path.dirname(dir));
+  } catch {}
 }
 
 /**
@@ -843,6 +886,30 @@ export async function energyBatch(m: Meter, rest: Span, count: number, one: (i: 
   return { count, answered, seconds: Number(s.seconds.toFixed(2)), tokens, millijoules: roundParts(s.millijoules), extraMillijoules: roundParts(extra), millijoulesEach: Math.round(extra[whole] / count), millijoulesPerToken: tokens ? Number((extra[whole] / tokens).toFixed(3)) : null };
 }
 
+/** Two stretches' draws agree, for settle: within this share of the first, or these milliwatts, whichever is more. */
+export const SETTLED = { share: 0.05, milliwatts: 100 };
+
+/**
+ * The PC let settle before a rest is read (kit 2.99.0): the whole PC's draw over stretches of `seconds` until two in a
+ * row agree (SETTLED), up to `minutes`. A rest read while the last run's heat, or a burst of something else, still lifts
+ * the PC reads high: on the X2, rests read just after another device's run came out up to 7 W over, and a model loaded
+ * cost less than none. How long it took, whether it settled, and each stretch's draw (none when the meter gave no reading).
+ */
+export async function settle(m: Meter, o: { now: () => number; sleep: (ms: number) => Promise<void>; seconds: number; minutes: number }): Promise<{ seconds: number; settled: boolean; draws: number[] }> {
+  const t0 = o.now();
+  const draws: number[] = [];
+  const limit = Math.max(2, Math.ceil((o.minutes * 60) / o.seconds));
+  while (draws.length < limit) {
+    const s = await measureSpan(m, { now: o.now, sleep: o.sleep, ms: o.seconds * 1000 });
+    const w = s?.milliwatts[m.whole];
+    if (w === undefined) break;
+    draws.push(w);
+    const [a, b] = draws.slice(-2);
+    if (draws.length > 1 && Math.abs(b - a) <= Math.max(a * SETTLED.share, SETTLED.milliwatts)) return { seconds: (o.now() - t0) / 1000, settled: true, draws };
+  }
+  return { seconds: (o.now() - t0) / 1000, settled: false, draws };
+}
+
 /** One /v1/embeddings request, never throwing: its time, how many vectors and how long, and the tokens the server counted. */
 async function embedAsk(http: typeof fetch, ep: { baseUrl: string; model: string }, input: string | string[], timeoutMs: number, now: () => number): Promise<{ ok: boolean; ms: number; vectors: number; dims: number; tokens: number | null; error: string | null }> {
   const t0 = now();
@@ -908,6 +975,10 @@ export interface NpuBenchOptions {
     memory?: (pid: number) => Promise<{ workingSetBytes: number; privateBytes: number } | null>;
     conditions?: () => Promise<Omit<Conditions, 'cpuBusyPercent'>>;
     cpuBusy?: () => Promise<number | null>;
+    /** Holds the PC awake with its screen on (holdAwake): what lets it go. */
+    awake?: () => () => void;
+    /** How many times the PC went into Modern Standby since a time (standbyCount). */
+    standby?: (since: Date) => Promise<number | null>;
     dischargeRate?: () => Promise<number | null>;
     /** The meters' own reading (power-meter.ts' MeterIo): the Energy Meter counters' PowerShell, nvidia-smi, a plug's fetch. */
     meter?: MeterIo;
@@ -1119,8 +1190,15 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     }
   }
 
-  // 3. The conditions: how busy the processor is before the start. A busy one is waited for, up to the suite's
-  // waitMinutes (kit 2.99.0), so a run in a series starts once whatever else ran has finished; then it runs as it is.
+  // 3. The conditions. With --energy, the PC is held awake with its screen on from here to the end (holdAwake, kit
+  // 2.99.0), so every rest and batch is the awake PC's, and Windows' log says whether it went into standby all the same.
+  const awakeSince = new Date();
+  if (o.energy) {
+    cleanups.push((o.io?.awake ?? holdAwake)());
+    report.conditions.awake = true;
+  }
+  // How busy the processor is before the start. A busy one is waited for, up to the suite's waitMinutes (kit 2.99.0),
+  // so a run in a series starts once whatever else ran has finished; then it runs as it is.
   const sampleBusy = async () => {
     const busy: number[] = [];
     for (let i = 0; i < suite.quiet.samples; i++) {
@@ -1138,6 +1216,20 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     log(`the processor is ${report.conditions.cpuBusyPercent ?? '?'}% busy: starting`);
   }
 
+  // A rest, read once the PC has settled (settle, kit 2.99.0), and said where it had to wait or never did. The battery's
+  // reading wobbles too much to settle: it is read as it is, as before.
+  const atRest = async (m: Meter) => {
+    const every = suite.energy.settleSeconds;
+    if (every && m.kind !== 'battery') {
+      const minutes = suite.energy.settleMinutes ?? 3;
+      const st = await settle(m, { now, sleep, seconds: every, minutes });
+      const [first, last] = [st.draws[0], st.draws[st.draws.length - 1]];
+      if (!st.settled && st.draws.length > 1) log(`energy: the PC's draw didn't settle in ${minutes} minutes (${watts(first)} at first, ${watts(last)} last): read as it is`);
+      else if (st.draws.length > 2) log(`energy: waited ${Math.round(st.seconds)} s for the PC to settle (${watts(first)} at first, ${watts(last)} settled)`);
+    }
+    return measureSpan(m, { now, sleep, ms: suite.energy.restSeconds * 1000 });
+  };
+
   // Energy (--energy): the meter, and the PC at rest with no model loaded, before the server starts. The battery's
   // reading is too coarse for the rests and batches (Energy, in the spec): it measures the triage minutes alone, as before.
   let meter: Meter | null = null;
@@ -1149,7 +1241,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
       meter = opened.meter;
       log(`energy: the meter is ${meter.say}`);
       if (meter.kind !== 'battery') {
-        unloaded = await measureSpan(meter, { now, sleep, ms: suite.energy.restSeconds * 1000 });
+        unloaded = await atRest(meter);
         log(`energy at rest, no model loaded: ${unloaded ? partsSay(meter, unloaded.milliwatts) : 'no reading'}`);
       }
     }
@@ -1204,7 +1296,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     // The model loaded and idle (--energy), just after the cold load: what keeping it loaded costs, against no model.
     let loaded: Span | null = null;
     if (meter && meter.kind !== 'battery') {
-      loaded = await measureSpan(meter, { now, sleep, ms: suite.energy.restSeconds * 1000 });
+      loaded = await atRest(meter);
       const w = meter.whole;
       log(`energy at rest, the model loaded: ${loaded ? partsSay(meter, loaded.milliwatts) : 'no reading'}${loaded && unloaded && w in loaded.milliwatts && w in unloaded.milliwatts ? `; keeping it loaded: ${watts(loaded.milliwatts[w] - unloaded.milliwatts[w])}` : ''}`);
     }
@@ -1321,7 +1413,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
       const tokensOf = (r: Streamed) => (Number(r.usage?.prompt_tokens) || 0) + (Number(r.usage?.completion_tokens) || 0);
       let jobs = 0;
       let tokens = 0;
-      const rest = await span({ ms: suite.energy.restSeconds * 1000 });
+      const rest = await atRest(m);
       const load = await span({
         ms: suite.energy.loadMinutes * 60_000,
         during: async () => {
@@ -1455,7 +1547,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
         const energy = report.results.energy;
         if (meter && meter.kind !== 'battery' && energy) {
           const w = meter.whole;
-          const idle = await measureSpan(meter, { now, sleep, ms: suite.energy.restSeconds * 1000 });
+          const idle = await atRest(meter);
           const keep = idle && unloaded && w in idle.milliwatts && w in unloaded.milliwatts ? Math.round(idle.milliwatts[w] - unloaded.milliwatts[w]) : null;
           energy.embed = { loadedMilliwatts: idle ? roundParts(idle.milliwatts) : null, keepLoadedMilliwatts: keep };
           log(`energy at rest, the embedding model loaded: ${idle ? partsSay(meter, idle.milliwatts) : 'no reading'}${keep !== null ? `; keeping it loaded: ${watts(keep)}` : ''}`);
@@ -1480,6 +1572,10 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
 
   report.run.streamed = streamedSeen.length ? streamedSeen.every(Boolean) : null;
   report.run.usageReported = usageSeen.length ? usageSeen.every(Boolean) : null;
+  if (report.conditions.awake) {
+    report.conditions.standby = await (o.io?.standby ?? standbyCount)(awakeSince);
+    if (report.conditions.standby) log(`the PC went into standby during the run, held awake as it was (a lid closed, the power button?): its figures aren't the awake PC's`);
+  }
   const r = finish(0);
   log(r.report.ranked ? 'Ranked: it met every condition.' : `Not ranked: ${r.report.marks.map((m) => m.say).join('; ')}`);
   return r;
@@ -1621,8 +1717,10 @@ export function summarySay(s: BenchSummary): string[] {
   rows.push(['embedding a query', (d) => n(d.embed?.queryMs ?? null, ' ms')]);
   rows.push(['embedding texts', (d) => n(d.embed?.tokensPerSecond ?? null, ' tokens/s')]);
   if (ds.some((x) => s.devices[x].energy)) {
-    rows.push(['keeping the model loaded', (d) => (d.energy?.keepLoadedMilliwatts == null ? '—' : `${n(d.energy.keepLoadedMilliwatts, ' mW')} (${n(d.energy.keepLoadedWhPerDay, ' Wh/day')})`)]);
-    rows.push(['keeping the embedder loaded', (d) => (d.energy?.embedKeepLoadedMilliwatts == null ? '—' : `${n(d.energy.embedKeepLoadedMilliwatts, ' mW')} (${n(d.energy.embedKeepLoadedWhPerDay, ' Wh/day')})`)]);
+    // Less than nothing is the rests' own wobble, more than what keeping it loaded costs: too small to tell.
+    const keep = (mw: number | null | undefined, wh: number | null | undefined) => (mw == null ? '—' : mw < 0 ? `too small to tell (${n(mw, ' mW')})` : `${n(mw, ' mW')} (${n(wh ?? null, ' Wh/day')})`);
+    rows.push(['keeping the model loaded', (d) => keep(d.energy?.keepLoadedMilliwatts, d.energy?.keepLoadedWhPerDay)]);
+    rows.push(['keeping the embedder loaded', (d) => keep(d.energy?.embedKeepLoadedMilliwatts, d.energy?.embedKeepLoadedWhPerDay)]);
     rows.push(['triage minutes, a token over rest', (d) => n(d.energy?.millijoulesPerToken ?? null, ' mJ')]);
     for (const id of [...new Set(ds.flatMap((x) => Object.keys(s.devices[x].energy?.batches ?? {})))]) {
       rows.push([`${id}: each over rest`, (d) => j(d.energy?.batches[id]?.millijoulesEach ?? null)]);

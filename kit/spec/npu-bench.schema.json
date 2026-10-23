@@ -63,7 +63,9 @@
         "windowsBuild": { "type": ["string", "null"] },
         "make": { "type": ["string", "null"] },
         "model": { "type": ["string", "null"] },
-        "beside": { "type": "array", "items": { "type": "number" }, "description": "The route's own ports, which another server held (the manor's own, say), so the run used others. Shown, not ranked." }
+        "beside": { "type": "array", "items": { "type": "number" }, "description": "The route's own ports, which another server held (the manor's own, say), so the run used others. Shown, not ranked." },
+        "awake": { "type": "boolean", "description": "The run held the PC awake with its screen on (--energy, kit 2.99.0)." },
+        "standby": { "type": ["number", "null"], "description": "How many times the PC went into Modern Standby during a run held awake (Windows' log; null where it couldn't be read). More than none: shown, not ranked." }
       }
     },
     "run": {
