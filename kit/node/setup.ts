@@ -119,7 +119,9 @@ export const LLAMA_PIN: { build: string; signed: string; files: Record<string, P
  * 2.108.0): NVIDIA's CUDA runtime (CUDART_ZIP), which NVIDIA doesn't sign. Installed before a CUDA build first runs,
  * where Smart App Control is on (runSetup).
  */
-export const LLAMA_CATALOGS: NpuSignedCatalog[] = [];
+export const LLAMA_CATALOGS: NpuSignedCatalog[] = [
+  { serverVersion: '12.4', file: 'castellan-cuda-cudart-12.4.cat', covers: "NVIDIA's CUDA runtime 12.4's 3 unsigned program files", size: 10889, sha256: 'fa1928dff519d83cccdea138a66f46cde8478c74f17e70779b1907cfd5e25b57' },
+];
 
 /** A pinned build as setup plans from it: a release whose assets are its files, each with its pinned digest. Nothing is asked of GitHub. */
 export function pinnedRelease(pin: typeof LLAMA_PIN = LLAMA_PIN): Release {
@@ -1285,15 +1287,15 @@ function putInPlace(from: string, into: string): void {
  * maker's zip of the version's files and Castellan's of the signed copies downloaded (each checked against its pinned
  * SHA-256), the server's folder taken from the maker's, the signed copies laid over it file by file, and the folder put
  * where the installer puts the server. Nothing of it runs while it's put together, and no installer runs at all. Null
- * when it's in place, else what failed.
+ * when it's in place, else the step that failed and why.
  */
-export async function installSignedBuild(server: string, b: NonNullable<NpuPlan['build']>, io: Pick<NpuIo, 'log' | 'download' | 'unpack' | 'overlay'>): Promise<string | null> {
+export async function installSignedBuild(server: string, b: NonNullable<NpuPlan['build']>, io: Pick<NpuIo, 'log' | 'download' | 'unpack' | 'overlay'>): Promise<{ step: 'download' | 'install'; why: string } | null> {
   for (const d of [b.files, b.signed]) {
     io.log(`downloading ${d.what} (${mb(d.size)})`);
     try {
       await (io.download ?? download)({ what: d.what, url: d.url, size: d.size, sha256: d.sha256, dest: d.dest, have: false }, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
     } catch (e: any) {
-      return `${d.what}'s download failed: ${e?.message ?? e}`;
+      return { step: 'download', why: `${d.what}'s download failed: ${e?.message ?? e}` };
     }
   }
   // Beside where it goes, so a build put together halfway never looks like the server.
@@ -1314,7 +1316,7 @@ export async function installSignedBuild(server: string, b: NonNullable<NpuPlan[
     putInPlace(folder, b.into);
   } catch (e: any) {
     clear();
-    return `${server} couldn't be put together: ${e?.message ?? e}`;
+    return { step: 'install', why: `${server} couldn't be put together: ${e?.message ?? e}` };
   }
   clear();
   for (const d of [b.files, b.signed]) rmSync(d.dest, { force: true });
@@ -1521,6 +1523,8 @@ export interface NpuIo {
   testRerank?: (ep: Endpoint) => Promise<string[]>;
   /** Copies the route's server's files over the embedding server's (overlayFiles). */
   overlay?: (from: string, into: string, files: string[]) => number;
+  /** Puts a signed build together where its installer would put the server (installSignedBuild). */
+  installBuild?: typeof installSignedBuild;
   /** A file's SHA-256 (the pinned model files). */
   hash?: (file: string) => Promise<string>;
   /** Copies one file (the runtime's DLLs beside the server). */
@@ -1928,8 +1932,8 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
     // Castellan's signed build in place of the maker's installer (kit 2.108.0: GenieX's, whose installer and own files
     // aren't signed), so nothing unsigned runs where Smart App Control is on.
     if (!n.installed && n.build && !(shared && exists(n.exe))) {
-      const why = await installSignedBuild(n.route.server, n.build, io);
-      if (why) return fail(why, 'install');
+      const failed = await (io.installBuild ?? installSignedBuild)(n.route.server, n.build, io);
+      if (failed) return fail(failed.why, failed.step);
       if (!exists(n.exe)) return fail(`${n.route.server} was put together, but ${n.exe} isn't there`, 'install');
     }
     if (!n.installed && n.download && !(shared && exists(n.exe))) {

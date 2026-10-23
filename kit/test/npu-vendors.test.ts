@@ -450,11 +450,11 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
   const snap = await planSetup({ detection: parseDetection(`${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([G, M]) });
   assert.equal(snap.npu?.installed, true);
   assert.deepEqual(snap.npu?.kinds, ['chat', 'vision', 'embed']);
-  assert.equal(snap.npu?.downloadBytes, 13263463 + 639150592, "only its embedding server: llama.cpp's b11645 zip (for the X2's GenieX 0.9.3) and Qwen3-Embedding");
+  assert.equal(snap.npu?.downloadBytes, 13566094 + 639150592, "only its embedding server: Castellan's signed copy of llama.cpp's b11645 zip (for the X2's GenieX 0.9.3) and Qwen3-Embedding");
   assert.deepEqual(snap.targets.map((t) => [t.id, t.kinds]), [], 'the NPU makes the embeddings too: nothing for the processor');
   assert.deepEqual(describePlan(snap).slice(2, 5), [
     '  have unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0 (1.9 GB)',
-    '  get  llama.cpp b11645 for embeddings on 18182 (13 MB, SHA-256 pinned)',
+    '  get  llama.cpp b11645 for embeddings on 18182 (14 MB, SHA-256 pinned)',
     '  get  Qwen3-Embedding-0.6B-Q8_0.gguf (639 MB)',
   ]);
   const E = path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon', 'llama-server.exe');
@@ -519,7 +519,7 @@ test("every Snapdragon X2 runs Qwen3-VL-2B whatever its memory, its pictures on 
     assert.deepEqual(x2.npu?.models.map((m) => m.id), [TWO_B], what);
     assert.deepEqual(x2.npu?.kinds, ['chat', 'vision', 'embed'], `${what}: chat and pictures from the one model, the embeddings on their own server as before`);
     assert.deepEqual(x2.npu?.models[0].pull, ['pull', TWO_B, '--model-hub', 'hf', '--model-type', 'vlm', '--skip-update'], `${what}: from Hugging Face: AI Hub has no QAIRT build of it`);
-    assert.equal(x2.npu?.downloadBytes, 1876179296 + 13263463 + 639150592, `${what}: the 2B (1.9 GB, not the 4B's 4.4) and the embedding server`);
+    assert.equal(x2.npu?.downloadBytes, 1876179296 + 13566094 + 639150592, `${what}: the 2B (1.9 GB, not the 4B's 4.4) and the embedding server`);
     assert.match(describePlan(x2)[0], /\(npu\): GenieX 0\.9\.3, chat and vision and embed on 18181; unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0$/, what);
     const e = V.npuEntry(x2.npu!.route, { tools, exe: G });
     assert.equal(e.chat!.model, TWO_B, what);
@@ -557,7 +557,7 @@ test("every Snapdragon X2 runs Qwen3-VL-2B whatever its memory, its pictures on 
     const p = await plan(NPU.x1, arm);
     assert.deepEqual(p.npu?.models.map((x) => x.id), [TWO_B], what);
     assert.equal(p.npu?.route.version, '0.9.3', what);
-    assert.equal((await plan(NPU.x1, arm, [])).npu?.download?.what, 'geniex-cli-setup-windows-arm64-v0.9.3.exe', what);
+    assert.equal((await plan(NPU.x1, arm, [])).npu?.build?.signed.what, 'geniex-cli-windows-arm64-v0.9.3-castellan.zip', what);
     const e = V.npuEntry(p.npu!.route, { tools, exe: G });
     assert.deepEqual(e.chat!.startCommand!.slice(7), ['--compute', 'npu', '--nctx', '2560'], what);
     assert.deepEqual(e.vision, { model: TWO_B, pictureTokens: 1024 }, what);
@@ -677,8 +677,8 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
   assert.equal(V.pluginPatchOf(p.route, 'snapdragon-x2')!.serverVersion, '0.9.1', "0.9.1's patch, over 0.9.1's own");
   assert.equal(p.embed!.exe, path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon', 'llama-server.exe'));
   assert.equal(p.embed!.download!.what, 'llama-b11645-bin-win-opencl-adreno-arm64.zip');
-  assert.equal(p.embed!.download!.size, 13263463);
-  assert.equal(p.embed!.download!.sha256, '231e50cdc87ae62b42d4d25c0cc4f937e36df40f8e3593719c23e976ae6eef04');
+  assert.equal(p.embed!.download!.size, 13566094);
+  assert.equal(p.embed!.download!.sha256, '763a9ca5dca307fa4732d08811d6e45ef4b9801c8037529a595730434fe6e1b5', "Castellan's signed copy (kit 2.108.0)");
   const e = V.npuEntry(p.route, { tools, exe: G, embed: { exe: p.embed!.exe, model: p.embed!.model } });
   assert.deepEqual(e.chat!.startCommand!.slice(7), ['--compute', 'npu', '--nctx', '2560']);
   assert.equal(e.embed!.startCommand![0], p.embed!.exe);
@@ -691,16 +691,19 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
     assert.equal(n.route.version, '0.9.3', `${have.length}`);
     assert.equal(n.embed!.server.version, 'b11645', `${have.length}`);
   }
-  // A new X2, nothing installed: GenieX 0.9.3's installer, pinned, as a new X Elite's (kit 2.101.0), until a signed build is pinned.
+  // A new X2, nothing installed: GenieX 0.9.3's signed build (kit 2.108.0), both its zips pinned and no installer, as a new X Elite's.
   const fresh = (await plan(null, [])).npu!;
   assert.equal(fresh.installed, false);
   assert.equal(fresh.route.version, '0.9.3');
-  assert.deepEqual([fresh.download!.what, fresh.download!.size, fresh.download!.sha256], ['geniex-cli-setup-windows-arm64-v0.9.3.exe', 70470238, '886d9f1a48cf6c1694338a13fc66be9d28e7fc5a3a5970d49b63de554a6ce17a']);
-  assert.match(describePlan(await plan(null, []))[1], /get  GenieX 0\.9\.3 \(\d+ MB, SHA-256 pinned\)$/);
+  assert.equal(fresh.download, null, 'no installer');
+  const sb = q.signedBuilds![0];
+  assert.deepEqual([fresh.build!.files.what, fresh.build!.files.sha256, fresh.build!.signed.what, fresh.build!.signed.sha256], [sb.files.file, sb.files.sha256, sb.signed.file, sb.signed.sha256]);
+  assert.match(fresh.build!.signed.url, /^https:\/\/github\.com\/Jcollier0120\/Manor-releases\/releases\/download\/geniex-0\.9\.3-castellan\//);
+  assert.match(describePlan(await plan(null, []))[1], /get  GenieX 0\.9\.3 \(\d+ MB, SHA-256 pinned\): its maker's files, with Castellan's signed copies of its own; no installer$/);
   const elite = (await planSetup({ detection: parseDetection(`${NPU.x1}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([]), serverVersion: async () => null })).npu!;
   assert.equal(elite.route.version, '0.9.3');
-  assert.deepEqual([elite.download!.what, elite.download!.size], ['geniex-cli-setup-windows-arm64-v0.9.3.exe', 70470238]);
-  assert.equal(elite.fallback!.download!.what, 'geniex-cli-setup-windows-arm64-v0.9.3.exe', 'its fallback on the same GenieX');
+  assert.deepEqual([elite.download, elite.build!.signed.what], [null, sb.signed.file]);
+  assert.equal(elite.fallback!.build!.signed.what, sb.signed.file, 'its fallback on the same GenieX');
   // A caller's own route is planned as given, never pinned over: the Smith's try of a later GenieX keeps its own installer.
   const tryRoute = { ...structuredClone(q), version: '0.9.2', download: { file: 'geniex-cli-setup-windows-arm64-v0.9.2.exe', url: 'https://github.com/qualcomm/GenieX/releases/download/v0.9.2/geniex-cli-setup-windows-arm64-v0.9.2.exe', size: 1, sha256: 'a'.repeat(64) } };
   const tried = V.planNpu({ support: parseNpus(NPU.x2, 'arm64')[0], tools, downloadsDir: path.join(tools, 'servers', 'downloads'), catalog: { ...V.NPU_CATALOG, routes: { ...V.NPU_CATALOG.routes, qualcomm: tryRoute } }, exists: () => false })!;
@@ -799,6 +802,13 @@ function fakeNpuIo(o: { answers?: boolean; installs?: boolean; pullFails?: boole
       if (o.overlayFails) throw new Error(`${from}\\ggml-hexagon.dll isn't there`);
       did.push(`overlay ${files.length} files from ${from} into ${into}`);
       return files.length;
+    },
+    // A signed build (GenieX 0.9.3's, kit 2.108.0) put together as its installer would leave it, or not.
+    installBuild: async (_server: string, b: { files: { what: string }; signed: { what: string } }) => {
+      if (o.downloadFails) return { step: 'download' as const, why: `${b.files.what}'s download failed: ${o.downloadFails}` };
+      did.push(`download ${b.files.what}`, `download ${b.signed.what}`, `put together from ${b.files.what}`);
+      if (o.installs !== false) present.add('installed');
+      return null;
     },
     testEmbed: async () => (o.embeds === false ? ['embeddings gave no vector ({"error":"no HTP0"})'] : []),
     run: async (exe: string, args: string[]) => {
@@ -1058,7 +1068,7 @@ test("an X Elite whose Qwen3-VL-2B doesn't answer properly gets the 4B in its pl
   assert.match(r.fellBack!.problems.join(), /about a red picture/);
   assert.deepEqual(fell.tests, [`${TWO_B} (red)`, FOUR_B], 'the 4B tested as before');
   assert.deepEqual(fell.stopped, ['geniex.exe http://127.0.0.1:18181']);
-  assert.deepEqual(fell.did.filter((d) => /^download geniex|^run geniex-cli-setup/.test(d)).length, 2, 'GenieX 0.9.3 downloaded and installed once');
+  assert.deepEqual(fell.did.filter((d) => /^download geniex|^put together|^run geniex-cli-setup/.test(d)), ['download geniex-sdk-windows-arm64-v0.9.3.zip', 'download geniex-cli-windows-arm64-v0.9.3-castellan.zip', 'put together from geniex-sdk-windows-arm64-v0.9.3.zip'], 'GenieX 0.9.3 downloaded and put together once (its signed build, kit 2.108.0), no installer');
   assert.equal(fell.did.filter((d) => /^unpack /.test(d)).length, 1, "the embedding server's files fetched once: the second try finds them");
   assert.match(fell.logged.join('\n'), /unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0 didn't work on this NPU \(.*\): setting up qualcomm\/Qwen3-VL-4B-Instruct:W4A16 in its place/);
   assert.match(fell.logged.join('\n'), /answered on the NPU in unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0's place: the NPU keeps chat and pictures/);
@@ -1075,8 +1085,8 @@ test("an X Elite whose Qwen3-VL-2B doesn't answer properly gets the 4B in its pl
   assert.match(both.problems[0], /^npu: GenieX didn't answer its test request: .*about a red picture.*config\.json gets no NPU entry/);
   assert.match(neither.logged.join('\n'), /qualcomm\/Qwen3-VL-4B-Instruct:W4A16 didn't work on this NPU either/);
 
-  // A failure before its models (its installer, its download): no fallback, said as before.
-  for (const [what, o, step] of [['the installer leaves nothing', { installs: false }, 'install'], ["GenieX's download fails", { downloadFails: '404 Not Found' }, 'download']] as const) {
+  // A failure before its models (its signed build, its download): no fallback, said as before.
+  for (const [what, o, step] of [['the build leaves no geniex.exe', { installs: false }, 'install'], ["GenieX's download fails", { downloadFails: '404 Not Found' }, 'download']] as const) {
     const early = pc(() => [], o);
     const e = await setUpNpu(await planned(), tools, early.io);
     assert.equal(e.failed, step, what);
@@ -1979,7 +1989,9 @@ test("FastFlowLM's catalog: the route's own version's alone, asked for once and 
   const catalog = { ...V.NPU_CATALOG, routes: { ...V.NPU_CATALOG.routes, amd: { ...V.NPU_CATALOG.routes.amd, catalogs: [{ ...flmCatalog, serverVersion: '1.0.5', file: 'castellan-amd-fastflowlm-1.0.5.cat' }, flmCatalog] } } };
   const plan = V.planNpu({ support: parseNpus(NPU.strix, 'x64')[0], tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk(), catalog })!;
   assert.deepEqual(plan.catalogs, [flmCatalog]);
-  assert.deepEqual(planFor(NPU.strix, 'x64', tools).catalogs, [], 'a route with none: none');
+  assert.deepEqual(planFor(NPU.strix, 'x64', tools).catalogs.map((c) => c.file), ['castellan-amd-fastflowlm-1.0.7.cat'], "the kit's own pin (kit 2.108.0)");
+  const none = { ...V.NPU_CATALOG, routes: { ...V.NPU_CATALOG.routes, amd: { ...V.NPU_CATALOG.routes.amd, catalogs: undefined } } };
+  assert.deepEqual(V.planNpu({ support: parseNpus(NPU.strix, 'x64')[0], tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk(), catalog: none })!.catalogs, [], 'a route with none: none');
   const f = fakeNpuIo();
   const order: string[] = [];
   const asks: unknown[] = [];
@@ -2064,7 +2076,8 @@ test("GenieX's signed build: planned in place of its installer, at its own versi
   assert.equal(x.download, null);
   assert.deepEqual(x.build && [x.build.files.what, x.build.files.folder, x.build.signed.what, x.build.into], [w.build.files.file, 'lib', w.build.signed.file, w.into]);
   assert.equal(x.build!.files.dest, path.join(w.downloads, w.build.files.file));
-  const without = V.planNpu({ support: parseNpus(NPU.x1, 'arm64')[0], tools: w.tools, downloadsDir: w.downloads, env: w.env, exists: disk(), serverVersion: null })!;
+  const unsigned = { ...V.NPU_CATALOG, routes: { ...V.NPU_CATALOG.routes, qualcomm: { ...V.NPU_CATALOG.routes.qualcomm, signedBuilds: undefined } } };
+  const without = V.planNpu({ support: parseNpus(NPU.x1, 'arm64')[0], tools: w.tools, downloadsDir: w.downloads, env: w.env, exists: disk(), catalog: unsigned, serverVersion: null })!;
   assert.equal(x.downloadBytes - without.downloadBytes, w.build.files.size + w.build.signed.size - without.download!.size, 'its two zips in place of the installer');
   // The X2's pin, 0.9.3 too (kit 2.108.0): the same build.
   const x2 = plan(NPU.x2);
@@ -2086,7 +2099,7 @@ test("GenieX's signed build set up: Qualcomm's lib folder with Castellan's signe
   const w = signedBuildWorld('signed-setup');
   const plan = V.planNpu({ support: parseNpus(NPU.x1, 'arm64')[0], tools: w.tools, downloadsDir: w.downloads, env: w.env, exists: disk(), catalog: w.catalog, serverVersion: null, noEmbed: true })!;
   const f = fakeNpuIo();
-  const { unpack: _unpack, overlay: _overlay, ...fakes } = f.io;
+  const { unpack: _unpack, overlay: _overlay, installBuild: _installBuild, ...fakes } = f.io;
   const io = { ...fakes, download: w.download, run: async (exe: string, args: string[]) => (w.did.push(`run ${path.win32.basename(exe)} ${args[0]}`), f.io.run(exe, args)), exists: (p: string) => (/geniex\.exe$/i.test(p) ? existsSync(p) : true) };
   const s = await setUpNpu(plan, w.tools, io);
   assert.ok(s.entry, s.problems.join('; '));
@@ -2106,11 +2119,11 @@ test("a signed build that can't be put together says why and leaves nothing; one
   const build = (catalog = w.catalog) => V.planNpu({ support: parseNpus(NPU.x1, 'arm64')[0], tools: w.tools, downloadsDir: w.downloads, env: w.env, exists: disk(), catalog, serverVersion: null })!.build!;
   const io = { log: () => {}, download: w.download };
   // Its download failing.
-  assert.equal(await installSignedBuild('GenieX', build(), { log: () => {}, download: async () => { throw new Error('404 Not Found'); } }), `${w.build.files.file}'s download failed: 404 Not Found`);
+  assert.deepEqual(await installSignedBuild('GenieX', build(), { log: () => {}, download: async () => { throw new Error('404 Not Found'); } }), { step: 'download', why: `${w.build.files.file}'s download failed: 404 Not Found` });
   // A zip without the server's folder.
   const q = w.catalog.routes.qualcomm;
   const noLib = { ...w.catalog, routes: { ...w.catalog.routes, qualcomm: { ...q, signedBuilds: [{ ...w.build, files: { ...w.build.files, folder: 'libs' } }] } } };
-  assert.equal(await installSignedBuild('GenieX', build(noLib), io), `GenieX couldn't be put together: ${w.build.files.file} has no libs folder`);
+  assert.deepEqual(await installSignedBuild('GenieX', build(noLib), io), { step: 'install', why: `GenieX couldn't be put together: ${w.build.files.file} has no libs folder` });
   assert.ok(!existsSync(w.local) || readdirSync(w.local).length === 0, 'nothing left where it goes');
   // Over a folder that's there (a GenieX removed, its models kept): GenieX's files moved in, the rest left.
   mkdirSync(path.join(w.into, 'models'), { recursive: true });

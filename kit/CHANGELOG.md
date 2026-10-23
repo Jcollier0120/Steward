@@ -18,10 +18,12 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### What changed
 
 - **The Snapdragon X2 pins GenieX 0.9.3** (its `serverPin`, 0.9.1 before), as the first X does since kit 2.101.0, so one GenieX and one signed build serve both. 0.9.3 is 0.9.1 with `/status` and a signed catalog for its Hexagon libraries: the same llama.cpp e467e5b, plugin source and b11645 embedding server, and the plugin patch's 0.9.3 entry (0.9.1's build over 0.9.3's own) was measured on an X2 running it. Setup puts 0.9.3 on a new X2; the NPU check and the benchmark run an X2 whose GenieX can't say its version as 0.9.3; the reports count an X2's speeds at 0.9.3.
+- **Signed, and pinned** (the signing sitting of 2026-10-23, `tools/sign-binaries.ts`): GenieX 0.9.3's signed build (`signedBuilds`: Qualcomm's SDK zip and Castellan's 16 signed copies, each pinned both ways), so a new Snapdragon X or X2 runs no installer; the Snapdragon NPU's embedding servers from Castellan's signed copies of llama.cpp b11645 and b11125 (`embedServer.download`, the releases repository's, in place of ggml-org's unsigned zips); FastFlowLM 1.0.7's catalog (`catalogs`, castellan-amd-fastflowlm-1.0.7.cat) and NVIDIA's CUDA runtime 12.4's (`LLAMA_CATALOGS`, castellan-cuda-cudart-12.4.cat), carried in `node/catalogs/`; and the catalog helper, signed (`node/prebuilt/catalog-635f89b2d399.exe`).
+- `installSignedBuild` says which step failed (`{ step, why }`: a download, or putting it together), so setup's NPU step fails at `download` or `install` as with an installer; `NpuIo.installBuild` stands in for it.
 
 ### Before you update
 
-- Nothing: take the kit as usual. A route without `catalogs` or `signedBuilds` sets up as before, and nothing asks for an administrator where Smart App Control is off. A GenieX already installed isn't changed: its installer's files stay as they are, and an X2 on GenieX 0.9.1 keeps running 0.9.1 with 0.9.1's build (the Smith offers it 0.9.3).
+- Nothing: take the kit as usual. A route without `catalogs` or `signedBuilds` sets up as before, and nothing asks for an administrator where Smart App Control is off. A GenieX already installed isn't changed: its installer's files stay as they are, and an X2 on GenieX 0.9.1 keeps running 0.9.1 with 0.9.1's build (the Smith offers it 0.9.3). An embedding server already set up is kept too: only a new one comes from the signed copy.
 
 ## 2.106.0
 

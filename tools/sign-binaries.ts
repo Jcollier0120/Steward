@@ -118,7 +118,10 @@ export const geniexSigned = (version: string) => ({ tag: `geniex-${version}-cast
  * as this kit's so that the owner connects SimplySign once. Each zip is pinned as its release publishes it; the run
  * lists its files. Their catalogs and pins are for that kit (pins.json names it), not copied into this one.
  */
-export const FASTFLOWLM_ALSO: (Pinned & { version: string; kit: string })[] = [];
+export const FASTFLOWLM_ALSO: (Pinned & { version: string; kit: string })[] = [
+  // Kit 2.109.0's AMD route (claude/kit-energy-order), as GitHub's release publishes the zip.
+  { version: '1.0.10', kit: 'kit 2.109.0', file: 'fastflowlm_1.0.10_windows_amd64.zip', url: `${DL}/ROCm/FastFlowLM/releases/download/v1.0.10/fastflowlm_1.0.10_windows_amd64.zip`, size: 30484687, sha256: 'a7063890d7b91037a07f381a396a0d7787ebdb69e1b03280971faf0a80f35b73' },
+];
 
 /** The kit's sources that need signing or a catalog, as npu-vendors.json and LLAMA_PIN pin them, and `also`. */
 export function sources(cat: NpuCatalog = NPU_CATALOG, pin: typeof LLAMA_PIN = LLAMA_PIN, also = FASTFLOWLM_ALSO): Source[] {
