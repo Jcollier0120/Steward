@@ -12,7 +12,7 @@ import { portFree, routeOnDevice, routeOnFreePorts } from './npu-check.ts';
 import { LockTimeout, QueueFull, withAcceleratorTurn } from './npu-queue.ts';
 import { patchTarget } from './npu-patch.ts';
 import { exitedSay, logLength, longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
-import { atVersion, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, pinnedRoute, planNpu, playedRoute, playedSay, playGeneration, pluginPatchOf, routeFor, serverExe, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
+import { atVersion, expandRoute, generationOf, hostedPatchFile, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, pinnedRoute, planNpu, playedRoute, playedSay, playGeneration, pluginPatchOf, routeFor, serverExe, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
 import { charging, joules, measureSpan, type Meter, type MeterIo, openMeter, partsSay, type Span, watts } from './power-meter.ts';
 import { acceleratorEntry, assetName, type Download, download, LLAMA_PIN, listDevices, matchDevice, mb, MODEL_PINS, MODEL_SPECS, type NpuIo, parseListDevices, pinnedModelUrl, saysReady, SIGNED_LLAMA_REPO, unpack, variantFor } from './setup.ts';
 import { mixSummary, readTally } from './token-tally.ts';
@@ -833,8 +833,9 @@ export async function kitPlugin(route: NpuRoute, generation: string | null, o: {
     const f = path.join(path.dirname(target), name);
     if (sizeOf(f) !== want.size || (await hash(f)) !== want.sha256) return { plugin: 'server', why: `its ${path.basename(name)} isn't the one the kit's build is made for`, done: none };
   }
-  const from = path.resolve(o.kitDir ?? path.dirname(fileURLToPath(import.meta.url)), patch.patched.from);
-  if (!existsSync(from)) return { plugin: 'server', why: `the kit has no ${patch.patched.from}`, done: none };
+  // The kit's build: in the kit's node part, or the one setup downloaded (OpenVINO GenAI's).
+  const from = patch.patched.url ? hostedPatchFile(patch, o.tools) : path.resolve(o.kitDir ?? path.dirname(fileURLToPath(import.meta.url)), patch.patched.from!);
+  if (!existsSync(from)) return { plugin: 'server', why: patch.patched.url ? `the kit's ${path.basename(from)} isn't downloaded` : `the kit has no ${patch.patched.from}`, done: none };
   const exe = serverExe(route, o.tools, o.env);
   const home = path.dirname(exe);
   const dir = path.join(o.tools, 'bench', `${path.basename(home).replace(/\W+/g, '-').toLowerCase()}-${route.version}`);
@@ -852,7 +853,7 @@ export async function kitPlugin(route: NpuRoute, generation: string | null, o: {
     }
     const into = path.join(dir, path.relative(home, target));
     copyFileSync(from, into);
-    if ((await hash(into)) !== patch.patched.sha256) throw new Error(`the kit's ${patch.patched.from} isn't the build it pins`);
+    if ((await hash(into)) !== patch.patched.sha256) throw new Error(`the kit's ${patch.patched.from ?? path.basename(from)} isn't the build it pins`);
   } catch (e: any) {
     removeCopy(dir);
     return { plugin: 'server', why: `a copy with the kit's build couldn't be made: ${String(e?.message ?? e).split(/\r?\n/)[0]}`, done: none };
@@ -1168,7 +1169,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     }
     // Everything the plan would fetch, its embedding server's too, so --no-setup and the prompt count it.
     const needs = plan.downloadBytes;
-    const missing = !plan.installed || !!plan.runtime || plan.models.some((m) => !m.have) || !!(plan.embed?.download || plan.embed?.modelDownload || plan.embed?.modelPull);
+    const missing = !plan.installed || !!plan.runtime || !!(plan.patch && !plan.patch.have) || plan.models.some((m) => !m.have) || !!(plan.embed?.download || plan.embed?.modelDownload || plan.embed?.modelPull);
     if (missing && o.setup === false) return finish(1, { code: 'setup', say: `${route.server} or its models aren't here, and --no-setup was given` });
     if (missing && !o.yes) {
       const ok = o.confirm ? await o.confirm(`Download ${needs ? mb(needs) : 'what it needs'} (${route.server} ${route.version} and its models)? [y/N] `) : false;
