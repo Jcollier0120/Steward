@@ -2,6 +2,42 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.103.0
+
+**Intel's NPU now answers questions about pictures as well as chat: Qwen3-VL-2B takes the 4B's place, on Castellan's build of OpenVINO GenAI.**
+
+### What changed
+
+- **Intel's model is now `Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov` (2.5 GB), for chat and pictures.** It's Castellan's symmetric INT8 export of Qwen3-VL-2B-Instruct, on Hugging Face with its card; every model file and its two picture configs are pinned. Its `size.longest_edge` is 1,048,576 pixels, so a picture is at most about 1,024 tokens inside the NPU's compiled prompt. Its vision endpoint's `pictureTokens` is 1,024 too, so the kit redraws a larger picture to fit and counts each one so.
+  - OpenVINO's INT4 export of the 2B (group size 128) answered "Yes" to "Reply with the single word: ready", every time. OpenVINO's NPU build of the 4B answered as well, but about three times slower, in 2.5 GB more memory.
+  - **Its picture detail is in the form the NPU runs.** Qwen3-VL adds features from its picture encoder's middle layers to its first three language-model layers (DeepStack). optimum-intel exports that step as a masked add, which the NPU plugin (NPUW, 2026.4.1) doesn't recognise: it never fills the mask, so on the NPU those features were zeroed and clear text was misread (4837 for 4827). The export has the three steps rewritten into transformers' own form (`scatter_deepstack.py`, in its Hugging Face repository; the weights unchanged), and the language model's two files are pinned anew. On the NPU it now answers as the processor does, 16 pictures of 16; on the processor and the graphics, word for word as before.
+- **Castellan's build of OpenVINO GenAI** (`node/openvino/`: `README.md`, `openvino-genai-castellan.patch`, `build-openvino-genai.bat`, `LICENSE` and `NOTICE`). Before it, Qwen3-VL failed on the NPU with OpenVINO Model Server 2026.4.1's own `openvino_genai.dll`: a prompt without a picture crashed, and once a request had failed, every later one failed until the server restarted. The build fixes both.
+  - It's 7.5 MB, so it isn't in the kit. The route's `pluginPatch` pins it on Manor-releases by `url`, size and SHA-256 (`NpuPluginPatch.patched.url`, in place of `from`), for every Intel generation.
+  - `planNpu`'s plan has it as `patch`, and counts its download.
+  - Setup downloads it into the tools home (`servers\patches`, `hostedPatchFile`) and puts it in before it tests the model (`installPatch`). It goes in only over OpenVINO Model Server 2026.4.1's own file, and only while `openvino.dll` and `tbb12.dll` are that version's. Intel's own is kept as `openvino_genai.dll.stock`.
+  - The keeper's look (`patchNpu`) puts it in again, tested, where the server's own came back. It never downloads: without the file, its record says `not-downloaded`.
+  - `NpuPluginPatch.required` says why a route's models need its patch. config.json's `npuPatch: false` doesn't take such a patch out.
+- **A PC already on the 4B moves to the 2B at Set up local AI.** The keeper's look never downloads: it finds the 2B and the build missing and records `needs-setup` (`npu-refresh.json`). Until now setup with no ids left a configured NPU entry alone, so nothing acted on that record, and a PC stayed on its old model however often Set up local AI was pressed (a Snapdragon X2 on the Qwen3-VL-4B too, though spec/NPU-VENDORS.md said it would move).
+  - `planSetup` takes the record (`npuRefresh`, which `setupCommand` reads with `readNpuRefresh`). With no ids, an entry the look left for setup, on the route's own server (`runsRoute`), is set up again. One a person pointed at another server, or one the keeper found current or hasn't looked at, is still left alone.
+  - So is an entry on its generation's `fallback` (a first-generation X Elite on the Qwen3-VL-4B, where its 2B failed): Set up local AI tries the 2B again, as spec/NPU-VENDORS.md said it would, and should it fail again sets the 4B up again quietly (`fellBack`, no note, no alarm). The keeper's look still keeps the fallback as it is, so it's never retried on the look's rounds.
+  - Setup downloads the 2B and the build, then tests the 2B with a picture and a chat. If the test fails, config.json keeps the 4B's entry, and the record stays `needs-setup`, so the next Set up local AI tries again. The graphics card or the processor takes the pictures. Where the 2B doesn't fit (a 12 GB Intel PC), the 4B's entry is left as it is.
+  - The setup log's line for a card taking the NPU's work names only what the card takes: "The graphics card takes the NPU's vision instead" where the 4B's kept entry still chats.
+  - Setup's test now first stops a server of the entry's own program that answers on its port without listing the model (`stopOtherModel`), in the NPU's turn. OpenVINO Model Server serves only the model it started with, so before this the old 4B server would have answered the 2B's test with a 404, and the PC would never have switched.
+- **Intel's retired list** (`routes.intel.retired`, by kit 2.101.0's rule): the 4B's folder, `{tools}\models\openvino\Castellan-AI\Qwen3-4B-Instruct-2507-int4-cw-ov`, since 2.103.0. The keeper removes it three days after nothing on the PC names it; a PC whose 2B failed still names it in its entry, so there it stays. There's no generation `fallback` to the 4B: the 2B is the route's own model on every Intel generation.
+- **The NPU 3720's prompt is read 256 tokens at a time** (meteor-lake, arrow-lake, wildcat-lake: `NPUW_LLM_PREFILL_CHUNK_SIZE` 256, `GENERATE_HINT` BEST_PERF; it was 128). Measured with the 2B on a Core Ultra 5 225U: a 1,805-token prompt in 3.8 to 3.9 s against 4.3 to 4.4 in 128-token chunks, and a small picture in 1.8 s against 2.0, for a short answer 0.5 to 0.7 s against 0.3 to 0.6. At these settings the 2B does the benchmark's three jobs in 12.9 s, writing 17.9 tokens a second, against 18.7 s at OpenVINO's own settings and the 4B's 27.4 s and 13.2 tokens a second.
+- **Intel's `memoryGb`**: the NPU 3720's chat 4.9 GB (it was 3.8), with its embeddings on the graphics 1.3 (meteor-lake); arrow-lake's and wildcat-lake's chat 4.9; the route's chat, Lunar Lake's and Panther Lake's at 4,096 tokens, 5.5 (it was 4.3).
+  - OpenVINO GenAI runs Qwen3-VL's picture encoder on the processor beside an NPU, and the server keeps what a full-size screenshot took: 1.9 GB more, the screenshot read in 12 to 15 s on the NPU 3720. On its graphics the encoder read twice as fast, but read a large picture's 4827 as 4877 three times in four, which the processor read right every time: it stays on the processor.
+  - So a 16 GB Lunar Lake or Panther Lake no longer has room for embeddings beside chat (`npuMemoryFit`): setup gives them to the graphics card or the processor. A 12 GB Intel PC no longer runs the NPU's chat. A 16 GB NPU 3720 keeps both: measured together after full-size screenshots, the two took 5.8 GB of its 6.2.
+- **setup's plan** names a downloaded build of a server file (`describePlan`: get Castellan's build of OpenVINO GenAI …, in place of the server's own `openvino_genai.dll`). A server without the file isn't patched.
+- **npu-bench** runs a server copy with a downloaded build too (`kitPlugin`).
+- spec/NPU-VENDORS.md and spec/NPU-BENCHMARK.md: the 2B's figures on Intel's NPU.
+
+### Before you update
+
+- Nothing for an agent: take the kit as usual. An Intel PC moves to the 2B the first time its local AI is set up after the keeper (the Smith, else Reeve) has looked at it with this kit, and that setup downloads 2.5 GB. Before that look, Set up local AI leaves its NPU as it is. On a 16 GB Lunar Lake or Panther Lake, that setup also moves its embeddings off the NPU.
+- A Snapdragon X2 still on the Qwen3-VL-4B moves to the 2B the same way (1.9 GB), as spec/NPU-VENDORS.md said it would.
+- A first-generation X Elite on its fallback 4B tries the 2B again at each Set up local AI, which tests it on the NPU (nothing to download where it was pulled before).
+
 ## 2.102.0
 
 **One text reader for the Clerk, the Scribe, Reeve and the Warrener: PDFs read from their own text, word boxes for Reeve, answers that no console can garble, and a check any PC can run.**

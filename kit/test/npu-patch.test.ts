@@ -419,3 +419,54 @@ test("an entry a person pointed at another server: an X2's build there goes back
   assert.equal(pc.plugin(), STOCK);
   assert.ok(!pc.did.includes('turn'), 'GenieX isn\'t what the NPU runs');
 });
+
+/** The X2's patch as Intel's is shipped (kit 2.103.0): a build setup downloads (`url`) and the route's model needs (`required`). */
+function hosted(pc: ReturnType<typeof fakePc>, o: { downloaded?: boolean } = {}) {
+  const p = pc.deps.catalog!.routes.qualcomm.generations['snapdragon-x2'].pluginPatch!;
+  p.patched = { url: 'https://example.invalid/releases/download/castellan.1/geniex_plugin-castellan.1.dll', ...pin(BUILD) };
+  p.required = 'the route\'s model fails without it';
+  const file = V.hostedPatchFile(p, tools);
+  if (o.downloaded) {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, BUILD);
+  } else rmSync(file, { force: true });
+  return file;
+}
+
+test("a build setup downloads: a look never downloads it, finds it once setup has, and keeps a required one when npuPatch is false", async () => {
+  const pc = fakePc();
+  hosted(pc);
+  assert.deepEqual(await patchNpu(pc.deps), { did: 'not-downloaded' });
+  assert.equal(pc.plugin(), STOCK);
+  assert.deepEqual(pc.did, ['detect'], 'nothing stopped, nothing tested');
+  assert.equal(pc.record()!.did, 'not-downloaded');
+
+  // Where setup has downloaded it, a look puts it in, tested.
+  const later = fakePc();
+  hosted(later, { downloaded: true });
+  assert.deepEqual(await patchNpu(later.deps), { did: 'patched' });
+  assert.equal(later.plugin(), BUILD);
+  assert.equal(later.stock(), STOCK);
+
+  // npuPatch: false leaves a required build where it is.
+  later.config({ npuPatch: false });
+  assert.deepEqual(await patchNpu(later.deps), { did: 'current' });
+  assert.equal(later.plugin(), BUILD);
+  assert.equal(later.record()!.off, true);
+});
+
+test("a downloaded build put in again where the server's own came back, and a required one that fails its test goes back", async () => {
+  const pc = fakePc({ plugin: BUILD, stockCopy: STOCK });
+  hosted(pc, { downloaded: true });
+  assert.deepEqual(await patchNpu(pc.deps), { did: 'current' });
+  // Setup unpacked the server again: its own file is back, and the next look puts the build in.
+  writeFileSync(pc.target, STOCK);
+  assert.deepEqual(await patchNpu(pc.deps), { did: 'patched' });
+  assert.equal(pc.plugin(), BUILD);
+
+  const failing = fakePc({ answers: ['chat answered nonsense'] });
+  hosted(failing, { downloaded: true });
+  const r = await patchNpu(failing.deps);
+  assert.equal(r.did, 'failed');
+  assert.equal(failing.plugin(), STOCK);
+});
