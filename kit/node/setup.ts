@@ -1418,8 +1418,11 @@ export interface NpuIo {
   /** Runs a program (the installer, the server's pull): its exit code and output. */
   run?: (exe: string, args: string[], o?: { timeoutMs?: number; env?: NodeJS.ProcessEnv }) => Promise<{ code: number | null; out: string }>;
   exists?: (p: string) => boolean;
-  /** The test request: problems, none when the server answered every kind it serves (and, with `seeRed`, saw its picture red). */
-  testNpu?: (entry: AcceleratorEntry, o?: { seeRed?: boolean }) => Promise<string[]>;
+  /**
+   * The test request: problems, none when the server answered every kind it serves (and, with `seeRed`, saw its picture
+   * red). Its options are testNpuEntry's, so an agent's own io that takes some of them (the Smith's `logFile`) still extends NpuIo.
+   */
+  testNpu?: (entry: AcceleratorEntry, o?: Parameters<typeof testNpuEntry>[1]) => Promise<string[]>;
   /** Stops whatever `program` serves `base` and waits until it's gone (keeper.ts' stopServerAt): between setup's tries of the NPU's models. */
   stopServer?: (program: string, base: string) => Promise<void>;
   /** The embedding server's test request (testNpuEmbed): problems, none when it gave a vector. */
