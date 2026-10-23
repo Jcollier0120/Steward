@@ -547,14 +547,14 @@ test('a command that needs a download, another server, or no NPU at all: left fo
   assert.deepEqual(none.did, [], 'no NPU in config.json: this PC not asked');
 });
 
-test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once setup has pulled it, never pulled here; an X Elite keeps the 4B", async () => {
+test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once setup has pulled it, never pulled here; an X Elite on the 4B keeps it (its fallback)", async () => {
   const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
   const X1 = 'npu2|30.0.140.1000|2025-03-01|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0D0A&SUBSYS_CRD08380&REV_0001\\2&DABA3FF&0|Snapdragon(R) X Elite - X1E78100 - Qualcomm(R) Hexagon(TM) NPU';
   const x2 = parseNpus(X2, 'arm64')[0];
   const x1 = parseNpus(X1, 'arm64')[0];
   // What an older kit wrote on an X2 (any, before kit 2.78.0; one of 20 GB or more, before 2.78.8): the route's 4B, on
-  // GenieX's QAIRT plugin, its embeddings on llama-server. The X Elite's command now, the same route's.
-  const plan = V.planNpu({ support: x1, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true })!;
+  // GenieX's QAIRT plugin, its embeddings on llama-server. The X Elite's command with its fallback, the same route's.
+  const plan = V.planNpu({ support: x1, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, fallback: true })!;
   const fourB = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model } }), timeouts: { ...MEASURED } };
   assert.equal(fourB.chat!.model, 'qualcomm/Qwen3-VL-4B-Instruct:W4A16');
   const on = (npu: typeof x2, ramGb: number, exists: (p: string) => boolean) => {
@@ -584,7 +584,8 @@ test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once 
     assert.match(pulled.log.join('\n'), /now start with this kit's command \(2\.75\.0\): model unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0 in qualcomm\/Qwen3-VL-4B-Instruct:W4A16's place/);
   }
 
-  // An X Elite: the 4B stays at any memory, whatever is on disk.
+  // An X Elite on the 4B (set up before kit 2.101.0, or fallen back to it): it stays at any memory, whatever is on disk,
+  // the 2B too; setup run again tries the 2B.
   for (const ramGb of [15.6, 47.6]) assert.deepEqual(await refreshNpu(on(x1, ramGb, () => true).deps), { did: 'current' }, `X Elite, ${ramGb} GB`);
 });
 

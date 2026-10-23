@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import type { NpuPluginPatch } from './fixture/src/kit/npu-vendors.ts';
 
 // The NPU server's file replaced with the kit's build of it (npu-patch.ts): on a Snapdragon X2, GenieX 0.8.0's llama.cpp
 // plugin, or 0.9.1's once setup or the Smith's Use it put 0.9.1 or 0.9.3 there. Only over GenieX's own file of that version, in the NPU's turn, kept only when the test answers, put back when switched
@@ -55,9 +56,9 @@ function catalogFor(folder: string, none = false) {
   } else {
     g.pluginPatch = { ...g.pluginPatch!, folder, stock: pin(STOCK), patched: { from: 'geniex/geniex_plugin.dll', ...pin(BUILD) }, needs: Object.fromEntries(Object.entries(NEEDS).map(([k, v]) => [k, pin(v)])) };
     for (const v of versions) {
-      const p = v.pluginPatch!['snapdragon-x2'];
+      const p = v.pluginPatch!['snapdragon-x2'] as NpuPluginPatch;
       const [stock, needs] = p.serverVersion === '0.9.3' ? [STOCK_093, NEEDS_093] : [STOCK_091, NEEDS_091];
-      v.pluginPatch = { 'snapdragon-x2': { ...p, folder, stock: pin(stock), patched: { from: 'geniex/0.9.1/geniex_plugin.dll', ...pin(BUILD_091) }, needs: Object.fromEntries(Object.entries(needs).map(([k, v]) => [k, pin(v)])) } };
+      v.pluginPatch = { ...v.pluginPatch, 'snapdragon-x2': { ...p, folder, stock: pin(stock), patched: { from: 'geniex/0.9.1/geniex_plugin.dll', ...pin(BUILD_091) }, needs: Object.fromEntries(Object.entries(needs).map(([k, v]) => [k, pin(v)])) } };
     }
   }
   return c;
@@ -144,7 +145,7 @@ test("an X2 with GenieX 0.8.0's own plugin: the build put in, in the NPU's turn,
   assert.deepEqual(pc.did.filter((x) => x === 'detect'), ['detect']);
 });
 
-test('the shipped catalog patches the X2 alone, over GenieX 0.8.0, 0.9.1 and 0.9.3, with the builds the kit carries', async () => {
+test("the shipped catalog patches the X2 over GenieX 0.8.0, 0.9.1 and 0.9.3, and the first-generation X Elite with the X2's build over 0.9.x, with the builds the kit carries", async () => {
   const route = V.NPU_CATALOG.routes.qualcomm;
   const p = route.generations['snapdragon-x2'].pluginPatch!;
   assert.equal(p.serverVersion, route.version);
@@ -152,8 +153,8 @@ test('the shipped catalog patches the X2 alone, over GenieX 0.8.0, 0.9.1 and 0.9
   assert.equal(p.stock.sha256, '4eabfa6c518c597935b3e5487fce85e1287bdba191236587cdb519a720dfe28a');
   const later = route.versions!.find((v) => v.pluginPatch)!;
   assert.equal(later.version, '0.9.0');
-  assert.deepEqual(Object.keys(later.pluginPatch!), ['snapdragon-x2']);
-  const p091 = later.pluginPatch!['snapdragon-x2'];
+  assert.deepEqual(later.pluginPatch, { 'snapdragon-x2': later.pluginPatch!['snapdragon-x2'], 'snapdragon-x': 'snapdragon-x2' }, "the X Elite named by the X2's id: the same file");
+  const p091 = later.pluginPatch!['snapdragon-x2'] as NpuPluginPatch;
   assert.equal(p091.serverVersion, '0.9.1');
   assert.equal(p091.file, p.file);
   assert.equal(p091.folder, p.folder);
@@ -161,7 +162,13 @@ test('the shipped catalog patches the X2 alone, over GenieX 0.8.0, 0.9.1 and 0.9
   assert.deepEqual(Object.keys(p091.needs), Object.keys(p.needs), 'the same files it loads');
   // 0.9.3 runs 0.9.1's build over its own rebuilt libraries, with 0.9.0's command and embedding server (each entry replaces those before it).
   const v093 = route.versions!.find((v) => v.version === '0.9.3')!;
-  const p093 = v093.pluginPatch!['snapdragon-x2'];
+  const p093 = v093.pluginPatch!['snapdragon-x2'] as NpuPluginPatch;
+  assert.equal(v093.pluginPatch!['snapdragon-x'], 'snapdragon-x2');
+  // pluginPatchOf gives the X Elite the X2's build on 0.9.x, none on 0.8.0 (where the X2's own is the generation's).
+  assert.equal(V.pluginPatchOf(V.atVersion(route, '0.9.3'), 'snapdragon-x'), p093);
+  assert.equal(V.pluginPatchOf(V.atVersion(route, '0.9.1'), 'snapdragon-x'), p091);
+  assert.equal(V.pluginPatchOf(route, 'snapdragon-x'), undefined);
+  assert.equal(V.pluginPatchOf(V.atVersion(route, '0.9.3'), 'snapdragon-8cx'), undefined);
   assert.equal(p093.serverVersion, '0.9.3');
   assert.equal(p093.folder, p.folder);
   assert.equal(p093.stock.sha256, '9612f66a0cc1a29b8f746697b808d62f49cfdd9328b94615b34f6ef1a6dae787');

@@ -14,6 +14,7 @@ import { refreshNpu, whatAnswers } from './npu-refresh.ts';
 import { cardIdleStopMinutes, NPU_CATALOG, npuIdleStopMinutes, smallPc } from './npu-vendors.ts';
 import { powershell, psQuote } from './ps.ts';
 import { keyInside, pathKey, samePath } from './real-path.ts';
+import { removeRetiredModels } from './retired.ts';
 import { RULES } from './rules.ts';
 import { kitVersion, refreshCardVision, refreshSmallModel, testNpuEmbed, testNpuEntry } from './setup.ts';
 
@@ -629,6 +630,16 @@ export async function serverProcesses(program: string, base: string): Promise<Se
   return rows.filter((r) => sameProgram(r.path, program) && servesBase(r.line, base)).map(({ pid, startedMs, workingSetBytes }) => ({ pid, startedMs, workingSetBytes }));
 }
 
+/** Stops whatever `program` serves `base`, and waits until it's gone (10 s at most): the NPU's refresh and patch, and setup between its tries of the NPU's models. */
+export async function stopServerAt(program: string, base: string): Promise<void> {
+  for (const p of await serverProcesses(program, base)) {
+    try {
+      process.kill(p.pid);
+    } catch {}
+  }
+  for (let i = 0; i < 40 && (await serverProcesses(program, base)).length; i++) await sleep(250);
+}
+
 /** Every llama-server's and GenieX's process on this PC, and every other program the servers are started with. */
 export async function modelServerProcesses(programs: string[] = []): Promise<SeenProcess[]> {
   const names = [...new Set(['llama-server.exe', 'geniex.exe', ...programs.map((p) => path.win32.basename(p).toLowerCase())])].filter((n) => /\.exe$/i.test(n) && !/^python/i.test(n));
@@ -978,14 +989,7 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
       const who = o.who ?? 'keeper';
       return reaperTurn(dirs, () => (e.length ? reaperTurn(e, fn, who, 40 * 60_000) : fn()), who, 40 * 60_000);
     },
-    stopServer: async (program: string, base: string) => {
-      for (const p of await serverProcesses(program, base)) {
-        try {
-          process.kill(p.pid);
-        } catch {}
-      }
-      for (let i = 0; i < 40 && (await serverProcesses(program, base)).length; i++) await sleep(250);
-    },
+    stopServer: stopServerAt,
     answering: (base: string) => whatAnswers(base),
     log: (line: string) => logLine(logFile, line),
   };
@@ -1028,21 +1032,29 @@ export function refreshCards(o: { logFile?: string } = {}): void {
   }
 }
 
-/** One copy of Qwen3-VL-2B where the NPU keeps one (setup.ts' refreshSmallModel), at most one look at a time: what it changed goes in the keeper's log. */
+/**
+ * One copy of Qwen3-VL-2B where the NPU keeps one (setup.ts' refreshSmallModel), then the model files the NPU's routes
+ * have retired, removed once nothing names them (retired.ts' removeRetiredModels), at most one look at a time: what they
+ * changed goes in the keeper's log.
+ */
 let smallModel: Promise<void> | null = null;
 export function startSmallModelRefresh(o: { logFile?: string } = {}): void {
   if (smallModel) return;
   const logFile = o.logFile ?? reaperLog();
-  smallModel = refreshSmallModel({ configFile: acceleratorConfigFile(), kit: kitVersion(), running: () => modelServerProcesses().then((ps) => ps.map((p) => p.line)), log: (line) => logLine(logFile, line) })
+  const log = (line: string) => logLine(logFile, line);
+  smallModel = refreshSmallModel({ configFile: acceleratorConfigFile(), kit: kitVersion(), log })
+    .catch((e: any) => logLine(logFile, `the graphics' and the processor's Qwen3-VL-2B file couldn't be looked at: ${e?.message ?? e}`))
+    .then(() => removeRetiredModels({ configFile: acceleratorConfigFile(), running: () => modelServerProcesses().then((ps) => ps.map((p) => p.line)), log }))
     .then(() => {})
-    .catch((e: any) => logLine(logFile, `the graphics' and the processor's Qwen3-VL-2B file couldn't be looked at:${e?.message ?? e}`))
+    .catch((e: any) => logLine(logFile, `the retired model files couldn't be looked at: ${e?.message ?? e}`))
     .finally(() => (smallModel = null));
 }
 
 /**
  * One look: each server, then the orphans. config.json and Manor's switch are read afresh, so a change applies at the
  * next look. With the PC's own reaper (pcReaper's), it first brings hardware.json, the cards' vision commands, the
- * NPU's command and the cards' Qwen3-VL-2B file up to date, whether or not it's handed config.json: the Smith hands the one it read for its round, and
+ * NPU's command and the cards' Qwen3-VL-2B file up to date (and removes the model files the NPU no longer runs, once nothing
+ * names them), whether or not it's handed config.json: the Smith hands the one it read for its round, and
  * until kit 2.78.8 that kept all three from ever running under it (Reeve leaves the looks to the Smith). A test's
  * reaper asks no PC.
  */

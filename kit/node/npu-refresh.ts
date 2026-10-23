@@ -4,7 +4,7 @@ import { type AcceleratorEntry, readConfigFile, validateKeeperConfig, writeConfi
 import { expandEnv } from './accelerators.ts';
 import type { Detection } from './detect.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
-import { atVersion, compareVersions, expandRoute, installedVersion, NPU_CATALOG, type NpuCatalog, npuEntry, npuMemoryFit, type NpuRoute, pinnedRoute, planNpu, routeFor, runsRoute, serverExe, smallPc } from './npu-vendors.ts';
+import { atVersion, compareVersions, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, npuEntry, npuMemoryFit, type NpuRoute, pinnedRoute, planNpu, routeFor, runsRoute, serverExe, smallPc } from './npu-vendors.ts';
 import { mergeEntries, type NpuEmbedOffer, type NpuRefreshRecord, overlayFiles, portablePath, readNpuRefresh, rememberNpuRefresh } from './setup.ts';
 
 /**
@@ -238,13 +238,16 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   // where an older kit set it up, the pin's where this one did. A server that is there but can't say which keeps its
   // command, not written, so a later look asks again.
   if (version === null && pinnedRoute(route, npu.generation).version !== route.version && (d.exists ?? existsSync)(serverExe(route, d.tools, d.env))) return { did: 'unknown-version' };
-  const generation =routeFor(atVersion(pinnedRoute(route, npu.generation), version), npu.generation, small);
+  // An entry that runs its generation's fallback (setup's, where its own models failed: the first-generation X Elite's
+  // Qwen3-VL-4B) keeps it: only setup tries the generation's own again.
+  const fallback = !!generationOf(route, npu.generation)?.fallback?.models.includes(entry.chat.model);
+  const generation = routeFor(atVersion(pinnedRoute(route, npu.generation), version), npu.generation, small, { fallback });
   const own = generation.embedServer ? `${generation.embedServer.server} ${generation.embedServer.version}` : null;
   const hadEmbed = !!entry.embed?.startCommand?.length;
   const refusedTries = own && embedOffer?.server === own ? embedOffer.tries : 0;
   const mayOffer = !hadEmbed && !!own && npuMemoryFit(generation, detected.ramBytes).embed && refusedTries < NPU_REFRESH_TRIES;
   const planFor = (noEmbed: boolean) =>
-    planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed, cards, small, serverVersion: version });
+    planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed, cards, small, serverVersion: version, fallback });
   let plan = planFor(!hadEmbed && !mayOffer);
   // Their server or model not here yet: left for setup (Set up local AI), and the rest goes on without them.
   if (mayOffer && plan && plan.downloadBytes > 0) plan = planFor(true);

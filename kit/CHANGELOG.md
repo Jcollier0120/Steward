@@ -2,6 +2,33 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.101.0
+
+**The first-generation Snapdragon X runs Qwen3-VL-2B, with the 4B as its fallback, and the keeper removes the model files the NPU's routes no longer run.**
+
+### What's new
+
+- **Qwen3-VL-2B on the first-generation X** (X Elite, X Plus). Its generation (`snapdragon-x`) has the X2's Qwen3-VL-2B Q4_0 as its own `models`, and pins GenieX 0.9.3 (`serverPin`): Qualcomm AI Hub builds no 2B for the X Elite, and 0.9.3 carries llama.cpp's signed Hexagon v73 code. Played on the X2 Elite on v73 code (2026-10-23): a first answer 2.2 s after the start, 71.2 tokens written a second, 21 of 24 quality items, 4 of 4 pictures and setup's red picture seen red, 0.05 processor cores busy, a 2.69 GB working set; AI Hub's X Elite build of the 4B, played the same way, 8.1 s, 41.1, 22 of 24, 3 of 4, 1.02 cores and 5.92 GB (spec/NPU-VENDORS.md, Qwen3-VL-2B on the first-generation X).
+  - On GenieX 0.9.0 and later the X gets Castellan's build of GenieX's plugin, GENIEX_PATCH_POLL with it, so its processor's threads sleep while the NPU writes. A version's `pluginPatch` may name another generation's build by its id (`"snapdragon-x": "snapdragon-x2"`), which `pluginPatchOf` follows.
+  - `playedRoute` gives GenieX `GGML_HEXAGON_ARCH` too, so a played X's 2B runs v73 code in GenieX's llama.cpp plugin as its embeddings do.
+- **A generation's fallback** (`NpuGeneration.fallback`: the route's own models it names, and why). The X's is the 4B. `routeFor(…, { fallback: true })` and `planNpu({ fallback: true })` give the route with them; `planSetup` puts that plan on `NpuPlan.fallback` where it fits the PC's memory, and `describePlan` says so.
+  - `setUpNpu` tries the generation's own models first, its test requiring the red picture seen red (`NpuIo.testNpu`'s `seeRed`). Should a step after the server's install fail (pull, checksum, test, measure), it stops their server in the NPU's turn (`NpuIo.stopServer`, by default the keeper's new `stopServerAt`) and sets the fallback up on the same server. The NPU gets its entry and no problem is said: `NpuSetup.fellBack` holds the fallback's route, its models and what failed first, and the report names the fallback. Should the fallback fail too, the first try's failure, as before.
+  - The keeper's NPU refresh keeps an entry on a fallback model (npu-refresh.ts), and never moves it in the background.
+- **The model files the routes no longer run are removed** (retired.ts). Each route in npu-vendors.json may list them: `retired`, npu-vendors.ts' `NpuRetired` (`path`, a `match` for the files in that folder it names, the GenieX `model` id it was served by, `since`, `why`). The keeper's look calls `removeRetiredModels` after `refreshSmallModel`.
+  - It looks on a PC that has the route's server installed, or whose NPU entry runs it. A file or folder no string in config.json and no running model server's command line names (by its path, its name or its model id) is recorded in `retired-models.json` beside config.json, and removed once unnamed for `RETIRED_GRACE_MS` (three days), a folder renamed aside first. Named again, it's kept and its count starts over. Never in an Everyone install's shared folder.
+  - Qualcomm's list: setup's Qwen3-VL-2B Q4_K_M for the graphics and the processor (since 2.100.0), AI Hub's Qwen3-VL-4B, and `qualcomm/Qwen3-4B-Instruct-2507`, the install's own GenieX entry's model until 2.100.0. A route that stops running a model adds it there.
+- **A pin may accept the builds pinned before** (`pinned[generation].earlier`, npu-vendors.ts' `PinnedFiles`): `checkPinned` passes files that are wholly one of them, and still says what differs from the current build otherwise. The 4B's X Elite pin is AI Hub's current build (v0.65.0, QAIRT 2.50), with its earlier build, no longer published, kept there for an X that pulled it.
+
+### What changed
+
+- **`refreshSmallModel` no longer removes the Q4_K_M** (`removeRetiredModels` does, the first file on Qualcomm's list): it takes no `running`, returns `{ changed }`, and drops a retired file from `small-model.json` once it's named again or gone. `SMALL_MODEL_GRACE_MS` is gone: retired.ts' `RETIRED_GRACE_MS` replaces it. A Q4_K_M a person points config.json at again is kept while config.json names it.
+- `routeFor` merges a server version's embedding server `env` over the route's, so a route given again (a played one) keeps what a caller added.
+- spec/NPU-VENDORS.md and spec/NPU-BENCHMARK.md name the X's models, its fallback and the retired files.
+
+### Before you update
+
+- Nothing for an agent: take the kit as usual. One that called `refreshSmallModel` with `running`, or read `SMALL_MODEL_GRACE_MS` or the `removed` it returned, drops them: the keeper's look removes the files now. An X set up before keeps its 4B until setup is run again.
+
 ## 2.100.0
 
 **On a Snapdragon X2 the reranker runs on the NPU, the graphics and the processor read the NPU's own Qwen3-VL-2B file, and the GenieX default is the X2's model.**

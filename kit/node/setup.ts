@@ -15,7 +15,8 @@ import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
+import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
+import { RETIRED_GRACE_MS } from './retired.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -930,7 +931,11 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
       npuPlain = npuNoteFor(det.label, 'chat', fit.why!);
       npuLeftOut = 'memory';
     } else {
-      npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed, cards: o.detection.cards, small, serverVersion: version });
+      const plan = (fallback: boolean) => planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed, cards: o.detection.cards, small, serverVersion: version, fallback });
+      npu = plan(false);
+      // Its generation's fallback (the first-generation X Elite's Qwen3-VL-4B), set up only should its own models fail.
+      const fallback = npu && generic && generationOf(generic, det.generation)?.fallback ? plan(true) : null;
+      if (npu && fallback && npuMemoryFit(fallback.route, o.detection.ramBytes).chat) npu.fallback = fallback;
       if (!fit.embed && route?.embedServer) {
         npuNote = `${det.label} (npu): its embeddings not set up: ${fit.why}. The graphics card or the processor makes them.`;
         npuPlain = npuNoteFor(det.label, 'embed', fit.why!);
@@ -1109,6 +1114,8 @@ export function describePlan(p: SetupPlan): string[] {
     lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
     if (n.runtime) lines.push(`  get  ${n.runtime.what} (${mb(n.runtime.size)}, SHA-256 pinned), beside ${path.win32.basename(n.exe)}: no administrator`);
     for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
+    const fb = n.fallback?.models;
+    if (fb?.length) lines.push(`  should it not answer properly on this NPU: ${fb.map((m) => `${m.id} (${m.have ? 'here already' : mb(m.size)})`).join(', ')} in its place`);
     if (n.embed) {
       const es = n.embed.server;
       if (es.download) lines.push(`  ${n.embed.download ? 'get ' : 'have'} ${es.server} ${es.version} for embeddings on ${es.port} (${mb(es.download.size)}, SHA-256 pinned)`);
@@ -1411,8 +1418,10 @@ export interface NpuIo {
   /** Runs a program (the installer, the server's pull): its exit code and output. */
   run?: (exe: string, args: string[], o?: { timeoutMs?: number; env?: NodeJS.ProcessEnv }) => Promise<{ code: number | null; out: string }>;
   exists?: (p: string) => boolean;
-  /** The test request: problems, none when the server answered every kind it serves. */
-  testNpu?: (entry: AcceleratorEntry) => Promise<string[]>;
+  /** The test request: problems, none when the server answered every kind it serves (and, with `seeRed`, saw its picture red). */
+  testNpu?: (entry: AcceleratorEntry, o?: { seeRed?: boolean }) => Promise<string[]>;
+  /** Stops whatever `program` serves `base` and waits until it's gone (keeper.ts' stopServerAt): between setup's tries of the NPU's models. */
+  stopServer?: (program: string, base: string) => Promise<void>;
   /** The embedding server's test request (testNpuEmbed): problems, none when it gave a vector. */
   testEmbed?: (entry: AcceleratorEntry) => Promise<string[]>;
   /** The NPU's reranker's test request (testNpuRerank): problems, none when it ranked the passage that answers first. */
@@ -1620,6 +1629,60 @@ export interface NpuSetup {
   failed?: NpuFailStep;
   /** What its report says it measured, on any generation: the first start, the warm answer, writing and reading. */
   speeds?: NpuSpeeds;
+  /**
+   * Its generation's fallback (NpuPlan.fallback), set up because its own models failed: the route it runs (its report
+   * names those models), and what failed first. The entry, note and speeds are the fallback's.
+   */
+  fellBack?: { route: NpuRoute; models: string[]; failed: NpuFailStep; problems: string[] };
+}
+
+/** The steps whose failure setup meets with the generation's fallback models (NpuPlan.fallback): its server itself was set up. */
+const FALLBACK_STEPS: readonly NpuFailStep[] = ['pull', 'checksum', 'test', 'test-nonsense', 'test-timeout', 'measure', 'too-slow'];
+
+/**
+ * A plan made before an earlier try put things in place (its server installed, its runtime beside it, a model or the
+ * embedding server's files fetched): what is here now isn't fetched again.
+ */
+function nowHere(n: NpuPlan, tools: string, exists: (p: string) => boolean): NpuPlan {
+  const installed = n.installed || exists(n.exe);
+  const e = n.embed;
+  return {
+    ...n,
+    installed,
+    download: installed ? null : n.download,
+    runtime: n.runtime && installed && n.runtime.files.every((f) => exists(path.join(n.runtime!.into, f))) ? null : n.runtime,
+    models: n.models.map((m) => ({ ...m, have: m.have || (!!m.present && exists(expandRoute(m.present, { tools }))) })),
+    embed: e && { ...e, download: e.download && exists(e.exe) ? null : e.download, modelDownload: e.modelDownload && exists(e.modelDownload.dest) ? null : e.modelDownload, modelPull: e.modelPull && e.model && exists(e.model) ? null : e.modelPull },
+  };
+}
+
+/**
+ * Sets the NPU up (setUpNpuOnce), and where its generation has fallback models (the first-generation X Elite's
+ * Qwen3-VL-4B, beside its Qwen3-VL-2B) and its own failed once its server was in place, the fallback in their place:
+ * the first try's test must see its red picture red too, and its server is stopped before the second's starts. What the
+ * first try met goes in the log and in `fellBack`, never in the problems: the NPU still has chat, and nothing to
+ * show as an error. The first try's outcome when the fallback fails as well.
+ */
+export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<NpuSetup> {
+  if (!n.fallback) return setUpNpuOnce(n, tools, io);
+  const first = await setUpNpuOnce(n, tools, io, { seeRed: true });
+  if (first.entry || !first.failed || !FALLBACK_STEPS.includes(first.failed)) return first;
+  const was = n.models.map((m) => m.id).join(', ');
+  const then = n.fallback.models.map((m) => m.id).join(', ');
+  io.log(`${was} didn't work on this NPU (${first.problems.join('; ')}): setting up ${then} in its place`);
+  const base = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p) }).chat?.baseUrl;
+  try {
+    if (base) await inNpuTurn(false, async () => (io.stopServer ?? (async (program: string, at: string) => (await import('./keeper.ts')).stopServerAt(program, at)))(n.exe, base), { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 });
+  } catch (e: any) {
+    io.log(`${n.route.server}'s server for ${was} couldn't be stopped (${String(e?.message ?? e).split(/\r?\n/)[0]}): the next try starts its own when it can`);
+  }
+  const second = await setUpNpuOnce(nowHere({ ...n.fallback, port: n.port }, tools, io.exists ?? existsSync), tools, io);
+  if (!second.entry) {
+    io.log(`${then} didn't work on this NPU either: ${second.problems.join('; ')}`);
+    return first;
+  }
+  io.log(`${then} answered on the NPU in ${was}'s place: the NPU keeps chat${n.kinds.includes('vision') ? ' and pictures' : ''}`);
+  return { ...second, fellBack: { route: n.fallback.route, models: n.fallback.models.map((m) => m.id), failed: first.failed, problems: first.problems } };
 }
 
 /**
@@ -1629,8 +1692,9 @@ export interface NpuSetup {
  * short requests more measure it, and its entry gets this PC's timeouts (calibrate); one too slow for the chat model
  * isn't used. Its entry comes back only when every step worked; otherwise the problems say which step failed, the note
  * says why in plain words, and config.json gets no NPU entry from it: its work goes to the graphics card or the processor.
+ * `seeRed`: its test's picture must be seen red (setUpNpu's first try of models it can fall back from).
  */
-export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<NpuSetup> {
+async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: boolean } = {}): Promise<NpuSetup> {
   const exists = io.exists ?? existsSync;
   const run = io.run ?? runProgram;
   const now = io.clockMs ?? (() => performance.now());
@@ -1717,7 +1781,7 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
   // Whether the test started the server: its time to the answers is a cold start only then (the report's coldMs).
   let started = undefined as boolean | undefined;
   const t0 = now();
-  const problems = await (io.testNpu ?? ((e: AcceleratorEntry) => testNpuEntry(e, { onReady: (r) => (started = r.started) })))(entry);
+  const problems = await (io.testNpu ?? ((e: AcceleratorEntry, t?: { seeRed?: boolean }) => testNpuEntry(e, { onReady: (r) => (started = r.started), seeRed: t?.seeRed })))(entry, o.seeRed ? { seeRed: true } : undefined);
   const coldMs = Math.round(now() - t0);
   if (problems.length) return fail(`${n.route.server} didn't answer its test request: ${problems.join('; ')}`, testStep(problems), plainReason(problems, 'chat'));
   // Every NPU is measured for its report; a generation nobody has measured also gets this PC's own timeouts from it,
@@ -2115,20 +2179,18 @@ export function withNpuChatFile(raw: Record<string, any>, file: string, o: { fro
 
 /**
  * The files refreshSmallModel moved the cards and the processor off, and when: `small-model.json`, beside config.json.
- * Each is removed once nothing has named it for SMALL_MODEL_GRACE_MS.
+ * Each is one the Snapdragon's route has retired (npu-vendors.json's `retired`), removed once nothing has named it for
+ * RETIRED_GRACE_MS (retired.ts' removeRetiredModels); until then, they read it again should the NPU's copy go.
  */
 export interface SmallModelRecord {
   /** The NPU's copy they read now. */
   file: string;
   retired: { path: string; since: string }[];
-  /** Those a person put back in config.json: theirs, never moved off again nor removed. */
+  /** Those a person put back in config.json: theirs, never moved off again (nor removed while it names them). */
   kept?: string[];
 }
 
 export const smallModelFile = (configFile: string) => path.join(path.dirname(configFile), 'small-model.json');
-
-/** How long a file the cards no longer read is kept: an agent that read config.json before still starts its server with it. */
-export const SMALL_MODEL_GRACE_MS = 3 * 24 * 60 * 60_000;
 
 export function readSmallModel(configFile: string): SmallModelRecord | null {
   try {
@@ -2150,13 +2212,12 @@ function namedFiles(raw: Record<string, any>): Set<string> {
 /**
  * One copy of Qwen3-VL-2B on a PC whose NPU keeps one (kit 2.100.0): the keeper's look, each time. Where npuChatFile
  * finds the NPU's copy, the cards and the processor that read SMALL_SPEC's Q4_K_M read it instead (withNpuChatFile);
- * nothing is started or stopped, and a server running keeps its file until its next start. The Q4_K_M is removed once
- * no entry in config.json has named it for SMALL_MODEL_GRACE_MS, and no process running names it (`running`: model
- * servers' command lines); a file Windows won't remove yet (a program still reads it) is tried again at a later look.
- * A Q4_K_M a person puts back in config.json is theirs: kept, and never moved off again. Should the NPU's copy go while
- * the Q4_K_M is still kept, they read the Q4_K_M again. Never in the PC's shared folder (an Everyone install), whose
- * files other accounts read, and never the NPU's own copy. The entries changed and the files removed; none when
- * config.json couldn't be read (the next look tries).
+ * nothing is started or stopped, and a server running keeps its file until its next start. The Q4_K_M, which the
+ * Snapdragon's route has retired, goes once nothing has named it for RETIRED_GRACE_MS (the same look's
+ * removeRetiredModels, from kit 2.101.0). A Q4_K_M a person puts back in config.json is theirs: kept, and never moved
+ * off again. Should the NPU's copy go while the Q4_K_M is still there, they read the Q4_K_M again. Never in the PC's
+ * shared folder (an Everyone install), whose files other accounts read. The entries changed; none when config.json
+ * couldn't be read (the next look tries).
  */
 export async function refreshSmallModel(o: {
   configFile: string;
@@ -2165,10 +2226,9 @@ export async function refreshSmallModel(o: {
   env?: Record<string, string | undefined>;
   now?: () => number;
   fileSize?: (p: string) => number;
-  running?: () => Promise<string[]>;
   validate?: (raw: unknown) => string[];
   log: (line: string) => void;
-}): Promise<{ changed: string[]; removed: string[] }> {
+}): Promise<{ changed: string[] }> {
   const env = o.env ?? process.env;
   const home = o.home ?? toolsHome(env as NodeJS.ProcessEnv);
   const now = (o.now ?? Date.now)();
@@ -2176,7 +2236,7 @@ export async function refreshSmallModel(o: {
   const days = (ms: number) => Math.floor(ms / 86_400_000);
   const had = readSmallModel(o.configFile);
   const file = readConfigFile(o.configFile);
-  if (file.error || isSharedTools(home, env)) return { changed: [], removed: [] };
+  if (file.error || isSharedTools(home, env)) return { changed: [] };
   const own = npuChatFile({ home, env, fileSize: size });
   const before = namedFiles(file.raw);
   // A Q4_K_M moved off and named again while the NPU's copy is there: a person's.
@@ -2193,7 +2253,7 @@ export async function refreshSmallModel(o: {
     const saved = writeConfigFile(o.configFile, next.raw, o.validate ?? validateKeeperConfig);
     if (saved.problems.length) {
       o.log(`${next.changed.join(', ')} keep the ${SMALL_SPEC.model} file they read: config.json wasn't written: ${saved.problems.join('; ')}`);
-      return { changed: [], removed: [] };
+      return { changed: [] };
     }
     raw = next.raw;
     changed = next.changed;
@@ -2201,40 +2261,20 @@ export async function refreshSmallModel(o: {
       const since = new Date(now).toISOString();
       const left = (had?.retired ?? []).filter((r) => !next.was.some((w) => w.toLowerCase() === r.path.toLowerCase()));
       record = { file: own.path, retired: [...left, ...next.was.map((p) => ({ path: p, since }))], ...(kept.length ? { kept } : {}) };
-      o.log(`${changed.join(', ')}: chat and vision now read the NPU's own copy of ${SMALL_SPEC.model}, ${path.win32.basename(own.path)} (kit ${o.kit}): one copy on this PC where there were two, as fast; each server takes it at its next start, and the Q4_K_M goes once nothing has read it for ${days(SMALL_MODEL_GRACE_MS)} days`);
+      o.log(`${changed.join(', ')}: chat and vision now read the NPU's own copy of ${SMALL_SPEC.model}, ${path.win32.basename(own.path)} (kit ${o.kit}): one copy on this PC where there were two, as fast; each server takes it at its next start, and the Q4_K_M goes once nothing has read it for ${days(RETIRED_GRACE_MS)} days`);
     } else o.log(`${changed.join(', ')}: chat and vision read ${path.win32.basename(back!.path)} again (kit ${o.kit}): the NPU's copy they read, ${path.win32.basename(had!.file)}, is gone`);
   }
-  const removed: string[] = [];
   if (record?.retired.length) {
+    // One config.json names again (a person's, or read again above) is read, and one removed is gone: neither is counted.
     const named = namedFiles(raw);
-    const due = own ? record.retired.filter((r) => now - Date.parse(r.since) >= SMALL_MODEL_GRACE_MS && !named.has(r.path.toLowerCase()) && r.path.toLowerCase() !== own.path.toLowerCase() && SMALL_SPEC.file.test(path.win32.basename(r.path))) : [];
-    const lines = due.length ? await (o.running ?? (async () => []))().catch(() => null) : null;
-    const left: SmallModelRecord['retired'] = [];
-    for (const r of record.retired) {
-      // One config.json names again (a person's, or read again above) is read: no longer counted.
-      if (named.has(r.path.toLowerCase())) continue;
-      const name = path.win32.basename(r.path).toLowerCase();
-      if (!due.includes(r) || !lines || lines.some((l) => l.toLowerCase().includes(name))) {
-        left.push(r);
-        continue;
-      }
-      const bytes = size(r.path);
-      try {
-        rmSync(r.path);
-        removed.push(r.path);
-        o.log(`removed ${path.win32.basename(r.path)}${bytes > 0 ? ` (${(bytes / 1024 ** 3).toFixed(2)} GB)` : ''}: nothing has read it for ${days(now - Date.parse(r.since))} days, since the cards and the processor read the NPU's own copy, ${path.win32.basename(record.file)}`);
-      } catch (e: any) {
-        if (e?.code !== 'ENOENT') left.push(r);
-      }
-    }
-    record = { ...record, retired: left };
+    record = { ...record, retired: record.retired.filter((r) => !named.has(r.path.toLowerCase()) && size(r.path) >= 0) };
   }
   if (record && JSON.stringify(record) !== JSON.stringify(had)) {
     try {
       writeFileSync(smallModelFile(o.configFile), JSON.stringify(record, null, 2) + '\n');
     } catch {}
   }
-  return { changed, removed };
+  return { changed };
 }
 
 /**
@@ -2560,7 +2600,8 @@ function keepNpuReport(o: SetupOptions, detection: Detection, plan: SetupPlan, n
   try {
     const report = npuReportFromSetup({
       detection,
-      route: plan.npu?.route ?? null,
+      // The models it runs: its generation's fallback where setup fell back to them.
+      route: npu?.fellBack?.route ?? plan.npu?.route ?? null,
       verified: !!plan.npu?.support.verified,
       skipped: plan.npuLeftOut ?? null,
       failed: npu?.failed ?? null,
