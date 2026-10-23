@@ -154,7 +154,9 @@ test("the page's timer looks every so often, and says why it couldn't once, not 
     log: (l) => lines.push(l),
     everyMs: 10,
   });
-  await new Promise((r) => setTimeout(r, 100));
+  // Until it has looked twice: a fixed 100 ms saw one look on a PC busy with the whole suite, its timers running late.
+  const until = Date.now() + 10_000;
+  while (looks.length < 2 && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
   stop();
   assert.ok(looks.length >= 2, String(looks.length));
   assert.deepEqual(looks[0], {});
