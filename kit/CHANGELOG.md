@@ -28,6 +28,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - **On a PC that holds no license, the sold staff released on this kit wait.** That includes test PCs and developers' PCs: they need a license, and a complimentary one does. Manor already takes them off duty there (Manor#364); now the staff wait by themselves too.
+- **What a held agent shows, and how it runs again.** Its page says "This PC holds no license for it: signing in brings it back" (after a trial, that the trial has ended), its pill says No license (or Trial ended), and its rounds and Run now wait. Signing in on that PC brings it back: Manor's Settings > License, with the email the license was bought with, or a key. The agent sees the new licence.json at its next look, with nothing to reinstall and its settings and data as they were.
 
 ## 2.108.0
 
