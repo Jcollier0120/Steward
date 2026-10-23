@@ -1488,7 +1488,8 @@ test("the keeper's look on a Snapdragon set up before: the card and the processo
   await look(t0);
   copy = false;
   assert.deepEqual(await look(t0 + 60_000), { changed: [SNAPDRAGON_CARD, 'cpu'] });
-  assert.deepEqual([modelOf(SNAPDRAGON_CARD), modelOf('cpu')], [q4km, q4km]);
+  // Written portably, as GenieX's copy was: under %USERPROFILE% where the PC's temp folder is (most PCs).
+  assert.deepEqual([modelOf(SNAPDRAGON_CARD), modelOf('cpu')], [portablePath(q4km), portablePath(q4km)]);
   assert.match(log.at(-1)!, /: chat and vision read Qwen3VL-2B-Instruct-Q4_K_M\.gguf again \(kit 2\.100\.0\): the NPU's copy they read, Qwen3-VL-2B-Instruct-Q4_0\.gguf, is gone$/);
   assert.deepEqual(await look(t0 + 2 * RETIRED_GRACE_MS), { changed: [] });
   assert.ok(existsSync(q4km));

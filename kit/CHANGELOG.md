@@ -19,6 +19,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - `NpuPluginPatch.required` says why a route's models need its patch. config.json's `npuPatch: false` doesn't take such a patch out.
 - **A PC already on the 4B moves to the 2B at Set up local AI.** The keeper's look never downloads: it finds the 2B and the build missing and records `needs-setup` (`npu-refresh.json`). Until now setup with no ids left a configured NPU entry alone, so nothing acted on that record, and a PC stayed on its old model however often Set up local AI was pressed (a Snapdragon X2 on the Qwen3-VL-4B too, though spec/NPU-VENDORS.md said it would move).
   - `planSetup` takes the record (`npuRefresh`, which `setupCommand` reads with `readNpuRefresh`). With no ids, an entry the look left for setup, on the route's own server (`runsRoute`), is set up again. One a person pointed at another server, or one the keeper found current or hasn't looked at, is still left alone.
+  - So is an entry on its generation's `fallback` (a first-generation X Elite on the Qwen3-VL-4B, where its 2B failed): Set up local AI tries the 2B again, as spec/NPU-VENDORS.md said it would, and should it fail again sets the 4B up again quietly (`fellBack`, no note, no alarm). The keeper's look still keeps the fallback as it is, so it's never retried on the look's rounds.
   - Setup downloads the 2B and the build, then tests the 2B with a picture and a chat. If the test fails, config.json keeps the 4B's entry, and the record stays `needs-setup`, so the next Set up local AI tries again. The graphics card or the processor takes the pictures. Where the 2B doesn't fit (a 12 GB Intel PC), the 4B's entry is left as it is.
   - The setup log's line for a card taking the NPU's work names only what the card takes: "The graphics card takes the NPU's vision instead" where the 4B's kept entry still chats.
   - Setup's test now first stops a server of the entry's own program that answers on its port without listing the model (`stopOtherModel`), in the NPU's turn. OpenVINO Model Server serves only the model it started with, so before this the old 4B server would have answered the 2B's test with a 404, and the PC would never have switched.
@@ -35,6 +36,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing for an agent: take the kit as usual. An Intel PC moves to the 2B the first time its local AI is set up after the keeper (the Smith, else Reeve) has looked at it with this kit, and that setup downloads 2.5 GB. Before that look, Set up local AI leaves its NPU as it is. On a 16 GB Lunar Lake or Panther Lake, that setup also moves its embeddings off the NPU.
 - A Snapdragon X2 still on the Qwen3-VL-4B moves to the 2B the same way (1.9 GB), as spec/NPU-VENDORS.md said it would.
+- A first-generation X Elite on its fallback 4B tries the 2B again at each Set up local AI, which tests it on the NPU (nothing to download where it was pulled before).
 
 ## 2.102.0
 

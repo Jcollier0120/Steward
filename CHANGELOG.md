@@ -15,7 +15,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **Castellan's build of one OpenVINO file.** OpenVINO's own build failed Qwen3-VL on Intel's NPU. Setup downloads Castellan's signed build of that file (7.5 MB) and keeps Intel's beside it.
 - **It takes more memory than the 4B.** Once it has read a full-size screenshot it holds about 1 GB more (4.8 GB). So a 16 GB Lunar Lake or Panther Lake PC moves its search (embeddings) off the NPU, to the graphics card or the processor, and a 12 GB Intel PC no longer chats on the NPU. A 16 GB Core Ultra 200U or 200H keeps both on the NPU and its graphics, as before.
-- **Set up local AI now moves an NPU to its new model.** Before, it left an NPU that was already set up on its old model, however often it was pressed. Now, once the manor has looked at the NPU with the new kit and found a newer model needing a download, Set up local AI downloads and tests it. A Snapdragon X2 still on the 4B moves to its 2B the same way (1.9 GB).
+- **Set up local AI now moves an NPU to its new model.** Before, it left an NPU that was already set up on its old model, however often it was pressed. Now, once the manor has looked at the NPU with the new kit and found a newer model needing a download, Set up local AI downloads and tests it. A Snapdragon X2 still on the 4B moves to its 2B the same way (1.9 GB), and a first-generation X Elite that fell back to the 4B tries its 2B again, keeping the 4B quietly should it fail again.
 - **The 4B's files are deleted** three days after nothing on the PC uses them, by the rule the kit 2.101.0 brought.
 
 ### Before you update

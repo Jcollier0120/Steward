@@ -467,6 +467,37 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
   assert.match(kept.npuNote!, /already set up in config\.json; left as it is/);
 });
 
+test("an X Elite on its fallback 4B tries its own 2B again at Set up local AI (no ids), the 4B again should it fail, nothing shown; on its own 2B, or a person's server, it's left as it is", async () => {
+  const tools = path.join(home, 'tools');
+  const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';
+  const TWO_B = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
+  const FOUR_B = 'qualcomm/Qwen3-VL-4B-Instruct:W4A16';
+  const detection = parseDetection(`${NPU.x1}\n${ARM}`);
+  const plan = (raw: any, did?: 'needs-setup' | 'current') => planSetup({ detection, ids: [], raw, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([G]), serverVersion: async () => '0.9.3', npuRefresh: did ? { kit: '2.103.0', at: '2026-10-23T00:00:00.000Z', did } : null });
+  const fresh = (await plan({})).npu!;
+  const entry = (route: any) => ({ accelerators: [V.npuEntry(route, { tools, exe: G })] });
+  // On its fallback, which the keeper's look keeps (npu-refresh.test.ts): setup plans its own 2B with the 4B behind it, as on a new PC.
+  for (const did of [undefined, 'current'] as const) {
+    const fell = await plan(entry(fresh.fallback!.route), did);
+    assert.deepEqual(fell.npu?.models.map((x) => x.id), [TWO_B], did);
+    assert.deepEqual(fell.npu?.fallback?.models.map((x) => x.id), [FOUR_B], did);
+    assert.equal(fell.npuNote, undefined, `${did}: being on the fallback is no note`);
+    assert.equal(fell.npuLeftOut, undefined, did);
+  }
+  // Asked for something else by name: the NPU is left as before.
+  assert.equal((await planSetup({ detection, ids: ['cpu'], raw: entry(fresh.fallback!.route), releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([G]), serverVersion: async () => '0.9.3' })).npu, null);
+  // On its own 2B: nothing to try again.
+  const own = await plan(entry(fresh.route), 'current');
+  assert.equal(own.npu, null);
+  assert.match(own.npuNote ?? '', /already set up in config\.json; left as it is/);
+  // The 4B on a server a person chose: theirs.
+  const theirs = entry(fresh.fallback!.route);
+  theirs.accelerators[0].chat!.startCommand = ['C:\\theirs\\server.exe', 'serve'];
+  const person = await plan(theirs, 'current');
+  assert.equal(person.npu, null);
+  assert.match(person.npuNote ?? '', /left as it is/);
+});
+
 test("every Snapdragon X2 runs Qwen3-VL-2B whatever its memory, its pictures on the Hexagon with its GenieX 0.9.1 (on the Adreno with 0.8.0); the X Elite too, on GenieX 0.9.3, with the 4B should the 2B fail", async () => {
   const tools = path.join(home, 'tools');
   const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';

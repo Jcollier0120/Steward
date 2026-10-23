@@ -914,9 +914,15 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   let npuLeftOut: NpuFailStep | undefined;
   // An entry the keeper's look left for setup (`needs-setup`, npu-refresh.ts: this kit's command for it needs a download,
   // such as Intel's Qwen3-VL-2B in the Qwen3-4B's place, kit 2.103.0, which a look never makes) is set up again, so
-  // Set up local AI makes the change. Only one on the route's server, as the look's was. Its test failing keeps the old
-  // entry (mergeEntries); a new model that doesn't fit beside everything else leaves it as it is.
-  const leftForSetup = o.npuRefresh?.did === 'needs-setup' && !!det?.supported && !!det.vendor && !!configuredNpu && !installDefault && !!NPU_CATALOG.routes[det.vendor] && runsRoute(configuredNpu, NPU_CATALOG.routes[det.vendor]!, o.home);
+  // Set up local AI makes the change. So is one on its generation's fallback (the first-generation X Elite's
+  // Qwen3-VL-4B, where its 2B failed): setup tries the generation's own models again, and failing, sets the fallback up
+  // again quietly (setUpNpu), while the keeper's look keeps it as it is. Only an entry on the route's server, as the
+  // look's was. Its test failing keeps the old entry (mergeEntries); a new model that doesn't fit beside everything else
+  // leaves it as it is.
+  const generic0 = det?.supported && det.vendor ? NPU_CATALOG.routes[det.vendor] : undefined;
+  const onRoute = !!generic0 && !!configuredNpu && !installDefault && runsRoute(configuredNpu, generic0, o.home);
+  const onFallback = onRoute && !!generationOf(generic0!, det!.generation)?.fallback?.models.includes(configuredNpu!.chat?.model ?? '');
+  const leftForSetup = onRoute && (o.npuRefresh?.did === 'needs-setup' || onFallback);
   const leftAsIs = `${det?.label} (npu): already set up in config.json; left as it is (accelerators setup npu sets it up again)`;
   if (det && !det.supported) {
     npuNote = `${det.label} (npu): not set up: ${det.why}. The graphics card or the processor takes its work.`;
