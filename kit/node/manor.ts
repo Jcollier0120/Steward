@@ -119,6 +119,18 @@ export function gpuWithNpu(own = true, home = manorHome()): { on: boolean; setBy
 }
 
 /**
+ * Since when the manor is stopped (Manor's Settings, **Stop the manor**: its stopped.json, from the stop until **Start
+ * the manor**), or null while it isn't: no file, or one without `since`. Nothing of the manor starts meanwhile, and the
+ * kit starts no model server (accelerators.ts' ensureServer). Read afresh, one stat while unchanged. Under node --test
+ * only a test's own Manor (MANOR_HOME, or `home`) counts, so the PC's stopped manor never decides a test.
+ */
+export function manorStopped(home?: string): string | null {
+  if (home === undefined && process.env.NODE_TEST_CONTEXT && !process.env.MANOR_HOME) return null;
+  const s = readJsonShared<{ since?: unknown } | null>(path.join(home ?? manorHome(), 'stopped.json'), null);
+  return s && typeof s.since === 'string' && s.since ? s.since : null;
+}
+
+/**
  * The manor's notification preferences (settings.json's "notify", on Manor's Settings page): whether agents notify
  * the owner at all, and the quiet hours when none does. Every agent follows them; none has a switch of its own.
  * Quiet hours are local times, "HH:MM" (24-hour), from `quietFrom` until `quietTo`, and may span midnight; null for

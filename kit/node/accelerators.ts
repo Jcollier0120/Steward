@@ -6,6 +6,7 @@ import { alive, startApart } from './apart.ts';
 import { blockedIn, blockedSay, cpuVariants, keepCpuVariant, loadedCpuVariant, type ReadLog } from './app-control.ts';
 import * as core from './core/index.js';
 import { acceleratorsDir, lockDirFor } from './lock.ts';
+import { manorStopped } from './manor.ts';
 import { lineState, queueDirFor, readLine, slotDirs, type Lane } from './npu-queue.ts';
 import { powershell, psQuote } from './ps.ts';
 import { samePath } from './real-path.ts';
@@ -593,6 +594,12 @@ export class ModelLoading extends AcceleratorDown {}
 /** The server isn't running and the caller asked not to start it. Not a failure: nothing is marked. */
 export class ServerNotRunning extends Error {}
 
+/**
+ * The server isn't running, and the manor is stopped (Manor's Settings, manor.ts' manorStopped): no model server starts
+ * until it's started again (kit 2.99.1). A server already running still serves. Not a failure: nothing is marked.
+ */
+export class ManorStopped extends ServerNotRunning {}
+
 /** How long a server may take to come up after its startCommand. */
 export const START_WAIT_MS = RULES.accelerators.startWaitMs;
 /** How long a look at /v1/models waits for an answer. */
@@ -798,6 +805,8 @@ export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs
     return { started: false, waited: true };
   }
   if (opts.start === false) throw new ServerNotRunning(core.say.serverNotRunning(ep.baseUrl));
+  // Stopped from Manor's Settings: the owner wants the PC quiet (a benchmark, a game) until they start the manor again.
+  if (manorStopped()) throw new ManorStopped(`${core.say.serverNotRunning(ep.baseUrl)}, and ${core.say.manorStopped()}`);
   if (!ep.startCommand?.length) throw new AcceleratorDown(core.say.noStartCommand(ep.baseUrl));
   waking('starting');
   let pending = starting.get(ep.baseUrl);

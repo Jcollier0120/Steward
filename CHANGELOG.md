@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.176
+
+**It hands out the kit 2.99.1: while you have the manor stopped, the local AI stays off.**
+
+### What changed
+
+- **The local AI stays off while the manor is stopped.** When you stop the manor from its Settings, for a benchmark, a build or a game, no employee starts the local AI's model servers again, not even Claude's searches through Reeve, until you start the manor again. Before, the first request after the stop started them right back up. A server you started yourself and left running is still used.
+- The NPU benchmark still starts its own servers while the manor is stopped: that's what a quiet PC is for.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each employee holds to the stop once it has the kit 2.99.1, and it needs a Manor with **Stop the manor**.
+
 ## 0.36.175
 
 **It hands out the kit 2.99.0, whose NPU benchmark compares the NPU with the graphics and the processor on every kind of PC, and measures the staff's searches too.**
