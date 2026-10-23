@@ -20,7 +20,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseDetection, parseNpus, hardwareOf } = await import('./fixture/src/kit/detect.ts');
-const { planSetup, describePlan, runSetup, setUpNpu, installerSaid, installerLogFile, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand, printReport, reportFrom } = await import('./fixture/src/kit/setup.ts');
+const { planSetup, describePlan, runSetup, setUpNpu, installPatch, stopOtherModel, installerSaid, installerLogFile, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand, printReport, reportFrom } = await import('./fixture/src/kit/setup.ts');
 const { orderAccelerators, readAccelerators, validateAccelerators, validateKeeperConfig } = await import('./fixture/src/kit/accelerator-config.ts');
 const core = await import('./fixture/src/kit/core/index.js');
 const { serverEnv } = await import('./fixture/src/kit/accelerators.ts');
@@ -194,19 +194,19 @@ test("a known maker's NPU of a generation setup doesn't know: tried on the most 
   const { intel, amd, qualcomm } = V.NPU_CATALOG.routes;
   for (const vendor of V.NPU_VENDORS) assert.ok(!Object.hasOwn(V.NPU_CATALOG.routes[vendor].generations, V.UNKNOWN_GENERATION), `${vendor}: no real generation is called ${V.UNKNOWN_GENERATION}`);
 
-  // Intel: the NPU 3720's 2,048-token prompt read 128 at a time (the smallest cap, with the arguments that compile it),
+  // Intel: the NPU 3720's 2,048-token prompt read 256 at a time (the smallest cap, with the arguments that compile it),
   // the Arrow Lake-S's generous timeouts and cold load, the most memory, and Panther Lake's later driver.
   const i = V.unknownGeneration(intel)!;
   assert.deepEqual(
     { supported: i.supported, verified: i.verified, maxContextTokens: i.maxContextTokens, caps: i.caps, timeouts: i.timeouts, memoryGb: i.memoryGb, driverMin: i.driverMin, args: i.args },
-    { supported: true, verified: false, maxContextTokens: 2048, caps: { chat: 2048, embed: 680 }, timeouts: { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 }, memoryGb: { chat: 4.3, embed: 1.74 }, driverMin: '32.0.100.5540', args: intel.generations['meteor-lake'].args },
+    { supported: true, verified: false, maxContextTokens: 2048, caps: { chat: 2048, embed: 680 }, timeouts: { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 }, memoryGb: { chat: 5.5, embed: 1.74 }, driverMin: '32.0.100.5540', args: intel.generations['meteor-lake'].args },
   );
   const ir = V.routeFor(intel, V.UNKNOWN_GENERATION);
   assert.equal(ir.serve[ir.serve.indexOf('--max_prompt_len') + 1], '2048', "OpenVINO compiles for the cap it's given");
-  // The NPU 3720's plugin settings as they are (its 128-token chunks among them), whatever it is tuned to.
+  // The NPU 3720's plugin settings as they are (its 256-token chunks among them), whatever it is tuned to.
   const plugin = (r: { serve: string[] }) => JSON.parse(r.serve[r.serve.indexOf('--plugin_config') + 1]);
   assert.deepEqual(plugin(ir), plugin(V.routeFor(intel, 'meteor-lake')));
-  assert.equal(plugin(ir).NPUW_LLM_PREFILL_CHUNK_SIZE, '128');
+  assert.equal(plugin(ir).NPUW_LLM_PREFILL_CHUNK_SIZE, '256');
   for (const id of Object.keys(intel.generations)) {
     const r = V.routeFor(intel, id);
     assert.ok(ir.maxContextTokens <= r.maxContextTokens && ir.timeouts.coldLoadMs! >= r.timeouts.coldLoadMs! && ir.timeouts.requestPerTokenMs! >= r.timeouts.requestPerTokenMs!, `no more daring than ${id}`);
@@ -304,9 +304,11 @@ test('config entries per vendor: one server on its own port, its caps and timeou
 
   const i = V.npuEntry(V.NPU_CATALOG.routes.intel, { tools, exe: `${tools}\\servers\\ovms-2026.4.1\\ovms.exe`, port: 18185 });
   assert.equal(i.chat!.baseUrl, 'http://127.0.0.1:18185', "OpenVINO Model Server serves /v1/models and /v1/chat/completions at its root");
-  assert.equal(i.chat!.model, 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov');
+  assert.equal(i.chat!.model, 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov');
   assert.deepEqual(i.chat!.startCommand!.slice(0, 5), [`${tools}\\servers\\ovms-2026.4.1\\ovms.exe`, '--rest_port', '18185', '--rest_bind_address', '127.0.0.1']);
-  assert.ok(i.chat!.startCommand!.includes('NPU') && i.chat!.startCommand!.includes('Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov'));
+  assert.ok(i.chat!.startCommand!.includes('NPU') && i.chat!.startCommand!.includes('Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov'));
+  // One model for chat and pictures (kit 2.103.0), its pictures fitted within 1,024 tokens as its own configs cap them.
+  assert.deepEqual(i.vision, { model: 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov', pictureTokens: 1024 });
   assert.deepEqual(i.chat!.env, {
     PYTHONHOME: `${tools}\\servers\\ovms-2026.4.1\\python`,
     PATH: `${tools}\\servers\\ovms-2026.4.1;${tools}\\servers\\ovms-2026.4.1\\python;${tools}\\servers\\ovms-2026.4.1\\python\\Scripts;%PATH%`,
@@ -316,7 +318,6 @@ test('config entries per vendor: one server on its own port, its caps and timeou
   assert.equal(started.Path, undefined, 'one PATH, whatever its case');
   const back = core.parseAccelerators(RULES, { accelerators: [i] }, null) as any;
   assert.deepEqual(back.accelerators[0].chat.env, i.chat!.env, 'every agent reads it back, so whoever starts the server sets it');
-  assert.equal(i.vision, undefined, 'no NPU vision build yet: a card or the processor takes it');
   assert.equal(i.maxContextTokens, 4096, 'reading is chunked at about 1,024 tokens, so a big cap costs short prompts little');
   const promptLen = i.chat!.startCommand!.indexOf('--max_prompt_len');
   assert.equal(Number(i.chat!.startCommand![promptLen + 1]), i.maxContextTokens, "the NPU is compiled for the route's own cap");
@@ -394,21 +395,23 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
   const intel = await planSetup({ detection: parseDetection(`${INTEL_IGPU}${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk() });
   assert.equal(intel.npu?.route.server, 'OpenVINO Model Server');
   assert.equal(intel.npu?.download?.sha256, 'aa79a0ae3b858356ba550978e397a8e8876a9d2706ffe4041b1dfd3f32cb8ce4');
-  assert.deepEqual(intel.npu?.kinds, ['chat', 'embed']);
+  assert.deepEqual(intel.npu?.kinds, ['chat', 'vision', 'embed']);
   assert.equal(intel.npu?.exe, path.join(tools, 'servers', 'ovms-2026.4.1', 'ovms.exe'));
   assert.deepEqual(intel.targets.map((t) => [t.id, t.variant?.variant, t.kinds]), [['gpu-intel-r-arc-tm-140v-gpu-16gb', 'vulkan-x64', ['chat', 'vision', 'embed']]], 'the Arc takes what the NPU does not, and is the fallback');
   const lines = describePlan(intel);
-  assert.match(lines[0], /^Core Ultra 200V, Lunar Lake \(NPU 4\) \(npu\): OpenVINO Model Server 2026\.4\.1, chat and embed on 18183; Castellan-AI\/Qwen3-4B-Instruct-2507-int4-cw-ov$/);
+  assert.match(lines[0], /^Core Ultra 200V, Lunar Lake \(NPU 4\) \(npu\): OpenVINO Model Server 2026\.4\.1, chat and vision and embed on 18183; Castellan-AI\/Qwen3-VL-2B-Instruct-int8-sym-ov$/);
   assert.match(lines[1], /get  OpenVINO Model Server 2026\.4\.1 \(140 MB, SHA-256 pinned\)/);
   // Its C++ runtime comes with it, beside ovms.exe: never "an administrator installs it" (a Lunar Lake, 2026-10-12).
   assert.equal(lines[2], '  get  the Microsoft Visual C++ runtime 14.44 (3 MB, SHA-256 pinned), beside ovms.exe: no administrator');
+  // Castellan's build of OpenVINO GenAI, in place of the server's own: Qwen3-VL fails on the NPU without it.
+  assert.equal(lines[3], "  get  Castellan's build of OpenVINO GenAI 2026.4.1.0's openvino_genai.dll (7 MB, SHA-256 pinned), in place of the server's own openvino_genai.dll");
   // Its embeddings: the same program started again, nothing more to download for it but its model, which it pulls.
-  assert.deepEqual(lines.slice(4, 6), ['  a second OpenVINO Model Server for embeddings on 18186', '  get  OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov (428 MB)']);
+  assert.deepEqual(lines.slice(5, 7), ['  a second OpenVINO Model Server for embeddings on 18186', '  get  OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov (428 MB)']);
   assert.equal(intel.npu?.embed?.download, null);
   assert.equal(intel.npu?.embed?.exe, intel.npu?.exe);
   assert.equal(intel.npu?.embed?.modelDownload, null);
   assert.deepEqual(intel.npu?.embed?.modelPull, ['--pull', '--source_model', 'OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov', '--model_repository_path', `${tools}\\models\\openvino`, '--task', 'embeddings']);
-  assert.equal(intel.npu?.downloadBytes, 139758672 + 3224191 + 2231646000 + 428341784, 'the server, its runtime, its chat model and its embedding model');
+  assert.equal(intel.npu?.downloadBytes, 139758672 + 3224191 + 7499856 + 2465200000 + 428341784, 'the server, its runtime, the GenAI build, its chat model and its embedding model');
   const pulledAlready = V.planNpu({ support: parseNpus(NPU.lunar, 'x64')[0], tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk([`${tools}\\models\\openvino\\OpenVINO\\Qwen3-Embedding-0.6B-int4-cw-ov\\graph.pbtxt`]) })!;
   assert.equal(pulledAlready.embed?.modelPull, null, 'pulled already (its graph.pbtxt is written last): not pulled again');
   assert.equal(intel.npu?.runtime?.into, path.join(tools, 'servers', 'ovms-2026.4.1'));
@@ -778,20 +781,78 @@ test("an NPU of a generation setup doesn't know: planned on the most cautious va
   assert.deepEqual([p.npu?.support.generation, p.npu?.route.maxContextTokens, p.npu?.route.timeouts.coldLoadMs], [V.UNKNOWN_GENERATION, 2048, 360_000]);
   assert.match(describePlan(p)[0], /^Intel NPU of a generation setup doesn't know yet, device ABCD \(npu\): OpenVINO Model Server .* \(tried on guessed values, the most cautious it has, and kept only if it passes its test\)$/);
   // Its model's files are the same on every Intel NPU ('*'), so they're checked on this one too.
-  assert.match((await V.checkPinned({ id: 'm', pinned: intelPins }, V.UNKNOWN_GENERATION, { tools })).join(), /openvino_model\.bin is missing/);
+  assert.match((await V.checkPinned({ id: 'm', pinned: intelPins }, V.UNKNOWN_GENERATION, { tools })).join(), /openvino_language_model\.bin is missing/);
   const out: string[] = [];
   printReport(reportFrom(parseDetection(`${INTEL_NEW}\n${X64('Intel(R) Core(TM) Ultra 7 365')}`), {}, path.join(tools, 'none.json'), path.join(tools, 'no-note.json')), (l: string) => out.push(l));
   assert.ok(out.some((l) => /Intel NPU of a generation setup doesn't know yet, device ABCD, driver 32\.0\.100\.5540 .*the manor runs models on it \(tried on guessed values/.test(l)), out.join('\n'));
 });
 
-test("Intel's model counts as here once its pull finished (OpenVINO writes graph.pbtxt last), so setting up again doesn't plan its 2.2 GB", () => {
+test("Intel's model counts as here once its pull finished (OpenVINO writes graph.pbtxt last), so setting up again doesn't plan its 2.5 GB", () => {
   const tools = 'C:\\Users\\me\\.manor\\accelerators';
   const support = parseNpus(NPU.lunar, 'x64')[0];
-  const graph = path.join(tools, 'models', 'openvino', 'Castellan-AI', 'Qwen3-4B-Instruct-2507-int4-cw-ov', 'graph.pbtxt');
+  const graph = path.join(tools, 'models', 'openvino', 'Castellan-AI', 'Qwen3-VL-2B-Instruct-int8-sym-ov', 'graph.pbtxt');
   const before = V.planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk() })!;
   assert.equal(before.models[0].have, false);
   const after = V.planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk([graph]) })!;
   assert.equal(after.models[0].have, true);
+});
+
+test("Castellan's build of OpenVINO GenAI (kit 2.103.0): planned on every Intel NPU, downloaded once, put in before the test with the server's own kept, someone's own file left", async () => {
+  const tools = mkdtempSync(path.join(tmpdir(), 'kit-genai-'));
+  try {
+    for (const line of [NPU.lunar, NPU.meteor]) {
+      const p = planFor(line, 'x64', tools).patch!;
+      assert.equal(p.file, 'openvino_genai.dll');
+      assert.equal(p.dest, path.join(tools, 'servers', 'patches', 'openvino_genai-2026.4.1.0-castellan.1.dll'));
+      assert.equal(p.have, false);
+      assert.ok(p.required, 'Qwen3-VL fails on the NPU without it');
+    }
+    const planned = planFor(NPU.lunar, 'x64', tools).patch!;
+    // Small stand-ins for the server's own file and the build, the pins made to match them.
+    const target = path.join(tools, 'servers', 'ovms-2026.4.1', 'openvino_genai.dll');
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, 'stock');
+    const build = path.join(tools, 'build.dll');
+    writeFileSync(build, 'castellan');
+    const p = { ...planned, stock: { size: 5, sha256: await V.sha256File(target) }, patched: { ...planned.patched, size: 9, sha256: await V.sha256File(build) } };
+    const did: string[] = [];
+    const io = { log: () => {}, download: async (d: { what: string; dest: string }) => void (did.push(`download ${d.what}`), writeFileSync(d.dest, 'castellan')) };
+    assert.equal(await installPatch(p, tools, io as any), null);
+    assert.deepEqual(did, ['download openvino_genai-2026.4.1.0-castellan.1.dll']);
+    assert.equal(readFileSync(target, 'utf8'), 'castellan');
+    assert.equal(readFileSync(`${target}.stock`, 'utf8'), 'stock', "the server's own, kept to put back");
+    // Kept already and in already: nothing downloaded, nothing changed.
+    assert.equal(await installPatch({ ...p, have: true }, tools, io as any), null);
+    assert.equal(did.length, 1);
+    // A file that is neither (someone's own build): left as it is, and the model tested on it.
+    writeFileSync(target, 'mine');
+    assert.equal(await installPatch({ ...p, have: true }, tools, io as any), null);
+    assert.equal(readFileSync(target, 'utf8'), 'mine');
+    // Its download failing fails the NPU's setup, which then keeps the PC's entry as it was.
+    const failing = { log: () => {}, download: async () => { throw new Error('404 Not Found'); } };
+    assert.equal(await installPatch({ ...p, have: false }, tools, failing as any), "openvino_genai-2026.4.1.0-castellan.1.dll's download failed: 404 Not Found");
+  } finally {
+    rmSync(tools, { recursive: true, force: true });
+  }
+});
+
+test("setup's test stops the old model's server first (OpenVINO Model Server serves only the model it started with): never one that lists the model, or nothing there", async () => {
+  const chat = { baseUrl: 'http://127.0.0.1:18183', model: 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov', startCommand: ['%USERPROFILE%\\.manor\\accelerators\\servers\\ovms-2026.4.1\\ovms.exe', '--rest_port', '18183'] };
+  const stopped: string[] = [];
+  const stop = async (program: string, base: string) => (stopped.push(`${program} at ${base}`), 1);
+  const env = process.env.USERPROFILE;
+  process.env.USERPROFILE = 'C:\\Users\\me';
+  try {
+    assert.equal(await stopOtherModel(chat, { list: async () => ['Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov'], stop }), true, "the 4B's server: stopped");
+    assert.deepEqual(stopped, ['C:\\Users\\me\\.manor\\accelerators\\servers\\ovms-2026.4.1\\ovms.exe at http://127.0.0.1:18183']);
+    assert.equal(await stopOtherModel(chat, { list: async () => [chat.model], stop }), false, 'serving the model already');
+    assert.equal(await stopOtherModel(chat, { list: async () => null, stop }), false, 'nothing answers there');
+    assert.equal(await stopOtherModel({ ...chat, startCommand: undefined }, { list: async () => ['other'], stop }), false, 'no command of its own to stop');
+    assert.equal(stopped.length, 1);
+  } finally {
+    if (env === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = env;
+  }
 });
 
 test('setting the NPU up: download (pinned), install for this user, pull, test request; its entry only once it answered', async () => {
@@ -862,7 +923,9 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
     'download Microsoft.VC.14.44.17.14.CRT.Redist.X64.base.vsix',
     `unpack into ${vsix}.unpacked`,
     ...['concrt140.dll', 'msvcp140.dll', 'msvcp140_codecvt_ids.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'].map((f) => `copy ${path.join(ovms, f)}`),
-    `run ovms.exe --pull --source_model Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov --model_repository_path ${path.join(tools, 'models', 'openvino')} --task text_generation`,
+    // Castellan's build of OpenVINO GenAI, before the model is tested on it: Qwen3-VL fails on the NPU without it.
+    'download openvino_genai-2026.4.1.0-castellan.1.dll',
+    `run ovms.exe --pull --source_model Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov --model_repository_path ${path.join(tools, 'models', 'openvino')} --task text_generation`,
     // Its embedding server is the same program: only its model, pulled the same way.
     `run ovms.exe --pull --source_model OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov --model_repository_path ${path.join(tools, 'models', 'openvino')} --task embeddings`,
   ]);
@@ -873,7 +936,7 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
   intelEmbed.pinned = intelEmbedPins;
   try {
     const unpinned = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, fakeNpuIo().io);
-    assert.equal(unpinned.entry?.chat?.model, 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov');
+    assert.equal(unpinned.entry?.chat?.model, 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov');
     assert.equal(unpinned.entry?.embed, undefined);
     assert.match(unpinned.problems.join(), /OpenVINO Model Server 2026\.4\.1, its embedding server, couldn't be set up: OpenVINO\/Qwen3-Embedding-0\.6B-int4-cw-ov isn't the build that was checked: .*openvino_model\.bin is missing/);
   } finally {
@@ -882,7 +945,7 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
   // Its pull failing: the same.
   const embedPullFails = fakeNpuIo();
   const pullFails = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...embedPullFails.io, run: async (exe: string, args: string[]) => (args.includes('embeddings') ? { code: 1, out: 'Libgit2 clone error' } : embedPullFails.io.run(exe, args)) });
-  assert.equal(pullFails.entry?.chat?.model, 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov');
+  assert.equal(pullFails.entry?.chat?.model, 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov');
   assert.equal(pullFails.entry?.embed, undefined);
   assert.match(pullFails.problems.join(), /couldn't download OpenVINO\/Qwen3-Embedding-0\.6B-int4-cw-ov \(exit 1: Libgit2 clone error\)/);
   const noRuntime = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...fakeNpuIo().io, download: async (d: { what: string }) => { if (d.what.endsWith('.vsix')) throw new Error('404 Not Found'); } });
@@ -1252,13 +1315,15 @@ test("a model pinned for every generation ('*'), as Intel's OpenVINO export is, 
   try {
     const want = intelPins['*'];
     assert.equal(Object.keys(intelPins).join(), '*');
-    assert.equal(want.files['openvino_model.bin'].sha256, 'dba3bbe51ca1b551d65ce89b3c32097c3db85e0529b033b9922d7be85d625dff');
+    assert.equal(want.files['openvino_language_model.bin'].sha256, 'e2350c3208d7863556824d5153ef5de68411be13f776719d94113b3609fd262e');
+    // Its pictures' files too: the encoder's models, and the configs that cap a picture at 1,024 tokens.
+    for (const f of ['openvino_vision_embeddings_model.bin', 'openvino_vision_embeddings_merger_model.bin', 'openvino_vision_embeddings_pos_model.bin', 'preprocessor_config.json', 'processor_config.json']) assert.ok(want.files[f], f);
     // Its embedding model the same way: OpenVINO's export, pulled on a Lunar Lake 2026-10-13.
     assert.equal(Object.keys(intelEmbedPins).join(), '*');
-    assert.deepEqual(Object.keys(intelEmbedPins['*'].files).sort(), Object.keys(want.files).filter((f) => f.startsWith('openvino_')).sort(), "the chat model's OpenVINO files, without its chat template");
+    assert.deepEqual(Object.keys(intelEmbedPins['*'].files).sort(), ['openvino_detokenizer.bin', 'openvino_detokenizer.xml', 'openvino_model.bin', 'openvino_model.xml', 'openvino_tokenizer.bin', 'openvino_tokenizer.xml'], 'its model, tokenizer and detokenizer');
     assert.equal(intelEmbedPins['*'].files['openvino_model.bin'].size, 400497516);
     // Small stand-ins for the files, with the pins' sizes and SHA-256s made to match them.
-    const dir = path.join(tools, 'models', 'openvino', 'Castellan-AI', 'Qwen3-4B-Instruct-2507-int4-cw-ov');
+    const dir = path.join(tools, 'models', 'openvino', 'Castellan-AI', 'Qwen3-VL-2B-Instruct-int8-sym-ov');
     mkdirSync(dir, { recursive: true });
     const files: Record<string, { size: number; sha256: string }> = {};
     for (const name of Object.keys(want.files)) {
@@ -1267,8 +1332,8 @@ test("a model pinned for every generation ('*'), as Intel's OpenVINO export is, 
     }
     const m = { ...V.NPU_CATALOG.routes.intel.models[0], pinned: { '*': { dir: want.dir, files } } };
     for (const g of ['meteor-lake', 'lunar-lake', 'panther-lake']) assert.deepEqual(await V.checkPinned(m, g, { tools }), [], g);
-    writeFileSync(path.join(dir, 'openvino_model.bin'), 'not the model!!!!!!');
-    assert.match((await V.checkPinned(m, 'lunar-lake', { tools }))[0], /openvino_model\.bin is 19 bytes, not 18/);
+    writeFileSync(path.join(dir, 'openvino_language_model.bin'), 'not the model!!!!!!');
+    assert.match((await V.checkPinned(m, 'lunar-lake', { tools }))[0], /openvino_language_model\.bin is 19 bytes, not 27/);
     // A generation's own pin is used before '*'.
     const own = { ...m, pinned: { ...m.pinned, 'lunar-lake': { dir: want.dir, files: {} } } };
     assert.deepEqual(await V.checkPinned(own, 'lunar-lake', { tools }), []);
@@ -1285,7 +1350,7 @@ const A = await import('./fixture/src/kit/accelerators.ts');
 const at16 = (ram: number) => `cpu|9|16|Intel(R) Core(TM) Ultra 7 155H\nram|${ram}\n`;
 const GiB = 1024 ** 3;
 
-test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128-token chunks, written with BEST_PERF, its prefix cache off, measured on an Arrow Lake-U, the Arrow Lake-S's generous until it is; Lunar Lake and Panther Lake in 512-token chunks, Wildcat Lake as the NPU 3720, estimated from it", () => {
+test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 256-token chunks, written with BEST_PERF, its prefix cache off, measured on an Arrow Lake-U, the Arrow Lake-S's generous until it is; Lunar Lake and Panther Lake in 512-token chunks, Wildcat Lake as the NPU 3720, estimated from it", () => {
   const intel = V.NPU_CATALOG.routes.intel;
   const g = intel.generations;
   assert.equal(g['lunar-lake'].verified, true);
@@ -1300,14 +1365,14 @@ test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128
   assert.equal(meteor.caps.chat, 2048);
   // BEST_PERF's first compile took up to 69 s: 120 s allows half again.
   assert.deepEqual(meteor.timeouts, { requestBaseMs: 15_000, requestPerTokenMs: 200, coldLoadMs: 120_000 });
-  assert.equal(meteor.memoryGb?.chat, 3.8, 'the working set at the end of the benchmark, 3.72 GB with its prefix cache off');
-  assert.equal(meteor.memoryGb?.embed, 1.74, "the route's embeddings, at their 2048-token max_length on every generation");
-  // The NPU 3720 reads a prompt 128 tokens at a time: a short answer 0.5 s against 3.1 in OpenVINO's own 1,024-token
-  // chunks, 1,550 tokens 4.0 s against 7.0 (an Arrow Lake-U, 2026-10-14). It writes with BEST_PERF, 12.3 to 13.1 tokens
-  // a second against 9.3 to 11.2, and OpenVINO Model Server's prefix cache is off: 3.72 GB at the benchmark's end
-  // against 4.30 with 32 blocks and 5.98 with its 128, reading 2 to 5% faster.
+  assert.equal(meteor.memoryGb?.chat, 4.9, "Qwen3-VL-2B's working set once it has read a full-size screenshot, 4.83 GB with its prefix cache off");
+  assert.equal(meteor.memoryGb?.embed, 1.3, 'its embeddings on the graphics, 1.08 to 1.27 GB beside it');
+  // The NPU 3720 reads Qwen3-VL-2B's prompts 256 tokens at a time (kit 2.103.0): a short answer 0.5 to 0.7 s against
+  // 1.9 to 2.5 in OpenVINO's own 1,024-token chunks, 1,805 tokens and a 236-token picture a tenth quicker than in 128
+  // (an Arrow Lake-U, 2026-10-23). It writes with BEST_PERF, and OpenVINO Model Server's prefix cache is off: Qwen3-4B
+  // held 3.72 GB at the benchmark's end against 4.30 with 32 blocks and 5.98 with its 128, reading 2 to 5% faster.
   const plugin = (r: typeof intel) => r.serve[r.serve.indexOf('--plugin_config') + 1];
-  assert.deepEqual(JSON.parse(plugin(meteor)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '128', GENERATE_HINT: 'BEST_PERF' });
+  assert.deepEqual(JSON.parse(plugin(meteor)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '256', GENERATE_HINT: 'BEST_PERF' });
   assert.ok(meteor.timeouts.coldLoadMs! >= 69_000 * 1.5, "the cold load covers BEST_PERF's first compile with half again");
   assert.equal(plugin(V.routeFor(intel, 'arrow-lake')), plugin(meteor), 'Arrow Lake-S: the same NPU 3720');
   assert.equal(plugin(intel), '{}');
@@ -1393,34 +1458,38 @@ test("the NPU 3720's embeddings, on the graphics, take the graphics' turn: OpenV
   assert.equal(p.npu?.embed?.turn, parseDetection(meteorPc).cards[0].id);
 });
 
-test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embeddings 1.74 GB; 16 GB keeps both, 12 GB chat alone, 8 GB neither', async () => {
+test("the memory rule: the NPU takes 40% of the PC at most; Qwen3-VL-2B (kit 2.103.0) at a Lunar Lake's 4,096 tokens 5.5 GB, its embeddings on the NPU 1.74: 32 GB keeps both, 16 GB chat alone, 12 GB neither; the NPU 3720's 4.9 and 1.3 on its graphics: both on 16 GB", async () => {
   const intel = V.NPU_CATALOG.routes.intel;
   assert.equal(V.NPU_MEMORY_SHARE, 0.4);
-  // A "16 GB" laptop shows Windows about 15.6 GB (the rest reserved for the graphics).
-  assert.deepEqual(V.npuMemoryFit(intel, 15.6 * GiB), { chat: true, embed: true, budgetGb: 6.2 });
+  // A "16 GB" laptop shows Windows about 15.4 to 15.6 GB (the rest reserved for the graphics).
+  const sixteen = V.npuMemoryFit(intel, 15.6 * GiB);
+  assert.deepEqual([sixteen.chat, sixteen.embed, sixteen.budgetGb], [true, false, 6.2]);
+  assert.match(sixteen.why!, /hasn't room for the NPU's embedding model \(1\.74 GB\)/);
+  assert.deepEqual(V.npuMemoryFit(intel, 31.6 * GiB), { chat: true, embed: true, budgetGb: 12.6 });
   const twelve = V.npuMemoryFit(intel, 11.6 * GiB);
-  assert.deepEqual([twelve.chat, twelve.embed], [true, false]);
-  assert.match(twelve.why!, /hasn't room for the NPU's embedding model \(1\.74 GB\)/);
-  const eight = V.npuMemoryFit(intel, 7.6 * GiB);
-  assert.deepEqual([eight.chat, eight.embed], [false, false]);
-  assert.match(eight.why!, /this PC's 8 GB of memory hasn't room for the NPU's chat model \(4\.3 GB\)/);
-  // The NPU 3720's chat at 2048 (3.8 GB) doesn't fit 8 GB either.
-  assert.equal(V.npuMemoryFit(V.routeFor(intel, 'meteor-lake'), 7.6 * GiB).chat, false);
+  assert.deepEqual([twelve.chat, twelve.embed], [false, false]);
+  assert.match(twelve.why!, /this PC's 12 GB of memory hasn't room for the NPU's chat model \(5\.5 GB\)/);
+  // The NPU 3720 at 2,048 tokens, its embeddings on the graphics: the two took 5.8 GB of a 15.4 GB PC's available
+  // memory after full-size screenshots (2026-10-23), inside its 6.2.
+  const meteor = V.routeFor(intel, 'meteor-lake');
+  assert.deepEqual(meteor.memoryGb, { chat: 4.9, embed: 1.3 });
+  assert.deepEqual(V.npuMemoryFit(meteor, 15.43 * GiB), { chat: true, embed: true, budgetGb: 6.2 });
+  assert.equal(V.npuMemoryFit(meteor, 11.6 * GiB).chat, false);
   assert.deepEqual(V.npuMemoryFit(intel, null), { chat: true, embed: true, budgetGb: 0 }, "memory unknown: the NPU isn't kept out on a guess");
 
   const tools = path.join(home, 'memory-rule');
   const planAt = (gb: number) => planSetup({ detection: parseDetection(`${NPU.lunar}\n${at16(Math.round(gb * GiB))}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk() });
+  const p32 = await planAt(31.6);
+  assert.deepEqual(p32.npu?.kinds, ['chat', 'vision', 'embed']);
+  assert.equal(p32.npuPlain, undefined);
   const p16 = await planAt(15.6);
-  assert.deepEqual(p16.npu?.kinds, ['chat', 'embed']);
-  assert.equal(p16.npuPlain, undefined);
+  assert.deepEqual(p16.npu?.kinds, ['chat', 'vision']);
+  assert.match(p16.npuPlain!, /^The NPU \(Core Ultra 200V, Lunar Lake \(NPU 4\)\) makes no embeddings: this PC's 16 GB of memory hasn't room/);
+  assert.deepEqual(p16.targets.map((t) => [t.id, t.kinds]), [['cpu', ['embed']]], 'the processor makes the embeddings');
   const p12 = await planAt(11.6);
-  assert.deepEqual(p12.npu?.kinds, ['chat']);
-  assert.match(p12.npuPlain!, /^The NPU \(Core Ultra 200V, Lunar Lake \(NPU 4\)\) makes no embeddings: this PC's 12 GB of memory hasn't room/);
-  assert.deepEqual(p12.targets.map((t) => [t.id, t.kinds]), [['cpu', ['embed']]], 'the processor makes the embeddings');
-  const p8 = await planAt(7.6);
-  assert.equal(p8.npu, null);
-  assert.match(p8.npuPlain!, /^The NPU \(Core Ultra 200V, Lunar Lake \(NPU 4\)\) isn't used: this PC's 8 GB of memory hasn't room for the NPU's chat model/);
-  assert.deepEqual(p8.targets.map((t) => [t.id, t.kinds]), [['cpu', ['chat', 'vision']]], 'the processor chats and sees, on one Qwen3-VL-2B server');
+  assert.equal(p12.npu, null);
+  assert.match(p12.npuPlain!, /^The NPU \(Core Ultra 200V, Lunar Lake \(NPU 4\)\) isn't used: this PC's 12 GB of memory hasn't room for the NPU's chat model/);
+  assert.deepEqual(p12.targets.map((t) => [t.id, t.kinds]), [['cpu', ['chat', 'vision']]], 'the processor chats and sees, on one Qwen3-VL-2B server');
 });
 
 test("calibration: this PC's timeouts from setup's measurements, never under the starting values, never past the bounds; too slow under 2 tokens a second", () => {
@@ -1651,15 +1720,17 @@ test("setup with a detection given keeps no NPU report unless told where; a PC w
 
 // Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu, off by default): a card beside an NPU is
 // set up only for the work no NPU serves, the rule requests and the keeper follow (core.cardWorkBesideNpu), so its
-// embedding model (0.64 GB) isn't downloaded to sit unused, nor its chat started on its Qwen3-VL-2B server.
-const LUNAR = () => parseDetection(`${INTEL_IGPU}${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`);
+// models aren't downloaded to sit unused. Since Qwen3-VL-2B (kit 2.103.0) Intel's NPU chats and sees; on a 16 GB Lunar
+// Lake its embeddings have no room beside them (npuMemoryFit), so the card makes those.
+const LUNAR = () => parseDetection(`${INTEL_IGPU}${NPU.lunar}\ncpu|9|16|Intel(R) Core(TM) Ultra 7 258V\nram|${Math.round(15.6 * 1024 ** 3)}\n`);
 const ARC = 'gpu-intel-r-arc-tm-140v-gpu-16gb';
 const ARC_VK = '  Vulkan0: Intel(R) Arc(TM) 140V GPU (16GB) (16384 MiB, 15000 MiB free)\n';
 const CHAT_GGUF = /Qwen3-4B-Instruct-2507-Q4_K_M\.gguf/;
+const VL_GGUF = /Qwen3VL-2B-Instruct-Q4_K_M\.gguf/;
 const EMBED_GGUF = /Qwen3-Embedding-0\.6B-Q8_0\.gguf/;
 /** What a setup run downloaded, by file. */
 const downloaded = (did: string[]) => did.filter((d) => d.startsWith('download '));
-/** setupCommand on an Intel PC with its Arc, on fakes: the config written and what it downloaded. */
+/** setupCommand on a 16 GB Intel PC with its Arc, on fakes: the config written and what it downloaded. */
 async function intelSetup(name: string, o: { gpuWithNpu: boolean; npu?: Parameters<typeof fakeNpuIo>[0] }) {
   const file = path.join(home, `${name}-config.json`);
   if (!existsSync(file)) writeFileSync(file, '{}');
@@ -1673,78 +1744,80 @@ async function intelSetup(name: string, o: { gpuWithNpu: boolean; npu?: Paramete
 }
 const kindsOf = (a: any) => (['chat', 'vision', 'embed', 'rerank'] as const).filter((k) => a?.[k]);
 
-test('beside an Intel NPU, with the switch off, the card is planned for vision alone: only its model and mmproj are downloaded', async () => {
+test('beside an Intel NPU with no room for its embeddings (16 GB), with the switch off, the card is planned for embeddings alone: only its embedding model is downloaded', async () => {
   const tools = path.join(home, 'beside');
   const off = await planSetup({ detection: LUNAR(), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: false });
-  assert.deepEqual(off.npu?.kinds, ['chat', 'embed']);
-  assert.deepEqual(off.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['vision'], ['chat', 'embed']]]);
-  assert.deepEqual(off.leftToNpu, [{ id: ARC, name: 'Intel(R) Arc(TM) 140V GPU (16GB)', kinds: ['chat', 'embed'] }]);
+  assert.deepEqual(off.npu?.kinds, ['chat', 'vision']);
+  assert.deepEqual(off.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['embed'], ['chat', 'vision']]]);
+  assert.deepEqual(off.leftToNpu, [{ id: ARC, name: 'Intel(R) Arc(TM) 140V GPU (16GB)', kinds: ['chat', 'vision'] }]);
   const files = off.downloads.map((d) => path.win32.basename(d.dest));
-  assert.ok(files.includes('Qwen3VL-2B-Instruct-Q4_K_M.gguf') && files.includes('mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf'), files.join());
-  assert.ok(!files.some((f) => CHAT_GGUF.test(f) || EMBED_GGUF.test(f)), `no chat or embedding model for the card: ${files.join()}`);
-  assert.ok(describePlan(off).includes(`Intel(R) Arc(TM) 140V GPU (16GB) (${ARC}): chat and embed not set up on it: the NPU does those, and "Use the graphics card for models when there's an NPU" is off`), describePlan(off).join('\n'));
+  assert.ok(files.some((f) => EMBED_GGUF.test(f)), files.join());
+  assert.ok(!files.some((f) => CHAT_GGUF.test(f) || VL_GGUF.test(f)), `no chat or vision model for the card: ${files.join()}`);
+  assert.ok(describePlan(off).includes(`Intel(R) Arc(TM) 140V GPU (16GB) (${ARC}): chat and vision not set up on it: the NPU does those, and "Use the graphics card for models when there's an NPU" is off`), describePlan(off).join('\n'));
   // The switch on (or left out, as for an agent with no Manor): the card is set up for everything, as before.
   const on = await planSetup({ detection: LUNAR(), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: true });
   assert.deepEqual(on.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['chat', 'vision', 'embed'], undefined]]);
   assert.equal(on.leftToNpu, undefined);
-  assert.equal(on.downloadBytes - off.downloadBytes, 639150592, "the card's embedding model more: its chat is its vision server's");
+  const onFiles = on.downloads.map((d) => path.win32.basename(d.dest));
+  assert.ok(onFiles.includes('Qwen3VL-2B-Instruct-Q4_K_M.gguf') && onFiles.includes('mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf'), onFiles.join());
+  assert.ok(on.downloadBytes > off.downloadBytes, "the card's Qwen3-VL-2B and its mmproj more: its chat is its vision server's");
   // Kinds asked for by name are set up as asked.
   const asked = await planSetup({ detection: LUNAR(), ids: [ARC], kinds: ['chat', 'vision'], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: false });
   assert.deepEqual(asked.targets.map((t) => t.kinds), [['chat', 'vision']]);
+  // A 32 GB one's NPU serves all three: its card is set up whole, as a Snapdragon's is, with the switch off too.
+  const big = await planSetup({ detection: parseDetection(`${INTEL_IGPU}${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: false });
+  assert.deepEqual(big.npu?.kinds, ['chat', 'vision', 'embed']);
+  assert.deepEqual(big.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['chat', 'vision', 'embed'], undefined]]);
 
   const run = await intelSetup('beside-run', { gpuWithNpu: false });
   assert.equal(run.r.code, 0, run.log.join('\n'));
-  assert.deepEqual(kindsOf(run.npuEntry), ['chat', 'embed']);
-  assert.deepEqual(kindsOf(run.arc), ['vision']);
+  assert.deepEqual(kindsOf(run.npuEntry), ['chat', 'vision']);
+  assert.deepEqual(kindsOf(run.arc), ['embed']);
   const got = downloaded(run.did);
-  assert.ok(got.some((d) => /Qwen3VL-2B-Instruct-Q4_K_M\.gguf/.test(d)) && got.some((d) => /mmproj-Qwen3VL/.test(d)), got.join('\n'));
-  assert.ok(!got.some((d) => CHAT_GGUF.test(d) || EMBED_GGUF.test(d)), got.join('\n'));
+  assert.ok(got.some((d) => EMBED_GGUF.test(d)), got.join('\n'));
+  assert.ok(!got.some((d) => CHAT_GGUF.test(d) || VL_GGUF.test(d)), got.join('\n'));
 });
 
-test('the NPU failing its embeddings at setup: the card takes them, beside its vision; the NPU keeps its chat', async () => {
-  const run = await intelSetup('beside-noembed', { gpuWithNpu: false, npu: { embeds: false } });
+test('the NPU failing its test at setup: the card takes its chat and pictures, beside its embeddings', async () => {
+  const run = await intelSetup('beside-nonpu', { gpuWithNpu: false, npu: { answers: false } });
   assert.equal(run.r.code, 0, run.log.join('\n'));
-  assert.deepEqual(kindsOf(run.npuEntry), ['chat']);
-  assert.deepEqual(kindsOf(run.arc), ['vision', 'embed']);
-  assert.ok(run.log.some((l) => /^The graphics card takes the NPU's embed instead/.test(l)), run.log.join('\n'));
+  assert.equal(run.npuEntry, undefined);
+  assert.deepEqual(kindsOf(run.arc), ['chat', 'vision', 'embed']);
+  assert.ok(run.log.some((l) => /^The graphics card takes the NPU's chat and vision instead/.test(l)), run.log.join('\n'));
   const got = downloaded(run.did);
-  assert.ok(got.some((d) => EMBED_GGUF.test(d)) && !got.some((d) => CHAT_GGUF.test(d)), got.join('\n'));
-  // The NPU failing outright: no NPU entry, and the card does everything, as before.
-  const none = await intelSetup('beside-nonpu', { gpuWithNpu: false, npu: { answers: false } });
-  assert.equal(none.npuEntry, undefined);
-  assert.deepEqual(kindsOf(none.arc), ['chat', 'vision', 'embed']);
+  assert.ok(got.some((d) => VL_GGUF.test(d)) && !got.some((d) => CHAT_GGUF.test(d)), got.join('\n'));
 });
 
 test('the switch on: the card is set up for everything beside the NPU', async () => {
   const run = await intelSetup('beside-on', { gpuWithNpu: true });
   assert.equal(run.r.code, 0, run.log.join('\n'));
-  assert.deepEqual(kindsOf(run.npuEntry), ['chat', 'embed']);
+  assert.deepEqual(kindsOf(run.npuEntry), ['chat', 'vision']);
   assert.deepEqual(kindsOf(run.arc), ['chat', 'vision', 'embed']);
   assert.equal(run.arc.chat.model, 'qwen3-vl-2b-instruct', 'one Qwen3-VL-2B server chats and sees');
   assert.ok(!downloaded(run.did).some((d) => CHAT_GGUF.test(d)));
 });
 
-test("the switch turned on later: setting up again fills in the card's chat and embeddings, and keeps the NPU as it was", async () => {
+test("the switch turned on later: setting up again fills in the card's chat and pictures, and keeps the NPU as it was", async () => {
   const first = await intelSetup('beside-later', { gpuWithNpu: false });
-  assert.deepEqual(kindsOf(first.arc), ['vision']);
+  assert.deepEqual(kindsOf(first.arc), ['embed']);
   const later = await intelSetup('beside-later', { gpuWithNpu: true });
   assert.equal(later.r.code, 0, later.log.join('\n'));
   assert.deepEqual(kindsOf(later.arc), ['chat', 'vision', 'embed']);
   assert.deepEqual(later.npuEntry, first.npuEntry, 'the NPU set up before is left as it is');
-  assert.equal(later.arc.chat.baseUrl, first.arc.vision.baseUrl, "chat takes its vision server's port, where that model runs");
+  assert.equal(later.arc.chat.model, 'qwen3-vl-2b-instruct');
+  assert.equal(later.arc.vision.baseUrl, undefined, 'one Qwen3-VL-2B server chats and sees: the vision entry has no server of its own');
   assert.ok(!later.did.some((d) => /OpenVINO|ovms/i.test(d)), later.did.join('\n'));
 });
 
-test('an install whose card already has its chat and embeddings keeps them when set up again with the switch off: nothing removed', async () => {
+test('an install whose card already has its chat and pictures keeps them when set up again with the switch off: nothing removed', async () => {
   const before = await intelSetup('beside-kept', { gpuWithNpu: true });
   assert.deepEqual(kindsOf(before.arc), ['chat', 'vision', 'embed']);
   const again = await intelSetup('beside-kept', { gpuWithNpu: false });
   assert.equal(again.r.code, 0, again.log.join('\n'));
   assert.deepEqual(kindsOf(again.arc), ['chat', 'vision', 'embed']);
   assert.deepEqual(again.arc.chat, before.arc.chat, 'its chat entry as it was');
-  assert.deepEqual(again.arc.embed, before.arc.embed, 'its embeddings entry as it was');
-  assert.notEqual(again.arc.vision.baseUrl, again.arc.chat.baseUrl);
-  assert.ok(!downloaded(again.did).some((d) => CHAT_GGUF.test(d) || EMBED_GGUF.test(d)), 'not downloaded again');
+  assert.deepEqual(again.arc.vision, before.arc.vision, 'its vision entry as it was');
+  assert.ok(!downloaded(again.did).some((d) => CHAT_GGUF.test(d) || VL_GGUF.test(d)), 'not downloaded again');
   assert.deepEqual(validateAccelerators(again.written), []);
 });
 

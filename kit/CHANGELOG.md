@@ -2,6 +2,34 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.103.0
+
+**Intel's NPU now answers questions about pictures as well as chat: Qwen3-VL-2B takes the 4B's place, on Castellan's build of OpenVINO GenAI.**
+
+### What changed
+
+- **Intel's model is now `Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov` (2.5 GB), for chat and pictures.** It's Castellan's symmetric INT8 export of Qwen3-VL-2B-Instruct, on Hugging Face with its card; every model file and its two picture configs are pinned. Its `size.longest_edge` is 1,048,576 pixels, so a picture is at most about 1,024 tokens inside the NPU's compiled prompt. Its vision endpoint's `pictureTokens` is 1,024 too, so the kit redraws a larger picture to fit and counts each one so.
+  - OpenVINO's INT4 export of the 2B (group size 128) answered "Yes" to "Reply with the single word: ready", every time. OpenVINO's NPU build of the 4B answered as well, but about three times slower, in 2.5 GB more memory.
+- **Castellan's build of OpenVINO GenAI** (`node/openvino/`: `README.md`, `openvino-genai-castellan.patch`, `build-openvino-genai.bat`, `LICENSE` and `NOTICE`). Before it, Qwen3-VL failed on the NPU with OpenVINO Model Server 2026.4.1's own `openvino_genai.dll`: a prompt without a picture crashed, and once a request had failed, every later one failed until the server restarted. The build fixes both.
+  - It's 7.5 MB, so it isn't in the kit. The route's `pluginPatch` pins it on Manor-releases by `url`, size and SHA-256 (`NpuPluginPatch.patched.url`, in place of `from`), for every Intel generation.
+  - `planNpu`'s plan has it as `patch`, and counts its download.
+  - Setup downloads it into the tools home (`servers\patches`, `hostedPatchFile`) and puts it in before it tests the model (`installPatch`). It goes in only over OpenVINO Model Server 2026.4.1's own file, and only while `openvino.dll` and `tbb12.dll` are that version's. Intel's own is kept as `openvino_genai.dll.stock`.
+  - The keeper's look (`patchNpu`) puts it in again, tested, where the server's own came back. It never downloads: without the file, its record says `not-downloaded`.
+  - `NpuPluginPatch.required` says why a route's models need its patch. config.json's `npuPatch: false` doesn't take such a patch out.
+- **A PC already on the 4B** keeps it until its local AI is set up again (Set up local AI). The keeper's refresh says `needs-setup`, since the 2B and the build aren't downloaded. Setup downloads both, then tests the 2B with a picture and a chat. If the test fails, config.json keeps the 4B's entry.
+  - Setup's test now first stops a server of the entry's own program that answers on its port without listing the model (`stopOtherModel`), in the NPU's turn. OpenVINO Model Server serves only the model it started with, so before this the old 4B server would have answered the 2B's test with a 404, and the PC would never have switched.
+- **The NPU 3720's prompt is read 256 tokens at a time** (meteor-lake, arrow-lake, wildcat-lake: `NPUW_LLM_PREFILL_CHUNK_SIZE` 256, `GENERATE_HINT` BEST_PERF; it was 128). Measured with the 2B on a Core Ultra 5 225U: a 1,805-token prompt in 3.8 to 3.9 s against 4.3 to 4.4 in 128-token chunks, and a small picture in 1.8 s against 2.0, for a short answer 0.5 to 0.7 s against 0.3 to 0.6. At these settings the 2B does the benchmark's three jobs in 13.4 s, against 18.7 at OpenVINO's own and the 4B's 27.4.
+- **Intel's `memoryGb`**: the NPU 3720's chat 4.9 GB (it was 3.8), with its embeddings on the graphics 1.3 (meteor-lake); arrow-lake's and wildcat-lake's chat 4.9; the route's chat, Lunar Lake's and Panther Lake's at 4,096 tokens, 5.5 (it was 4.3).
+  - OpenVINO GenAI runs Qwen3-VL's picture encoder on the processor beside an NPU, and the server keeps what a full-size screenshot took: 1.9 GB more, the screenshot read in 12 to 15 s on the NPU 3720. On its graphics the encoder read twice as fast but misread a number, so it stays on the processor.
+  - So a 16 GB Lunar Lake or Panther Lake no longer has room for embeddings beside chat (`npuMemoryFit`): setup gives them to the graphics card or the processor. A 12 GB Intel PC no longer runs the NPU's chat. A 16 GB NPU 3720 keeps both: measured together after full-size screenshots, the two took 5.8 GB of its 6.2.
+- **setup's plan** names a downloaded build of a server file (`describePlan`: get Castellan's build of OpenVINO GenAI …, in place of the server's own `openvino_genai.dll`). A server without the file isn't patched.
+- **npu-bench** runs a server copy with a downloaded build too (`kitPlugin`).
+- spec/NPU-VENDORS.md and spec/NPU-BENCHMARK.md: the 2B's figures on Intel's NPU.
+
+### Before you update
+
+- Nothing for an agent: take the kit as usual. An Intel PC moves to the 2B the next time its local AI is set up, which downloads 2.5 GB. On a 16 GB Lunar Lake or Panther Lake, that setup also moves its embeddings off the NPU.
+
 ## 2.102.0
 
 **One text reader for the Clerk, the Scribe, Reeve and the Warrener: PDFs read from their own text, word boxes for Reeve, answers that no console can garble, and a check any PC can run.**

@@ -22,13 +22,13 @@ The website shows two boards:
 - **Chips**: one row per chip generation (Snapdragon X2 Elite, Lunar Lake, Ryzen AI 300...), each with the model Castellan ships for it, measured by us. This is what a customer gets on that chip.
 - **Models**: per chip, every model we've measured on it, shipped or a candidate. This is how we choose what to ship.
 
-Every model Castellan runs today is a Qwen model at 4-bit weights:
+Every model Castellan runs today is a Qwen model, at 4-bit weights except Intel's 8-bit:
 
 | Maker | Server | Model | Weights |
 |---|---|---|---|
 | Qualcomm X | GenieX 0.9.3 (its pin, kit 2.101.0) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0), as on the X2; Qwen3-VL-4B-Instruct (W4A16) its fallback | 4-bit; also does vision, on the Hexagon's second session |
 | Qualcomm X2 | GenieX 0.9.x (its llama.cpp plugin; the X2 pins 0.9.1) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Hexagon's second session (on the Adreno under 0.8.0) |
-| Intel | OpenVINO Model Server 2026.4.1 | Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov | 4-bit symmetric, channel-wise |
+| Intel | OpenVINO Model Server 2026.4.1, with Castellan's build of OpenVINO GenAI | Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov (kit 2.103.0; Qwen3-4B-Instruct-2507 int4-cw before) | 8-bit symmetric, per channel; also does vision |
 | AMD | FastFlowLM 1.0.7 | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
 
 They are not the same weights: each maker's NPU needs its own format, Qualcomm's are vision models, and AMD's is a smaller model that does both. So the chips board doesn't claim identical models. It compares what each chip delivers with its shipped model, names the model on every row, and shows a quality score beside the speed, so a faster chip whose model answers worse can't hide it.
@@ -247,6 +247,27 @@ The first energy runs on Intel (kit 2.98.2, 2026-10-22): a Lenovo 83KS, Core Ult
 | Processor | 36.3 s | 18.0 tok/s | 11.0 s | 249, 208, 361 J | 818 J | 22.3 W | 279 mJ |
 
 The graphics card does the three jobs 21% faster than the NPU, for 1.9 times the energy; the processor is slower than the NPU and takes 4.6 times it. The NPU's own share has no counter: its cores drew 2–6 J a job, the rest is the NPU and the chip around it. All three answered the same 23 of 24 quality items. Keeping the model loaded cost nothing measurable on any of them (−0.6 to +0.3 W, within the rest's noise).
+
+These are the 4B's. Kit 2.103.0 moves Intel to Qwen3-VL-2B, and its energy series is still to run.
+
+### On Intel: Qwen3-VL-2B on the NPU 3720 (kit 2.103.0)
+
+The same PC, 2026-10-23, the full run (no energy) on OpenVINO Model Server 2026.4.1 with Castellan's build of OpenVINO GenAI (NPU-VENDORS.md, Castellan's build of OpenVINO GenAI). Each model was run as a candidate (`--candidate`), its files measured into the report. The first two columns ran at OpenVINO's own prompt settings, the third at the route's (`NPUW_LLM_PREFILL_CHUNK_SIZE` 256, `GENERATE_HINT` BEST_PERF). Every run was ranked.
+
+| | Qwen3-VL-4B INT4 (OpenVINO's NPU build) | Qwen3-VL-2B INT8 (Castellan's) | Qwen3-VL-2B INT8, the route's settings |
+|---|---|---|---|
+| Quality | 23 of 24 | 22 of 24 | 22 of 24 |
+| Pictures | 4 of 4, 6.6–7.1 s each | 4 of 4, 2.1–2.5 s | 4 of 4, 0.8–1.1 s |
+| Writing | 8.6 tok/s | 11.0 tok/s | 17.3 tok/s |
+| A short answer | 6.2 s | 1.9 s | 0.56 s |
+| Read 1,024 | 6.3 s | 2.0 s | 2.0 s |
+| Read near the cap (1,73x of 2,048) | 12.7 s | 3.9 s | 3.4 s |
+| Job time (3 jobs) | 46.6 s | 18.7 s | 13.4 s |
+| Cold load / cached | 114 / 13.2 s | 35 / 5.7 s | 46 / 4.3 s |
+| Memory, working set (private) | 6.9 GB (1.5) | 4.4 GB (1.0) | 4.0 GB (1.1) |
+| Speed after 10 minutes | 99% | 100% | 100% |
+
+The 2B misses "time" and "apples" by running out of tokens mid-working, not by a wrong answer. Against the 4B it had on this PC (On Intel: energy, above), the route's 2B does the three jobs in about half the time (13.4 s against 27.4) and writes faster (17.3 tokens a second against 13.2), and it reads pictures as well.
 
 ## Comparing devices (kit 2.99.0)
 

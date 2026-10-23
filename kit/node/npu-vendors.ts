@@ -45,8 +45,10 @@ export interface NpuModel {
   serve?: string[];
   /**
    * The most tokens a picture may be, where its server reads a picture at its own size, a token per 32 × 32 px (GenieX's
-   * llama.cpp plugin, the X2's Qwen3-VL-2B): written as its vision endpoint's pictureTokens, so the kit redraws a larger
-   * picture to fit (fitPicture) and counts each picture so. A model whose server sizes pictures itself has none.
+   * llama.cpp plugin, the X2's Qwen3-VL-2B), or up to a cap in its model's own files (Intel's Qwen3-VL-2B, whose
+   * longest_edge of 1,048,576 px is 1,024 tokens, inside the NPU's compiled prompt): written as its vision endpoint's
+   * pictureTokens, so the kit redraws a larger picture to fit (fitPicture) and counts each picture so. A model whose
+   * server sizes pictures smaller itself has none.
    */
   pictureTokens?: number;
   /** A file that is there once it's downloaded, when the server keeps it in a known place. */
@@ -140,6 +142,11 @@ export interface NpuRoute {
    */
   retired?: NpuRetired[];
   vision?: string;
+  /**
+   * A build of one of its server's files for every generation that has none of its own, at the route's version: OpenVINO
+   * GenAI's, which Qwen3-VL needs on Intel's NPUs (npu-patch.ts).
+   */
+  pluginPatch?: NpuPluginPatch;
   licence: string;
   /** Its maker's terms for the server and what it carries, named before it's downloaded (GenieX, the QAIRT runtime inside it). */
   terms?: MakerTerms[];
@@ -277,9 +284,10 @@ export interface PinnedFile {
  * A file of the route's server that the keeper replaces with the kit's own build of it (npu-patch.ts), only on its
  * generation, only over the very file the server's pinned version installs, and only while the files it is built against
  * are that version's: Castellan's build of GenieX 0.8.0's llama.cpp plugin on the Snapdragon X2, which holds about 2 GB
- * less (qualcomm/GenieX#1557). The server's own file is kept beside it (`<file>.stock`) and put back whenever the patch
- * fails its test, is switched off (config.json's npuPatch: false), or a later kit drops it. Anything else there (a
- * GenieX update) is left alone.
+ * less (qualcomm/GenieX#1557); Castellan's build of OpenVINO GenAI on every Intel NPU, without which Qwen3-VL fails there
+ * (kit 2.103.0). The server's own file is kept beside it (`<file>.stock`) and put back whenever the patch fails its test,
+ * is switched off (config.json's npuPatch: false, unless it's `required`), or a later kit drops it. Anything else there
+ * (a GenieX update) is left alone.
  */
 export interface NpuPluginPatch {
   what: string;
@@ -290,10 +298,19 @@ export interface NpuPluginPatch {
   file: string;
   /** The server's own file. */
   stock: PinnedFile;
-  /** The kit's build: `from` is its path in the kit's node part. */
-  patched: PinnedFile & { from: string };
+  /**
+   * The kit's build, one of: `from`, its path in the kit's node part (GenieX's plugin, 0.3 MB); or `url`, where setup
+   * downloads one too big for every agent to carry (OpenVINO GenAI's, 7 MB, signed on Manor-releases), kept in the tools
+   * home (hostedPatchFile) for the keeper to put in again.
+   */
+  patched: PinnedFile & { from?: string; url?: string };
   /** The server's files the build links against, by their path in `folder`: all must be these, or it isn't applied. */
   needs: Record<string, PinnedFile>;
+  /**
+   * Why the route's models can't run without it, where they can't (Qwen3-VL on Intel's NPU): setup puts it in before it
+   * tests the model, and config.json's npuPatch: false doesn't take it out.
+   */
+  required?: string;
   basis: string;
 }
 
@@ -801,16 +818,19 @@ export function serverVersionOf(route: NpuRoute): NpuServerVersion | undefined {
 
 /**
  * The kit's build of a server file for a generation at the route's version: its `versions` entry's when one applies (GenieX
- * 0.9's), else the generation's own (for the pinned version).
+ * 0.9's), else the generation's own (for the pinned version), else the route's for every generation (OpenVINO GenAI's).
  */
 export function pluginPatchOf(route: NpuRoute, generation: string | null | undefined): NpuPluginPatch | undefined {
   const v = serverVersionOf(route);
-  if (!v) return generationOf(route, generation)?.pluginPatch;
+  if (!v) return generationOf(route, generation)?.pluginPatch ?? route.pluginPatch;
   const own = (g: string | null | undefined) => (g && v.pluginPatch && Object.hasOwn(v.pluginPatch, g) ? v.pluginPatch[g] : undefined);
   const p = own(generation);
   // Another generation's build, by its id (never a chain of them).
   return typeof p === 'string' ? (typeof own(p) === 'object' ? (own(p) as NpuPluginPatch) : undefined) : p;
 }
+
+/** Where setup keeps a build it downloads (`patched.url`): the tools home's servers\patches, under the file's name in its URL. */
+export const hostedPatchFile = (p: NpuPluginPatch, tools: string) => path.join(tools, 'servers', 'patches', path.posix.basename(new URL(p.patched.url!).pathname));
 
 // ------------------------------------------------------------------------------------------------
 // Per generation, memory and calibration
@@ -973,8 +993,9 @@ export function playedSay(p: Played, dir: string = p.dataDir, catalog: NpuCatalo
 /**
  * The share of the PC's memory the NPU's models may hold: the NPU has no memory of its own (Intel's, AMD's and
  * Qualcomm's share the PC's), and Windows, the browser and the manor's agents need the rest. On a 16 GB PC that is
- * 6.4 GB, room for Intel's chat (4.27 GB) and embeddings (1.74 GB) with 9.6 GB left; a 12 GB PC keeps chat alone; an
- * 8 GB PC (some Meteor Lake laptops) keeps the NPU out, and the processor or the card takes its work.
+ * 6.2 GB, room for the NPU 3720's chat (4.9 GB) and its embeddings on the graphics (1.3), not for a Lunar Lake's chat
+ * (5.5) and embeddings on the NPU (1.74), which go to the graphics card. Since Qwen3-VL-2B (kit 2.103.0) a 12 GB PC
+ * (4.6) keeps Intel's NPU out, as an 8 GB one does, and the processor or the card takes its work.
  */
 export const NPU_MEMORY_SHARE = 0.4;
 
@@ -1116,6 +1137,11 @@ export interface NpuPlan {
   /** The runtime to put beside the server's program, when the route needs one and a file of it isn't there yet. */
   runtime: (NpuRuntime & { dest: string; into: string }) | null;
   /**
+   * The kit's build of a server file that setup downloads (a `patched.url`), when there is one for this PC's generation and
+   * server version: where it's kept, and whether it's there. Setup puts it in place of the server's own before testing.
+   */
+  patch: (NpuPluginPatch & { dest: string; have: boolean }) | null;
+  /**
    * The route's embedding server, when it has one: where it goes, and its zip and model unless they're here (its
    * model downloaded as a file, or pulled by the route's program: the arguments that pull it).
    */
@@ -1177,6 +1203,8 @@ export function planNpu(o: {
   const into = path.dirname(exe);
   const rt = route.runtime;
   const runtime = rt && !(installed && rt.files.every((f) => exists(path.join(into, f)))) ? { ...rt, dest: path.join(o.downloadsDir, rt.file), into } : null;
+  const pp = pluginPatchOf(route, o.support.generation);
+  const patch = pp?.patched.url && pp.serverVersion === route.version ? { ...pp, dest: hostedPatchFile(pp, o.tools), have: exists(hostedPatchFile(pp, o.tools)) } : null;
   const es = route.embedServer;
   let embed: NpuPlan['embed'] = null;
   if (es) {
@@ -1192,12 +1220,13 @@ export function planNpu(o: {
   const downloadBytes =
     (download ? download.size : 0) +
     (runtime ? runtime.size : 0) +
+    (patch && !patch.have ? patch.patched.size : 0) +
     models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0) +
     (embed?.download?.size ?? 0) +
     (embed?.modelDownload?.size ?? 0) +
     (embed?.modelPull ? embed.server.model.size : 0);
   const powerTool = route.powerTool ? { ...route.powerTool, exe: expandRoute(route.powerTool.exe, { tools: o.tools, env: o.env }) } : undefined;
-  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
+  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, patch, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
 }
 
 /**

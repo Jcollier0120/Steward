@@ -2,6 +2,25 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.183
+
+**It hands out the kit 2.103.0: on an Intel Core Ultra PC, the NPU now reads pictures as well as chat, and answers faster.**
+
+### What's new
+
+- **Intel's NPU reads pictures.** Its model is now Qwen3-VL-2B, which answers both chat and questions about pictures, so screenshots no longer go to the graphics card or the processor. On a Core Ultra 5 225U it does the benchmark's three jobs in 12.9 s, against 27.4 s for the 4B it replaces, writes 17.9 tokens a second against 13.2, and reads a small picture in about a second.
+- **It reads the fine print as the processor does.** The model's copy on Hugging Face is Castellan's, with one step rewritten that Intel's NPU support skipped: without it, the NPU misread clear numbers in a picture (4837 for 4827). Now it answers them as the processor does.
+
+### What changed
+
+- **Castellan's build of one OpenVINO file.** OpenVINO's own build failed Qwen3-VL on Intel's NPU. Setup downloads Castellan's signed build of that file (7.5 MB) and keeps Intel's beside it.
+- **It takes more memory than the 4B.** Once it has read a full-size screenshot it holds about 1 GB more (4.8 GB). So a 16 GB Lunar Lake or Panther Lake PC moves its search (embeddings) off the NPU, to the graphics card or the processor, and a 12 GB Intel PC no longer chats on the NPU. A 16 GB Core Ultra 200U or 200H keeps both on the NPU and its graphics, as before.
+- **The 4B's files are deleted** three days after nothing on the PC uses them, by the rule the kit 2.101.0 brought.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An Intel PC moves to the new model the next time its local AI is set up (Set up local AI), which downloads 2.5 GB. If the new model fails its test there, the PC keeps the old one.
+
 ## 0.36.182
 
 **It hands out the kit 2.102.0: one text reader for every employee that reads text in pictures, which reads PDFs exactly and no longer loses a file over a bullet point.**

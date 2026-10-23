@@ -16,7 +16,7 @@ So each maker gets its own server, chosen for being OpenAI-compatible, installab
 | Maker | Server | Version | What it serves on the NPU | Install |
 |---|---|---|---|---|
 | Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.9.x on the X2 (it pins 0.9.1; 0.9.3 where the Smith's Use it put it), 0.9.3 on the X (from kit 2.101.0; 0.8.0 where an earlier kit put it) | chat, vision (one model: Qwen3-VL-2B-Instruct Q4_0, on the X with Qwen3-VL-4B W4A16 as its fallback); embeddings, and on the X2 a reranker when asked for, on llama.cpp's server over GenieX's libraries | its Inno Setup installer, silent, per user, no administrator |
-| Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake, Wildcat Lake) | OpenVINO Model Server | 2026.4.1 | chat (Qwen3-4B-Instruct-2507, channel-wise INT4) | a zip, unpacked into the accelerators' folder |
+| Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake, Wildcat Lake) | OpenVINO Model Server | 2026.4.1 | chat, vision (one model: Qwen3-VL-2B, symmetric INT8, on Castellan's build of OpenVINO GenAI) | a zip, unpacked into the accelerators' folder |
 | AMD Ryzen AI 300 and later (XDNA 2) | FastFlowLM | 1.0.7 | chat, vision (one model: `qwen3.5:2b`, Qwen3.5-2B) | a portable zip, unpacked into the accelerators' folder |
 
 Second choices, if a route fails on hardware: Foundry Local for Snapdragon and Intel; Lemonade Server (AMD's, Apache-2.0, which itself runs FastFlowLM) for AMD.
@@ -485,6 +485,24 @@ From kit 2.82.1 the build also frees the vision encoder once no picture has come
 
 What stays above a chat's, 0.3 to 0.4 GB, is the OpenCL backend's own buffers, in GenieX's ggml-opencl.dll, which the kit doesn't build.
 
+### Castellan's build of OpenVINO GenAI (kit 2.103.0)
+
+OpenVINO Model Server 2026.4.1 carries OpenVINO GenAI 2026.4.1.0 (`openvino_genai.dll`). On Intel's NPU it fails Qwen3-VL, the route's model from kit 2.103.0, in two ways:
+- **A prompt without a picture crashes** (`roi_end <= max_dim`). NPUW's chunked prefill slices `visual_pos_masks` along the prompt, but a text-only prompt's mask has one element.
+- **After one failed request, every later one fails** (`prompt_ids.get_size() >= tokenized_history.size()`) until the server restarts. The failed prompt's tokens stay in the pipeline's history. This was the Lunar Lake's failure with OpenVINO's Qwen3-VL-4B on 2026-10-13 (Verified, below).
+
+Castellan's build of the same file fixes both (`node/openvino/`, whose README says what changed and how it was built). It goes on the same way GenieX's plugin does, with two differences:
+- **It's downloaded, not carried.** At 7.5 MB, it's too big for every agent's kit. The route's `pluginPatch` pins it on Manor-releases by `url`, size and SHA-256, for every Intel generation. `planNpu` counts it in the plan's download (`patch`). Setup downloads it into `servers\patches` in the tools home (`hostedPatchFile`) and puts it in before it tests the model (`installPatch`).
+- **It's required** (`required`). The route's model doesn't run without it, so config.json's `npuPatch: false` leaves it in place.
+
+The rest is as for GenieX's plugin:
+- **When:** only over OpenVINO Model Server 2026.4.1's own file, and only while `openvino.dll` and `tbb12.dll` are 2026.4.1's.
+- **Kept:** Intel's own file is kept beside it as `openvino_genai.dll.stock`.
+- **The keeper's look** keeps it, and puts it in again, tested, where Intel's own came back (setup unpacking the server again). It never downloads: without the file, its record says `not-downloaded`.
+- **Taken out:** a later kit that drops the patch puts Intel's own back. That happens once a server release carries a GenAI with both fixes.
+
+Measured on the NPU 3720 with Qwen3-VL-2B: with Intel's own file, every prompt without a picture failed. With the build, npu-bench's full run answered 22 of 24, and 4 of 4 pictures (Qwen3-VL-2B on Intel's NPU, above).
+
 ### A later GenieX on the PC: 0.9 (kit 2.88.1)
 
 The route pins GenieX 0.8.0, and setup installs that, except on the Snapdragon X2, which pins 0.9.1 of its own from kit 2.88.1 (below, "The X2 on 0.9.1"). The Smith offers later versions, and its try installs one in place of the one there; Use it keeps it. So a PC can run a GenieX its generation doesn't pin. The route's `versions` (`NpuServerVersion`) say how each later version runs, from its `version` on until the next one listed, and `routeFor` applies the newest at or before the route's version:
@@ -637,11 +655,13 @@ So a chat that finds the embedding server idle pays about half a second once, an
 | Qualcomm X | `qualcomm/Qwen3-VL-4B-Instruct:W4A16` (Qualcomm AI Hub's NPU build) | chat, vision | 4.4 GB |
 | Qualcomm X2 | `unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0` (unsloth's Q4_0 GGUF of Qwen3-VL-2B-Instruct and its F16 vision projector, from Hugging Face; its files pinned) | chat, vision | 1.9 GB |
 | Qualcomm | Qwen3-Embedding-0.6B Q8_0 (`Qwen/Qwen3-Embedding-0.6B-GGUF`, the graphics card's) | embeddings | 639 MB |
-| Intel | `Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov` (Castellan's channel-wise INT4 export, the kind the NPU runs properly; its files pinned) | chat | 2.2 GB |
+| Intel | `Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov` (Castellan's symmetric INT8 export, its pictures capped at about 1,024 tokens; its files pinned) | chat, vision | 2.5 GB |
 | Intel | `OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov` (OpenVINO's channel-wise INT4 export; its files pinned) | embeddings | 428 MB |
 | AMD | `qwen3.5:2b` (Qwen3.5-2B, FastFlowLM's NPU2 build) | chat, vision | 2.0 GB |
 
-Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embeddings), OpenVINO Model Server 140 MB (and its Visual C++ runtime, 3 MB), FastFlowLM 40 MB.
+Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embeddings), OpenVINO Model Server 140 MB (and its Visual C++ runtime, 3 MB, and Castellan's build of OpenVINO GenAI, 7.5 MB), FastFlowLM 40 MB.
+
+Intel's model was Castellan's channel-wise INT4 export of Qwen3-4B-Instruct-2507 (2.2 GB, chat only) until kit 2.103.0.
 
 **Off the NPU, for the benchmark (kit 2.99.0).** GenieX and FastFlowLM run on the NPU only, so a route of theirs says how the benchmark runs its model on the graphics and the processor instead (`offNpu`): the same model as llama.cpp reads it, at the NPU's context, served by setup's pinned llama.cpp build for the device (`variantFor`), with setup's embedding model beside it. Only `npu-bench --device GPU|CPU` uses it; setup and the keeper never do.
 
@@ -665,15 +685,16 @@ AMD's `--reasoning-budget 0` is checked (2026-10-23, the pinned Q4_0 on b11734's
 | Qualcomm AI Hub's W4A16 builds (the first-generation X's Qwen3-VL-4B, [its card](https://huggingface.co/qualcomm/Qwen3-VL-4B-Instruct)) | Apache-2.0, with the card's "Usage and Limitations", and the Responsible AI License | The card says they're not for: essential services; justice and democratic processes; emotional state; biometrics and real-time remote biometric identification; education and employment decisions; exploiting vulnerabilities; social scoring; law enforcement and predictive policing; critical infrastructure; migration; social-media recommenders; scraping facial images; subliminal manipulation. Setup names the card and the Responsible AI License before it pulls one. **Have them reviewed** against Castellan's terms. |
 | llama.cpp (the Snapdragon's embedding server) | MIT | Run over GenieX's own libraries, under GenieX's terms. |
 | OpenVINO Model Server | Apache-2.0 | Its zip carries its third-party licences. |
+| Castellan's build of OpenVINO GenAI (`openvino_genai.dll`, the kit's `node/openvino/`, downloaded from Manor-releases) | Apache-2.0, OpenVINO GenAI's | A modified build that Castellan redistributes, signed with its certificate. GenAI's licence, a NOTICE saying what changed and that it isn't Intel's release, the patch, and GenAI's third-party programs list go with it, in the kit and in the release. |
 | The Microsoft Visual C++ runtime DLLs beside it | Visual Studio's "Distributable Code" terms | Microsoft lets an application carry these DLLs in its own folder; here each PC downloads them from Microsoft, so Castellan doesn't redistribute them either: **have it reviewed**. |
 | OpenVINO's model exports | the base model's (Apache-2.0 for Qwen3) | |
 | FastFlowLM | MIT (its code and CLI); its NPU kernels free for any use, including commercial | It asks for "Powered by FastFlowLM" in the product's notices: add it to the third-party notices. |
 | Qwen3-4B-Instruct-2507, Qwen3-VL-4B-Instruct, Qwen3-VL-2B-Instruct, Qwen3-Embedding-0.6B, Qwen3.5-2B | Apache-2.0 | |
 | unsloth/Qwen3-VL-2B-Instruct-GGUF (a 16 GB X2's model) | Apache-2.0, the base model's | A format conversion and Q4_0 quantization of Qwen's weights, nothing else. |
-| Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov, on Hugging Face | Apache-2.0, the base model's | Castellan's own export, so Castellan publishes this one: with the base model's LICENSE, and a model card saying what was changed (the weights converted and compressed, nothing else) and how, as Apache-2.0 asks. |
+| Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov and Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov, on Hugging Face | Apache-2.0, the base model's | Castellan's own exports, so Castellan publishes them: with the base model's LICENSE, and a model card saying what was changed and how, as Apache-2.0 asks: the weights converted and compressed, and in the 2B's, the picture size its configs allow. |
 | Avoided | Llama 3.2 (community licence), Gemma and EmbeddingGemma (Gemma's terms flow down to users), AMD's Ryzen AI ONNX runtime (AMD's software licence) | Not installed by setup. |
 
-Each customer's PC downloads the servers, runtimes and models from their makers (GitHub releases, Microsoft, Hugging Face, Qualcomm AI Hub); Castellan doesn't redistribute them, except Intel's NPU model, its own export, which it publishes on Hugging Face as Castellan-AI, and its build of GenieX's llama.cpp plugin, which the kit carries.
+Each customer's PC downloads the servers, runtimes and models from their makers (GitHub releases, Microsoft, Hugging Face, Qualcomm AI Hub); Castellan doesn't redistribute them, except Intel's NPU model, its own export, which it publishes on Hugging Face as Castellan-AI, its build of GenieX's llama.cpp plugin, which the kit carries, and its build of OpenVINO GenAI, which it publishes on Manor-releases.
 
 **Qualcomm's terms, named before the download** (kit 2.97.0). A maker's terms beyond a licence are in `npu-vendors.json`, as `terms` on the route (for its server and what that carries) and on a model (`MakerTerms`: the maker, what they cover, what they say in a line, and a link). On a Snapdragon, the route's are GenieX's licence, the QAIRT runtime's (Qualcomm's AI Runtime SDK EULA, linked through the plugin's THIRD_PARTY_NOTICES.md; kit 2.97.0 named Qualcomm's Terms of Use for it, wrongly) and the Responsible AI License; AI Hub's Qwen3-VL-4B adds its card and the Responsible AI License. Setup's plan carries the ones that come with what it will download (`npuTerms`: the route's when its server is to be installed, a model's when it is to be pulled, each document once, the Responsible AI License last; none once they're all here), as `SetupPlan.terms`. `describePlan` prints them after the download's size, under "Qualcomm's terms come with what this downloads for the NPU: setting it up means you accept them, for everyone using this PC and your staff.", one line each with its link, and the command's question becomes "Download 5.1 GB, under the terms above? [y/N]". The X2's own model is unsloth's GGUF (Apache-2.0), so a new X2 is shown GenieX's terms alone. Intel's and AMD's routes carry none: their licences are open ones.
 

@@ -44,7 +44,7 @@ function fakeOvms(port: number, o: { cap: number; dieOverCap?: boolean; answer?:
       let body = '';
       req.on('data', (c) => (body += c));
       req.on('end', () => {
-        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov"}]}');
+        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov"}]}');
         const j = JSON.parse(body);
         seen.push(j);
         const prompt = j.messages.map((m: any) => m.content).join(' ');
@@ -184,9 +184,10 @@ test('on an Intel NPU: setup timed, every measurement taken, the report kept, an
   assert.equal((report.npu as any).pciDevice, '643E');
   assert.equal((report.npu as any).generation, 'lunar-lake');
   // The model was pulled with OpenVINO's own command; nothing was downloaded (the program was there).
-  assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov')));
-  assert.equal(by.setup.data.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size);
-  // Qwen3-4B-Instruct-2507 doesn't think, so isn't told /no_think; a think block (the fake writes one) is stripped all the same.
+  assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov')));
+  // The model, and Castellan's build of OpenVINO GenAI that its pictures need (kit 2.103.0).
+  assert.equal(by.setup.data.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + V.NPU_CATALOG.routes.intel.pluginPatch!.patched.size);
+  // Qwen3-VL-2B-Instruct doesn't think, so isn't told /no_think; a think block (the fake writes one) is stripped all the same.
   assert.doesNotMatch(s.fake.seen[0].messages.at(-1).content, /\/no_think/);
   assert.match(by['first-answer'].say, /answered "ready" \(with an empty think block, stripped\)/);
   // Under the cap answers; past it is refused plainly, and the server keeps answering.
@@ -219,7 +220,7 @@ test("the NPU's report (npu-report.ts): kept after a check on this PC's NPU, wit
   assert.match(r.chip.cpu, /Ultra 7 258V$/);
   assert.match(r.chip.npu, /AI Boost$/);
   const intel = V.routeFor(V.NPU_CATALOG.routes.intel, 'lunar-lake');
-  assert.deepEqual(r.route, { server: intel.server, version: intel.version, model: 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov', cap: intel.maxContextTokens, verified: true });
+  assert.deepEqual(r.route, { server: intel.server, version: intel.version, model: 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov', cap: intel.maxContextTokens, verified: true });
   assert.equal(r.ok, true);
   assert.equal(r.failed, null);
   const by = Object.fromEntries(report.steps.map((x: any) => [x.step, x]));
@@ -322,7 +323,7 @@ test("a route's own embedding server: set up beside the server, started by the k
   const { code, report } = await C.npuCheck(opts);
   assert.equal(code, 0, s.lines.join('\n'));
   assert.deepEqual(report.steps.map((x: any) => x.step).slice(-2), ['kit-test', 'embed']);
-  assert.deepEqual(got, ['download llama-b11125-bin-win-opencl-adreno-arm64.zip', 'unpack', 'overlay 13', 'download Qwen3-Embedding-0.6B-Q8_0.gguf']);
+  assert.deepEqual(got, ['download openvino_genai-2026.4.1.0-castellan.1.dll', 'download llama-b11125-bin-win-opencl-adreno-arm64.zip', 'unpack', 'overlay 13', 'download Qwen3-Embedding-0.6B-Q8_0.gguf']);
   const embed = report.steps.at(-1) as any;
   assert.equal(embed.ok, true);
   assert.equal(embed.data.dims, 1024);
@@ -330,7 +331,7 @@ test("a route's own embedding server: set up beside the server, started by the k
   assert.match(embed.say, /the kit started llama\.cpp and had a vector in .* a query took \d+ ms and a chunk of code \d+ ms \(1024 dimensions\)/);
   assert.equal(inputs[0], 'where is the push notification token registered');
   assert.ok(inputs[1].length > 1500, 'a chunk about the size Reeve indexes');
-  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + q.download!.size + q.model.size);
+  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + V.NPU_CATALOG.routes.intel.pluginPatch!.patched.size + q.download!.size + q.model.size);
 });
 
 test("Intel's embedding server: a second OpenVINO Model Server, nothing downloaded for it but its model, which it pulls", async () => {
@@ -357,12 +358,12 @@ test("Intel's embedding server: a second OpenVINO Model Server, nothing download
   const { code, report } = await C.npuCheck(opts);
   assert.equal(code, 0, s.lines.join('\n'));
   assert.deepEqual(report.steps.map((x: any) => x.step).slice(-2), ['kit-test', 'embed']);
-  assert.deepEqual(downloads, [], 'the program is the route\'s, already here');
+  assert.deepEqual(downloads, ['openvino_genai-2026.4.1.0-castellan.1.dll'], 'the program is the route\'s, already here: only its chat\'s GenAI build is downloaded');
   assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov') && a.includes('embeddings')), JSON.stringify(s.ran));
   const embed = report.steps.at(-1) as any;
   assert.equal(embed.ok, true);
   assert.match(embed.say, /the kit started OpenVINO Model Server and had a vector in .* \(1024 dimensions\)/);
-  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + V.NPU_CATALOG.routes.intel.embedServer!.model.size);
+  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + V.NPU_CATALOG.routes.intel.pluginPatch!.patched.size + V.NPU_CATALOG.routes.intel.embedServer!.model.size);
 });
 
 test('a server that dies on a request past its cap fails the cap step, and is started again for the rest', async () => {
@@ -398,9 +399,9 @@ test('a rehearsal of another maker’s route needs a scratch REEVE_HOME; a missi
   };
   const r = await C.npuCheck({ ...s.opts, io: { ...s.opts.io, setup } });
   assert.match(r.report.steps.find((x: any) => x.step === 'requirements')!.say, /needs the Microsoft Visual C\+\+ runtime 14\.44, which setup puts beside it \(3 MB, no administrator\)/);
-  assert.deepEqual(got, [rt.file]);
+  assert.deepEqual(got, [rt.file, 'openvino_genai-2026.4.1.0-castellan.1.dll']);
   for (const f of rt.files) assert.equal(readFileSync(path.join(dir, f), 'utf8'), 'from Microsoft', f);
-  assert.equal(r.report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, rt.size + s.catalog.routes.intel.models[0].size);
+  assert.equal(r.report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, rt.size + s.catalog.routes.intel.pluginPatch!.patched.size + s.catalog.routes.intel.models[0].size);
   assert.equal(r.code, 0, s.lines.join('\n'));
 });
 
