@@ -12,6 +12,7 @@ import { bumpOne, trialBranch, trialDirOf, WITHOUT_THE_KIT } from './bump.ts';
 import { checkoutOf, mapLimit, networkFailure, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { kitReach } from './kitreach.ts';
 import { blobOf, kitTrialsFile, type TrialPasses } from './trialpass.ts';
+import { removeProfile, trialProfileOf } from './trialprofile.ts';
 import { withRepo } from './slots.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
 import { retiredOf } from '../retired.ts';
@@ -44,6 +45,10 @@ import { retiredOf } from '../retired.ts';
  * (KitTrial's `retry`), and holds the kit only if it fails then too. And each agent is tried only as far as the kit
  * changes it (kitreach.ts): one none of whose kit files change isn't tried at all, and one whose files change runs only
  * the tests they reach. Its rollout's bump runs the same ones.
+ *
+ * An agent whose tests expected what the kit said before, where all the kit changed is that text (copied.ts), passes
+ * once they are brought up to it, and doesn't hold the kit; its rollout's bump brings them up again, in its commit. Its
+ * tests run in a scratch profile of their own (trialprofile.ts), never in what this PC holds.
  *
  * An agent Manor has retired (retired.ts) gets no kit, so it isn't tried: left out of a new trial, dropped from one going
  * on, and a failure of its that a trial kept no longer holds the kit.
@@ -143,6 +148,7 @@ async function tryEach(ctx: Ctx, employees: Employee[], kit: string, dir: string
     const repo = checkoutOf(e);
     try {
       if (existsSync(repo)) await removeWorktree(ctx.run, repo, trialDirOf(ctx.settings, e), trialBranch(kit));
+      removeProfile(trialProfileOf(trialDirOf(ctx.settings, e)));
     } catch (err) {
       ctx.log(`[${e.id}] couldn't remove its trial: ${(err as Error).message}`);
     }
@@ -177,9 +183,10 @@ const ownFailuresOf = (results: EmployeeResult[]): NonNullable<KitTrial['own']> 
 
 /**
  * Each employee that passed its checks, by id: the commit of its branch it was bumped from (TrialPasses' `mains`). One
- * that ran only the tests the kit reaches (`partial`) is kept too: its rollout's bump would run the same ones.
+ * that ran only the tests the kit reaches (`partial`) is kept too: its rollout's bump would run the same ones. One that
+ * passed once its tests were brought up to the kit (`copies`) isn't: its rollout's bump runs its checks, to bring them up again.
  */
-const mainsOf = (results: EmployeeResult[]): Record<string, string> => Object.fromEntries(results.filter((r) => r.outcome === 'done' && r.base).map((r) => [r.id, r.base!]));
+const mainsOf = (results: EmployeeResult[]): Record<string, string> => Object.fromEntries(results.filter((r) => r.outcome === 'done' && r.base && !r.copies).map((r) => [r.id, r.base!]));
 
 /** The memory one agent's try may take at its peak: its install, a type check and a test run side by side. */
 const TRY_BYTES = 3 * 1024 ** 3;
