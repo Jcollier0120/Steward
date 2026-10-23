@@ -143,6 +143,7 @@ export const say = Object.freeze({
   serverNotRunning: (baseUrl) => `${baseUrl} isn't running`,
   /** @param {string} baseUrl */
   noStartCommand: (baseUrl) => `its server ${baseUrl} isn't running, and the accelerators' config has no startCommand for it`,
+  manorStopped: () => 'the manor is stopped: no model server starts until you start the manor again in its Settings',
   /** @param {string} command @param {string} why */
   couldNotStart: (command, why) => `couldn't start "${command}": ${why}`,
   /** @param {string} program @param {string} baseUrl @param {number} seconds */

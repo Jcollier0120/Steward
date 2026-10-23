@@ -2,6 +2,22 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.99.1
+
+**No model server is started while the manor is stopped from Manor's Settings.**
+
+### What changed
+
+- **`ensureServer` honours Manor's stop.** While Manor's `stopped.json` is in its folder (Settings, **Stop the manor**, until **Start the manor**), a server that is down isn't started: `ensureServer` throws `ManorStopped`, a `ServerNotRunning`, before any start. So a request through `Npu` marks nothing failed and goes on to a server that is already running, if one serves it; with none, its `NpuError` says the manor is stopped (the core's `say.manorStopped`). The keeper's restarts are refused the same way, logged once as a skip, and setup's tests say so.
+  - Before, Reeve's MCP tools or any agent's model work started GenieX or another server again moments after Manor's stop had ended them.
+- **manor.ts' `manorStopped()`**: since when the manor is stopped, or null (no file, or one without `since`). Under `node --test` only a test's own `MANOR_HOME` counts, so a PC with its manor stopped never fails an agent's tests.
+- The NPU benchmark starts its own servers (npu-server.ts' `startServer`) and isn't held: the owner stops the manor to run it on a quiet PC.
+- spec/ACCELERATORS.md: the stopped manor.
+
+### Before you update
+
+- Nothing for an agent: take the kit as usual. It needs a Manor with **Stop the manor**; with an older Manor nothing changes.
+
 ## 2.99.0
 
 **The NPU benchmark measures the same model on the NPU, the graphics and the processor on every route, measures embeddings, and runs a series of runs with a summary of their medians.**

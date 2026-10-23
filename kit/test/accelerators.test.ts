@@ -1199,6 +1199,58 @@ setTimeout(() => process.exit(0), 8000);
   }
 });
 
+test("the manor stopped from Manor's Settings: no server is started, nothing is marked, one already running still serves, and the request says why", async () => {
+  fresh();
+  noGames();
+  const { manorStopped } = await import('./fixture/src/kit/manor.ts');
+  const manor = process.env.MANOR_HOME!;
+  mkdirSync(manor, { recursive: true });
+  const file = path.join(manor, 'stopped.json');
+  const since = new Date().toISOString();
+  // As Manor writes it.
+  writeFileSync(file, JSON.stringify({ since, running: ['reeve'], tasks: [], servers: [], left: [] }));
+  // A start command that would leave a mark: it never runs.
+  const mark = path.join(home, 'started-while-stopped');
+  const script = path.join(home, 'mark.mjs');
+  writeFileSync(script, "import { writeFileSync } from 'node:fs';\nwriteFileSync(process.argv[2], '');\n");
+  process.env.ACCEL_TEST_NODE = process.execPath;
+  const off = { baseUrl: `http://127.0.0.1:${await closedPort()}`, model: 'm', startCommand: ['%accel_test_node%', script, mark] };
+  const card = await fakeServer(() => ({ text: 'from the card' }));
+  try {
+    assert.equal(manorStopped(), since);
+    await assert.rejects(A.ensureServer(off, { waitMs: 2000 }), (e: Error) => e instanceof A.ManorStopped && e instanceof A.ServerNotRunning && e.message === `${off.baseUrl} isn't running, and the manor is stopped: no model server starts until you start the manor again in its Settings`);
+    assert.deepEqual(await A.ensureServer({ baseUrl: card.baseUrl, model: 'm' }), { started: false, waited: false }, 'a server already running is used');
+    // The NPU isn't started: the card, running, answers, and that is no fallback.
+    const both = new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: off }, gpu('gpu-card', { chat: { baseUrl: card.baseUrl, model: 'm' } } as any)], acceleratorOrder: ['npu', 'gpu-card'] }));
+    const a = await both.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
+    assert.equal(a.text, 'from the card');
+    assert.equal(a.fellBackFrom, undefined, 'nothing failed');
+    assert.equal(A.readFailure('npu'), null, 'a stopped manor is not a failure');
+    // Nothing running: the request says why, so nobody waits for it.
+    const alone = new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: off }] }));
+    await assert.rejects(alone.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 }), (e: Error) => e instanceof NpuError && /the NPU's server isn't running; the manor is stopped: no model server starts until you start the manor again in its Settings/.test(e.message));
+    assert.equal(A.readFailure('npu'), null);
+    assert.equal(existsSync(mark), false, 'its start command never ran');
+    // A file Manor didn't finish, or one without its time, isn't a stop.
+    writeFileSync(file, '{"since":');
+    assert.equal(manorStopped(), null);
+    writeFileSync(file, JSON.stringify({ running: [] }));
+    assert.equal(manorStopped(), null);
+    // Under node --test, only a test's own Manor counts: never this PC's.
+    delete process.env.MANOR_HOME;
+    try {
+      assert.equal(manorStopped(), null);
+    } finally {
+      process.env.MANOR_HOME = manor;
+    }
+  } finally {
+    rmSync(file, { force: true });
+    await card.close();
+  }
+  // Started again (Manor removes the file): servers start as before.
+  assert.equal(manorStopped(), null);
+});
+
 test("the warm-up is skipped while the server answered this same model within its keepalive; another model, an older answer or a server just started warms up", async () => {
   fresh();
   noGames();

@@ -15,6 +15,7 @@ import {
   lineLook,
   loadAccelerators,
   lockDirsOf,
+  ManorStopped,
   markFailed,
   noteEmbedded,
   MAX_AHEAD,
@@ -464,6 +465,8 @@ export class Npu {
     let first: { acc: Accelerator; reason: string } | null = null;
     const tried = new Set<string>();
     const notRunning: Accelerator[] = [];
+    /** One of them wasn't started because the manor is stopped (Manor's Settings): said, so nobody waits for it. */
+    let manorWasStopped = false;
     let loadingOn: { acc: Accelerator; reason: string } | null = null;
     for (;;) {
       const { list, skipped, npuFirst } = candidates(
@@ -477,7 +480,7 @@ export class Npu {
           throw new NpuBusy(core.say.modelLoading(theAccelerator(loadingOn.acc), loadingOn.reason, deferred));
         }
         if (notRunning.length && !first) {
-          const also = skipped.map((s) => s.detail).join('; ');
+          const also = [...(manorWasStopped ? [core.say.manorStopped()] : []), ...skipped.map((s) => s.detail)].join('; ');
           throw new NpuError(core.say.serversNotRunning(notRunning, also));
         }
         throw noCandidate(skipped, first);
@@ -534,6 +537,7 @@ export class Npu {
         // Not running, and not to be started: the next candidate, with nothing marked.
         if (e instanceof ServerNotRunning) {
           notRunning.push(acc);
+          if (e instanceof ManorStopped) manorWasStopped = true;
           continue;
         }
         // Its model was still loading: slow, not failed. Nothing is marked; this agent leaves it alone a
