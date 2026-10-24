@@ -118,6 +118,27 @@ Measured on the X2 Elite Extreme (Hexagon v81, 48 GB, 2026-10-23), llama.cpp b11
 - **Its context.** `-c 4096 -b 2048 -ub 512`, as the NPU's embedding server: ten files and a question fit in one request, at 0.55 GB less of the NPU's memory than the cards' flags.
 - **Reeve's warm-up.** Reeve sends a chat warm-up to a server it starts on the NPU; the reranking server answers it (200) without harm.
 
+### Harrier-OSS-v1-0.6B on trial (2026-10-24)
+
+Microsoft's harrier-oss-v1-0.6b (MIT, published 2026-03-30) is Qwen3-Embedding-0.6B's network trained again: `Qwen3Model`, 1,024 dimensions, last-token pooling, queries written the same way (`Instruct: …\nQuery: …`). Its card gives 69.0 on multilingual MTEB v2 against about 64 for Qwen3-Embedding-0.6B (the vendor's figures, not ours). A trial on the X2 Elite Extreme (Hexagon v81, 48 GB) asked whether it should replace Qwen3-Embedding. No pin changed.
+
+- **Its file.** Microsoft publishes no GGUF, and the two others found (a gguf-my-repo Q8_0 and a format of its own) aren't from anyone we trust, so it was converted here: revision f9b9dc8d367d443f2479d27aa5d8d2850c0774ee, every file checked against Hugging Face's own hashes, then llama.cpp b11645's `convert_hf_to_gguf.py --outtype q8_0`. Two conversions gave the same bytes: `harrier-oss-v1-0.6b-Q8_0.gguf`, 639,447,840 bytes, SHA-256 `c9ee3148d6a12b4a6b57bcbdf2fef3a511481590063353ce6e216ce3917859df`. Its metadata is Qwen's GGUF's (qwen3, last-token pooling, the end token 151643 added), plus NFC normalizing, with the vocabulary padded to 151,936 (151,669).
+- **Its vectors.** 77 texts (Reeve's 24 questions with its instruction, 44 of Reeve's chunks, 4 dense and 5 short ones; 21,955 tokens). On the Hexagon, through the NPU's embedding server as setup runs it, against the processor's b11734: cosine 0.99975 or more (median 0.99989), the same nearest chunk for 20 of the 24 questions and 4.96 of the top five. Against Microsoft's float32 weights in PyTorch: 0.99983 or more, with the same token counts. Qwen3-Embedding's, the same way: 0.99915 or more, 24 of 24.
+- **The same speed and memory.** The 77 texts took 4.8 s on the Hexagon with either (about 4,570 tokens a second), and 14.5 s (Harrier) and 15.1 s on the processor at 8 threads. Reeve indexed as fast with either: GamerNexus's 7,775 chunks in 542 s (Qwen3-Embedding) and 541–555 s (Harrier), Reeve's 2,424 in 175 s and 179–180 s. Each server holds 1.10 GB of the NPU's memory (1,102 and 1,104 MB), and 2.5 GB of the PC's after the same work.
+
+Reeve's 24 search questions (the reranker's, above) on frozen copies of the same repositories, the same chunks and the same instruction, only the embedder changed. Reeve keeps 512 of the 1,024 dimensions (`embedDims`). Qwen3-Embedding is trained for that (Matryoshka); Harrier's card doesn't say, so both were measured at 512 and at 1,024. Right file first / in the top five, then the mean reciprocal rank:
+
+| | Qwen3-Embedding, 512 | Harrier, 512 | Qwen3-Embedding, 1,024 | Harrier, 1,024 |
+|---|---|---|---|---|
+| Search alone (hybrid) | 9 / 21, 0.590 | 13 / 21, 0.660 | 9 / 21, 0.597 | 11 / 21, 0.639 |
+| Reranked (blended, ten files) | 12 / 20, 0.640 | 12 / 21, 0.642 | 12 / 21, 0.638 | 11 / 20, 0.619 |
+
+- **A little better without the reranker, the same with it.** At Reeve's 512 dimensions Harrier put four more right files first: it ranked the right file higher on 6 questions, lower on 3, and the same on 15, which 24 questions can't tell from chance (a sign test's p is 0.5). At 1,024 it was two more. Reranked there is no difference (12 and 12; 11 and 12).
+- **Three questions can't be scored.** They name files that have since moved: two jobs went from `.ps1` to `.ts`, and `src/kit/` is left out of Reeve's index. So every run misses them. For the two jobs, both models' search put the moved file first.
+- **Energy wasn't measured.** The owner put the energy runs off until the feature work is done. Both are the same 0.6B network at Q8_0, at the same speed and with the same NPU memory, so a token should cost the same. npu-bench's embedding rows are measured for both before any switch.
+
+**Not switching, for now.** Accuracy comes first, and Harrier's gain isn't clear: it shows only without the reranker (opt-in, so how most PCs search), it is within chance on 24 questions, and it is gone once results are reranked. A switch rebuilds every search index once: this PC's Reeve holds 66,069 chunks, about 80 minutes of the Hexagon at full pace (14 chunks a second), before Clerk's and Chamberlain's indexes. More questions would settle it. If Harrier then wins, the switch is its GGUF on the Hexagon and the graphics cards, and an OpenVINO export for Intel's NPU.
+
 ### Memory on a 16 GB Snapdragon (kit 2.75.1)
 
 Snapdragon X and X2 PCs start at 16 GB, which Windows shows as about 15.6, and the Hexagon has no memory of its own. Windows lets one device hold about half the PC's memory at once (7.8 GB there). Through kit 2.75.0, GenieX's model and the embedding server held 6.9 GB of that between them, and their processes up to 10 GB of the PC's.
