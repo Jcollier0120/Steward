@@ -1,5 +1,5 @@
 /**
- * THIRD-PARTY-NOTICES.txt (kit 2.132.0): the licenses of what others made that a staff member's release carries, kept
+ * THIRD-PARTY-NOTICES.txt (kit 2.134.0): the licenses of what others made that a staff member's release carries, kept
  * with every copy as their makers ask (an MIT license's "this permission notice shall be included"), as Manor's release
  * keeps its own (Manor's tools/notices.ts). release.ts writes it at the zip's top level, made from what the zip carries:
  *

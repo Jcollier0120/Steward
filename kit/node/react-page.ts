@@ -172,7 +172,7 @@ export async function bundlePage(entry: string, esbuild: Esbuild, o: { minify?: 
   return (await bundled(entry, esbuild, o, false)).text;
 }
 
-/** bundlePage's bundle, and the npm packages it carries (kit 2.132.0): for the release's notices (notices.ts). */
+/** bundlePage's bundle, and the npm packages it carries (kit 2.134.0): for the release's notices (notices.ts). */
 export async function bundlePageWith(entry: string, esbuild: Esbuild, o: { minify?: boolean; nodeModules?: string } = {}): Promise<{ text: string; packages: BundledPackage[] }> {
   return bundled(entry, esbuild, o, true);
 }

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-// A release's THIRD-PARTY-NOTICES.txt (notices.ts, kit 2.132.0): made from what it carries, and no release that
+// A release's THIRD-PARTY-NOTICES.txt (notices.ts, kit 2.134.0): made from what it carries, and no release that
 // carries something of others' with no notice for it. And no document in a release (release.ts' isDoc).
 const STEWARD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 process.env.STEWARD_ESBUILD = STEWARD;

@@ -39,7 +39,7 @@
  * the agent runs from, at its top level: src\ (no tests) with src\kit\ in it, art\, package.json, LICENSE and
  * release.json, which names the kit; and kit.json and tools\kit.ts, so the copy can fill its kit again (and the
  * Steward, installed, has the tools\kit.ts it hands out). So an installed agent needs neither the Steward nor GitHub.
- * No document goes (kit 2.132.0): not a .md anywhere in it (the kit's specs and READMEs in src\kit\ included), which
+ * No document goes (kit 2.134.0): not a .md anywhere in it (the kit's specs and READMEs in src\kit\ included), which
  * are for the repository, but a license or notice file. THIRD-PARTY-NOTICES.txt goes beside them, made from what the
  * zip carries of others' (notices.ts): a release that carries something with no notice for it isn't built.
  *
@@ -199,7 +199,7 @@ export const sumsText = (files: { name: string; hash: string }[]) => files.map((
 
 const isTest = (f: string) => /\.(test|spec)\.[cm]?[jt]s$/.test(f);
 
-/** A document, for the repository and never in a release (kit 2.132.0): a .md, but a license or notice file. */
+/** A document, for the repository and never in a release (kit 2.134.0): a .md, but a license or notice file. */
 export const isDoc = (f: string) => /\.md$/i.test(f) && !isLicenseFile(path.posix.basename(f));
 
 /** Picks the release's files from a repo's (paths relative to its root, either slash). */
