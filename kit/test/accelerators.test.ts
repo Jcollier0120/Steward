@@ -1199,6 +1199,22 @@ setTimeout(() => process.exit(0), 8000);
   }
 });
 
+test("a server whose program isn't there says so plainly, and it's a failure (kit 2.113.3); a program on PATH is the spawn's to find", async () => {
+  fresh();
+  noGames();
+  // As on the X2 whose GenieX was in the Claude app's own AppData alone: the staff found no geniex.exe.
+  const folder = path.join(home, 'GenieX CLI');
+  process.env.ACCEL_TEST_GENIEX = folder;
+  const gone = { baseUrl: `http://127.0.0.1:${await closedPort()}`, model: 'm', startCommand: ['%accel_test_geniex%\\geniex.exe', 'serve'] };
+  const said = `"geniex.exe" isn't installed where the staff look for it (${folder}\\geniex.exe). They set it up again by themselves; to do it now, open Castellan and choose Set up local AI`;
+  await assert.rejects(A.ensureServer(gone, { waitMs: 2000 }), (e: Error) => e instanceof A.ProgramMissing && e instanceof A.AcceleratorDown && e.message === said);
+  const alone = new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: gone }] }));
+  await assert.rejects(alone.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 }), (e: Error) => e instanceof NpuError && e.message.includes(said));
+  assert.ok(A.readFailure('npu'), 'marked failed, as any start that fails');
+  await assert.rejects(A.ensureServer({ ...gone, startCommand: ['no-such-program-anywhere'] }, { waitMs: 2000 }), (e: Error) => !(e instanceof A.ProgramMissing) && /couldn't start "no-such-program-anywhere"/.test(e.message));
+  delete process.env.ACCEL_TEST_GENIEX;
+});
+
 test("the manor stopped from Manor's Settings: no server is started, nothing is marked, one already running still serves, and the request says why", async () => {
   fresh();
   noGames();

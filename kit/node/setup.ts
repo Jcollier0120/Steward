@@ -17,6 +17,7 @@ import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
 import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, fallbackDevices, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage, workOrderFor } from './npu-vendors.ts';
+import { inAppData, type OutsideJob, type OutsideSetupResult, OutsideUnavailable, packagedOutsideTests, runOutside } from './outside.ts';
 import { RETIRED_GRACE_MS } from './retired.ts';
 import { rememberSignatures, signaturesFile } from './signatures.ts';
 
@@ -2885,6 +2886,93 @@ export interface SetupOptions {
   app?: string;
   /** Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu() read now, when left out). */
   gpuWithNpu?: boolean;
+  /**
+   * The person said yes to the download already (kit 2.113.3): setup's own run outside a packaged app (outside-run.ts),
+   * which was asked in the app. Its plan isn't said again, and a second download (the card's, the processor's, in the
+   * NPU's place) isn't made without `yes`: nobody is there to ask.
+   */
+  asked?: boolean;
+  /**
+   * The packaged app setup runs inside (outside.ts' packagedApp), or null; and how it runs outside it (runOutside).
+   * Asked only when setup isn't given a detection or io of its own; none in a test run unless the test gives one.
+   */
+  packaged?: () => Promise<unknown>;
+  outside?: (job: OutsideJob) => Promise<OutsideSetupResult>;
+}
+
+/**
+ * What a plan would write under AppData (outside.ts' inAppData), each in a few words. In a packaged app (the Claude
+ * desktop app is one) those writes would land in the app's own folder, which nothing outside it sees: setup runs
+ * outside it instead, and refuses them where it can't (setupCommand). From kit 2.113.3:
+ * - Qualcomm's route: GenieX itself (its installer installs it for this user in %LOCALAPPDATA%\GenieX CLI, and writes
+ *   HKCU; Castellan's signed build is put together there), and the kit's build of its plugin (npu-patch.ts) over its
+ *   llama_cpp folder. Its models go in %USERPROFILE%\.cache\geniex, and the Hexagon embedding server (llama.cpp's,
+ *   over copies of GenieX's libraries) in the tools home: neither is AppData.
+ * - Intel's (OpenVINO Model Server, Castellan's OpenVINO GenAI build, its compile cache, its models) and AMD's
+ *   (FastFlowLM and its models in %USERPROFILE%\.flm) are unpacked in the tools home, and llama.cpp's builds and the
+ *   models for the graphics and the processor are downloaded there: none of them is AppData, unless the tools home is.
+ * Any installer counts, wherever its program goes: an installer's registry writes are redirected too.
+ */
+export function writesAppData(plan: SetupPlan, env: NodeJS.ProcessEnv = process.env): string[] {
+  const out: string[] = [];
+  const tools = path.dirname(plan.modelsDir);
+  const add = (what: string, p: string | null | undefined) => {
+    if (p && inAppData(p, env) && !out.some((x) => x.endsWith(`(${p})`))) out.push(`${what} (${p})`);
+  };
+  for (const n of [plan.npu, plan.npu?.fallback]) {
+    if (!n) continue;
+    const server = `${n.route.server} ${n.route.version}`;
+    if (!n.installed && n.download && n.route.install.kind === 'inno') out.push(`${server}'s installer, which installs it for this user (${path.dirname(n.exe)})`);
+    else if (!n.installed) add(server, path.dirname(n.exe));
+    add(`${n.route.server}'s runtime`, n.runtime?.into);
+    if (n.patch) add(`Castellan's build of ${n.route.server}'s ${n.patch.file}`, path.join(expandRoute(n.patch.folder, { tools, env }), n.patch.file));
+    if (n.embed && (n.embed.download || n.embed.server.overlay)) add(`${n.embed.server.server}, for the NPU's embeddings`, n.embed.folder);
+    add(`the NPU's embedding model`, n.embed?.modelDownload?.dest);
+    for (const m of n.models.filter((m) => !m.have)) add(m.id, m.present ? expandRoute(m.present, { tools, env }) : null);
+  }
+  for (const d of plan.downloads.filter((d) => !d.have)) add(d.what, d.unpackTo ?? d.dest);
+  return out;
+}
+
+/**
+ * The rest of setup run outside the packaged app it was started in (kit 2.113.3: outside.ts), once the person has seen
+ * the plan and said yes: as a one-off task Task Scheduler starts, its lines passed on as they come. Its exit code and
+ * entries; null when Task Scheduler won't run it and nothing it writes is in AppData (setup then runs here, as before).
+ * Where something is, it's refused, in plain words.
+ */
+async function setUpOutside(o: SetupOptions, plan: SetupPlan, x: { configFile: string; home: string; gpuWithNpu: boolean }, log: (line: string) => void): Promise<{ code: number; plan: SetupPlan; entries?: Accelerator[] } | null> {
+  log("This runs inside a packaged app (the Claude desktop app is one), where Windows keeps what's written to AppData to that app alone, out of the staff's sight. So setup runs from Task Scheduler instead; its lines follow.");
+  const options: Extract<OutsideJob, { kind: 'setup' }>['options'] = {
+    ids: o.ids,
+    ...(o.kinds?.length ? { kinds: o.kinds } : {}),
+    ...(o.yes ? { yes: true } : {}),
+    configFile: x.configFile,
+    home: x.home,
+    gpuWithNpu: x.gpuWithNpu,
+    ...(o.app ? { app: o.app } : {}),
+    ...(o.noneConfigured ? { noneConfigured: o.noneConfigured } : {}),
+    ...(o.npuNoteFile ? { npuNoteFile: o.npuNoteFile } : {}),
+    ...(o.npuReportFile !== undefined ? { npuReportFile: o.npuReportFile } : {}),
+    ...(o.blockedFile !== undefined ? { blockedFile: o.blockedFile } : {}),
+    ...(o.signaturesFile !== undefined ? { signaturesFile: o.signaturesFile } : {}),
+  };
+  try {
+    const r = await (o.outside ?? ((job: OutsideJob) => runOutside<OutsideSetupResult>(job, { log })))({ kind: 'setup', options });
+    return { code: r.code, plan, entries: r.entries as Accelerator[] };
+  } catch (e: any) {
+    const why = String(e?.message ?? e).split(/\r?\n/)[0];
+    if (!(e instanceof OutsideUnavailable)) {
+      log(`problem: setup outside the app stopped: ${why}`);
+      return { code: 1, plan };
+    }
+    const writes = writesAppData(plan, o.env as NodeJS.ProcessEnv | undefined);
+    if (writes.length) {
+      log(`problem: setup couldn't run outside the app (${why}), and inside it these would be the app's alone: ${writes.join('; ')}. So nothing is set up. Set up local AI from Manor's page, or run setup from a terminal outside the app.`);
+      return { code: 1, plan };
+    }
+    log(`note: setup couldn't run outside the app (${why}). Nothing it sets up goes in AppData, so it runs here.`);
+    return null;
+  }
 }
 
 /**
@@ -2928,11 +3016,12 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   // What this PC has, for every program that reads Reeve's config: a model is never called the NPU on a PC without one.
   const hw = o.detection ? null : hardwareOf(detection);
   if (hw) rememberHardware(hw);
-  log(`Looking up what this PC needs (llama.cpp ${LLAMA_PIN.build} and the models, as this kit pins them)...`);
+  // Setup's own run outside a packaged app (outside-run.ts) was planned, said and asked in the app already.
+  if (!o.asked) log(`Looking up what this PC needs (llama.cpp ${LLAMA_PIN.build} and the models, as this kit pins them)...`);
   const releases = await (o.releases ?? llamaReleases)();
   const withNpu = o.gpuWithNpu ?? gpuWithNpu().on;
   const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu, npuRefresh: readNpuRefresh(configFile) });
-  for (const l of describePlan(plan)) log(l);
+  if (!o.asked) for (const l of describePlan(plan)) log(l);
   const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu || !!plan.npuRerank;
   if (!settingUp && !plan.dropNpu) {
     log('Nothing to set up.');
@@ -2944,12 +3033,19 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     log('Dry run: nothing downloaded, config.json unchanged.');
     return { code: 0, plan };
   }
-  if (settingUp && plan.downloadBytes && !o.yes) {
+  if (settingUp && plan.downloadBytes && !o.yes && !o.asked) {
     const ok = o.confirm ? await o.confirm(`Download ${mb(plan.downloadBytes)}${plan.terms.length ? ', under the terms above' : ''}? [y/N] `) : false;
     if (!ok) {
       log(o.confirm ? 'Not downloading.' : `It would download ${mb(plan.downloadBytes)}: run again with --yes.`);
       return { code: 1, plan };
     }
+  }
+  // Inside a packaged app (the Claude desktop app), what setup and the servers it tries write to AppData would be that
+  // app's alone: the rest runs outside it, from Task Scheduler (kit 2.113.3). Asked only for the PC's own setup, not a test's.
+  const packaged = o.asked ? null : (o.packaged ?? (o.io || o.detection ? null : packagedOutsideTests));
+  if (settingUp && packaged && (await packaged())) {
+    const outside = await setUpOutside(o, plan, { configFile, home: o.home ?? toolsHome(), gpuWithNpu: withNpu }, log);
+    if (outside) return outside;
   }
   // One ask for catalogs for the whole command: its runs for the card and the processor too.
   const base = { log, ...o.io };

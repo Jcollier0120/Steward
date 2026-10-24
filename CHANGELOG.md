@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.197
+
+**It hands out the kit 2.113.3: setting up local AI from the Claude desktop app no longer hides the NPU's server from the staff, and a server whose program is missing is set up again by itself.**
+
+### What changed
+
+- **Setup runs outside the Claude desktop app.** The Claude desktop app is a packaged app: Windows keeps what a session in it writes to AppData in the app's own folder, where the staff can't see it. Setting up local AI from a session put Qualcomm's GenieX there, so on that Snapdragon every request to the NPU failed. Now setup asks first, as before, then runs from Task Scheduler, outside the app, and shows its progress in the session. This applies on every maker's NPU: Qualcomm, Intel and AMD.
+- **If Task Scheduler won't run it**, setup says so plainly. It refuses whatever would have landed in the app's own folder (GenieX, on a Snapdragon) instead of hiding it there. Intel's and AMD's servers don't go in AppData, so their setup goes on as before.
+- **The keeper's update of GenieX's plugin** runs outside the app the same way.
+- **A server whose program is missing says so.** The error no longer reads "spawn … ENOENT". It says the program isn't installed where the staff look for it. After five minutes the staff set that server up again by themselves, at most every six hours while it still fails. A start command of your own (a script, a program elsewhere) is never replaced.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A PC whose NPU server was set up from the Claude app before this has it set up again by the staff, a few minutes after the update; that downloads the server again.
+
 ## 0.36.196
 
 **It hands out the kit 2.113.2: the guide says why pictures on an Intel Core Ultra stay on the NPU, though the graphics read one for less energy in the benchmark.**

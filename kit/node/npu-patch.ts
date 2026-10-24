@@ -6,6 +6,7 @@ import type { Detection } from './detect.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { NPU_REFRESH_RETRY_MS, NPU_REFRESH_TRIES, serverFailed, servers, stillAnswering } from './npu-refresh.ts';
 import { atVersion, compareVersions, expandRoute, hostedPatchFile, installedVersion, NPU_CATALOG, type NpuCatalog, type NpuPluginPatch, type NpuRoute, pinnedRoute, pluginPatchOf, runsRoute, sameFile, sha256File } from './npu-vendors.ts';
+import { inAppData, type OutsideJob, packagedOutsideTests, runOutside } from './outside.ts';
 
 /**
  * A file of the NPU's server replaced with the kit's own build of it (npu-vendors.ts' NpuPluginPatch): on the Snapdragon
@@ -85,6 +86,13 @@ export interface NpuPatchDeps {
   /** The NPU entry's test (a picture and a chat), in the turn the caller holds: the problems, none when it answered properly. */
   test: (e: AcceleratorEntry) => Promise<string[]>;
   log: (line: string) => void;
+  /**
+   * The packaged app this keeper runs inside (outside.ts' packagedApp), or null: there, a server's file in AppData
+   * (GenieX's, in %LOCALAPPDATA%\GenieX CLI) is moved by a run outside it (`outside`: outside.ts' runOutside), since in
+   * the package it would move for this process alone (kit 2.113.3). None in a test run unless the test gives one.
+   */
+  packaged?: () => Promise<unknown>;
+  outside?: (job: OutsideJob) => Promise<unknown>;
 }
 
 export const npuPatchFile = (configFile: string) => path.join(path.dirname(configFile), 'npu-patch.json');
@@ -163,7 +171,7 @@ export async function putPatchIn(target: string, from: string, want: string, isS
 }
 
 /** GenieX's own file put back from `.stock`: the kit's set aside (removed once nothing has it loaded). */
-function putStockBack(target: string): void {
+export function putStockBack(target: string): void {
   const aside = setAside(target);
   removeQuietly(aside);
   renameSync(target, aside);
@@ -212,7 +220,13 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
     return { did, ...(r.problems?.length ? { problems: r.problems } : {}), ...(r.retryAt ? { retryAt: r.retryAt } : {}) };
   };
   if (!target) return done(npu?.supported ? 'not-here' : 'no-npu');
-  removeQuietly(setAside(target));
+  // The server's file in AppData, from a keeper inside a packaged app (outside.ts): moved by a run outside it, and
+  // nothing removed meanwhile (a look from outside removes what's left over).
+  const viaOutside = inAppData(target, d.env ?? process.env) && !!(await (d.packaged ?? packagedOutsideTests)());
+  const outside = d.outside ?? ((job: OutsideJob) => runOutside(job, { log: d.log }));
+  const stockBack = async (t: string) => (viaOutside ? void (await outside({ kind: 'stock-back', target: t })) : putStockBack(t));
+  const patchIn = async (t: string, f: string, want: string, stock: boolean) => (viaOutside ? void (await outside({ kind: 'patch-in', target: t, from: f, want, isStock: stock })) : putPatchIn(t, f, want, stock, hash));
+  if (!viaOutside) removeQuietly(setAside(target));
   if (!existsSync(target)) return done('not-installed');
 
   const now = await hash(target);
@@ -227,7 +241,7 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
 
   // A file that is neither GenieX's pinned one nor a kit's build: GenieX updated, or someone's own. Left as it is.
   if (!ownBuild && !olderBuild && !isStock) {
-    if (existsSync(backup)) removeQuietly(backup);
+    if (existsSync(backup) && !viaOutside) removeQuietly(backup);
     return done('hands-off');
   }
 
@@ -254,8 +268,8 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
   if (!entry?.chat?.startCommand?.length || !route || !runsRoute(entry, route, d.tools)) {
     // Nothing of the manor's runs on it to test with: put GenieX's own back if a build is there, else leave it.
     if (!isStock && (await backupGood())) {
-      putStockBack(target);
-      d.log(`${path.basename(target)}: ${server}'s own is back (${notWanted ?? "the NPU's entry doesn't run " + server})`);
+      await stockBack(target);
+      d.log(`${path.basename(target)}: ${server}'s own is back (${notWanted ??"the NPU's entry doesn't run " + server})`);
       return done('restored', sums);
     }
     return done('no-npu', sums);
@@ -271,7 +285,7 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
     try {
       await d.withTurn(async () => {
         for (const s of chatServer(entry)) await d.stopServer(s.program, s.base);
-        putStockBack(target);
+        await stockBack(target);
       });
     } catch (e) {
       if (e instanceof QueueFull || e instanceof LockTimeout) return { did: 'busy' };
@@ -291,7 +305,7 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
       const stayed = await stillAnswering(d, chatServer(entry).map((s) => s.base));
       if (stayed.length) return stayed;
       try {
-        await putPatchIn(target, from, patch!.patched.sha256, isStock, hash);
+        await patchIn(target, from, patch!.patched.sha256, isStock);
       } catch (e: any) {
         return [`${path.basename(target)} couldn't be put in: ${e?.message ?? e}`];
       }
@@ -299,7 +313,7 @@ export async function patchNpu(d: NpuPatchDeps): Promise<NpuPatchOutcome> {
       if (p.length) {
         for (const s of chatServer(entry)) await d.stopServer(s.program, s.base);
         try {
-          putStockBack(target);
+          await stockBack(target);
         } catch (e: any) {
           p.push(`${server}'s own ${path.basename(target)} couldn't be put back: ${e?.message ?? e}`);
         }

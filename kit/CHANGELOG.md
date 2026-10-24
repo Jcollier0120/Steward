@@ -2,6 +2,35 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.113.3
+
+**Setup runs outside a packaged app (the Claude desktop app is one), and a server whose program is gone is set up again by the keeper.**
+
+### What's new
+
+- **outside.ts.** It finds the packaged app a process runs inside, and runs a step outside it.
+  - `packagedApp` walks the process's ancestors (Win32_Process) to one from WindowsApps; `parseProcessTable` and `packagedAncestor` are ported from Manor's windows.ts. `packagedOutsideTests` gives none in a test run.
+  - `inAppData` tells whether a path is in %LOCALAPPDATA%, %APPDATA% or the profile's AppData. %TEMP% doesn't count: Windows doesn't redirect it.
+  - `runOutside(job)` runs a job as a one-off Task Scheduler task, like `manor install`'s hop: no trigger, InteractiveToken, LeastPrivilege, hidden, `conhost --headless node outside-run.ts <folder>`. It passes on the run's log lines as they come and returns its result. The task is deleted after. Task Scheduler refusing, or not starting it within 2 minutes, throws `OutsideUnavailable`.
+  - The job folder is in the accelerators' home (`outside\<id>`), never in AppData. Its job.json carries the kit's own variables (`carriedEnv`), never one that names a token, key, secret or password.
+- **outside-run.ts** is the run outside. It sets the job's variables before importing any of the kit, since the kit's modules read their folders as they load, and sets `KIT_OUTSIDE=1`, so a run outside never looks for a package again.
+- **server-repair.ts.** `missingServers(raw)` lists the enabled servers whose program isn't there. It only counts a program setup puts there (`setupFolders`: the tools home, and GenieX's %LOCALAPPDATA%\GenieX CLI). `repairMissing(deps)` sets one of those up again (`setupCommand({ ids: [id], yes: true })`) once it has been missing for 5 minutes across looks. It sets up one server a look, never while the manor is stopped, and retries a failing one at most every 6 hours. Its record is server-repair.json, beside config.json.
+- **keeper.ts' `startRepairs`.** It runs the repair in the background of the keeper's look (`keeperLook`, with the PC's own reaper), not while the NPU's refresh is testing.
+- **`ProgramMissing`** (accelerators.ts, an `AcceleratorDown`): a startCommand whose absolute program isn't there is said with `core.say.notInstalled` rather than Node's ENOENT. Node gives ENOENT for a missing working folder too.
+
+### What changed
+
+- **`setupCommand`** plans, says the plan and asks as before. Then, inside a packaged app, it runs the rest outside (`runOutside` of a `setup` job) and returns that run's code and entries.
+  - It hops on every route. The servers setup tries write their own caches to AppData too (llama.cpp's OpenCL kernels).
+  - Where Task Scheduler won't run it, the steps `writesAppData(plan)` lists are refused in a plain message, and nothing is set up. On Qualcomm's route those are GenieX's installer (HKCU too) or Castellan's signed build put together in %LOCALAPPDATA%\GenieX CLI, and a plugin patch in its folder. Intel's and AMD's routes have none unless the tools home is in AppData, so their setup runs in the process, with a note.
+  - New `SetupOptions`: `asked` (the run outside: the plan isn't said or asked again), `packaged` and `outside` (tests). Nothing is asked about packages when setup is given a `detection` or `io` of its own.
+- **`patchNpu`** (npu-patch.ts): inside a packaged app, the moves of a server file in AppData (GenieX's plugin) are `patch-in` and `stock-back` jobs run outside. Refused, the plugin "couldn't be put in", and GenieX keeps its own. `putStockBack` is exported. New deps: `packaged`, `outside`.
+- **`core.say.notInstalled(program, file)`**: "… isn't installed where the staff look for it (…). They set it up again by themselves; to do it now, open Castellan and choose Set up local AI".
+
+### Before you update
+
+- Nothing: take the kit as usual. An agent that runs the keeper's look (the Smith, Reeve) sets up again a server whose program is missing, a few minutes after it takes this kit. On a PC whose GenieX was set up from the Claude app, that means downloading and installing GenieX again, for real this time.
+
 ## 2.113.2
 
 **Intel's pictures stay on the NPU, and the guide says why.**
