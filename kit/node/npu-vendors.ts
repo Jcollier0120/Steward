@@ -454,13 +454,27 @@ export interface NpuEmbedServer {
  * A route's reranker (kit 2.100.0): its embedding server's program (llama.cpp on the Hexagon, the route's embedServer),
  * from the same folder with the same environment, started with `--reranking` on a port of its own, with setup's
  * reranker model (setup.ts' MODEL_SPECS.rerank: the file a graphics card's or the processor's reranker runs). Set up only
- * when the reranker is asked for (setup's `--serve rerank`), on a PC with the memory for it (not smallPc).
+ * when the reranker is asked for (setup's `--serve rerank`), on a PC with the memory for it (rerankFits).
  */
 export interface NpuRerankServer {
   port: number;
   /** Its arguments: {port}, {file} (the model's path), {model} (the model's id) and {tools} filled in. */
   serve: string[];
   basis: string;
+  /**
+   * The generations (their ids) whose PCs under idleStop.smallPcGb run it too (kit 2.135.4), beside chat and
+   * embeddings, as a bigger PC does: measured there on a 16 GB PC's memory. Another generation's small PC leaves the
+   * reranker where it went before.
+   */
+  smallPc?: { generations: string[]; basis: string };
+}
+
+/**
+ * Whether a PC with this much memory runs its route's reranker on the NPU (kit 2.135.4): any PC of idleStop.smallPcGb
+ * or more, and a smaller one whose generation the route's rerankServer names in its `smallPc`.
+ */
+export function rerankFits(route: Pick<NpuRoute, 'rerankServer'>, generation: string | null | undefined, ramBytes: number | null | undefined): boolean {
+  return !smallPc(ramBytes) || (!!generation && !!route.rerankServer?.smallPc?.generations.includes(generation));
 }
 
 /** An embedding model downloaded as a file into the tools home's models folder (where setup puts the graphics card's): the same file, so the same index. */

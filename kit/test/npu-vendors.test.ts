@@ -309,7 +309,20 @@ test('every route in npu-vendors.json is whole: a pinned https download, an inst
       assert.deepEqual(validateKeeperConfig({ workOrder: wo }), [], `${vendor} ${id}`);
       assert.deepEqual(core.readWorkOrder(wo), wo, `${vendor} ${id}`);
     }
+    // The generations whose small PCs keep the NPU's reranker (kit 2.135.4): ones the route supports, with what was
+    // measured; any PC of 20 GB or more keeps it, whatever its generation.
+    const rs = r.rerankServer;
+    if (rs?.smallPc) {
+      assert.ok(rs.smallPc.generations.length && rs.smallPc.generations.every((id) => r.generations[id]?.supported), `${vendor}: ${rs.smallPc.generations}`);
+      assert.ok(rs.smallPc.basis.length > 40 && /MB|GB/.test(rs.smallPc.basis), `${vendor}: its figures`);
+      for (const id of Object.keys(r.generations)) {
+        assert.equal(V.rerankFits(r, id, 16 * 1024 ** 3), rs.smallPc.generations.includes(id), `${vendor} ${id} at 16 GB`);
+        assert.equal(V.rerankFits(r, id, 32 * 1024 ** 3), true, `${vendor} ${id} at 32 GB`);
+      }
+      assert.equal(V.rerankFits(r, null, 16 * 1024 ** 3), false, 'a generation nobody knows, on a small PC');
+    }
   }
+  assert.deepEqual(V.NPU_CATALOG.routes.qualcomm.rerankServer?.smallPc?.generations, ['snapdragon-x2'], 'the X2 alone: the first X was not measured');
 });
 
 test("each work's order by generation (kit 2.111.0): AMD's Ryzen AI 300 sends every picture to the Radeon (kit 2.135.1, the owner's ruling); the others the NPU first", () => {

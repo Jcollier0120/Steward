@@ -16,7 +16,7 @@ import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, fallbackDevices, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, plannedAt, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage, workOrderFor } from './npu-vendors.ts';
+import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, fallbackDevices, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, plannedAt, planNpu, type PowerToolCheck, rerankFits, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage, workOrderFor } from './npu-vendors.ts';
 import { inAppData, type OutsideJob, type OutsideSetupResult, OutsideUnavailable, packagedOutsideTests, runOutside } from './outside.ts';
 import { RETIRED_GRACE_MS } from './retired.ts';
 import type { StageDeps } from './set-up-again.ts';
@@ -987,9 +987,11 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   const npuServes = new Set<EndpointKind>(npu ? npu.kinds : det?.supported && configuredNpu && !installDefault ? ENDPOINT_KINDS.filter((k) => serves(configuredNpu, k)) : []);
   // The reranker on the NPU (kit 2.100.0), where its route runs one on its embedding server's program (a Snapdragon's
   // llama.cpp on the Hexagon, npu-vendors.json's rerankServer) and the NPU has that server, set up now or before: when
-  // it's asked for with no accelerator named (or the NPU named), and kept when the NPU is set up again. Not on a PC with
-  // little memory (smallPc), whose NPU servers already give way to its chat: the reranker goes where it went before.
-  const rerankRoute = det?.supported && det.vendor && !o.skipNpu && !smallPc(o.detection.ramBytes) && (askedNpu || !o.ids.length) ? (npu?.route ?? NPU_CATALOG.routes[det.vendor]) : undefined;
+  // it's asked for with no accelerator named (or the NPU named), and kept when the NPU is set up again. On a PC with
+  // little memory (smallPc) only where its generation was measured beside chat and embeddings (a Snapdragon X2, kit
+  // 2.135.4: rerankFits); on another, the reranker goes where it went before.
+  const rerankAt = det?.supported && det.vendor && !o.skipNpu && (askedNpu || !o.ids.length) ? (npu?.route ?? NPU_CATALOG.routes[det.vendor]) : undefined;
+  const rerankRoute = rerankAt && rerankFits(rerankAt, det?.generation, o.detection.ramBytes) ? rerankAt : undefined;
   const hasEmbedServer = !!rerankRoute && (npu ? !!npu.embed : !!configuredNpu && !installDefault && !!npuRerank(rerankRoute, configuredNpu.embed, { tools: o.home, file: '', model: '' }));
   const rerankOnNpu = !!rerankRoute?.rerankServer && hasEmbedServer && (kinds.includes('rerank') || (!!npu && !!configuredNpu?.rerank));
   // What the cards and the processor are asked for: the rest.
