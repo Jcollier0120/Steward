@@ -191,8 +191,10 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   // A release that signs waits while this PC can't (SimplySign Desktop not connected): nothing is built, nothing fails,
   // and the next round looks again (signing.ts). Before the tasting, which it would only have to do again. Not one whose
   // kit takes the signed native files a release before kept from the same sources: it signs nothing (needsSigning).
-  const signs = e.release === TAG_RELEASE ? null : signsWith({ kitJson: pinText, signTs: await showFile(run, repo, remote, 'tools/sign.ts'), release: e.release });
-  if (signs && (await needsSigning(run, { id: e.id, repo, commit, kitJson: pinText }))) {
+  // On the PC that releases Castellan, a kit that signs its scripts signs them with the owner's certificate (signsWith).
+  const castellan = !!releasesRepoEnv(ctx.settings).MANOR_RELEASES_REPO;
+  const signs = e.release === TAG_RELEASE ? null : signsWith({ kitJson: pinText, signTs: await showFile(run, repo, remote, 'tools/sign.ts'), release: e.release, castellan });
+  if (signs && (await needsSigning(run, { id: e.id, repo, commit, kitJson: pinText, castellan, checkout: checkoutOf(e) }))) {
     const down = await signingProblem(run, signs);
     if (down) {
       ctx.log(`[${e.id}] v${version} waits until this PC can sign: ${down}`);

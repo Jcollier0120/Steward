@@ -24,7 +24,8 @@ import { download, type Download } from './setup.ts';
  *   generation measured for it: OPENVINO_GENERATIONS), and the model from the manor's releases, each pinned by size and
  *   SHA-256, keeping only the files it uses and their notices. About 226 MB to fetch on a Snapdragon, 242 MB kept
  *   (Qualcomm's compiler alone is 182 MB), and 13 MB of compiled graphs; 199 MB on an Intel Core Ultra, 131 MB kept
- *   (OpenVINO's plugin is 112 MB), and 48 MB of compiled graphs. Until all of it is there, Windows' OCR reads, as before.
+ *   (OpenVINO's plugin is 112 MB), and 48 MB of compiled graphs; 81 MB on an AMD or Intel PC that reads on the
+ *   processor, 19 MB kept. Until all of it is there, Windows' OCR reads, as before.
  * - The program (a kit helper, signed: prebuilt.ts) loads the model once and stays, reading picture after picture,
  *   until no picture has come for two minutes. It runs in the cache folder, where what a runtime leaves in its working
  *   folder (VitisAI's signature files) belongs, and keeps each NPU's compiled graphs there.
@@ -33,8 +34,8 @@ import { download, type Download } from './setup.ts';
  *   OCR instead of waiting.
  * - Before it reads anything, the program reads a picture it draws itself on the NPU and on the processor; an NPU that
  *   reads it differently isn't used. Where there's no NPU the model can use (AMD's is still to be measured, and Intel
- *   generations other than OPENVINO_GENERATIONS), it reads on the processor only when ON_PROCESSOR says that's worth
- *   it; else Windows' OCR.
+ *   generations other than OPENVINO_GENERATIONS), or an NPU that fails that check, it reads on the processor
+ *   (ON_PROCESSOR).
  *
  * KIT_OCR_ENGINE: `windows` reads with Windows' OCR alone, `model` with the model wherever it can (on the processor
  * too); unset, the model where it's worth it. Under node:test it's Windows' OCR unless KIT_OCR_ENGINE says otherwise,
@@ -143,8 +144,8 @@ export const OPENVINO_PACK: NpuPack = {
  * plugin fetched for it (kit 2.117.0). Measured by ocr-check on an Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU
  * 3720 shows Meteor Lake's 7D1D), 2026-10-24: 1,212 of 1,253 lines exactly against Windows' OCR's 736, no group worse,
  * and 55 ms of processor a picture against 61. It spends more a picture than Windows' OCR (859 mJ against 465 mJ over
- * rest, the package's): the owner chose the model for how much better it reads. Other generations keep Windows' OCR
- * until they're measured.
+ * rest, the package's): the owner chose the model for how much better it reads. Other generations read with the model
+ * on the processor until they're measured (ON_PROCESSOR).
  */
 export const OPENVINO_GENERATIONS: readonly string[] = ['meteor-lake'];
 
@@ -171,10 +172,14 @@ export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt
 };
 
 /**
- * Whether the model reads on the processor where no NPU can (spec/OCR.md, "On the processor"): measured on a Snapdragon
- * X2 Elite's processor against Windows' OCR.
+ * Whether the model reads on the processor where no NPU can: on an AMD PC until its NPU's route (VitisAI) is measured,
+ * an Intel PC whose NPU isn't of OPENVINO_GENERATIONS or that has none, and a PC whose NPU fails the program's check
+ * (kit 2.124.0; AMD's and Intel's since 2.121.0 and 2.122.0). Windows' OCR costs less there, but the owner's rule,
+ * 2026-10-24, is never to trade how well it reads for less power. On a Core Ultra 5 225U's processor it reads the
+ * check's lines as on the NPU, 1,212 of 1,253 against Windows' OCR's 736, at 16 times the processor time a picture;
+ * on a Snapdragon X2 Elite's, 20 times (spec/OCR.md, "On the processor").
  */
-export const ON_PROCESSOR = false;
+export const ON_PROCESSOR = true;
 
 /** How many pages are read in one turn of the NPU: about half a second's work, so other model work comes in between. */
 export const TURN_PAGES = 8;

@@ -41,7 +41,7 @@ test("the plugin a PC takes: Qualcomm's on Arm, Intel's on a generation measured
   assert.equal(m.packFor('arm64', {}), m.QNN_PACK);
   assert.equal(m.packFor('x64', {}), null, 'no NPU report in a test run');
   assert.equal(m.packFor('x64', {}, intel('meteor-lake')), m.OPENVINO_PACK, "Intel's NPU 3720 was measured");
-  assert.equal(m.packFor('x64', {}, intel('lunar-lake')), null, 'a generation not measured yet keeps Windows OCR');
+  assert.equal(m.packFor('x64', {}, intel('lunar-lake')), null, 'a generation not measured yet: no plugin, the processor reads');
   assert.equal(m.packFor('x64', {}, intel(null)), null);
   assert.equal(m.packFor('x64', {}, () => ({ vendor: 'amd' as const, generation: 'xdna2' })), null, "AMD's NPU is still to be measured");
   assert.equal(m.packFor('x64', {}, () => null), null, 'no NPU, or no setup yet');
@@ -187,16 +187,17 @@ function readyPlace(arch: 'arm64' | 'x64', pack: any): string {
   return where;
 }
 
-test("not fetched yet: Windows' OCR reads while the fetch starts; not worth it here: nothing fetched at all", async () => {
+test("not fetched yet: Windows' OCR reads while the fetch starts; told so, nothing fetched at all", async () => {
   const fetches: string[] = [];
   const fetch = (p: any) => void fetches.push(p.home);
   const where = path.join(home, 'empty');
   assert.equal(await m.modelReader({ env: {}, arch: 'arm64', home: where, fetch }), null);
   assert.deepEqual(fetches, [where]);
   assert.equal(await m.modelReader({ env: {}, arch: 'x64', home: where, fetch }), null);
-  assert.deepEqual(fetches, [where], m.ON_PROCESSOR ? 'fetched for the processor' : "an x64 PC without an NPU the model uses fetches nothing (ON_PROCESSOR is off)");
+  const x64 = m.ON_PROCESSOR ? [where, where] : [where];
+  assert.deepEqual(fetches, x64, m.ON_PROCESSOR ? 'fetched for the processor' : "an x64 PC without an NPU the model uses fetches nothing (ON_PROCESSOR is off)");
   assert.equal(await m.modelReader({ env: { KIT_OCR_ENGINE: 'windows' }, arch: 'arm64', home: where, fetch }), null);
-  assert.deepEqual(fetches, [where]);
+  assert.deepEqual(fetches, x64);
 });
 
 test('on the processor when told: its program started there once, and every page answered by it', async () => {
@@ -211,6 +212,22 @@ test('on the processor when told: its program started there once, and every page
   assert.equal(started.length, 1);
   assert.equal(started[0][started[0].indexOf('--on') + 1], 'cpu');
   assert.ok(!started[0].includes('--qnn'));
+});
+
+test("with no NPU the model can use, it reads on the processor (ON_PROCESSOR): fetched without a plugin, and started there", async () => {
+  if (!m.ON_PROCESSOR) return;
+  const fetches: [string, unknown][] = [];
+  const fetch = (p: any, _arch: string, pack: unknown) => void fetches.push([p.home, pack]);
+  const empty = path.join(home, 'empty-cpu');
+  assert.equal(await m.modelReader({ env: {}, arch: 'x64', home: empty, fetch }), null, "Windows' OCR reads while it's fetched");
+  assert.deepEqual(fetches, [[empty, null]], 'ONNX Runtime and the model, no plugin');
+  const where = readyPlace('x64', null);
+  const started: string[][] = [];
+  const start = (args: string[], cwd: string) => (started.push(args), startFake(args, cwd));
+  const r = await m.modelReader({ env: {}, arch: 'x64', home: where, start });
+  assert.equal(r?.engine, 'model-cpu');
+  assert.equal(started[0][started[0].indexOf('--on') + 1], 'cpu');
+  assert.ok(!started[0].includes('--openvino'));
 });
 
 test("on the NPU: started again once it has compiled, its turn taken, pages answered; a page that ends the program leaves the rest to Windows' OCR", async () => {
