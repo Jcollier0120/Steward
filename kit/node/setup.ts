@@ -1002,8 +1002,11 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   const cards = o.detection.cards;
   let wanted = (o.ids.length ? o.ids : cards.map((c) => c.id)).filter((id) => id !== 'npu');
   const cpuDefault: EndpointKind[] = !npuServes.has('chat') ? ['chat', ...(npuServes.has('vision') ? [] : ['vision' as const])] : !npuServes.has('embed') ? ['embed'] : [];
-  // Beside an NPU, with Manor's switch off, a card is never asked for the NPU's work (the keeper keeps it out): none of it is set up on the card.
+  // Beside an NPU, with Manor's switch off, a card is never asked for the NPU's work (the keeper keeps it out): none of it is set up on the card,
+  // but the work the PC's work order puts the card first for (kit 2.135.3: AMD's pictures, run on demand), the order setup writes for
+  // this NPU's generation (setupCommand's withWorkOrder), none when a list of the person's own takes its place.
   const besideNpu = o.gpuWithNpu === false && npuServes.size > 0 && !o.kinds?.length;
+  const besideOrder = besideNpu && !Array.isArray(o.raw?.acceleratorOrder) && det?.supported && det.vendor ? (workOrderFor(NPU_CATALOG.routes[det.vendor], det.generation) ?? undefined) : undefined;
   const leftToNpu: NonNullable<SetupPlan['leftToNpu']> = [];
   if (!o.ids.length && !cards.length && o.detection.cpu && cpuDefault.length) wanted = ['cpu'];
   const targets: SetupTarget[] = [];
@@ -1018,7 +1021,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     const cpuKinds = o.cpuKinds?.length ? o.cpuKinds : o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? restKinds.filter((k) => k === 'chat' || k === 'vision' || k === 'rerank') : cpuDefault;
     // A card the NPU leaves nothing to (a Snapdragon's, whose NPU serves all three) is set up whole, as before: the
     // switch is offered only beside a configured card, and the person can't turn on a card that has no entry.
-    const besideKinds = card && besideNpu ? core.cardWorkBesideNpu(restKinds, [...npuServes]) : restKinds;
+    const besideKinds = card && besideNpu ? core.cardWorkBesideNpu(restKinds, [...npuServes], besideOrder) : restKinds;
     const cardKinds = besideKinds.length ? besideKinds : restKinds;
     // Only the reranker asked for, and the NPU takes it: nothing for this one to do.
     if (rerankOnNpu && !(card ? cardKinds : cpuKinds).length) continue;

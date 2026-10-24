@@ -374,10 +374,11 @@ export class Npu {
    * The accelerators, in the order requests try them (none when there is a problem). With Manor's "Use the graphics
    * card for models when there's an NPU" off and an NPU here, a graphics card only for the work no NPU here serves
    * (manor.ts's gpuWithNpu(), read afresh each time, and the core's withoutGpuBesideNpu): the NPU's own work never
-   * goes to one, not even as a fallback; the rest (vision, beside Intel's NPU) starts the card's server on demand.
+   * goes to one, not even as a fallback, but for the work config.json's work order puts the card first for (AMD's
+   * pictures, kit 2.135.3; never chat); the rest (vision, beside Intel's NPU and AMD's) starts the card's server on demand.
    */
   get accelerators(): Accelerator[] {
-    return 'error' in this.cfg ? [] : core.withoutGpuBesideNpu(this.cfg.accelerators, this.withNpu());
+    return 'error' in this.cfg ? [] : core.withoutGpuBesideNpu(this.cfg.accelerators, this.withNpu(), this.cfg.workOrder);
   }
 
   get hasVision(): boolean {

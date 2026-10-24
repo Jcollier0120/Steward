@@ -130,18 +130,19 @@ const lower = (p: string) => p.toLowerCase();
 /**
  * The work config.json's `workOrder` puts a graphics card first for that no card serves yet, by the card that gains it:
  * the first enabled card in the core's order (the one its requests would go to). The order as the core reads it, so none
- * with an acceleratorOrder of the person's own; none for a work Manor's gpuWithNpu (off) keeps the card out of, as the
- * NPU serves it (the core's cardWorkBesideNpu, the one rule requests follow).
+ * with an acceleratorOrder of the person's own; none for a work Manor's gpuWithNpu (off) keeps the card out of (the core's
+ * cardWorkBesideNpu, the one rule requests follow). That rule keeps a card the work its order puts it first for (kit
+ * 2.135.3), so with the switch off too, an AMD PC set up before gains the Radeon's vision, run on demand.
  */
 export function orderAdds(raw: Record<string, any>, accs: Accelerator[], withNpu: boolean): Map<string, EndpointKind[]> {
   const out = new Map<string, EndpointKind[]>();
-  const order = Array.isArray(raw?.acceleratorOrder) ? undefined : core.readWorkOrder(raw?.workOrder);
+  const order = core.workOrderIn(raw);
   const cards = accs.filter((a) => a.kind === 'gpu' && a.enabled !== false);
   if (!order || !cards.length) return out;
   const npu = core.npuServes(accs);
   for (const w of core.WORKS) {
     if (order[w]?.devices[0] !== 'gpu' || cards.some((c) => serves(c, w))) continue;
-    if (!withNpu && !core.cardWorkBesideNpu([w], npu).length) continue;
+    if (!withNpu && !core.cardWorkBesideNpu([w], npu, order).length) continue;
     out.set(cards[0].id, [...(out.get(cards[0].id) ?? []), w]);
   }
   return out;
