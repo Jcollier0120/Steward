@@ -124,6 +124,8 @@ export declare const say: Readonly<{
     manorStopped: () => "the manor is stopped: no model server starts until you start the manor again in its Settings";
     /** @param {string} command @param {string} why */
     couldNotStart: (command: string, why: string) => string;
+    /** @param {string} program @param {string} file */
+    notInstalled: (program: string, file: string) => string;
     /** @param {string} program @param {string} baseUrl @param {number} seconds */
     didNotAnswer: (program: string, baseUrl: string, seconds: number) => string;
     /** @param {string} program @param {number | null} code @param {string} baseUrl */

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { developerProForTests } from '../src/kit/developer-pro.ts';
+import { gitExe } from '../src/kit/git-exe.ts';
 import { makersPcForTests } from '../src/maker.ts';
 import { run as realRun, type Ran, type Runner } from '../src/run.ts';
 import type { Employee, Settings } from '../src/settings.ts';
@@ -39,7 +40,8 @@ makersPcForTests(() => true);
 // the firmware, every other PC (WEASELDEV02, a contributor's) failed the tests that file work for the Wright.
 developerProForTests(() => true);
 
-export const sh = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
+// The real git.exe, as run.ts starts it (the kit's git-exe.ts): Git for Windows' launcher on PATH would double each one's cost.
+export const sh = (cwd: string, ...args: string[]) => execFileSync(gitExe(), args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 
 const PKG = (v: string) => `{\n  "name": "fake",\n  "version": "${v}",\n  "private": true,\n  "type": "module"\n}\n`;
 const LOCK = (v: string) => `{\n  "name": "fake",\n  "version": "${v}",\n  "lockfileVersion": 3,\n  "requires": true,\n  "packages": {\n    "": {\n      "name": "fake",\n      "version": "${v}"\n    }\n  }\n}\n`;

@@ -2,6 +2,199 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.113.5
+
+**Setup runs outside a packaged app (the Claude desktop app is one), and a server whose program is gone is set up again by the keeper.**
+
+### What's new
+
+- **outside.ts.** It finds the packaged app a process runs inside, and runs a step outside it.
+  - `packagedApp` walks the process's ancestors (Win32_Process) to one from WindowsApps; `parseProcessTable` and `packagedAncestor` are ported from Manor's windows.ts. `packagedOutsideTests` gives none in a test run.
+  - `inAppData` tells whether a path is in %LOCALAPPDATA%, %APPDATA% or the profile's AppData. %TEMP% doesn't count: Windows doesn't redirect it.
+  - `runOutside(job)` runs a job as a one-off Task Scheduler task, like `manor install`'s hop: no trigger, InteractiveToken, LeastPrivilege, hidden, `conhost --headless node outside-run.ts <folder>`. It passes on the run's log lines as they come and returns its result. The task is deleted after. Task Scheduler refusing, or not starting it within 2 minutes, throws `OutsideUnavailable`.
+  - The job folder is in the accelerators' home (`outside\<id>`), never in AppData. Its job.json carries the kit's own variables (`carriedEnv`), never one that names a token, key, secret or password.
+- **outside-run.ts** is the run outside. It sets the job's variables before importing any of the kit, since the kit's modules read their folders as they load, and sets `KIT_OUTSIDE=1`, so a run outside never looks for a package again.
+- **server-repair.ts.** `missingServers(raw)` lists the enabled servers whose program isn't there. It only counts a program setup puts there (`setupFolders`: the tools home, and GenieX's %LOCALAPPDATA%\GenieX CLI). `repairMissing(deps)` sets one of those up again (`setupCommand({ ids: [id], yes: true })`) once it has been missing for 5 minutes across looks. It sets up one server a look, never while the manor is stopped, and retries a failing one at most every 6 hours. Its record is server-repair.json, beside config.json.
+- **keeper.ts' `startRepairs`.** It runs the repair in the background of the keeper's look (`keeperLook`, with the PC's own reaper), not while the NPU's refresh is testing.
+- **`ProgramMissing`** (accelerators.ts, an `AcceleratorDown`): a startCommand whose absolute program isn't there is said with `core.say.notInstalled` rather than Node's ENOENT. Node gives ENOENT for a missing working folder too.
+
+### What changed
+
+- **`setupCommand`** plans, says the plan and asks as before. Then, inside a packaged app, it runs the rest outside (`runOutside` of a `setup` job) and returns that run's code and entries.
+  - It hops on every route. The servers setup tries write their own caches to AppData too (llama.cpp's OpenCL kernels).
+  - Where Task Scheduler won't run it, the steps `writesAppData(plan)` lists are refused in a plain message, and nothing is set up. On Qualcomm's route those are GenieX's installer (HKCU too) or Castellan's signed build put together in %LOCALAPPDATA%\GenieX CLI, and a plugin patch in its folder. Intel's and AMD's routes have none unless the tools home is in AppData, so their setup runs in the process, with a note.
+  - New `SetupOptions`: `asked` (the run outside: the plan isn't said or asked again), `packaged` and `outside` (tests). Nothing is asked about packages when setup is given a `detection` or `io` of its own.
+- **`patchNpu`** (npu-patch.ts): inside a packaged app, the moves of a server file in AppData (GenieX's plugin) are `patch-in` and `stock-back` jobs run outside. Refused, the plugin "couldn't be put in", and GenieX keeps its own. `putStockBack` is exported. New deps: `packaged`, `outside`.
+- **`core.say.notInstalled(program, file)`**: "… isn't installed where the staff look for it (…). They set it up again by themselves; to do it now, open Castellan and choose Set up local AI".
+
+### Before you update
+
+- Nothing: take the kit as usual. An agent that runs the keeper's look (the Smith, Reeve) sets up again a server whose program is missing, a few minutes after it takes this kit. On a PC whose GenieX was set up from the Claude app, that means downloading and installing GenieX again, for real this time.
+
+## 2.113.4
+
+**The guide's card figure for Intel's pictures is the current setup's.**
+
+### What changed
+
+- spec/NPU-VENDORS.md (Intel's pictures stay on the NPU) is measured again on a Core Ultra 5 225U on 2026-10-24, with the manor running, in three rounds that took three servers in turn:
+  - the card as setup gives it now (LLAMA_PIN b11734, Qwen3-VL-2B Q4_K_M with its Q8_0 projector): 36 J a picture warm (30–48 J), in 1.9 s; 20–68 J to start and read a first picture; 3.2 GB;
+  - the NPU: 20 J (18–26 J), in 1.4 s;
+  - the 4B on b11669 that an older kit set up: 46 J, in 2.7 s; 4.9 GB.
+  The 41 J before was that older setup's. No `batchAt` pays either way, and Intel's generations still record no `order`.
+- spec/NPU-BENCHMARK.md: the 225U's picture bullet gives the same figures.
+
+### Before you update
+
+- Nothing: take the kit as usual. Only the guides change.
+
+## 2.113.2
+
+**Intel's pictures stay on the NPU, and the guide says why.**
+
+### What changed
+
+- spec/NPU-VENDORS.md (Each work's order on a generation, Intel's pictures stay on the NPU) records the measurements on a Core Ultra 5 225U, 2026-10-24.
+  - OpenVINO on the Arc spent 13.3 J on a picture against the NPU's 17.5 J, but read the 896 px tally picture's 4827 as 4877 three times in four. The NPU and the processor read it right.
+  - The card server setup gives Intel's integrated graphics (llama.cpp Vulkan, its encoder on the processor, `encodesOnProcessor`) spent about 41 J a picture warm, and 56–66 J to start and read its first.
+  - So no `batchAt` pays, and Intel's generations record no `order`.
+- spec/NPU-BENCHMARK.md: the 225U's picture bullet says the same.
+
+### Before you update
+
+- Nothing: take the kit as usual. Only the guides change.
+
+## 2.113.1
+
+**The NPU benchmark says where the embedder ran, and its summary compares pictures a picture each: OpenVINO counts a picture's tokens unalike on the NPU and off it.**
+
+### What changed
+
+- **`results.embed.device`** (npu-bench, its report): where the embedding server ran. That is OpenVINO's `--target_device` (on the NPU 3720 the graphics, from its generation's `embedArgs`), or the run's own device off the NPU (llama.cpp's, beside the model); null where the route doesn't say. spec/npu-bench.schema.json has it, not required, so earlier reports still match.
+- **The summary** (`benchSummary`, `summarySay`): each device's `embed.device`, and a row `the embedder ran on` where a column's embedder ran on another device than its model.
+- **No token figure for the pictures batch**: `millijoulesPerToken` is null and there is no `pictures: a token over rest` row. OpenVINO Model Server 2026.4.1 counts a picture as 8 prompt tokens whatever its size on the graphics and the processor, and as its own tokens on the NPU (64 for the suite's 224 px square). The picture and the answers are the same on all three. Measured on a Core Ultra 5 225U, 2026-10-24.
+- spec/NPU-BENCHMARK.md: the Intel Core Ultra 5 225U's series (kit 2.106.0, 2026-10-24). The NPU does the chat jobs for about half the Arc's energy and under a third of the processor's. A picture is cheapest on the Arc. The NPU's embedding rows are the Arc's. Also brought up to date: Reading the summary, the report's `embed`, and On Intel and AMD.
+
+### Before you update
+
+- Nothing: take the kit as usual. Only the benchmark changes, nothing an agent runs.
+
+## 2.113.0
+
+**Every agent but Manor and Heiward needs a license for its PC. No staff member works for free: sold or not, held back, internal, or one the Exchequer doesn't list, each waits on a PC without one.**
+
+### What changed
+
+- **Who checks** (`license-check.ts`): every agent but Manor and Heiward (`checksLicense(id)`). Before, only a sold agent checked, so an agent ran on a PC with no license when Manor's exchequer.json was missing or couldn't be read, when the Exchequer's list left it out or gave it a tier but Household or Workshop, when Manor's staff.json held it back or marked it internal (the Wright, the Bailiff, the Crier), or when its release.json said `"sold": false`. None of that decides anything now.
+- **`ownSale` and `soldHere` are gone**, and `readLicenseFor` and `checkLicense` take no `sold`. `LicenseReading.sold` is `checked`. release.json's `sold` is still stamped as a release is published, and nothing reads it.
+- **An error of the check's own holds the agent** (state `unreadable`, with the error in `problem`), as a license it can't read does. Before, it let the agent run.
+- What holds an agent, and what its page, pill and ping say, are as in 2.110.0: no license for this PC, one that can't be read or verified, another PC's, or an ended trial. A paid, lapsed (the Freehold license) or pending license runs, as does a running trial.
+
+### What an agent must do
+
+- Nothing: release it on this kit. An agent that passed `sold` to `checkLicense` or `readLicenseFor` drops it.
+
+### Before you update
+
+- **On a PC that holds no license, every agent released on this kit waits, Manor and Heiward aside.** That includes the internal staff (the Wright, the Bailiff, the Crier) and any held back from sale, on developers' and test PCs too: give each PC a license (a complimentary one does).
+- **What a held agent shows, and how it runs again.** Its page says "This PC holds no license for it: signing in brings it back" (after a trial, "The trial ended: a license brings it back"), its pill says No license (or Trial ended), its rounds and Run now wait, and its ping says it isn't running. Its settings and data are kept. Sign in on that PC in Manor's Settings > License, with the email the license was bought with, or enter a key: the agent sees the new licence.json at its next look (licence.json changing is read at once), with nothing to reinstall.
+
+## 2.112.1
+
+**On AMD's Ryzen AI 300 a picture waits in the Radeon's line, rather than going to a free NPU that spends more on it.**
+
+### What changed
+
+- **The order's first, alone** (`candidates`, the core, and its vectors): where the work's order puts one first, by its `runningFirst` or a batch (as many of the work waiting as its `batchAt`), the first in that order that can take the request is its only candidate, as the NPU first is. Busy, it's waited for. The next takes the request only when that one failed lately, is a game's, or is rested after a long line.
+- **Why**: until now the pick shared the request out to whichever candidate had a free slot or the shortest line. On AMD that sent most of a batch of 4 background pictures to the NPU, at 26.6 J each against the Radeon's 10.4 (found by the Reeve session, 2026-10-24). An agent's background pictures count those of its own already headed to a line, so from the second the Radeon looked busier than a free NPU. A picture sent while the Radeon read another went to the NPU the same way. Waiting for a busy Radeon costs a picture about 0.47 s for each one ahead of it.
+- **A background request behind `maxAhead` (4) in that one line is deferred** for a later round (`NpuBusy`), as on the NPU, rather than going to the next device.
+- **`isBatch(order, waiting)`** (the core, exported): whether as many of the work wait as its order's `batchAt`. `workOrdered` keeps the work's devices' order for a batch, whoever's server is up, by it, as before.
+- spec/ACCELERATORS.md (Choosing an accelerator, step 2), spec/NPU-VENDORS.md (Counting the pictures that wait).
+
+### Before you update
+
+- Nothing: take the kit as usual. Only AMD's XDNA 2 has a work order, and only its pictures have `runningFirst` and `batchAt`: its chat keeps the NPU first, and its embeddings the Radeon, then the processor. A `candidates` caller without `workOrder` gets the candidates it got before.
+- Reeve's own routing (`src/routing.ts`, which reads `workOrder` from Reeve 0.18.63) mirrors the pick, and takes the same change in its own repository, with `isBatch`.
+
+## 2.111.0
+
+**AMD's NPU server is FastFlowLM 1.0.10. A generation can say which device each work spends least on, and on AMD's Ryzen AI 300 pictures go to the Radeon.**
+
+### What changed
+
+- **FastFlowLM 1.0.10** is AMD's route's server (`npu-vendors.json`: its zip, 30,484,687 bytes, SHA-256 `a7063890d7b91037a07f381a396a0d7787ebdb69e1b03280971faf0a80f35b73`, 296 files). It does the same as 1.0.7 within noise: three interleaved runs of each on a Ryzen AI 7 350's NPU, means, triage 25.0 J against 26.2, a reply 24.6 against 29.4, a summary 47.4 against 51.7, reading 1,024 tokens 31.5 against 31.1, writing 22.9 tokens a second against 22.5 (spec/NPU-BENCHMARK.md). Its NPU check passed every step, and its timeouts stay.
+- **Its signed catalog is the route's** (`catalogs`): `node/catalogs/castellan-amd-fastflowlm-1.0.10.cat`, kit 2.108.0's (17,357 bytes, SHA-256 `5b989f4fc81fe06d0d3a8cb5d1a9a3c7e52f0eb9d45b54d7853fee71b2281a69`, listing 1.0.10's 36 unsigned program files), beside 1.0.7's. Where Smart App Control is on, setup installs it before 1.0.10 runs, asking once for an administrator, and removes 1.0.7's in the same prompt. `tools/sign-binaries.ts`' `FASTFLOWLM_ALSO` is empty: 1.0.10 is the route's own.
+- **Its licences**: the MIT License for its runtime, orchestration and CLI (`LICENSE_RUNTIME.txt`), and AMD's FastFlowLM NPU Binary License for its NPU kernels and engine libraries (`LICENSE_BINARY.txt`: any use, commercial included, redistributed only unmodified with that licence). Both are in its zip with `THIRD_PARTY_NOTICES.txt`. The route's `licence` says so, with the credit its README asks for: "Powered by [FastFlowLM](https://github.com/ROCm/FastFlowLM)".
+- **It still misreads a picture with a side of a whole number of 32 px**, so `sides-of-32` stays. llama.cpp's Qwen3-VL-2B on the Radeon 860M misread the same four sizes (spec/NPU-VENDORS.md); the kit doesn't nudge a card's pictures yet.
+- **1.0.7's folder is retired**: `{tools}\servers\fastflowlm-1.0.7` in the route's `retired`, removed three days after nothing names it (kit 2.101.0's rule). The models in `%USERPROFILE%\.flm\models` serve both, and stay.
+- **`NpuGeneration.order`** (optional): for `chat`, `vision` and `embed`, the kinds of device that work spends least energy on, first preferred (`devices`: `npu`, `gpu`, `cpu`, each once), `runningFirst`, `batchAt`, and a `basis` with the figures. `workOrderFor(route, generation)` gives it without its bases (null for none), and `fallbackDevices(route, generation, work)` the devices after the NPU (a card, then the processor, unless the order says otherwise). Only AMD's XDNA 2 has one: chat on the NPU, the Radeon, the processor; pictures on the Radeon, the NPU, the processor, a running server first unless 4 or more wait; embeddings on the Radeon, the processor.
+- **config.json's `workOrder`**, a keeper key (`KEEPER_KEYS`, `ACCELERATOR_KEYS`): those orders, as setup writes them. `parseAccelerators` reads it only when `acceleratorOrder` is "auto" (the core's `readWorkOrder`), leaving out a work written wrong, and `validateAccelerators` names it.
+- **`candidates` follows the work's order** (the core, and its vectors): the fitting accelerators in that work's devices' order, any it leaves out after them (`workOrdered`), and with `runningFirst`, those whose server is up first (the state's `running`), unless as many of the work wait as its `batchAt` (the state's `waiting`). The NPU first then applies as before. The node `candidates` takes `workOrder`, `running(id)` and `waiting`. `serversUp(accs, work, workOrder, look?)` asks each server of that work whether it's up (a GET of its `/v1/models`, all at once, 0.5 s at most: `UP_PROBE_MS`), only when that work's order goes by it. `Npu` asks before each request (its `serversUp` option replaces it in tests). Manor's gpuWithNpu off still keeps a card out.
+- **Why pictures go to the Radeon on AMD** (a Ryzen AI 7 350, 2026-10-23): a warm picture costs the Radeon 10.4 J (Qwen3-VL-2B, llama.cpp) against the NPU's 26.6 J (FastFlowLM 1.0.10), and the Radeon read 8 of 8 against the NPU's 6. But starting the Radeon's server and one picture costs 66 J. n pictures cost about 55.6 + 10.4n J on the Radeon from a stopped server, against 26.6n J on the NPU: the same at 3.4. **The owner's answers**: asked by the AMD manager where pictures should go, "Radeon unless only NPU up"; then, to the Snapdragon manager, "keep single pictures on the NPU when it's running, but send batches of 4 or more waiting pictures to the Radeon." So a picture goes to the NPU only when FastFlowLM is up, the Radeon's server isn't, and fewer than 4 pictures wait (vision's `batchAt` 4). With both servers up, a single picture goes to the warm Radeon (10.4 J against 26.6 J): the owner's ruling on that case, to the Snapdragon manager, of "With both servers up, a single picture stays on the NPU. Only batches of 4 or more go to the Radeon.", was "actually change that, make it the gpu instead". The Radeon's server, once started, takes the pictures after (`runningFirst`) and holds its 2.8 GB beside FastFlowLM's 3.8 GB until the keeper stops it.
+- **Counting what waits** (`waitingFor(work, turns)`, npu.ts): this process's requests of the work from when each is asked until its turn starts, so a batch sent at once counts itself whole, and other processes' tickets in those turns' lines that say they're of it. `Npu` counts only for a work whose order has a `batchAt`. **`AskOptions.batch`**: how many the caller is sending together, this one included (a folder of screenshots); the larger of the two counts.
+- **A ticket says its work** (spec/NPU-QUEUE.md): `"work"` in its contents, `chat`, `vision`, `embed` or `rerank` (the core's `ticketText`, its sixth argument; `waitingOf` reads it back, and `queueSnapshot`'s waiting has it). `TurnOptions.work` and `acceleratorTurn`'s `work` write it. Informational: a ticket without it counts as no picture.
+- **Setup writes `workOrder`** from the NPU's generation, whether its NPU was set up or blocked (`withWorkOrder`), and removes it where there's none. When the NPU can't take a work, its fallback follows the order (`fallbackDevices`): a work whose order puts the processor before a card goes to the processor.
+- spec/NPU-VENDORS.md (Each work's order on a generation; the sides of 32 px on 1.0.10 and on llama.cpp's Qwen3-VL-2B; Licences), ACCELERATORS.md (`workOrder`; Choosing an accelerator), NPU-QUEUE.md (a ticket's `work`), NPU-BENCHMARK.md (FastFlowLM 1.0.10 against 1.0.7).
+
+### Before you update
+
+- Nothing for most agents: take the kit as usual. Every new field is optional, so an older kit (the Smith pins 2.99.1) reads the catalog and config.json as before. A `candidates` caller without `workOrder` gets the order it got before. A program in the NPU's line that doesn't write a ticket's `work` (npu-embed, Heiward's) is read as before; its requests count as no pictures.
+- A staff member that sends several pictures at once may say how many (`AskOptions.batch`), so a folder's worth starts the Radeon's server on AMD at the first picture.
+- An AMD PC gets 1.0.10, and its order, the next time setup runs: the keeper's look finds 1.0.10 missing and leaves it for setup. A PC on any other NPU gets no `workOrder`.
+- Reeve's own routing (`src/routing.ts`) doesn't read `workOrder` yet. On AMD his embeddings go to the Radeon first by the auto order anyway.
+
+## 2.110.0
+
+**A sold agent doesn't run without a license for its PC. No license, one that can't be read or verified, or another PC's holds its rounds, as an ended trial does.**
+
+### What changed
+
+- **Closed when there's no license** (`license-check.ts`). A sold agent's rounds wait, and Run now with them, when licence.json is missing, can't be read, doesn't verify, or was made for another PC (states `missing`, `unreadable`, `bad-signature` and the new `another-pc`). Its page says "This PC holds no license for it: signing in brings it back" (`NO_LICENSE_TEXT`), and its pill says "No license". Its settings and data are kept, and a license lifts the hold at once. Before, anything the check couldn't judge ran. A paid, lapsed (the Freehold license) or pending license runs as before, as does a running trial.
+- **Its release says whether it's sold** (`release.json`'s `sold`; `ownSale`). `npm run release -- --publish` stamps it from the Exchequer's list (`saleOf`). A sold agent then checks whatever Manor's exchequer.json and staff.json say, so deleting one of Manor's files doesn't stop the check. A copy whose release doesn't say goes by Manor's files, as before: a release from before, a checkout, or one built while the Exchequer couldn't say.
+- **This PC's license** (`license.ts`: `deviceIdFor`, `machineGuid`, `readDeviceId`, `isThisPc`, `DEVICE_FILE`; `everyone.ts`: `sharedLicenseFolder`).
+  - A license's `sub` must be device.json's id, in Manor's folder or in an Everyone install's shared license folder, as Manor's readLicense has it.
+  - With no device.json, an id made from a PC (version 8) is made again from MachineGuid and the folder, so a licence.json copied from another PC on its own isn't this PC's.
+  - An id from before 2026-10-21 (random) with no device.json, or a PC whose MachineGuid can't be read, has nothing to check it by, and counts.
+  - reg.exe is run by its full path.
+- **The API**:
+  - `LicenseCheck.held` is new; `ended` is still the trial's end alone.
+  - `licenseHeld()` and `heldNote()` say either hold. `trialEnded()` and `trialEndedNote()` are their old names, and now say either too. `holdText(check)` gives a hold's words, and `holdPill(text)` its pill.
+  - `dutyStatus(duty, up, held)` takes the hold's words; true still means the trial's end.
+  - The ping's `license` has `held`.
+
+### What an agent must do
+
+- Nothing: release it on this kit. An agent whose Run now doesn't go through `every()` should check `licenseHeld()`, not `licenseNow().ended`.
+
+### Before you update
+
+- **On a PC that holds no license, the sold staff released on this kit wait.** That includes test PCs and developers' PCs: they need a license, and a complimentary one does. Manor already takes them off duty there (Manor#364); now the staff wait by themselves too.
+- **What a held agent shows, and how it runs again.** Its page says "This PC holds no license for it: signing in brings it back" (after a trial, that the trial has ended), its pill says No license (or Trial ended), and its rounds and Run now wait. Signing in on that PC brings it back: Manor's Settings > License, with the email the license was bought with, or a key. The agent sees the new licence.json at its next look, with nothing to reinstall and its settings and data as they were.
+
+## 2.108.0
+
+**Every program the staff's local models run is signed, by its maker or by Castellan, or listed in a catalog Castellan signs, so Windows' Smart App Control lets them run.**
+
+### What's new
+
+- **Castellan's signed builds** (`NpuSignedBuild`, a route's `signedBuilds`, a version each): GenieX without its installer, which Smart App Control blocks as it unpacks its own setup program. Setup downloads Qualcomm's own SDK zip of the version (its `files`, whose `lib` folder is the folder GenieX's installer fills, its QAIRT runtime signed by Qualcomm) and Castellan's zip of signed copies of GenieX's own unsigned files (`signed`), takes the folder from the first, lays the copies over it file by file and puts it where the installer puts GenieX (`installSignedBuild`, `NpuPlan.build`, in place of `download`). No installer runs and no administrator is asked. `copies` pins each signed file by its path, as Qualcomm ships it and signed; `sameFile` takes a signed copy as the file it was, so the X2's plugin patch (npu-patch.ts) goes in over a signed GenieX as over Qualcomm's, keeps the signed copy as `.stock`, and its `needs` are met by signed copies. A version without one installs as before.
+- `overlayFiles` makes the folder of each file it copies where it isn't there.
+- **Who signed each server's files** (`node/signatures.ts`): every .exe, .dll, .pyd and .node in the folder of each model server config.json starts, with the signature Windows finds on it (its maker's, Castellan's, a catalog's, or none) and its signer (`signatureInventory`, `inventorySay`). `node <agent>\src\kit\signatures.ts [--all] [--json]` prints this PC's. The NPU check shows it (`NpuCheckReport.signatures`, its log's Signatures line and each unsigned file), and setup keeps it in signatures.json beside blocked.json (`rememberSignatures`; `SetupOptions.signaturesFile`). A developer's view: nothing in it is a notice for the staff.
+- **Castellan's catalogs** (`node/catalogs.ts`, `node/catalog.cs`). A route's `catalogs` (`NpuSignedCatalog`: a server version, the file, its size and SHA-256, what it lists) are signed catalogs of its maker's unsigned files, carried in `node/catalogs/`. Setup installs the ones for the route's version in Windows' catalog database before anything of the server runs, and removes the route's older ones, through one administrator prompt, only where Smart App Control is on or in evaluation (`ensureCatalogs`, `NpuPlan.catalogs`, `NpuIo.catalogs`). The staff still download the server from its maker. `node <agent>\src\kit\catalogs.ts` lists the ones Windows holds; `remove` removes them; `test <file.cat> <folder>` checks that a catalog lets Windows load what Smart App Control blocks.
+- **The catalog helper**, `catalog` in prebuilt.ts' `HELPERS`: a console program that adds and removes catalogs and loads a file as Windows would to run it. It runs only from its signed copy: compiled on the PC, Smart App Control would block it too.
+- **One administrator prompt a run.** Setup asks for every catalog the run may need before anything of it runs (`catalogsOnce`): the NPU's server's and, beside a CUDA build of llama.cpp, NVIDIA's runtime's (`LLAMA_CATALOGS`, route `cuda`). It asks again only for a catalog it wasn't asked for, so a prompt turned down isn't put up again for the NPU's second models or for the card set up in its place. `NpuIo.catalogs` takes the routes whose older catalogs go (`routes: string[]`).
+
+### What changed
+
+- **The Snapdragon X2 pins GenieX 0.9.3** (its `serverPin`, 0.9.1 before), as the first X does since kit 2.101.0, so one GenieX and one signed build serve both. 0.9.3 is 0.9.1 with `/status` and a signed catalog for its Hexagon libraries: the same llama.cpp e467e5b, plugin source and b11645 embedding server, and the plugin patch's 0.9.3 entry (0.9.1's build over 0.9.3's own) was measured on an X2 running it. Setup puts 0.9.3 on a new X2; the NPU check and the benchmark run an X2 whose GenieX can't say its version as 0.9.3; the reports count an X2's speeds at 0.9.3.
+- **Signed, and pinned** (the signing sitting of 2026-10-23, `tools/sign-binaries.ts`): GenieX 0.9.3's signed build (`signedBuilds`: Qualcomm's SDK zip and Castellan's 16 signed copies, each pinned both ways), so a new Snapdragon X or X2 runs no installer; the Snapdragon NPU's embedding servers from Castellan's signed copies of llama.cpp b11645 and b11125 (`embedServer.download`, the releases repository's, in place of ggml-org's unsigned zips); FastFlowLM 1.0.7's catalog (`catalogs`, castellan-amd-fastflowlm-1.0.7.cat) and NVIDIA's CUDA runtime 12.4's (`LLAMA_CATALOGS`, castellan-cuda-cudart-12.4.cat), carried in `node/catalogs/`; and the catalog helper, signed (`node/prebuilt/catalog-635f89b2d399.exe`).
+- **FastFlowLM 1.0.10's catalog, carried but not used** (`node/catalogs/castellan-amd-fastflowlm-1.0.10.cat`, 17,357 bytes, SHA-256 5b989f4f…; it lists 1.0.10's 36 unsigned program files): made and signed in the same sitting, for the kit that moves AMD's route to FastFlowLM 1.0.10. In 2.108.0 the route stays on 1.0.7 and no route's `catalogs` names it, so setup never installs it.
+- `installSignedBuild` says which step failed (`{ step, why }`: a download, or putting it together), so setup's NPU step fails at `download` or `install` as with an installer; `NpuIo.installBuild` stands in for it.
+
+### Before you update
+
+- Nothing: take the kit as usual. A route without `catalogs` or `signedBuilds` sets up as before, and nothing asks for an administrator where Smart App Control is off. A GenieX already installed isn't changed: its installer's files stay as they are, and an X2 on GenieX 0.9.1 keeps running 0.9.1 with 0.9.1's build (the Smith offers it 0.9.3). An embedding server already set up is kept too: only a new one comes from the signed copy.
+
 ## 2.106.0
 
 **A generation of an NPU can say the biggest model size a manager has tested on it; the Smith offers no bigger.**

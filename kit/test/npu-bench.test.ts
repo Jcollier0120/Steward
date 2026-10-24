@@ -441,6 +441,7 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.ok(e, s.lines.join('\n'));
   assert.equal(e.server, `OpenVINO Model Server ${V.NPU_CATALOG.routes.intel.embedServer!.version}`);
   assert.equal(e.model, 'OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov');
+  assert.equal(e.device, 'NPU', "where its --target_device has it: the route's, the NPU");
   assert.equal(e.dims, 4);
   assert.equal(e.texts, SUITE.embed!.texts);
   assert.equal(e.queryMs.tries.length, SUITE.tries.full);
@@ -636,6 +637,7 @@ test("a generation with its own cap is run, reported and read near at it; --cap 
   assert.equal(capOf(own.fake.commands[0]), String(gen.maxContextTokens));
   assert.ok(r.report.results.readAtCap, own.lines.join('\n'));
   assert.ok(own.lines.some((l) => l.startsWith(`reading near the cap (`) && l.includes(` of ${gen.maxContextTokens} tokens)`)), own.lines.join('\n'));
+  assert.equal(r.report.results.embed?.device, 'GPU', "the NPU 3720's embedder runs on the graphics (its generation's embedArgs), and the report says so");
 
   const asked = await scene({ npu: METEOR });
   const r2 = await B.npuBench({ ...asked.opts, profile: 'quick', cap: 4096 });
@@ -775,6 +777,7 @@ test("--device GPU on a Snapdragon: the X2's own model, GenieX's files, on llama
   assert.equal(Number(arg(s.embed.commands[0], '--port')), s.port + 101);
   assert.ok(s.embed.commands[0].includes('--embeddings'));
   assert.equal(report.results.embed!.server, 'llama.cpp b11734 (opencl-adreno-arm64)');
+  assert.equal(report.results.embed!.device, 'GPU', 'beside the model, on its device');
   // llama.cpp has no quirks: no nonce, and each picture sent as a data: URL.
   assert.ok(s.fake.seen.every((j) => !j.messages.some((m: any) => typeof m.content === 'string' && /^\[req [a-z0-9]+\]/.test(m.content))), 'no nonce');
   assert.ok(s.fake.pictures.length && s.fake.pictures.every((p) => /^data:image\/png;base64,/.test(p.url)));
@@ -1324,7 +1327,7 @@ test("the summary: each figure the median of a device's runs; keeping a model lo
   assert.equal(npu.runs, 3);
   assert.equal(npu.coldLoadMs, 2000);
   assert.equal(npu.server, 'GenieX 0.9.3');
-  assert.deepEqual(npu.embed, { queryMs: 30, requestMs: 900, tokensPerSecond: 7000 });
+  assert.deepEqual(npu.embed, { device: null, queryMs: 30, requestMs: 900, tokensPerSecond: 7000 }, 'reports before kit 2.113.1 say nothing of where it ran');
   assert.equal(npu.energy!.keepLoadedMilliwatts, 400);
   assert.equal(npu.energy!.keepLoadedWhPerDay, 9.6, '400 mW all day');
   assert.equal(npu.energy!.embedKeepLoadedWhPerDay, 2.4);
@@ -1342,4 +1345,41 @@ test("the summary: each figure the median of a device's runs; keeping a model lo
     ['triage: each over rest', '5.00 J', '9.00 J'],
     ['triage: the whole PC, the batch', '80.0 J in 8 s', '80.0 J in 8 s'],
   ]) assert.ok(lines.some((l) => new RegExp(`^${esc(row)} +${esc(npuCell)} +${esc(cpuCell)}$`).test(l)), `${row}\n${lines.join('\n')}`);
+  assert.ok(!lines.some((l) => l.startsWith('the embedder ran on')), 'no row for it where no column says it ran elsewhere');
+});
+
+test("the summary on Intel: the NPU's embedder on the graphics says so; pictures compare a picture each, never a token", () => {
+  // OpenVINO Model Server 2026.4.1 counted the suite's red 224 px square as 64 prompt tokens and 3 around it on the
+  // NPU, and as 8 whatever its size on the Arc and the processor (a Core Ultra 5 225U, 2026-10-24): the same picture.
+  const run = (device: string, embedDevice: string, pictureTokens: number) => ({
+    format: 'castellan-npu-bench-report/1',
+    suite: { version: 'castellan-npu-bench/2', kit: '2.113.1', profile: 'quick' },
+    pc: { cpu: 'Intel(R) Core(TM) Ultra 5 225U', chip: null },
+    marks: [],
+    ranked: true,
+    quality: { score: 1, passed: 22 },
+    vision: { passed: 4 },
+    run: { device, server: 'OpenVINO Model Server 2026.4.1', model: 'm' },
+    results: {
+      coldLoadMs: 5000,
+      short: { median: 500 },
+      writeTokensPerSecond: { median: 20 },
+      readFirstTokenMs: {},
+      jobTimeS: 10,
+      embed: { server: 'OpenVINO Model Server 2026.4.1', device: embedDevice, queryMs: { median: 27 }, requestMs: { median: 900 }, tokensPerSecond: 1800 },
+      energy: {
+        meter: { kind: 'emi', say: 'x', whole: 'rapl_package0_pkg' },
+        millijoulesPerToken: 1.5,
+        batches: { pictures: { count: 5, seconds: 5, tokens: pictureTokens, millijoules: { rapl_package0_pkg: 100_000 }, extraMillijoules: { rapl_package0_pkg: 87_500 }, millijoulesEach: 17_500, millijoulesPerToken: 87_500 / pictureTokens } },
+      },
+    },
+  });
+  const s = B.benchSummary([run('NPU', 'GPU', 611), run('GPU', 'GPU', 242), run('CPU', 'CPU', 242)] as any);
+  assert.equal(s.devices.NPU.embed!.device, 'GPU');
+  assert.equal(s.devices.NPU.energy!.batches.pictures.millijoulesPerToken, null, "a token's figure for pictures would set 611 tokens against 242 for the same five pictures");
+  assert.equal(s.devices.NPU.energy!.batches.pictures.millijoulesEach, 17_500);
+  const lines = B.summarySay(s);
+  assert.ok(lines.some((l) => /^the embedder ran on +GPU +GPU +CPU$/.test(l)), lines.join('\n'));
+  assert.ok(lines.some((l) => /^pictures: each over rest +17\.5 J +17\.5 J +17\.5 J$/.test(l)), lines.join('\n'));
+  assert.ok(!lines.some((l) => l.startsWith('pictures: a token')), lines.join('\n'));
 });

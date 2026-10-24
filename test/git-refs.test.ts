@@ -8,15 +8,16 @@ import { commitOf, headBranch, refOnDisk } from '../src/git.ts';
 import { apiAsk, takeGlance } from '../src/glance.ts';
 import { GithubLimited } from '../src/budget.ts';
 import { run } from '../src/run.ts';
+import { gitExe } from '../src/kit/git-exe.ts';
 
 // Fewer processes (Steward 0.35.11): a branch's commit read from the clone's files, and the glance asked over HTTPS.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-refs-'));
 after(() => rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
-const g = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
+const g = (cwd: string, ...args: string[]) => execFileSync(gitExe(), args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 
 test("a branch's commit from the clone's files: loose, packed, from a worktree, and git's answer when the files don't say", async () => {
   const repo = path.join(home, 'repo');
-  execFileSync('git', ['init', '-q', '-b', 'main', repo], { windowsHide: true });
+  execFileSync(gitExe(), ['init', '-q', '-b', 'main', repo], { windowsHide: true });
   g(repo, 'config', 'user.email', 't@example.test');
   g(repo, 'config', 'user.name', 'T');
   writeFileSync(path.join(repo, 'a.txt'), 'a');
@@ -49,7 +50,7 @@ test("a branch's commit from the clone's files: loose, packed, from a worktree, 
 
   // commitOf answers as git does either way.
   for (const ref of ['refs/heads/main', 'origin/main', 'refs/heads/none', one, 'refs/heads/side']) {
-    const ask = (r: string) => (execFileSync('git', ['rev-parse', '--verify', '--quiet', `${r}^{commit}`], { cwd: repo, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null);
+    const ask = (r: string) => (execFileSync(gitExe(), ['rev-parse', '--verify', '--quiet', `${r}^{commit}`], { cwd: repo, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null);
     let want: string | null;
     try {
       want = ask(ref);
@@ -83,7 +84,7 @@ test("the glance over HTTPS: GitHub's answer as gh gave it, partial answers kept
 
 test("the branch a clone has checked out, from its HEAD file: a clone's, a worktree's own, detached, a reftable clone's, and none", () => {
   const repo = path.join(home, 'heads');
-  execFileSync('git', ['init', '-q', '-b', 'main', repo], { windowsHide: true });
+  execFileSync(gitExe(), ['init', '-q', '-b', 'main', repo], { windowsHide: true });
   g(repo, 'config', 'user.email', 't@example.test');
   g(repo, 'config', 'user.name', 'T');
   writeFileSync(path.join(repo, 'a.txt'), 'a');
@@ -98,7 +99,7 @@ test("the branch a clone has checked out, from its HEAD file: a clone's, a workt
   // A reftable clone's HEAD file says only refs/heads/.invalid: git is asked instead.
   const table = path.join(home, 'heads-reftable');
   try {
-    execFileSync('git', ['init', '-q', '--ref-format=reftable', '-b', 'main', table], { windowsHide: true, stdio: 'ignore' });
+    execFileSync(gitExe(), ['init', '-q', '--ref-format=reftable', '-b', 'main', table], { windowsHide: true, stdio: 'ignore' });
   } catch {
     // A git older than 2.45 makes no reftable clones.
   }

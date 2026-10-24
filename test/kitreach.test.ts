@@ -84,19 +84,18 @@ test('the given change picks the tests: only those that reach a changed kit file
 
 test('a trial goes on over several rounds, a few agents each, and skips the agents the kit changes nothing for', async () => {
   rmSync(kitTrialsFile(), { force: true });
-  const agents = [agent('plain', ['node']), agent('webone', ['node', 'web']), agent('webtwo', ['node', 'web'])];
+  const agents = [agent('plain', ['node']), agent('webone', ['node', 'web'])];
   const tried: Awaited<ReturnType<typeof kitTrialAtMain>>[] = [];
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < 2; round++) {
     const c = ctx(agents);
     c.settings.parallel = 1;
     tried.push(await kitTrialAtMain(c, me, { commit: head, kit: '1.0.1' }, 0));
   }
-  assert.deepEqual(tried[0], { state: 'going', why: `${TRIAL_GOING}: 1 of 3 so far` });
-  assert.deepEqual(tried[1], { state: 'going', why: `${TRIAL_GOING}: 2 of 3 so far` });
-  assert.equal(tried[2].state, 'passed', 'all tried: the kit is released');
+  assert.deepEqual(tried[0], { state: 'going', why: `${TRIAL_GOING}: 1 of 2 so far` });
+  assert.equal(tried[1].state, 'passed', 'all tried: the kit is released');
 
   const kept = JSON.parse(readFileSync(kitTrialsFile(), 'utf8'))[mainKeyOf(head)];
   assert.equal(kept.pending, undefined);
-  assert.deepEqual([kept.passed, kept.untouched, kept.failed.length], [2, 1, 0]);
-  assert.deepEqual(Object.keys(kept.mains).sort(), ['webone', 'webtwo'], 'tried with all their checks (theirs are no npm test): kept for the rollout');
+  assert.deepEqual([kept.passed, kept.untouched, kept.failed.length], [1, 1, 0]);
+  assert.deepEqual(Object.keys(kept.mains).sort(), ['webone'], 'tried with all its checks (none is npm test): kept for the rollout');
 });

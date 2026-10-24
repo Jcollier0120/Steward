@@ -35,5 +35,11 @@ export function sharesModels(env: NodeJS.ProcessEnv = process.env): boolean {
   return hasEveryone(env);
 }
 
+/**
+ * The PC's license folder (%ProgramData%\Castellan\license, Manor's licenseFolder) where this account's license is the
+ * PC's, as with the models (sharesModels); null where it's Manor's own folder. Its device.json is the PC's id.
+ */
+export const sharedLicenseFolder = (env: NodeJS.ProcessEnv = process.env): string | null => (sharesModels(env) ? path.join(sharedRoot(env), 'license') : null);
+
 /** The accelerators' shared folder (%ProgramData%\Castellan\accelerators): servers\ and models\ in it, as in an account's own. */
 export const sharedAcceleratorsHome = (env: NodeJS.ProcessEnv = process.env) => path.join(sharedRoot(env), 'accelerators');

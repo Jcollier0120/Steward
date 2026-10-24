@@ -2,6 +2,131 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.199
+
+**It hands out the kit 2.113.5: setting up local AI from the Claude desktop app no longer hides the NPU's server from the staff, and a server whose program is missing is set up again by itself.**
+
+### What changed
+
+- **Setup runs outside the Claude desktop app.** The Claude desktop app is a packaged app: Windows keeps what a session in it writes to AppData in the app's own folder, where the staff can't see it. Setting up local AI from a session put Qualcomm's GenieX there, so on that Snapdragon every request to the NPU failed. Now setup asks first, as before, then runs from Task Scheduler, outside the app, and shows its progress in the session. This applies on every maker's NPU: Qualcomm, Intel and AMD.
+- **If Task Scheduler won't run it**, setup says so plainly. It refuses whatever would have landed in the app's own folder (GenieX, on a Snapdragon) instead of hiding it there. Intel's and AMD's servers don't go in AppData, so their setup goes on as before.
+- **The keeper's update of GenieX's plugin** runs outside the app the same way.
+- **A server whose program is missing says so.** The error no longer reads "spawn … ENOENT". It says the program isn't installed where the staff look for it. After five minutes the staff set that server up again by themselves, at most every six hours while it still fails. A start command of your own (a script, a program elsewhere) is never replaced.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A PC whose NPU server was set up from the Claude app before this has it set up again by the staff, a few minutes after the update; that downloads the server again.
+
+## 0.36.198
+
+**It hands out the kit 2.113.4: the guide's figures for a picture on an Intel Core Ultra's graphics are now those of the card server setup gives today.**
+
+### What changed
+
+- **On Intel's NPU 3720, pictures still stay on the NPU, with the right figures.** The card figure came from a PC still on an older setup (Qwen3-VL-4B on llama.cpp b11669). Setup now gives the graphics Qwen3-VL-2B on b11734. Measured in turn with the NPU, it spent 36 J on a picture against the NPU's 20 J. It's faster and holds 3.2 GB rather than 4.9 GB, but still costs about 1.8 times the NPU's energy.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Where pictures go doesn't change.
+
+## 0.36.196
+
+**It hands out the kit 2.113.2: the guide says why pictures on an Intel Core Ultra stay on the NPU, though the graphics read one for less energy in the benchmark.**
+
+### What changed
+
+- **On Intel's NPU 3720, pictures stay on the NPU.** In the benchmark, OpenVINO on the Arc graphics spent less on a picture than the NPU did (13 J against 17.5 J). But it misread fine text in a larger picture three times in four, where the NPU read it right. The graphics' server that setup actually runs reads pictures with the processor, and spent about 41 J on each. So no batch of pictures is cheaper on the graphics. AMD's rule, which sends batches to the Radeon, doesn't carry over.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Where pictures go doesn't change.
+
+## 0.36.195
+
+**It hands out the kit 2.113.1: the NPU benchmark's guide has Intel's energy figures, and its summary says where the embedding model ran.**
+
+### What changed
+
+- **Intel's energy figures are in the benchmark's guide.** On a Core Ultra 5 225U the NPU does the staff's chat jobs for about half the energy of the Arc graphics, and under a third of the processor's. A picture costs least on the Arc: 13 J, against 17.5 J on the NPU.
+- **The benchmark's summary says where the embedding model ran.** On this Intel generation it runs on the graphics even in the NPU's runs, so that column's embedding figures are the graphics'.
+- **Pictures are compared a picture at a time, not a token at a time.** OpenVINO counts a picture's tokens one way on the NPU and another on the graphics and the processor, even for the same picture, so the per-token figure for pictures misled.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Only the NPU benchmark changes. What the staff run, and where, stays the same.
+
+## 0.36.194
+
+**It hands out the kit 2.113.0: on a PC without your license, only Heiward runs. No staff member works for free.**
+
+### What changed
+
+- **Every employee but Heiward waits on a PC without your license**, sold or not: the ones held back from sale, the internal ones (the Wright, the Bailiff, the Crier) and any the Exchequer doesn't list, as well as the Household and Workshop staff. Before, an employee the Exchequer didn't list as sold, or one whose release said it wasn't sold, kept running there, and so did every employee when Manor's record of the Exchequer's list was missing.
+- **A license that lapsed still runs what it has** (the Freehold license), as does one waiting for its first payment, and a running trial.
+
+### Before you update
+
+- **Check that every PC running Castellan's staff holds a license**, developers' and test PCs included: a complimentary license does. Manor's Settings > License on each PC says what it holds. Nothing changes on a PC that holds one.
+- **A waiting employee says so, and signing in brings it back.** Its page says "This PC holds no license for it: signing in brings it back" (after a trial, that the trial ended), its pill says No license (or Trial ended), and its rounds and Run now wait. Sign in on that PC in Manor's Settings > License, with the email you bought Castellan with (or enter a key): the staff go back on duty, with nothing to reinstall and their settings and data as they were.
+
+## 0.36.193
+
+**It hands out the kit 2.112.1: on an AMD Ryzen AI PC, a picture can now wait a moment for the graphics card instead of running on the NPU.**
+
+### What changed
+
+- **A picture can now wait a moment for the Radeon instead of running on the NPU.** Since 0.36.191 pictures go to the Radeon graphics, where one costs 10 J against the NPU's 27 J. But while the Radeon read one picture, the next went to the NPU if it was free, so most of a batch of 4 sent at once ran on the NPU. Now a picture waits in the Radeon's line, about half a second for each picture ahead of it. The NPU reads it only when the Radeon can't: its server failed lately, a game has the card, or it's resting after a long line. As before, a single picture goes to the NPU when only the NPU's server is running.
+- **When 4 of a staff member's background pictures already wait in that line, the next waits for a later round**, as it would on the NPU, rather than going to the NPU.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Only pictures on an AMD Ryzen AI PC change; chat and search go where they went.
+
+## 0.36.191
+
+**It hands out the kit 2.111.0: on an AMD Ryzen AI PC, pictures go to the graphics card, where they cost the least energy, and the NPU's server is updated to FastFlowLM 1.0.10.**
+
+### What's new
+
+- **Each kind of work goes where it costs least.** On a Ryzen AI 7 350 the manor measured each kind of work on the NPU, the Radeon graphics and the processor. Chat stays on the NPU: a triage costs it 26 J, the Radeon 41 J and the processor 89 J. A picture costs the Radeon 10 J and the NPU 27 J, so pictures now go to the Radeon. The owner's rule: "Radeon unless only NPU up", and "keep single pictures on the NPU when it's running, but send batches of 4 or more waiting pictures to the Radeon." So when the NPU's server is already running and the Radeon's isn't, a single picture goes to the NPU, as starting the Radeon's server for it would cost more (66 J). When 4 or more pictures are waiting, from any of the staff, they go to the Radeon: from the fourth, its start has paid for itself. Search (embeddings) stays on the Radeon, at 13 mJ a word-piece against the processor's 44.
+
+### What changed
+
+- **FastFlowLM 1.0.10.** AMD's NPU server is updated. It's as fast and as frugal as 1.0.7, and its new licence is as free. The manor's notices credit it: "Powered by FastFlowLM". Where Windows' Smart App Control is on, Castellan's signed list of its files lets it run, as 1.0.7's did. The old version's folder is deleted three days after nothing uses it; the model stays.
+- **When the NPU can't run** (Windows' Smart App Control blocking its server, say), each kind of its work goes where it costs least next.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An AMD PC moves to FastFlowLM 1.0.10, and to the new order, the next time its local AI is set up (Set up local AI) after the manor has looked at its NPU. That downloads 30 MB; the model stays. Where Smart App Control is on, that setup asks once for an administrator, to add 1.0.10's list of files and take 1.0.7's away. While the Radeon's picture server runs, it holds 2.8 GB of memory beside the NPU's, until it rests after 5 minutes unused.
+
+## 0.36.190
+
+**It hands out the kit 2.110.0: the staff you pay for run only on a PC that holds your license.**
+
+### What changed
+
+- **The Household and Workshop staff wait on a PC without your license.** That means a PC with no license, one that can't be read, or one made for another PC. Their rounds wait, and their page says signing in brings them back. Their settings and data are kept. Before, a PC that had lost its license kept them running; now they run only where your license is, as after a trial ends.
+- **A license that lapsed still runs what it has** (the Freehold license), as does one waiting for its first payment.
+- **The Steward is staff the license covers too.** On a PC with no license, its rounds wait.
+
+### Before you update
+
+- **Check that every PC running Castellan's paid staff holds a license**, test PCs included: a complimentary license does. Manor's Settings > License on each PC says what it holds. Nothing changes on a PC that holds one.
+- **A waiting employee says so, and signing in brings it back.** Its page says "This PC holds no license for it: signing in brings it back", its pill says No license, and its rounds and Run now wait. Sign in on that PC in Manor's Settings > License, with the email you bought Castellan with (or enter a key): the staff go back on duty, with nothing to reinstall and their settings and data as they were.
+
+## 0.36.188
+
+**It hands out the kit 2.108.0: every program the staff's local models run is signed, so Windows' Smart App Control lets them run.**
+
+### What changed
+
+- **Every program the staff's local models run is signed, so Windows' Smart App Control lets them run.** Where a model server's maker signs nothing, Castellan does: the Snapdragon NPU's embedding server comes from Castellan's signed copy, as the graphics card's and the processor's llama.cpp already do. GenieX, the Snapdragon NPU's server, is put together without its installer: Qualcomm's own files, downloaded from Qualcomm, with Castellan's signed copies of GenieX's own. FastFlowLM (AMD's NPU) and NVIDIA's CUDA runtime are still downloaded from their makers, unchanged, and Castellan signs a list of their files. Where Smart App Control is on, setup adds that list to Windows, asking once for an administrator.
+- **A new Snapdragon X2 gets GenieX 0.9.3**, as the first Snapdragon X does, in place of 0.9.1: the same models, as quick, from the one signed GenieX.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Where Smart App Control is on, the next setup of an AMD NPU or of an NVIDIA card asks once for an administrator; a Snapdragon's asks for none. A GenieX already installed is kept as it is: a Snapdragon X2 on GenieX 0.9.1 keeps running it, and the Smith offers 0.9.3 there. Setup never changes Windows' Smart App Control setting.
+
 ## 0.36.186
 
 **It hands out the kit 2.106.0: the manor can say how big a model it has tested on each kind of NPU, and the Smith suggests none bigger.**

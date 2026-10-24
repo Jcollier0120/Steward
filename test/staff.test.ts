@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { chooseKit, kitReleasesIn } from '../src/kitsource.ts';
 import { releaseDecision } from '../src/stages/release.ts';
-import { appReleasesIn, checksOf, parseLog, parsePrs, prOfCommit, readPin, staffRow } from '../src/stages/staff.ts';
+import { appReleasesIn, checksOf, parseLog, parsePrs, prOfCommit, readPin, staff, staffRow } from '../src/stages/staff.ts';
 import { RETIRED } from '../src/retired.ts';
 import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
 
@@ -117,6 +117,11 @@ test("an employee's row: its checkout, its branch's version and kit, its PRs, it
   assert.deepEqual(row.release, { tag: 'v0.3.1', version: '0.3.1', published: '2026-10-02T22:20:41Z', kit: '1.0.0' });
   assert.equal(row.releaseNeeded, true, '0.4.0 has no release yet');
   assert.deepEqual(row.notes, []);
+  // The whole table with no glance (GitHub's query of every repository failed): each row asks gh itself, and the table
+  // keeps no glance's signatures, so the next round with a glance makes it again ("it wasn't made from a glance").
+  const table = await staff(ctx, { fetch: false, kit: '1.0.0' });
+  assert.deepEqual(table.rows[0].prs.map((p) => p.number), [3, 4]);
+  assert.equal(table.seen, undefined);
   // An employee that doesn't take the kit says so.
   const off = await staffRow(ctx, { ...e, usesKit: false }, { fetch: false, kit: '1.0.0' });
   assert.deepEqual(off.notes, ['not using the kit yet']);

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { APP, appRoot } from '../app.ts';
 import { developer } from './developer.ts';
 import { duty } from './duty.ts';
-import { trialEnded, trialEndedNote } from './license-check.ts';
+import { heldNote, licenseHeld } from './license-check.ts';
 import { lookFor, sceneSvg } from './look.ts';
 import { manorLink, manorSettingsUrl } from './manor.ts';
 import type { Onboarding } from './onboarding.ts';
@@ -57,7 +57,7 @@ export interface PageShell {
   scene: string;
   /** Off duty: since when, in words; null on duty. */
   offDutySince: string | null;
-  /** The trial has ended (license-check.ts, kit 2.45.0): the banner's words, shown in place of the off-duty one; null otherwise. */
+  /** The trial has ended, or this PC holds no license (license-check.ts, kit 2.45.0 and 2.110.0): the banner's words, shown in place of the off-duty one; null otherwise. */
   trialEnded: string | null;
   /** Settling into the manor (kit 2.43.3): the banner's words and its drawing (the kit's markup), while its first round waits its turn or a long one runs; null otherwise. */
   settling: { text: string; svg: string } | null;
@@ -93,7 +93,7 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
   const dev = developer().on;
   const first = firstRoundNow();
   const settling = settlingText(APP.name, look, first);
-  const ended = trialEnded();
+  const ended = licenseHeld();
   return {
     app: { id: APP.id, name: APP.name, role: APP.role, version: APP.version },
     title: o.title ?? APP.name,
@@ -102,7 +102,7 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
     pill: pillOf({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, needs: needs?.text, first, ended }),
     scene: sceneSvg(look),
     offDutySince: d.onDuty ? null : ago(d.since),
-    trialEnded: ended ? trialEndedNote() : null,
+    trialEnded: ended ? heldNote(ended) : null,
     settling: settling ? { text: settling, svg: SETTLING_SVG } : null,
     manor: m ? { name: m.name, url: m.url, theme: m.theme, settingsUrl: manorSettingsUrl(m) } : null,
     themes: themes().map((t) => ({ name: t.name, label: t.label, description: t.description, swatch: t.swatch, group: t.group, groupLabel: groupLabel(t.group) })),

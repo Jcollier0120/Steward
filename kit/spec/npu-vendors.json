@@ -94,14 +94,14 @@
           "hexagonArch": "v81",
           "aiHubChipset": "qualcomm-snapdragon-x2-elite",
           "serverPin": {
-            "version": "0.9.1",
+            "version": "0.9.3",
             "download": {
-              "file": "geniex-cli-setup-windows-arm64-v0.9.1.exe",
-              "url": "https://github.com/qualcomm/GenieX/releases/download/v0.9.1/geniex-cli-setup-windows-arm64-v0.9.1.exe",
-              "size": 70519444,
-              "sha256": "0cffc8532c1d48cdfac757667025b7fd2f2e8a8184026944410a764337ad67c0"
+              "file": "geniex-cli-setup-windows-arm64-v0.9.3.exe",
+              "url": "https://github.com/qualcomm/GenieX/releases/download/v0.9.3/geniex-cli-setup-windows-arm64-v0.9.3.exe",
+              "size": 70470238,
+              "sha256": "886d9f1a48cf6c1694338a13fc66be9d28e7fc5a3a5970d49b63de554a6ce17a"
             },
-            "basis": "Measured on the X2 Elite with Qwen3-VL-2B Q4_0, 2026-10-18 (spec/NPU-VENDORS.md, A later GenieX on the PC): GenieX 0.9.1 reads its pictures on the Hexagon's second session in a median 1.50 s against 0.8.0's 4.49 s on the Adreno (34 of 35 screen questions against 33, 21 of 21 photos on both), and leaves the Adreno free; with Castellan's build for 0.9.1 (the route's versions) it holds what 0.8.0 does at rest (1.62 GB working set after a chat), and gives its first answer after a start in 3.5 s (3.1). Chat 72.5 tokens a second (73.0). The first-generation X pins 0.9.3 (kit 2.101.0), which its models were measured on. The installer's size and SHA-256 as GitHub and GenieX's own .sha256 publish them, checked on a download"
+            "basis": "GenieX 0.9.3 from kit 2.108.0, as the first-generation X pins it: the version Castellan's signed build is of (the route's signedBuilds), so an X2 is set up without GenieX's installer, which Smart App Control blocks. 0.9.3 is 0.9.1 with a /status endpoint and a signed catalog for its Hexagon libraries: the same llama.cpp (e467e5b) and plugin source, and the same b11645 embedding server (the route's 0.9.3 entry), so it runs as 0.9.1 did, measured on the X2 Elite with Qwen3-VL-2B Q4_0 (2026-10-18, spec/NPU-VENDORS.md, A later GenieX on the PC): pictures on the Hexagon's second session in a median 1.50 s against 0.8.0's 4.49 s on the Adreno, chat at 72.5 tokens a second. Castellan's plugin build over 0.9.3 was measured on the X2 Elite too (2026-10-22, the 0.9.3 entry's pluginPatch): four pictures of four right, a 2.72 GB working set against GenieX's own plugin's 3.54, the processor 0.08 cores busy against 5.22. A PC on 0.9.1 (kit 2.98.0 to 2.107.0) runs it as it is. The installer's size and SHA-256 as GitHub and GenieX's own .sha256 publish them, checked on a download (2026-10-23)"
           },
           "pluginPatch": {
             "what": "Castellan's build of GenieX 0.8.0's llama.cpp plugin: qualcomm/GenieX v0.8.0 with three commits of Castellan's (kit node/geniex/README.md), signed with Castellan's certificate. The model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row (its compute buffer on the NPU 128 MiB, not 601); the vision encoder loads with the first picture, and is freed again after 60 s without one; and GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens",
@@ -210,6 +210,187 @@
         "size": 65196910,
         "sha256": "fcc4d932f371a9b3ad3d08a1b34912fe21a7fdf7c54d47c869250b50d81ec734"
       },
+      "signedBuilds": [
+        {
+          "serverVersion": "0.9.3",
+          "files": {
+            "file": "geniex-sdk-windows-arm64-v0.9.3.zip",
+            "url": "https://github.com/qualcomm/GenieX/releases/download/v0.9.3/geniex-sdk-windows-arm64-v0.9.3.zip",
+            "size": 91519631,
+            "sha256": "3edffa6e64878dfb68ea45116c37550a286e01d0c5066c28e8673cdfd4840446",
+            "folder": "lib"
+          },
+          "signed": {
+            "file": "geniex-cli-windows-arm64-v0.9.3-castellan.zip",
+            "url": "https://github.com/Jcollier0120/Manor-releases/releases/download/geniex-0.9.3-castellan/geniex-cli-windows-arm64-v0.9.3-castellan.zip",
+            "size": 22485685,
+            "sha256": "6e1508ac73d5225ba686b7573a622c82a1737dd44d9ae2cb06f558c2a698f28e"
+          },
+          "copies": {
+            "geniex.dll": {
+              "stock": {
+                "size": 4987904,
+                "sha256": "691fcab1f4fe97ae96a77e3083df668f5305f4d9aa633185fca96a8dd0403ad0"
+              },
+              "signed": {
+                "size": 4998224,
+                "sha256": "16f79f04e63ca673d1cfdeb58f37e7a607447a5cbeda24f6b99e52fb9c480da1"
+              }
+            },
+            "geniex.exe": {
+              "stock": {
+                "size": 41647104,
+                "sha256": "0391794e4e60b5adb347eed20c0d0316d8c7a111a9b32543657f96dde6fbd772"
+              },
+              "signed": {
+                "size": 41657424,
+                "sha256": "584452d84a0ef8a22fc4c4d392175a452c32810ae5ab13cea6a2163c579812e4"
+              }
+            },
+            "llama_cpp\\geniex_plugin.dll": {
+              "stock": {
+                "size": 356864,
+                "sha256": "9612f66a0cc1a29b8f746697b808d62f49cfdd9328b94615b34f6ef1a6dae787"
+              },
+              "signed": {
+                "size": 367184,
+                "sha256": "d88e6037becb7047ac2a6888d81355fdbc685210f72914692489c8e0f6710da9"
+              }
+            },
+            "llama_cpp\\ggml-base.dll": {
+              "stock": {
+                "size": 670208,
+                "sha256": "7d1f6cd72f81b4797629689e09eb89a3cf19d683428b4a9604fe4be637e49c04"
+              },
+              "signed": {
+                "size": 680528,
+                "sha256": "5d00a6fe0fc83d3ae32520a66029c9d5793a882e93d8202bbf62bf8e9f7fee9f"
+              }
+            },
+            "llama_cpp\\ggml-cpu.dll": {
+              "stock": {
+                "size": 867840,
+                "sha256": "57d5887e23875b9bf0b3da8af832288c1d3801dd07b09d1f7b6d04b896a8170c"
+              },
+              "signed": {
+                "size": 878160,
+                "sha256": "11a1b117f60a0652cb520b160d7be102eb27617b3bc822ef6d5d064a8a068a1e"
+              }
+            },
+            "llama_cpp\\ggml-hexagon.dll": {
+              "stock": {
+                "size": 389120,
+                "sha256": "d59d0d6fcc03760214f662387683ab9de3011c163c6ef79fbb43ca665e649979"
+              },
+              "signed": {
+                "size": 399440,
+                "sha256": "4809293ffc52dd3717c3241cac273ae209297c7310c15f750f2b245ef0eba828"
+              }
+            },
+            "llama_cpp\\ggml-opencl.dll": {
+              "stock": {
+                "size": 3112960,
+                "sha256": "92f8bb45eb4df49885afaa7d82f14fe6c7e59b7d035b404f9009c0429ce06349"
+              },
+              "signed": {
+                "size": 3123280,
+                "sha256": "29796a6fe69e2c384bb38f0b4b22684ac429afda7e34de8def9fb1d95ba97259"
+              }
+            },
+            "llama_cpp\\ggml.dll": {
+              "stock": {
+                "size": 72192,
+                "sha256": "2daa509202f5cc9a3d323ae47c9570f67d0f8d516108f16592737efcca7fb167"
+              },
+              "signed": {
+                "size": 82512,
+                "sha256": "a9b5775d5c026000cfca55cf4d7de80eb0f7daed705b58ebf356f83d7ec1ecfe"
+              }
+            },
+            "llama_cpp\\llama-common.dll": {
+              "stock": {
+                "size": 5219840,
+                "sha256": "6c44239b00968dcc10e88d19ae85abf4fef7df5d57a94dc3e515c9285fcc994a"
+              },
+              "signed": {
+                "size": 5230160,
+                "sha256": "2fbadad1f2601fae00eace11d92bcd3fa5847ab2cd73ae809509ce96cf3b9906"
+              }
+            },
+            "llama_cpp\\llama.dll": {
+              "stock": {
+                "size": 3099136,
+                "sha256": "fb879ea821809e95b0f014b31d6c8b71ea9daa3576c4c2f3385890c871342fb6"
+              },
+              "signed": {
+                "size": 3109456,
+                "sha256": "5a200b3e56712fb7e420be1ddbb838464498ea5f358ef9426656755c41c96ee2"
+              }
+            },
+            "llama_cpp\\mtmd.dll": {
+              "stock": {
+                "size": 1550336,
+                "sha256": "7fef77166aff398682f3f118989d228da20dadc4e0662a35d75e987fff928917"
+              },
+              "signed": {
+                "size": 1560656,
+                "sha256": "f8277bc992f697ecf1dd97e8d0ce05341d3f534d84707cfff8aa834b5c111117"
+              }
+            },
+            "qairt\\geniex-proc-vision.dll": {
+              "stock": {
+                "size": 558592,
+                "sha256": "6301bcd8f9d7bb338ce6082db5dd75764cc86a4f3263ebc715e97fa740e6994c"
+              },
+              "signed": {
+                "size": 568912,
+                "sha256": "a11539ca6cfda4d2e2344f57f128e95b99ba228980dadd0764bb0514017f7b9c"
+              }
+            },
+            "qairt\\geniex-proc.dll": {
+              "stock": {
+                "size": 4553728,
+                "sha256": "a6662e779767d02046c2b2baa18c74732bae282f9785c2fb4363481947a35c24"
+              },
+              "signed": {
+                "size": 4564048,
+                "sha256": "0b12c2fcce546a29c1aa2796d26144420bd6195d55b1d2b9522ae59f5df075a0"
+              }
+            },
+            "qairt\\geniex_core.dll": {
+              "stock": {
+                "size": 1134080,
+                "sha256": "8b182a88cb9e9ae357b666c84fd32783103e61c8dd47d00900a4c886962a9818"
+              },
+              "signed": {
+                "size": 1144400,
+                "sha256": "b36ce3ed98b05d4ff9585ba1e80e55fb9257930d0be27854d385535fed7f1ddf"
+              }
+            },
+            "qairt\\geniex_plugin.dll": {
+              "stock": {
+                "size": 393728,
+                "sha256": "f9d137df6264a87b42873a2c1e89139b17614c90972ec4c57780082048779d40"
+              },
+              "signed": {
+                "size": 404048,
+                "sha256": "4aaa4ce019fc2c1a8ee6fac8bfc891fa822093b5526c9f4074fd0862e4b72f87"
+              }
+            },
+            "qairt\\geniex_vlm.dll": {
+              "stock": {
+                "size": 398848,
+                "sha256": "16651455de6e8e80bfaacc02a8a3d15bef756f358b5e25b80f1efb1deb142621"
+              },
+              "signed": {
+                "size": 409168,
+                "sha256": "4a7dcfc0349f420b3919ec8f80db39449edb15f8877b9fd672f13cb448429309"
+              }
+            }
+          },
+          "basis": "tools/sign-binaries.ts, 2026-10-23: GenieX CLI 0.9.3's 16 unsigned files (geniex.exe from its installer, the rest from geniex-sdk-windows-arm64-v0.9.3.zip), signed by Castellan and otherwise unchanged"
+        }
+      ],
       "install": {
         "kind": "inno",
         "args": [
@@ -243,9 +424,9 @@
             "version": "b11645",
             "download": {
               "file": "llama-b11645-bin-win-opencl-adreno-arm64.zip",
-              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11645/llama-b11645-bin-win-opencl-adreno-arm64.zip",
-              "size": 13263463,
-              "sha256": "231e50cdc87ae62b42d4d25c0cc4f937e36df40f8e3593719c23e976ae6eef04"
+              "url": "https://github.com/Jcollier0120/Manor-releases/releases/download/llama.cpp-b11645/llama-b11645-bin-win-opencl-adreno-arm64.zip",
+              "size": 13566094,
+              "sha256": "763a9ca5dca307fa4732d08811d6e45ef4b9801c8037529a595730434fe6e1b5"
             },
             "into": "{tools}\\servers\\llama.cpp\\b11645-hexagon",
             "exe": "{tools}\\servers\\llama.cpp\\b11645-hexagon\\llama-server.exe",
@@ -314,9 +495,9 @@
             "version": "b11645",
             "download": {
               "file": "llama-b11645-bin-win-opencl-adreno-arm64.zip",
-              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11645/llama-b11645-bin-win-opencl-adreno-arm64.zip",
-              "size": 13263463,
-              "sha256": "231e50cdc87ae62b42d4d25c0cc4f937e36df40f8e3593719c23e976ae6eef04"
+              "url": "https://github.com/Jcollier0120/Manor-releases/releases/download/llama.cpp-b11645/llama-b11645-bin-win-opencl-adreno-arm64.zip",
+              "size": 13566094,
+              "sha256": "763a9ca5dca307fa4732d08811d6e45ef4b9801c8037529a595730434fe6e1b5"
             },
             "into": "{tools}\\servers\\llama.cpp\\b11645-hexagon",
             "exe": "{tools}\\servers\\llama.cpp\\b11645-hexagon\\llama-server.exe",
@@ -537,9 +718,9 @@
         "version": "b11125",
         "download": {
           "file": "llama-b11125-bin-win-opencl-adreno-arm64.zip",
-          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11125/llama-b11125-bin-win-opencl-adreno-arm64.zip",
-          "size": 12848190,
-          "sha256": "9806ac40d46aacd1aa2ef6ea982054fb72e86cf28aec507b2d5e9bdb76ce20c1"
+          "url": "https://github.com/Jcollier0120/Manor-releases/releases/download/llama.cpp-b11125/llama-b11125-bin-win-opencl-adreno-arm64.zip",
+          "size": 13145105,
+          "sha256": "f3d4ae9b57246c71938f8de3407f91537024785243b4c080bee80e97ec219584"
         },
         "into": "{tools}\\servers\\llama.cpp\\b11125-hexagon",
         "exe": "{tools}\\servers\\llama.cpp\\b11125-hexagon\\llama-server.exe",
@@ -1092,7 +1273,7 @@
     },
     "amd": {
       "server": "FastFlowLM",
-      "version": "1.0.7",
+      "version": "1.0.10",
       "arch": "x64",
       "generations": {
         "xdna": {
@@ -1110,7 +1291,34 @@
             "requestBaseMs": 15000,
             "coldLoadMs": 30000
           },
-          "basis": "Measured by the NPU check on AMD Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), NPU driver 32.0.20102.3930, 2026-10-15, Qwen3.5-2B for chat and vision, its context 4,096 (--ctx-len), every measuring step passing: writes 19.4 tokens a second: 150 ms a token allows twice that; reading 3,272 tokens took 4.1 s: a 15 s base allows twice that and a warm answer; the slowest start to a first answer took 17 s (the kit's test request, a picture and then chat): 30 s allows half again. One model answers chat and pictures, so nothing switches between them. Qwen3-4B's, before it: writes 13.8 tokens a second, 3,115 tokens read in 6.6 s, a 20 s base, and its switch to and from its vision model, 8 to 9 s, inside each."
+          "basis": "Measured by the NPU check on AMD Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), NPU driver 32.0.20102.3930, 2026-10-15, Qwen3.5-2B for chat and vision, its context 4,096 (--ctx-len), every measuring step passing: writes 19.4 tokens a second: 150 ms a token allows twice that; reading 3,272 tokens took 4.1 s: a 15 s base allows twice that and a warm answer; the slowest start to a first answer took 17 s (the kit's test request, a picture and then chat): 30 s allows half again. One model answers chat and pictures, so nothing switches between them. Qwen3-4B's, before it: writes 13.8 tokens a second, 3,115 tokens read in 6.6 s, a 20 s base, and its switch to and from its vision model, 8 to 9 s, inside each. That was FastFlowLM 1.0.7. With 1.0.10 (kit 2.111.0) on the same PC, NPU driver 32.0.20102.4480, 2026-10-23, the NPU check passed every step: it writes 22.2 tokens a second, read 3,272 tokens in 3.0 s, and its slowest start to a first answer took 11 s, all inside these.",
+          "order": {
+            "chat": {
+              "devices": [
+                "npu",
+                "gpu",
+                "cpu"
+              ],
+              "basis": "npu-bench's quick profile, three runs on each device, medians, on AMD Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), NPU driver 32.0.20102.3930, the package meter (Windows' Energy Meter, rapl_package0_pkg: the chip's energy, there being no whole-PC part), kit 2.99.1, 2026-10-23, each job over the PC at rest: a triage 26.4 J on the NPU (FastFlowLM 1.0.7, Qwen3.5-2B), 40.7 J on the Radeon 860M and 88.6 J on the processor (llama.cpp b11734, Qwen3.5-2B Q4_0); a reply 27.5 J on the NPU, 87.3 J on the Radeon, 79.4 J on the processor; a summary 48.7 J on the NPU, 89.8 J on the Radeon, 128.5 J on the processor; reading 1,024 tokens 31.1 J on the NPU, 32.2 J on the Radeon, 87.5 J on the processor. The NPU spends the least on every chat job. FastFlowLM 1.0.10 is the same within noise (kit 2.111.0, driver 32.0.20102.4480, 2026-10-23, three interleaved runs of each version, means on the NPU, 1.0.10 against 1.0.7: a triage 25.0 J against 26.2, a reply 24.6 against 29.4, a summary 47.4 against 51.7, reading 1,024 tokens 31.5 against 31.1, writing 22.95 tokens a second against 22.47)."
+            },
+            "vision": {
+              "devices": [
+                "gpu",
+                "npu",
+                "cpu"
+              ],
+              "runningFirst": true,
+            "batchAt": 4,
+              "basis": "npu-bench's quick profile, three runs on each device, medians, on AMD Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), NPU driver 32.0.20102.3930, the package meter (Windows' Energy Meter, rapl_package0_pkg: the chip's energy, there being no whole-PC part), kit 2.99.1, 2026-10-23, each job over the PC at rest: a picture 26.1 J on the NPU (FastFlowLM 1.0.7), 12.1 J on the Radeon 860M and 22.8 J on the processor (llama.cpp b11734, Qwen3.5-2B Q4_0 and its F16 projector). Then the Radeon's own picture model, the one setup gives a graphics card (Qwen3-VL-2B Q4_K_M and its Q8_0 projector, llama.cpp b11734 Vulkan), against FastFlowLM 1.0.10 on the NPU, three interleaved rounds on the same PC, driver 32.0.20102.4480, 2026-10-23: from a stopped server, starting it and one picture took 66 J in 3.9 s on the Radeon (55 to 86 J, the 86 its first load ever) and 177 J in 10.8 s on the NPU (164 to 192 J); each picture after that, warm, 10.4 J in 0.47 s on the Radeon and 26.6 J in 1.28 s on the NPU; the server then held 2.8 GB for the Radeon and 3.8 GB for the NPU. The suite's four pictures twice each: 8 of 8 right on the Radeon, 6 of 8 on the NPU. So the Radeon goes first. Starting the Radeon's server costs about 56 J more than a warm picture there: with FastFlowLM already up, a lone picture costs less on the NPU (26.6 J against 66), and the Radeon wins that back only from the fourth picture in a row. So with runningFirst, a picture goes to the NPU when FastFlowLM is up and the Radeon's server isn't. With batchAt, 4 or more pictures waiting go to the Radeon even then: n pictures cost about 55.6 + 10.4n J there from a stopped server (its start and first picture 66 J, then 10.4 J each) against 26.6n J on the NPU, the same at 3.4 pictures. The owner's answers (2026-10-23): asked by the AMD manager where pictures should go, \"Radeon unless only NPU up\"; then, to the Snapdragon manager, \"keep single pictures on the NPU when it's running, but send batches of 4 or more waiting pictures to the Radeon.\" With both servers up, a single picture goes to the warm Radeon (10.4 J against 26.6 J): the owner's ruling on that case, to the Snapdragon manager, of \"With both servers up, a single picture stays on the NPU. Only batches of 4 or more go to the Radeon.\", was \"actually change that, make it the gpu instead\". The Radeon's server, once up, takes the pictures after them (runningFirst) and holds its 2.8 GB beside FastFlowLM's until the keeper stops it, after 5 minutes unused on a PC under 20 GB."
+            },
+            "embed": {
+              "devices": [
+                "gpu",
+                "cpu"
+              ],
+              "basis": "None on the NPU on this route (embeddings, below). npu-bench's quick profile, three runs on each device, medians, on AMD Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), NPU driver 32.0.20102.3930, the package meter (Windows' Energy Meter, rapl_package0_pkg: the chip's energy, there being no whole-PC part), kit 2.99.1, 2026-10-23, each job over the PC at rest: an embedding 12.8 mJ a token on the Radeon 860M and 44.1 mJ on the processor (llama.cpp b11734, Qwen3-Embedding-0.6B Q8_0), 1,614 and 515 tokens a second."
+            }
+          }
         }
       },
       "driverMin": "32.0.203.311",
@@ -1119,15 +1327,31 @@
         "vision": 4.1
       },
       "download": {
-        "file": "fastflowlm_1.0.7_windows_amd64.zip",
-        "url": "https://github.com/ROCm/FastFlowLM/releases/download/v1.0.7/fastflowlm_1.0.7_windows_amd64.zip",
-        "size": 40181694,
-        "sha256": "0377e501afe3595d491cde1ff91923f225240053437d6e55b47c6e86fadc54d8"
+        "file": "fastflowlm_1.0.10_windows_amd64.zip",
+        "url": "https://github.com/ROCm/FastFlowLM/releases/download/v1.0.10/fastflowlm_1.0.10_windows_amd64.zip",
+        "size": 30484687,
+        "sha256": "a7063890d7b91037a07f381a396a0d7787ebdb69e1b03280971faf0a80f35b73"
       },
+      "catalogs": [
+        {
+          "serverVersion": "1.0.7",
+          "file": "castellan-amd-fastflowlm-1.0.7.cat",
+          "covers": "FastFlowLM 1.0.7's 45 unsigned program files",
+          "size": 19121,
+          "sha256": "140b5510f76fccc0e610c61da6ec8f0c0cdb4bb4ce2fac093d8216e6800b5f8d"
+        },
+        {
+          "serverVersion": "1.0.10",
+          "file": "castellan-amd-fastflowlm-1.0.10.cat",
+          "covers": "FastFlowLM 1.0.10's 36 unsigned program files",
+          "size": 17357,
+          "sha256": "5b989f4fc81fe06d0d3a8cb5d1a9a3c7e52f0eb9d45b54d7853fee71b2281a69"
+        }
+      ],
       "install": {
         "kind": "zip",
-        "into": "{tools}\\servers\\fastflowlm-1.0.7",
-        "exe": "{tools}\\servers\\fastflowlm-1.0.7\\flm.exe"
+        "into": "{tools}\\servers\\fastflowlm-1.0.10",
+        "exe": "{tools}\\servers\\fastflowlm-1.0.10\\flm.exe"
       },
       "port": 18184,
       "serve": [
@@ -1187,11 +1411,18 @@
           "chat": 6,
           "vision": 6
         },
-        "basis": "The slowest measured, rounded up to a tenth of a second, Qwen3.5-2B for chat and vision. Chat: npu-check --idle on a Ryzen AI 7 350 (Krackan, 16 GB), 2026-10-15, every step passing: stopped to its first answer in 15.0 s (FastFlowLM loads the model before it opens its port), the keeper's stop freeing 3.7 GB. Vision: the NPU check's kit-test the same day, the kit's test request on a stopped server, a picture and then chat, 16.5 s: the same server and model, so no switch. Started alike from Node, three times each, Qwen3.5-2B answered first in 11.8 to 12.4 s and Qwen3-4B in 10.1 to 10.7 s; Qwen3-4B's idleStop was 6.6 s for chat and 15.7 s for vision (its switch to the vision model, 9.2 s, included). All of these were measured while Reeve embedded on the Radeon 860M, which shares the PC's memory with the NPU: Qwen3-4B's server came up in 8.5 to 9.3 s then, against 4 to 6 s on the quiet PC that gave its 6.6 s, so they are on the slow side.",
+        "basis": "The slowest measured, rounded up to a tenth of a second, Qwen3.5-2B for chat and vision. Chat: npu-check --idle on a Ryzen AI 7 350 (Krackan, 16 GB), 2026-10-15, every step passing: stopped to its first answer in 15.0 s (FastFlowLM loads the model before it opens its port), the keeper's stop freeing 3.7 GB. Vision: the NPU check's kit-test the same day, the kit's test request on a stopped server, a picture and then chat, 16.5 s: the same server and model, so no switch. Started alike from Node, three times each, Qwen3.5-2B answered first in 11.8 to 12.4 s and Qwen3-4B in 10.1 to 10.7 s; Qwen3-4B's idleStop was 6.6 s for chat and 15.7 s for vision (its switch to the vision model, 9.2 s, included). FastFlowLM 1.0.10 started faster, from a stopped server to its first picture in 10.4 to 11.4 s (three rounds, Node, driver 32.0.20102.4480, 2026-10-23): these stay. All of the 1.0.7 figures were measured while Reeve embedded on the Radeon 860M, which shares the PC's memory with the NPU: Qwen3-4B's server came up in 8.5 to 9.3 s then, against 4 to 6 s on the quiet PC that gave its 6.6 s, so they are on the slow side.",
         "verify": "On a Ryzen AI 300 (XDNA 2) laptop with 16 GB, with FastFlowLM set up by setup: stop the manor's own NPU server first (or let the keeper stop it), then run node <agent>\\src\\kit\\npu-check.ts --idle --yes from any agent that has the kit (2.71.0 or later). It passes or fails each step and prints the idleStop numbers its cold start gives; if they differ from these, change coldStartMs and minutes here."
       },
+      "retired": [
+        {
+          "path": "{tools}\\servers\\fastflowlm-1.0.7",
+          "since": "2.111.0",
+          "why": "FastFlowLM 1.0.7, the route's server until kit 2.111.0 pinned 1.0.10 (the same speed and energy within noise). Setup unpacks 1.0.10 beside it and points the NPU's entry there; the models in %USERPROFILE%\\.flm\\models serve both, and stay."
+        }
+      ],
       "embeddings": "not on the NPU: FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms; embeddings go to the graphics card or the processor",
-      "licence": "FastFlowLM: MIT (orchestration and CLI), NPU kernels free for any use including commercial; asks for \"Powered by FastFlowLM\" in the product's notices",
+      "licence": "FastFlowLM 1.0.10: its runtime, orchestration and CLI under the MIT License (LICENSE_RUNTIME.txt); its NPU kernels and prebuilt engine libraries under AMD's FastFlowLM NPU Binary License (LICENSE_BINARY.txt: free for any use, commercial included, and redistributed only unmodified with that licence beside them), both in its zip with its THIRD_PARTY_NOTICES.txt. Its README asks to be acknowledged, and the manor's notices do: Powered by [FastFlowLM](https://github.com/ROCm/FastFlowLM)",
       "offNpu": {
         "context": 4096,
         "models": {
@@ -1222,7 +1453,7 @@
         },
         "basis": "Qwen3.5-2B, the model FastFlowLM runs on the NPU, as unsloth's Q4_0 GGUF and F16 projector (Hugging Face, unsloth/Qwen3.5-2B-GGUF at f6d5376b, Apache-2.0), run by llama.cpp b11734 on the Radeon (its Vulkan build) and on the processor (its x64 build), at FastFlowLM's --ctx-len 4096 and with its thinking off, as FastFlowLM serves it. FastFlowLM's own weights are in its NPU format (q4nx), which nothing else reads: Q4_0 is the nearest 4-bit GGUF. Downloaded into the tools home's models folder (1.9 GB), for the benchmark only."
       },
-      "notes": "A portable zip, unpacked into the tools home: no installer, no administrator. AMD's NPU driver 32.0.203.311 or later (an administrator installs drivers). One server holds one model: Qwen3.5-2B answers chat and pictures alike, so nothing switches (the Qwen3-4B pair before it, one model for chat and one for vision, took 8 to 9 s to switch either way). Models are kept in %USERPROFILE%\\.flm\\models. Its context is --ctx-len 4096, the cap: FastFlowLM holds its whole context on the NPU from the start, and without it took the model's own, 40,960 tokens for Qwen3-4B (about 144 KB a token, 5.6 GB, on top of 3.3 GB of weights). On a Ryzen AI 7 350 with 16 GB, where Windows lets a device hold half the PC's memory at once (7.6 GB), that never loaded (XRT 0xc01e0200, the video memory manager couldn't page every allocation in at once), from a fresh start too; at 4,096 Qwen3-4B loaded in 4 to 6 s and held 4.5 GB, at 8,192 10.6 s and 5.1 GB, at the same speed (13.9 to 14.1 tokens a second), and its vision model held 5.3 GB. Qwen3.5-2B at 4,096 holds 3.7 GB started and 4.0 to 4.1 GB after jobs and pictures, writes 19.4 to 21.0 tokens a second and reads about 800. Its tokenizer has 248,320 entries against Qwen3's 151,936, so the same text is usually fewer tokens to it, and the kit's estimate of 3 characters a token stays on the safe side. FastFlowLM serves it with its thinking off. A failed load doesn't stop it: it serves on, /v1/models listing every model it knows, and answers each request 200 with only {\"error\":\"Failed to load … model!\"} (it tries the load again each time); the kit takes that for the server failing (failedWithOk), and the NPU check asks /api/ps, which lists the model it holds (reportsLoaded). A prompt past its context is refused 400 (\"Max length reached!\"), the server still up. Its power mode: at each start FastFlowLM runs C:\\Windows\\System32\\AMD\\xrt-smi.exe configure --pmode (performance by default) and ignores the result. On the Krackan that never ran: an older driver's xrt_coreutil.dll (2024) beside the newer xrt-smi.exe lacks a function it needs, so xrt-smi failed to load at every start (silently from Node, which the kit starts it from; with a dialog for each start from anywhere else). So its --pmode runs (powersaver, balanced, performance, turbo: the same speed on mains power, 14.0 tokens a second each, and on battery, none drawing clearly less than the battery meter's own swing) all ran in one mode, the driver's own, and say nothing of the modes: the route sets none until they're measured on a PC whose xrt-smi runs. With Qwen3-4B, in that one mode, on battery it used 20.7 mJ a token (npu-bench --energy), wrote 13.1 tokens a second and loaded in 12.7 s (5.4 s on mains power), and a smaller --prefill-chunk-len than its 4,096 only read slower (3,000 tokens 7.3 s at 1,024, 9.5 s at 512, against 5.3 s). It reads far faster than it writes: Qwen3-4B 34 to 36 times (472 to 512 tokens a second read, 13.1 to 14.4 written, on mains power and on battery), Qwen3.5-2B 41 times (795 and 19.4), so readPerWrite is 30: on a generation nobody has measured, calibrate takes a full-cap read at 30 times the writing speed it measured (the Krackan's --harden measurement gave a 35 s base with Qwen3-4B and 25 s with Qwen3.5-2B, where the kit's 10 gave 90 s). Its --img-pre-resize default (2: a large picture scaled to a height of 720; a small one isn't enlarged) is kept, measured with Qwen3-4B's vision model: a 1920x1080 screen cost 960 tokens and 4.5 s an answer and a 1080x2400 phone screen 270 tokens and 2.3 s, every answer right, where the original size cost 2,080 and 2,600 tokens and twice to four times the time for nothing more right, and a height of 480 misread small text. FastFlowLM 1.0.7 misreads a picture it doesn't shrink (720 px tall or less) when a side is a whole number of 32 px, so the route has the quirk sides-of-32: the kit makes such a side a pixel longer before sending it (NPU-VENDORS.md, FastFlowLM's pictures with sides of 32 px). It keeps no prefix cache: a request asked again costs the same. It streams a token a chunk, with its usage in the last (stream_options.include_usage)."
+      "notes": "A portable zip, unpacked into the tools home: no installer, no administrator. AMD's NPU driver 32.0.203.311 or later (an administrator installs drivers). One server holds one model: Qwen3.5-2B answers chat and pictures alike, so nothing switches (the Qwen3-4B pair before it, one model for chat and one for vision, took 8 to 9 s to switch either way). Models are kept in %USERPROFILE%\\.flm\\models. Its context is --ctx-len 4096, the cap: FastFlowLM holds its whole context on the NPU from the start, and without it took the model's own, 40,960 tokens for Qwen3-4B (about 144 KB a token, 5.6 GB, on top of 3.3 GB of weights). On a Ryzen AI 7 350 with 16 GB, where Windows lets a device hold half the PC's memory at once (7.6 GB), that never loaded (XRT 0xc01e0200, the video memory manager couldn't page every allocation in at once), from a fresh start too; at 4,096 Qwen3-4B loaded in 4 to 6 s and held 4.5 GB, at 8,192 10.6 s and 5.1 GB, at the same speed (13.9 to 14.1 tokens a second), and its vision model held 5.3 GB. Qwen3.5-2B at 4,096 holds 3.7 GB started and 4.0 to 4.1 GB after jobs and pictures, writes 19.4 to 21.0 tokens a second and reads about 800. Its tokenizer has 248,320 entries against Qwen3's 151,936, so the same text is usually fewer tokens to it, and the kit's estimate of 3 characters a token stays on the safe side. FastFlowLM serves it with its thinking off. A failed load doesn't stop it: it serves on, /v1/models listing every model it knows, and answers each request 200 with only {\"error\":\"Failed to load … model!\"} (it tries the load again each time); the kit takes that for the server failing (failedWithOk), and the NPU check asks /api/ps, which lists the model it holds (reportsLoaded). A prompt past its context is refused 400 (\"Max length reached!\"), the server still up. Its power mode: at each start FastFlowLM runs C:\\Windows\\System32\\AMD\\xrt-smi.exe configure --pmode (performance by default) and ignores the result. On the Krackan that never ran: an older driver's xrt_coreutil.dll (2024) beside the newer xrt-smi.exe lacks a function it needs, so xrt-smi failed to load at every start (silently from Node, which the kit starts it from; with a dialog for each start from anywhere else). So its --pmode runs (powersaver, balanced, performance, turbo: the same speed on mains power, 14.0 tokens a second each, and on battery, none drawing clearly less than the battery meter's own swing) all ran in one mode, the driver's own, and say nothing of the modes: the route sets none until they're measured on a PC whose xrt-smi runs. With Qwen3-4B, in that one mode, on battery it used 20.7 mJ a token (npu-bench --energy), wrote 13.1 tokens a second and loaded in 12.7 s (5.4 s on mains power), and a smaller --prefill-chunk-len than its 4,096 only read slower (3,000 tokens 7.3 s at 1,024, 9.5 s at 512, against 5.3 s). It reads far faster than it writes: Qwen3-4B 34 to 36 times (472 to 512 tokens a second read, 13.1 to 14.4 written, on mains power and on battery), Qwen3.5-2B 41 times (795 and 19.4), so readPerWrite is 30: on a generation nobody has measured, calibrate takes a full-cap read at 30 times the writing speed it measured (the Krackan's --harden measurement gave a 35 s base with Qwen3-4B and 25 s with Qwen3.5-2B, where the kit's 10 gave 90 s). Its --img-pre-resize default (2: a large picture scaled to a height of 720; a small one isn't enlarged) is kept, measured with Qwen3-4B's vision model: a 1920x1080 screen cost 960 tokens and 4.5 s an answer and a 1080x2400 phone screen 270 tokens and 2.3 s, every answer right, where the original size cost 2,080 and 2,600 tokens and twice to four times the time for nothing more right, and a height of 480 misread small text. FastFlowLM 1.0.7 misreads a picture it doesn't shrink (720 px tall or less) when a side is a whole number of 32 px, and 1.0.10 still does (2026-10-23), so the route has the quirk sides-of-32: the kit makes such a side a pixel longer before sending it (NPU-VENDORS.md, FastFlowLM's pictures with sides of 32 px). It keeps no prefix cache: a request asked again costs the same. It streams a token a chunk, with its usage in the last (stream_options.include_usage)."
     }
   },
   "devices": {

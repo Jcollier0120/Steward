@@ -40,7 +40,7 @@ export type Work = core.Work;
 
 /**
  * `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path.
- * `sides-of-32`: a picture's side of a whole number of 32 px is made a pixel longer first (FastFlowLM 1.0.7: fitPicture).
+ * `sides-of-32`: a picture's side of a whole number of 32 px is made a pixel longer first (FastFlowLM 1.0.7 and 1.0.10: fitPicture).
  */
 export const QUIRKS: string[] = [...core.QUIRKS];
 
@@ -537,17 +537,20 @@ export const MAX_AHEAD = RULES.accelerators.maxAhead;
 
 export type Need = core.Need;
 export type Skipped = core.Skipped;
+export type WorkOrder = core.WorkOrder;
 
 /**
  * The candidates for a request, in order: they serve its kind, its size fits their cap, they haven't
  * failed in the last 10 minutes (unless every one that would do has: then they all may, as a last
  * resort), a game isn't using them (background work only), and this agent isn't leaving them alone
- * after a line that was too long (`deferredMs`).
+ * after a line that was too long (`deferredMs`). The config's `workOrder` for its kind, when it has one, orders them
+ * first, with `running` (serversUp) for its runningFirst, and `waiting` (how many of the work wait, this one included)
+ * for its batchAt.
  */
 export function candidates(
   accs: Accelerator[],
   need: Need,
-  state: { failure?: (id: string) => Failure | null; games?: Games | null; deferredMs?: (id: string) => number; now?: number } = {},
+  state: { failure?: (id: string) => Failure | null; games?: Games | null; deferredMs?: (id: string) => number; now?: number; workOrder?: WorkOrder | null; running?: (id: string) => boolean; waiting?: number } = {},
 ): { list: Accelerator[]; skipped: Skipped[]; npuFirst: boolean } {
   const asked = accs.filter((a) => core.serves(a, need.work));
   return core.candidates(RULES, accs, need, {
@@ -555,7 +558,25 @@ export function candidates(
     games: state.games ?? null,
     deferredMs: state.deferredMs ? Object.fromEntries(asked.map((a) => [a.id, state.deferredMs!(a.id)])) : undefined,
     nowMs: state.now ?? Date.now(),
+    ...(state.workOrder ? { workOrder: state.workOrder } : {}),
+    ...(state.running ? { running: Object.fromEntries(asked.map((a) => [a.id, state.running!(a.id)])) } : {}),
+    ...(state.waiting ? { waiting: state.waiting } : {}),
   });
+}
+
+/** How long a look at whether a server is up waits: a server that isn't refuses at once, and one that takes longer is up. */
+export const UP_PROBE_MS = 500;
+
+/**
+ * Whose servers for this work are up (running: ready, or busy loading or answering), by id, when the work's order goes by
+ * it (`workOrder`'s runningFirst); else none is asked and the answer is undefined. One look each, all at once, starting
+ * nothing.
+ */
+export async function serversUp(accs: Accelerator[], work: Work, workOrder: WorkOrder | null | undefined, look: (baseUrl: string) => Promise<ServerState> = (b) => probe(b, UP_PROBE_MS)): Promise<((id: string) => boolean) | undefined> {
+  if (!workOrder?.[work]?.runningFirst) return undefined;
+  const up = new Map<string, boolean>();
+  await Promise.all(accs.filter((a) => core.serves(a, work)).map(async (a) => up.set(a.id, (await look(a[work]!.baseUrl)) !== 'down')));
+  return (id) => up.get(id) ?? false;
 }
 
 /** An accelerator's lock folders, one per slot: `locks\npu` for the NPU, `locks\<id>`, `<id>.2` … for the others. */
@@ -635,6 +656,14 @@ export class ServerNotRunning extends Error {}
  * until it's started again (kit 2.99.1). A server already running still serves. Not a failure: nothing is marked.
  */
 export class ManorStopped extends ServerNotRunning {}
+
+/**
+ * The server's program isn't where its startCommand says (kit 2.113.5): its setup removed, or never seen by the staff
+ * (setup run inside a packaged app once left GenieX in that app's own AppData, which the staff can't see). A failure,
+ * marked as one, and said plainly rather than as Node's ENOENT, which it gives for a missing working folder too. The
+ * keeper sets the server up again (server-repair.ts).
+ */
+export class ProgramMissing extends AcceleratorDown {}
 
 /** How long a server may take to come up after its startCommand. */
 export const START_WAIT_MS = RULES.accelerators.startWaitMs;
@@ -902,6 +931,8 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: StartOpti
 async function startOnce(ep: Endpoint, waitMs: number, readyMs: number, o: StartOptions): Promise<ServerReady> {
   const [cmd, ...args] = ep.startCommand!.map((a) => expandEnv(a));
   const program = path.win32.basename(cmd);
+  // Its program looked for first (kit 2.113.5): a program on PATH (no folder named) is left to the spawn.
+  if (path.win32.isAbsolute(cmd) && !existsSync(cmd)) throw new ProgramMissing(core.say.notInstalled(program, cmd));
   const startedAt = Date.now();
   let spawnError: Error | undefined;
   let exited: number | null | undefined;
@@ -1090,8 +1121,8 @@ export function pictureSize(b: Buffer): { width: number; height: number } | null
 }
 
 /**
- * The size a server with `sides-of-32` should get a picture at, or null when it reads it right as it is. FastFlowLM 1.0.7
- * misreads a picture with a side of a whole number of 32 px (its models' patches, 16 px merged in twos) when it doesn't
+ * The size a server with `sides-of-32` should get a picture at, or null when it reads it right as it is. FastFlowLM (1.0.7,
+ * and 1.0.10 still) misreads a picture with a side of a whole number of 32 px (its models' patches, 16 px merged in twos) when it doesn't
  * shrink the picture itself, which its --img-pre-resize 2 (the default, the AMD route's) does only above 720 px tall.
  * Made a pixel longer, such a side is resampled by the model's own resize, and read right: spec/NPU-VENDORS.md has the
  * measurements. Pure.

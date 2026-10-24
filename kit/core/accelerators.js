@@ -59,9 +59,24 @@ import { slotNames } from './queue.js';
  */
 
 /**
+ * @typedef {object} WorkOrderOf One kind of work's order on this PC, from its NPU's generation (setup writes it from
+ * npu-vendors.json's `order`, kit 2.111.0).
+ * @property {AcceleratorKind[]} devices The kinds of device, first preferred; any it leaves out follow, in the auto order.
+ * @property {boolean} [runningFirst] A device whose server is running goes before one whose server isn't, the order kept
+ * otherwise: on AMD's Ryzen AI 300, a picture goes to the Radeon unless only FastFlowLM is up.
+ * @property {number} [batchAt] With runningFirst: from this many of the work waiting (`waiting`, this request included),
+ * the order is kept whoever's server is up, so a batch starts the first device's server. On AMD's Ryzen AI 300, 4 pictures
+ * waiting go to the Radeon even while only FastFlowLM is up (the owner's rule, 2026-10-23).
+ */
+
+/** @typedef {Partial<Record<Work, WorkOrderOf>>} WorkOrder */
+
+/**
  * @typedef {object} AcceleratorConfig
  * @property {Accelerator[]} accelerators In the order requests try them: acceleratorOrder's, or auto's.
  * @property {'auto' | string[]} order
+ * @property {WorkOrder} [workOrder] The config's `workOrder`, each work's own order over the auto order: only with
+ * acceleratorOrder "auto" (a person's list is kept).
  * @property {number} requestTimeoutMs
  * @property {boolean} legacy Read from an older config's chatEndpoint and embedEndpoint.
  * @property {string[]} problems Entries that couldn't be read, in words.
@@ -121,7 +136,7 @@ export const WORKS = Object.freeze(['chat', 'vision', 'embed']);
 /**
  * `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path.
  * `sides-of-32`: a picture's side of a whole number of 32 px, on a picture the server doesn't shrink, is made a pixel
- * longer first (FastFlowLM 1.0.7 misreads it).
+ * longer first (FastFlowLM 1.0.7 and 1.0.10 misread it).
  */
 export const QUIRKS = Object.freeze(['prefix-leak', 'image-path', 'sides-of-32']);
 
@@ -216,6 +231,64 @@ function readTimeouts(v) {
     if (typeof n === 'number' && Number.isInteger(n) && n >= 0) out[k] = n;
   }
   return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * config.json's `workOrder` as written: each work's devices (npu, gpu, cpu, each at most once), its runningFirst, and its
+ * batchAt (a whole number, 2 or more; otherwise left out). A work written otherwise is left out, and with none left, there
+ * is none.
+ * @param {any} v
+ * @returns {WorkOrder | undefined}
+ */
+export function readWorkOrder(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  /** @type {WorkOrder} */
+  const out = {};
+  for (const w of WORKS) {
+    const o = v[w];
+    const devices = o && typeof o === 'object' && Array.isArray(o.devices) ? o.devices : null;
+    if (!devices?.length || devices.some((/** @type {unknown} */ d) => d !== 'npu' && d !== 'gpu' && d !== 'cpu') || new Set(devices).size !== devices.length) continue;
+    out[w] = { devices: [...devices], ...(o.runningFirst === true ? { runningFirst: true } : {}), ...(Number.isInteger(o.batchAt) && o.batchAt >= 2 ? { batchAt: o.batchAt } : {}) };
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * The accelerators in one work's order (`workOrder`'s): the kinds it names first, in its order, the rest after it as
+ * given (the auto order); with runningFirst, those whose server `running` says is up before those whose isn't, that order
+ * kept otherwise, unless as many of the work wait as its batchAt: then the order is kept as it is. No order for the work:
+ * as given.
+ * @template {{ id: string, kind: AcceleratorKind }} A
+ * @param {A[]} list
+ * @param {WorkOrderOf | undefined} order
+ * @param {Record<string, boolean>} [running] By id.
+ * @param {number} [waiting] How many of the work wait, this request included.
+ * @returns {A[]}
+ */
+export function workOrdered(list, order, running, waiting) {
+  if (!order) return list;
+  /** @param {A} a */
+  const rank = (a) => {
+    const i = order.devices.indexOf(a.kind);
+    return i < 0 ? order.devices.length : i;
+  };
+  const byKind = list
+    .map((a, i) => ({ a, i }))
+    .sort((x, y) => rank(x.a) - rank(y.a) || x.i - y.i)
+    .map((x) => x.a);
+  if (!order.runningFirst || !running || isBatch(order, waiting)) return byKind;
+  return [...byKind.filter((a) => running[a.id]), ...byKind.filter((a) => !running[a.id])];
+}
+
+/**
+ * Whether as many of the work wait as its order's batchAt: a batch, which keeps the order whoever's server is up
+ * (kit 2.112.1; Reeve's routing reads it too).
+ * @param {WorkOrderOf | undefined} order
+ * @param {number} [waiting]
+ * @returns {boolean}
+ */
+export function isBatch(order, waiting) {
+  return order?.batchAt !== undefined && (waiting ?? 0) >= order.batchAt;
 }
 
 /**
@@ -568,9 +641,11 @@ export function parseAccelerators(rules, raw, hw = null) {
   const order = Array.isArray(raw?.acceleratorOrder)
     ? raw.acceleratorOrder.filter((/** @type {unknown} */ x) => typeof x === 'string').map((/** @type {string} */ id) => renamed.get(id) ?? id)
     : 'auto';
+  const workOrder = order === 'auto' ? readWorkOrder(raw?.workOrder) : undefined;
   return {
     accelerators: ordered(rules, list, order),
     order,
+    ...(workOrder ? { workOrder } : {}),
     requestTimeoutMs: positiveInt(raw?.requestTimeoutMs) ?? rules.accelerators.defaultRequestTimeoutMs,
     legacy,
     problems,
@@ -825,10 +900,20 @@ export function gameCards(rules, load, accs, opts) {
  * only when the NPU can't: it doesn't serve the work, the request is too big for it, or it failed lately.
  * Busy, resting after a long line, or loading its model, it is waited for, never passed over. An
  * acceleratorOrder that puts something else first is the person's choice, and kept.
+ *
+ * **The work's own order** (kit 2.111.0): the config's `workOrder` for the request's kind, when it has one, puts the
+ * accelerators in that order first (workOrdered), with `running` saying whose servers are up for its runningFirst. The
+ * NPU first then means first in that order: AMD's pictures go to the Radeon, and to the NPU only when its server is up
+ * and the Radeon's isn't. With its batchAt, from that many of the work waiting (`waiting`, this request included) the
+ * order is kept whoever's server is up: 4 pictures waiting start the Radeon's (the owner's rule). **It waits in one line**
+ * (kit 2.112.1): where the order puts one first, by its runningFirst or a batch, the first in it that can take the request
+ * is the only candidate, as the NPU first is. A busy Radeon is waited for, not passed over for a free NPU or processor
+ * that spends more on the work (AMD's pictures: 26.6 J each on the NPU against the Radeon's 10.4). The others take it only
+ * when that one can't: failed lately, a game's, or rested after a long line.
  * @param {Rules} rules
  * @param {Accelerator[]} accs
  * @param {Need} need
- * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, deferredMs?: Record<string, number>, nowMs?: number }} [state]
+ * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, deferredMs?: Record<string, number>, nowMs?: number, workOrder?: WorkOrder | null, running?: Record<string, boolean>, waiting?: number }} [state]
  * @returns {{ list: Accelerator[], skipped: Skipped[], npuFirst: boolean }}
  */
 export function candidates(rules, accs, need, state = {}) {
@@ -836,7 +921,13 @@ export function candidates(rules, accs, need, state = {}) {
   const list = [];
   /** @type {Skipped[]} */
   const skipped = [];
-  const fitting = accs.filter((acc) => serves(acc, need.work) && need.tokens <= capFor(acc, need.work));
+  const order = state.workOrder?.[need.work];
+  const fitting = workOrdered(
+    accs.filter((acc) => serves(acc, need.work) && need.tokens <= capFor(acc, need.work)),
+    order,
+    state.running,
+    state.waiting,
+  );
   /** @param {Accelerator} acc */
   const failureOfAcc = (acc) => state.failures?.[acc.id] ?? null;
   // When every one that would do has failed, they're tried anyway (the last resort, as Reeve does), rather
@@ -863,7 +954,9 @@ export function candidates(rules, accs, need, state = {}) {
     }
     list.push(acc);
   }
-  return { list, skipped, npuFirst };
+  // The work's order puts one first (its runningFirst, or a batch): the first that can take it, alone (above).
+  const first = !npuFirst && !!order && (!!order.runningFirst || isBatch(order, state.waiting));
+  return { list: first ? list.slice(0, 1) : list, skipped, npuFirst };
 }
 
 /**

@@ -29,7 +29,7 @@ Every model Castellan runs today is a Qwen model, at 4-bit weights except Intel'
 | Qualcomm X | GenieX 0.9.3 (its pin, kit 2.101.0) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0), as on the X2; Qwen3-VL-4B-Instruct (W4A16) its fallback | 4-bit; also does vision, on the Hexagon's second session |
 | Qualcomm X2 | GenieX 0.9.x (its llama.cpp plugin; the X2 pins 0.9.1) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Hexagon's second session (on the Adreno under 0.8.0) |
 | Intel | OpenVINO Model Server 2026.4.1, with Castellan's build of OpenVINO GenAI | Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov (kit 2.103.0; Qwen3-4B-Instruct-2507 int4-cw before) | 8-bit symmetric, per channel; also does vision |
-| AMD | FastFlowLM 1.0.7 | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
+| AMD | FastFlowLM 1.0.10 (kit 2.111.0; 1.0.7 before) | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
 
 They are not the same weights: each maker's NPU needs its own format, Qualcomm's are vision models, and AMD's is a smaller model that does both. So the chips board doesn't claim identical models. It compares what each chip delivers with its shipped model, names the model on every row, and shows a quality score beside the speed, so a faster chip whose model answers worse can't hide it.
 
@@ -126,7 +126,7 @@ One JSON file per run, `castellan-npu-bench-report/1`, with its schema beside th
 - **pc**: the processor and its chip generation (as detection labels it, e.g. "Intel Core Ultra 7 256V, Lunar Lake"), the NPU's name, PCI device and driver version and date, RAM, Windows build, and the laptop's make and model (cooling and power limits differ between laptops with the same chip).
 - **conditions**: plugged in or battery, power mode, battery charge, how busy the processor was before the start, and (kit 2.99.0) `beside`: the route's ports another server held, so the run took others; with `--energy`, `awake` (the run held the PC awake, its screen on) and `standby` (how many times it went into Modern Standby all the same, from Windows' log).
 - **run**: device, server and version, model id, size and each file's SHA-256 (as `npu-vendors.json` pins them; a candidate's are measured once setup has pulled it, except on FastFlowLM's route: see `--candidate` in **What's built**), and whether it is shipped or a candidate. On a played run (`--generation`, below), `played`: the older Snapdragon's generation this NPU played. From kit 2.99.0, off the NPU on llama.cpp, the server is `llama.cpp b11734 (<its build>)` and the files are the GGUFs it ran (Comparing devices, below); and where the kit builds the server's plugin (GenieX's on an X2), `plugin`: the kit's build installed (`kit`), a copy of the server running it (`kit-copy`), the server's own (`server`, not ranked), or neither (`other`).
-- **results**: each measurement's five tries, their median and spread, and the job time. Each job also has each try's answer tokens (`answerTokens`) and first-token time (`firstTokenMs`), and its spread at one answer length (`spreadAtLength`). With `--energy`, `energy`: the power at rest and through the triage minutes, and millijoules a token; from kit 2.98.0, with a meter other than the battery, also the meter (`meter`, and the part that is the whole PC, `whole`), whether the battery was charging, each part's power at rest without the model and with it (`idle`, and what keeping it loaded costs, `keepLoadedMilliwatts`), each part's at rest and working (`restParts`, `loadParts`), and each batch (`batches`: how many, how long, the tokens, each part's energy and over rest, one's and a token's). From kit 2.99.0, `embed`: the embedding server and model, its time to the first vector (`loadMs`), a query's and a request's times (`queryMs`, `requestMs`), the texts a request, the tokens counted, tokens a second and the vectors' length (`dims`); null where it wasn't measured. And in `energy`, `embed`: each part at rest with the embedding model loaded, and what keeping it loaded costs, with its batch in `batches.embed`.
+- **results**: each measurement's five tries, their median and spread, and the job time. Each job also has each try's answer tokens (`answerTokens`) and first-token time (`firstTokenMs`), and its spread at one answer length (`spreadAtLength`). With `--energy`, `energy`: the power at rest and through the triage minutes, and millijoules a token; from kit 2.98.0, with a meter other than the battery, also the meter (`meter`, and the part that is the whole PC, `whole`), whether the battery was charging, each part's power at rest without the model and with it (`idle`, and what keeping it loaded costs, `keepLoadedMilliwatts`), each part's at rest and working (`restParts`, `loadParts`), and each batch (`batches`: how many, how long, the tokens, each part's energy and over rest, one's and a token's). From kit 2.99.0, `embed`: the embedding server and model, its time to the first vector (`loadMs`), a query's and a request's times (`queryMs`, `requestMs`), the texts a request, the tokens counted, tokens a second and the vectors' length (`dims`); null where it wasn't measured. From kit 2.113.1 also where its server ran (`device`: OpenVINO's `--target_device`, or the run's device off the NPU; null where the route doesn't say). And in `energy`, `embed`: each part at rest with the embedding model loaded, and what keeping it loaded costs, with its batch in `batches.embed`.
 - **quality**: each item's answer, its grade, the score, and whether the gate passed.
 - **marks**: anything that keeps it off the board (not streamed, estimated tokens, noisy, battery, gate failed, played, and from kit 2.99.0 `beside`, `standby` and `plugin`), each with its reason in plain words.
 
@@ -248,7 +248,7 @@ The first energy runs on Intel (kit 2.98.2, 2026-10-22): a Lenovo 83KS, Core Ult
 
 The graphics card does the three jobs 21% faster than the NPU, for 1.9 times the energy; the processor is slower than the NPU and takes 4.6 times it. The NPU's own share has no counter: its cores drew 2–6 J a job, the rest is the NPU and the chip around it. All three answered the same 23 of 24 quality items. Keeping the model loaded cost nothing measurable on any of them (−0.6 to +0.3 W, within the rest's noise).
 
-These are the 4B's. Kit 2.103.0 moves Intel to Qwen3-VL-2B, and its energy series is still to run.
+These are the 4B's. Kit 2.103.0 moved Intel to Qwen3-VL-2B, whose series is below (The Intel Core Ultra 5 225U, 2026-10-24).
 
 ### On Intel: Qwen3-VL-2B on the NPU 3720 (kit 2.103.0)
 
@@ -286,7 +286,8 @@ node src\kit\npu-bench.ts --device NPU,GPU,CPU --runs 3 --energy --yes 2>&1 | Te
 Speed and quality read as in a report. The energy rows need a meter other than the battery (the counters, a Shelly plug or a card's own reading), and are the whole PC's (the meter's `system`, or the plug's), so the screen and everything else are in them alike on every device:
 
 - **keeping the model loaded**: the PC at rest with the model loaded, less at rest with no model, and the same over a day (Wh/day): what the agents' habit of keeping their model loaded all day costs, used or not. **keeping the embedder loaded** is the same for the embedding model by itself. Below nothing, it reads **too small to tell**: the two rests varied by more than the model costs, which is no saving.
-- **`<batch>: each over rest`**: one job's energy over the PC at rest just before the batch (working less idle), and **a token over rest** the same a token. This is the work's own cost: the device that does a job for the fewest joules.
+- **`<batch>: each over rest`**: one job's energy over the PC at rest just before the batch (working less idle), and **a token over rest** the same a token. This is the work's own cost: the device that does a job for the fewest joules. Pictures have no token row (kit 2.113.1): servers count a picture's tokens unalike (OpenVINO's, The Intel Core Ultra 5 225U, below), so pictures compare a picture each.
+- **the embedder ran on**: shown where a column's embedding model ran on another device than its chat model (the NPU 3720's, on the graphics). That column's embedding rows, and keeping the embedder loaded, are that device's.
 - **`<batch>: the whole PC, the batch`**: everything the PC spent finishing the batch, rest included, and how long it took. A device that draws more but finishes sooner can spend less here than a slower, frugal one, because the PC's own draw runs on until the work is done: this is what a battery sees.
 - The summary's JSON also has each batch's job by part (`eachByPart`: the NPU's, the graphics', each processor cluster's, the memory's), which says where the energy went.
 
@@ -357,6 +358,61 @@ The energy is the chip's (`rapl_package0_pkg`), not the whole PC's. AMD's counte
 - **Speed is close for writing** (22.5–26.4 tokens a second); FastFlowLM's first answer after a start (8.1 s) and its short answer (708 ms) are the slowest, and the NPU answers two more quality items than llama.cpp does with the model's GGUF.
 - Two rests caught other work: the graphics' second run's rest with no model (10.1 W, against 4.0–4.6) and the processor's second run's rest with its model loaded. Each made only that run's "keeping it loaded" wrong. The medians leave them out.
 
+**FastFlowLM 1.0.10 against 1.0.7** (kit 2.111.0, which pins 1.0.10). The same PC, NPU driver 32.0.20102.4480, the quick profile, three runs of each version interleaved (1.0.10, 1.0.7, and so on), the NPU alone, means (range), 2026-10-23:
+
+| On the NPU | FastFlowLM 1.0.10 | FastFlowLM 1.0.7 |
+|---|---|---|
+| triage: each over rest | 25.0 J (23.1–26.4) | 26.2 J (25.6–27.4) |
+| reply: each over rest | 24.6 J (20.1–28.3) | 29.4 J (26.8–32.1) |
+| summary: each over rest | 47.4 J (43.1–51.9) | 51.7 J (43.0–67.4) |
+| reading 1,024 tokens: each over rest | 31.5 J (30.3–32.3) | 31.1 J (31.0–31.3) |
+| a picture: each over rest | 27.5 J (26.4–29.5) | 26.6 J (26.5–26.8) |
+| writing | 22.9 tokens/s | 22.5 tokens/s |
+| first answer after a start | 7.8 s | 8.0 s |
+| short answer | 720 ms | 716 ms |
+| job time | 7.96 s (7.9–8.1) | 10.23 s (8.0–14.5) |
+| quality (of 24), pictures (of 4) | 22, 3 | 22, 3 |
+
+The same within noise: each version's ranges overlap on every row. 1.0.7's job time is one slow run (14.5 s), its summary batch's 67 J with it. So the pin moved for 1.0.10's licences and fixes, not its speed (NPU-VENDORS.md, Licences). The NPU check on 1.0.10 passed every step: 22.2 tokens a second, 3,272 tokens read in 3.0 s, its slowest start to a first answer 11 s.
+
+### The Intel Core Ultra 5 225U, 2026-10-24
+
+Kit 2.106.0, the quick profile, three runs of each device a round at a time, medians (the nine reports 23:53–02:02 UTC, the summary at 02:23). The Lenovo 83KS of On Intel, above: Core Ultra 5 225U (NPU 3720), its Arc graphics. The same model on each, the route's Qwen3-VL-2B INT8 (Castellan's export, its DeepStack rewritten), on OpenVINO Model Server 2026.4.1 with Castellan's build of OpenVINO GenAI, the long read at the NPU 3720's cap (2,048) on each. Qwen3-Embedding-0.6B INT4 beside it: on the graphics in the NPU's runs (the generation's `embedArgs`, NPU-VENDORS.md, The NPU 3720's embeddings run on the processor's graphics), on the run's own device in the others. Plugged in at 99%, Windows' power mode Balanced, the screen at 75% and held on by each run (no standby), the manor stopped (its staff, triggered tasks and servers), and the processor 8–15% busy at each start.
+
+The energy is the chip's (RAPL's `pkg`), not the whole PC's, as on AMD. Its parts are the cores (`pp0`) and the graphics (`pp1`). The NPU has no counter of its own: it is in the rest of the package, with the memory controller and the chip around it. `dram` reads 0.
+
+| | NPU | Graphics (Arc) | Processor |
+|---|---|---|---|
+| first answer after a start | 45.3 s | 10.4 s | 7.2 s |
+| short answer | 549 ms | 109 ms | 140 ms |
+| writing | 17.3 tokens/s | 25.2 tokens/s | 22.3 tokens/s |
+| reading 1,024 tokens | 2,071 ms | 2,586 ms | 4,241 ms |
+| job time | 13.08 s | 9.92 s | 15.33 s |
+| quality (of 24), pictures (of 4) | 22, 4 | 22, 4 | 22, 4 |
+| the embedder ran on | the graphics | the graphics | the processor |
+| embedding texts | 1,835 tokens/s | 1,749 tokens/s | 555 tokens/s |
+| keeping the model loaded | 684 mW (16.4 Wh/day) | 3 mW (0.1 Wh/day) | too small to tell |
+| keeping the embedder loaded | 769 mW (18.5 Wh/day) | too small to tell | too small to tell |
+| triage: each over rest | 17.9 J | 41.5 J | 79.6 J |
+| reply: each over rest | 17.7 J | 26.4 J | 45.9 J |
+| summary: each over rest | 45.2 J | 86.9 J | 154.0 J |
+| reading 1,024 tokens: each over rest | 15.6 J | 38.4 J | 77.7 J |
+| a picture: each over rest | 17.5 J | 13.3 J | 16.6 J |
+| embedding: a token over rest | 8.1 mJ | 8.9 mJ | 39.7 mJ |
+| triage ×5: the chip | 169.0 J in 13.1 s | 258.5 J in 12.1 s | 507.7 J in 23.0 s |
+| reply ×5: the chip | 150.8 J in 13.7 s | 169.5 J in 8.8 s | 283.6 J in 12.8 s |
+| summary ×5: the chip | 422.6 J in 41.0 s | 578.0 J in 31.7 s | 947.9 J in 42.8 s |
+| embedding ×5: the chip | 411.1 J in 20.3 s | 409.5 J in 21.2 s | 1,694.0 J in 62.3 s |
+
+- **The NPU does the chat jobs for about half the Arc's energy and under a third of the processor's**: 81 J for the three jobs against 155 J and 280 J, and a 1,024-token read for 15.6 J against 38.4 J and 77.7 J. The chip as a whole spends the least on the NPU for every chat batch, even where the Arc finishes first (five replies in 8.8 s against 13.7 s, for 170 J against 151 J). Of each job the NPU's cores drew 2.8–6.0 J: the rest is the NPU and the chip around it. The Arc has the best job time (9.9 s against 13.1 s) and writes fastest. The NPU reads a 1,024-token prompt fastest, though the Arc reads 512 tokens sooner (974 ms against 1,608).
+- **Against the 4B** it had on this PC (On Intel: energy, above, batches of 20 where these are of 5), the 2B's three jobs cost the NPU 81 J against 178 J, the Arc 155 J against 336 J and the processor 280 J against 818 J. All three devices answer the same 22 of 24 questions and all four pictures right.
+- **A picture is cheapest on the Arc here, but stays on the NPU.** Here the Arc spent 13.3 J on a picture, against 17.5 J on the NPU and 16.6 J on the processor. On the NPU route the picture encoder runs on the processor (NPU-VENDORS.md, Qwen3-VL-2B on Intel's NPU): of the NPU's 17.5 J its cores drew 14.6 J, about what the processor's own run spends on a picture (15.8 J). But the Arc's run is OpenVINO with its encoder on the graphics, which misreads fine text (the 896 px tally picture's 4827 as 4877, three times in four), and setup runs no such server. The card server setup does give the Arc (llama.cpp b11734 with Qwen3-VL-2B) encodes on the processor too. In rounds that took it and the NPU in turn, it spent 36 J a picture against the NPU's 20 J. So Intel's pictures stay on the NPU (NPU-VENDORS.md, Intel's pictures stay on the NPU).
+- **A picture's tokens aren't counted alike, and pictures aren't capped unalike.** The pictures batch counted 611 tokens on the NPU and 242 on the Arc and the processor for the same five pictures. Asked one at a time (2026-10-24), the NPU's server counted the four pictures' prompts as 84, 110, 123 and 124 tokens, the Arc's as 25, 45, 30 and 31, each picture's question by itself 17, 37, 22 and 23 on both. So the NPU counts each picture's own tokens: Qwen3-VL's 32 px a token, the 224 px red square scaled up to its smallest size of 256 px (64 tokens), and 3 around each. OpenVINO's graphics and processor servers count 8 whatever the picture's size. The answers were the same, so the picture is the same on every device: nothing to cap. Only the count differs, and with it the batch's "a token" (143, 274 and 343 mJ). From kit 2.113.1 the summary has no token row for pictures, which compare a picture each.
+- **The NPU's embedding rows are the Arc's.** The NPU 3720's embedder runs on the graphics, so in the NPU's runs it is the Arc's: 8.1 mJ a token, the graphics' own part 39.7 J of a request's 59.3 J, against the Arc runs' 8.9 mJ (40.5 J of 64.6 J). The same work, within noise. On the processor a token costs 39.7 mJ, 4.5 times the Arc's. From kit 2.113.1 the summary says so in its own row (`the embedder ran on`).
+- **The first answer after a start is the NPU 3720's compile.** The run empties its own compile cache first. Started again from the cache, its first answer came in 4.3 s in every run (4,269–4,302 ms), within the 6.9 s the keeper's idle stop takes for an NPU 3720 (NPU-VENDORS.md, Resting when unused), so that stays. A PC compiles once. The Arc's start from its cache is 3.2 s, the processor's 5.6 s.
+- **What keeping a model loaded costs is too small to tell here.** The chip's rest wandered from 3.5 to 7.8 W between readings, most of it in the cores (`pp0` 0.3–3.0 W), so a run's "keeping it loaded" read anywhere from −3.4 W to +2.2 W. The NPU's 684 mW is two of its three runs at 0.69 W (the third read −0.9 W). In both, what rose was the cores' part (by 0.69 and 0.83 W), not the rest of the chip, where the NPU is. So it is the server's own threads at rest, or the same wobble. Either way it is about 0.7 W at most, and the keeper stops the server when the NPU is unused. The embedder's 769 mW in the NPU's runs, where it is on the Arc, is the wobble too: the graphics' part reads 0–10 mW with it loaded.
+- The processor's first run is marked `noisy` (its short answer's tries varied by more than 15%). The medians leave that out.
+
 ### On Intel and AMD
 
 On a laptop with Windows' Energy Meter counters (`node src\kit\power-meter.ts` says), from a worktree of the Steward at kit 2.99.0 or later (Running it on a PC, step 1), plugged in, the lid open, the PC quiet (step 3) and its agents paused (step 4). The run keeps the PC awake with its screen on by itself, so the figures are an awake PC's, as the X2's are:
@@ -366,7 +422,7 @@ node src\kit\power-meter.ts
 node src\kit\npu-bench.ts --device NPU,GPU,CPU --runs 3 --energy --profile quick --yes 2>&1 | Tee-Object -FilePath npu-bench-devices.log
 ```
 
-AMD's series is above (The AMD Ryzen AI 7 350, 2026-10-23). Intel's on kit 2.99.x, the three devices a round at a time, is still due: its figures above are kit 2.98.2's, each device's full run by itself. On Intel the counters are RAPL's, the chip's own (`pkg`: its cores, graphics and NPU; On Intel, above), with no `system`: the energy rows are then the chip's, not the whole PC's, and the screen isn't in them. On AMD the same (its `system power` reads a flat 1.5 W, so the package is the whole). Without the counters, a Shelly plug (`--meter shelly:<address>`) gives the whole PC's rows; the battery gives speed only. Send back the summary (`npu-bench-summary-<maker>-<date>.json`), the nine reports, and the log, privately. On AMD the graphics and processor runs download Qwen3.5-2B's GGUF (1.9 GB) into the tools home's `models\unsloth\Qwen3.5-2B-GGUF`, which nothing else uses: remove it after. llama.cpp's builds (`servers\llama.cpp\llama.cpp-b11734-*`) are setup's own, and can stay.
+AMD's and Intel's series are above (The AMD Ryzen AI 7 350, 2026-10-23; The Intel Core Ultra 5 225U, 2026-10-24). Intel's earlier figures (On Intel: energy) are kit 2.98.2's, the 4B's, each device's full run by itself. On Intel the counters are RAPL's, the chip's own (`pkg`: its cores, graphics and NPU; On Intel, above), with no `system`: the energy rows are then the chip's, not the whole PC's, and the screen isn't in them. On AMD the same (its `system power` reads a flat 1.5 W, so the package is the whole). Without the counters, a Shelly plug (`--meter shelly:<address>`) gives the whole PC's rows; the battery gives speed only. Send back the summary (`npu-bench-summary-<maker>-<date>.json`), the nine reports, and the log, privately. On AMD the graphics and processor runs download Qwen3.5-2B's GGUF (1.9 GB) into the tools home's `models\unsloth\Qwen3.5-2B-GGUF`, which nothing else uses: remove it after. llama.cpp's builds (`servers\llama.cpp\llama.cpp-b11734-*`) are setup's own, and can stay.
 
 ## The website
 

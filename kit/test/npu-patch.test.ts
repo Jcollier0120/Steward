@@ -305,12 +305,42 @@ test("0.9.3's patch only over 0.9.3's own files: a library that isn't 0.9.3's, o
   assert.equal(later.plugin(), STOCK_093);
 });
 
-test("an X2 whose GenieX can't say its version runs the X2's pin, 0.9.1 (what setup installs there): 0.9.1's build over 0.9.1's own", async () => {
-  const pc = fakePc({ plugin: STOCK_091, needs: NEEDS_091, version: null });
+test("a GenieX 0.9.3 put together from Castellan's signed build (kit 2.108.0): its signed copies count as GenieX's own, so the build goes in and the signed copy is kept", async () => {
+  const signed = (s: string) => `${s}, signed`;
+  const files: Record<string, string> = { 'llama_cpp\\geniex_plugin.dll': STOCK_093, ...Object.fromEntries(Object.entries(NEEDS_093).map(([k, v]) => [path.win32.join('llama_cpp', k), v])) };
+  const withBuild = (pc: ReturnType<typeof fakePc>, copies = files) => {
+    const c = pc.deps.catalog!;
+    c.routes.qualcomm.signedBuilds = [{ serverVersion: '0.9.3', files: { file: 'sdk.zip', url: 'https://x/sdk.zip', size: 1, sha256: 'a', folder: 'lib' }, signed: { file: 'signed.zip', url: 'https://x/signed.zip', size: 1, sha256: 'b' }, copies: Object.fromEntries(Object.entries(copies).map(([k, v]) => [k, { stock: pin(v), signed: pin(signed(v)) }])), basis: 'test' }];
+    return pc;
+  };
+  const pc = withBuild(fakePc({ plugin: signed(STOCK_093), needs: Object.fromEntries(Object.entries(NEEDS_093).map(([k, v]) => [k, signed(v)])), version: '0.9.3' }));
   assert.deepEqual(await patchNpu(pc.deps), { did: 'patched' });
   assert.equal(pc.plugin(), BUILD_091);
-  assert.equal(pc.stock(), STOCK_091);
-  // 0.8.0's files there, its version unsaid: nothing put in over a plugin that isn't 0.9.1's.
+  assert.equal(pc.stock(), signed(STOCK_093), 'the signed copy kept, to put back');
+  // Switched off: the signed copy back.
+  pc.config({ npuPatch: false });
+  assert.equal((await patchNpu(pc.deps)).did, 'off');
+  assert.equal(pc.plugin(), signed(STOCK_093));
+
+  // Without the signed build in the catalog, the same files are someone else's: left as they are.
+  const unknown = fakePc({ plugin: signed(STOCK_093), needs: NEEDS_093, version: '0.9.3' });
+  assert.deepEqual(await patchNpu(unknown.deps), { did: 'hands-off' });
+  assert.equal(unknown.plugin(), signed(STOCK_093));
+  // A signed copy of another file isn't GenieX's own: a library signed from 0.9.1's keeps 0.9.3's plugin.
+  const mixed = withBuild(fakePc({ plugin: STOCK_093, needs: { ...NEEDS_093, 'llama.dll': signed('llama 0.9.1') }, version: '0.9.3' }), { ...files, 'llama_cpp\\llama.dll': 'llama 0.9.1' });
+  assert.deepEqual(await patchNpu(mixed.deps), { did: 'stock', problems: ["GenieX's llama.dll isn't 0.9.3's"] });
+});
+
+test("an X2 whose GenieX can't say its version runs the X2's pin, 0.9.3 (what setup puts together there, kit 2.108.0): 0.9.1's build over 0.9.3's own", async () => {
+  const pc = fakePc({ plugin: STOCK_093, needs: NEEDS_093, version: null });
+  assert.deepEqual(await patchNpu(pc.deps), { did: 'patched' });
+  assert.equal(pc.plugin(), BUILD_091);
+  assert.equal(pc.stock(), STOCK_093);
+  // 0.9.1's files there, its version unsaid: nothing put in over a plugin that isn't 0.9.3's.
+  const was = fakePc({ plugin: STOCK_091, needs: NEEDS_091, version: null });
+  assert.deepEqual(await patchNpu(was.deps), { did: 'hands-off' });
+  assert.equal(was.plugin(), STOCK_091);
+  // 0.8.0's files there, its version unsaid: the same.
   const older = fakePc({ version: null });
   assert.deepEqual(await patchNpu(older.deps), { did: 'hands-off' });
   assert.equal(older.plugin(), STOCK);
@@ -356,6 +386,49 @@ test("switched off (config.json's npuPatch: false): GenieX's own back in the NPU
   assert.deepEqual(await patchNpu(never.deps), { did: 'off' });
   assert.equal(never.plugin(), STOCK);
   assert.ok(!never.did.includes('turn'));
+});
+
+test("inside a packaged app (the Claude desktop app), GenieX's plugin in AppData is moved by runs outside it, in and back; refused there, it says so and GenieX keeps its own", async () => {
+  const { putPatchIn, putStockBack } = await import('./fixture/src/kit/npu-patch.ts');
+  const { OutsideUnavailable } = await import('./fixture/src/kit/outside.ts');
+  const pc = fakePc();
+  // GenieX's folder in this PC's %LOCALAPPDATA%, as it is on an X2.
+  const env = { LOCALAPPDATA: path.dirname(path.dirname(pc.folder)) };
+  const jobs: string[] = [];
+  const outside = async (job: any) => {
+    jobs.push(`${job.kind} ${path.basename(job.target)}`);
+    if (job.kind === 'patch-in') await putPatchIn(job.target, job.from, job.want, job.isStock, V.sha256File);
+    else putStockBack(job.target);
+    return null;
+  };
+  const inside = { ...pc.deps, env, packaged: async () => ({ pid: 1200 }), outside };
+  assert.deepEqual(await patchNpu(inside), { did: 'patched' });
+  assert.deepEqual(jobs, ['patch-in geniex_plugin.dll']);
+  assert.equal(pc.plugin(), BUILD);
+  assert.equal(pc.stock(), STOCK);
+  pc.config({ npuPatch: false });
+  assert.deepEqual(await patchNpu(inside), { did: 'off' });
+  assert.deepEqual(jobs, ['patch-in geniex_plugin.dll', 'stock-back geniex_plugin.dll']);
+  assert.equal(pc.plugin(), STOCK);
+  assert.equal(pc.stock(), null);
+
+  // Outside a package, or a GenieX outside AppData: moved here, as before.
+  for (const [packaged, inLocal] of [[null, true], [{ pid: 1200 }, false]] as const) {
+    const fresh = fakePc();
+    jobs.length = 0;
+    const local = inLocal ? path.dirname(path.dirname(fresh.folder)) : path.join(home, 'elsewhere');
+    assert.deepEqual(await patchNpu({ ...fresh.deps, env: { LOCALAPPDATA: local }, packaged: async () => packaged, outside }), { did: 'patched' });
+    assert.deepEqual(jobs, []);
+    assert.equal(fresh.plugin(), BUILD);
+  }
+
+  // Task Scheduler refusing: nothing put in the package, GenieX's own kept, and the log says why.
+  const refused = fakePc();
+  const r = await patchNpu({ ...refused.deps, env: { LOCALAPPDATA: path.dirname(path.dirname(refused.folder)) }, packaged: async () => ({ pid: 1200 }), outside: async () => Promise.reject(new OutsideUnavailable("Task Scheduler wouldn't take the task (ERROR: Access is denied.)")) });
+  assert.equal(r.did, 'failed');
+  assert.equal(refused.plugin(), STOCK);
+  assert.deepEqual(refused.leftovers(), []);
+  assert.match(refused.log.join('\n'), /geniex_plugin\.dll couldn't be put in: Task Scheduler wouldn't take the task \(ERROR: Access is denied\.\)/);
 });
 
 test("a later kit that no longer patches this PC puts GenieX's own back; an older kit never takes a newer one's look back", async () => {

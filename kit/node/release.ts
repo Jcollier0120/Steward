@@ -60,7 +60,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP } from '../app.ts';
 import type { Release } from './install.ts';
-import { isUrgent, letOut, NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, type ExchequerOutcome } from './exchequer.ts';
+import { isUrgent, letOut, NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, saleOf, type ExchequerOutcome } from './exchequer.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
 import { buildNative, nativeOf, nativeSources, runBuild, stageNative, type Arch, type Native, type NativeBuilt } from './native.ts';
 import { releaseNotes, type Notes } from './notes.ts';
@@ -328,6 +328,14 @@ async function build(readable = false, publishing = false): Promise<Built> {
   const sources = native ? [...nativeSources(native), ...native.notices] : [];
   const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, ANNOUNCEMENT, ...sources) !== '';
   const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString(), kit: kit.kit, form: readable ? 'readable' : 'minified' };
+  // Whether the Exchequer sells it, as its list says when it's published (kit 2.110.0). The license check doesn't read it
+  // (kit 2.113.0: every agent but Manor and Heiward needs a license, sold or not). When the Exchequer can't say,
+  // release.json says nothing.
+  if (publishing) {
+    const sale = await saleOf(APP.id);
+    if (sale.forSale === null) console.log(`  release.json doesn't say whether ${APP.id} is sold: ${sale.line}`);
+    else release.sold = sale.forSale;
+  }
   let nativeBuilt: NativeBuilt | null = null;
   if (native) {
     // A release that will be published signs its native files, unless a release before kept them signed from the same

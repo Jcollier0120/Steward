@@ -7,15 +7,16 @@ import { after, test } from 'node:test';
 import { headerOf, httpsOrigin, originsOf, refused, remoteOrigins, signedIn, signInEnv, subcommand } from '../src/git-auth.ts';
 import { fetchFor, hasObject } from '../src/git.ts';
 import type { Ran, Runner, RunOptions } from '../src/run.ts';
+import { gitExe } from '../src/kit/git-exe.ts';
 
 // Fewer processes (Steward 0.35.31): git's sign-in handed over up front, and a PR's head fetched only when it isn't here.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-auth-'));
 after(() => rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
-const g = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
+const g = (cwd: string, ...args: string[]) => execFileSync(gitExe(), args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 
 function repoWith(name: string, url: string): string {
   const repo = path.join(home, name);
-  execFileSync('git', ['init', '-q', '-b', 'main', repo], { windowsHide: true });
+  execFileSync(gitExe(), ['init', '-q', '-b', 'main', repo], { windowsHide: true });
   g(repo, 'remote', 'add', 'origin', url);
   return repo;
 }

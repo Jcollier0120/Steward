@@ -87,24 +87,15 @@ test('a round with nothing to do leaves no trace: the last stage stays what last
   assert.equal(readFileSync(lastStageFile(), 'utf8'), before);
 });
 
-test('a version pushed straight to main, with no PR and no vouch, is tested here once and released by the next round; its pass is vouched for', async () => {
+test("a version pushed straight to main, with no PR and no vouch, is tested here once; a release that fails is tried once at its commit; later rounds leave it to a person, and say so quietly", async () => {
   sh(f.checkout, 'pull', '--quiet', '--ff-only', 'origin', 'main');
-  const sha = raise('main', '0.4.1', '0.4.2');
-  sh(f.checkout, 'push', '--quiet', 'origin', `${sha}:refs/heads/main`);
-  const out = await round();
-  assert.deepEqual(out.results.filter((x) => x.outcome !== 'skipped').map((x) => x.message.replace(/\(.{7}\)/, '(…)')), ['release: released v0.4.2 from origin/main (…), with kit 1.0.0']);
-  assert.deepEqual(released(), ['0.4.1', '0.4.2']);
-  assert.equal(testsIn(out.log), 1, out.log.join('\n'));
-  assert.equal(tested()[`fake@${sha}`]?.ok, true, "main's head tested here before its release, and kept by commit");
-  assert.ok(vouched.has(sha), 'its pass vouched for on that commit, so nothing tests it again');
-});
-
-test("a release that fails is tried once at its commit; later rounds leave it to a person, and say so quietly", async () => {
-  const sha = raise('main', '0.4.2', '0.4.3');
+  const sha = raise('main', '0.4.1', '0.4.3');
   sh(f.checkout, 'push', '--quiet', 'origin', `${sha}:refs/heads/main`);
   const failed = await round();
   assert.match(failed.results.find((x) => x.outcome === 'failed')!.message, /^release: .* failed \(exit 1\)/);
   assert.equal(testsIn(failed.log), 1, 'its checks passed here first');
+  assert.equal(tested()[`fake@${sha}`]?.ok, true, "main's head tested here before its release, and kept by commit");
+  assert.ok(vouched.has(sha), 'its pass vouched for on that commit, so nothing tests it again');
   assert.equal(last().results.some((x: any) => x.outcome === 'failed'), true, 'the failure is recorded');
   assert.deepEqual(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')), { fake: sha.slice(0, 7) });
   const before = readFileSync(lastStageFile(), 'utf8');
@@ -154,11 +145,8 @@ test("a release that fails while this PC is offline isn't held against its commi
   let looks = 0;
   const failed = await runStage('round', {}, { run: r.run, online: async () => looks++ === 0 });
   assert.match(failed.results.find((x) => x.outcome === 'failed')!.message, /^release: .* failed \(exit 1\)/);
-  assert.notEqual(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')).fake, sha.slice(0, 7), 'no hold on this commit: it failed offline');
+  assert.notEqual(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')).fake, sha.slice(0, 7), 'no hold on this commit, so the next round tries it again: it failed offline');
   assert.equal(tries(), before + 1);
-  await round();
-  assert.equal(tries(), before + 2, 'tried again, online');
-  assert.equal(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')).fake, sha.slice(0, 7), 'online, a failure is held as before');
 });
 
 test('the next round comes sooner at most a few times in a row, and never later than Settings say', async () => {

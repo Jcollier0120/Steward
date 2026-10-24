@@ -7,16 +7,19 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { type Block, blockedExit, blockedExitSay, blockedIn, blockedSay, cpuVariantLoaded, keepCpuVariant, localPath, type SacState, saysBlockedExit, smartAppControlOutsideTests, stoppingBlocks } from './app-control.ts';
 export { cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
-import { blockedFile, type BlockedServerFile, chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberBlocked, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
+import { blockedFile, type BlockedServerFile, chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberBlocked, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody, type WorkOrder } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, type Endpoint, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, isSharedTools, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
+import { type CatalogsDone, catalogsSay, ensureCatalogs } from './catalogs.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
 import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage } from './npu-vendors.ts';
+import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, fallbackDevices, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage, workOrderFor } from './npu-vendors.ts';
+import { inAppData, type OutsideJob, type OutsideSetupResult, OutsideUnavailable, packagedOutsideTests, runOutside } from './outside.ts';
 import { RETIRED_GRACE_MS } from './retired.ts';
+import { rememberSignatures, signaturesFile } from './signatures.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -111,6 +114,15 @@ export const LLAMA_PIN: { build: string; signed: string; files: Record<string, P
     },
   },
 };
+
+/**
+ * Castellan's signed catalogs of what setup takes beside llama.cpp's builds as its maker ships it (catalogs.ts, kit
+ * 2.108.0): NVIDIA's CUDA runtime (CUDART_ZIP), which NVIDIA doesn't sign. Installed before a CUDA build first runs,
+ * where Smart App Control is on (runSetup).
+ */
+export const LLAMA_CATALOGS: NpuSignedCatalog[] = [
+  { serverVersion: '12.4', file: 'castellan-cuda-cudart-12.4.cat', covers: "NVIDIA's CUDA runtime 12.4's 3 unsigned program files", size: 10889, sha256: 'fa1928dff519d83cccdea138a66f46cde8478c74f17e70779b1907cfd5e25b57' },
+];
 
 /** A pinned build as setup plans from it: a release whose assets are its files, each with its pinned digest. Nothing is asked of GitHub. */
 export function pinnedRelease(pin: typeof LLAMA_PIN = LLAMA_PIN): Release {
@@ -769,6 +781,18 @@ export function withoutNpu(raw: Record<string, any>, localAppData: string): Reco
   return out;
 }
 
+/**
+ * config.json with this PC's `workOrder` (kit 2.111.0): its NPU generation's order for each work (workOrderFor), or
+ * none when it records none. Nothing else changes, and nothing at all when it's the same.
+ */
+export function withWorkOrder(raw: Record<string, any>, order: WorkOrder | null): Record<string, any> {
+  if (JSON.stringify(raw.workOrder ?? null) === JSON.stringify(order)) return raw;
+  const out = { ...raw };
+  if (order) out.workOrder = order;
+  else delete out.workOrder;
+  return out;
+}
+
 // ------------------------------------------------------------------------------------------------
 // The plan
 
@@ -1126,7 +1150,8 @@ export function describePlan(p: SetupPlan): string[] {
   if (p.npu) {
     const n = p.npu;
     lines.push(`${n.support.label} (npu): ${n.route.server} ${n.route.version}, ${n.kinds.join(' and ')} on ${n.port}; ${n.models.map((m) => m.id).join(', ')}${untried(n.support)}`);
-    lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
+    if (n.build) lines.push(`  get  ${n.route.server} ${n.route.version} (${mb(n.build.files.size + n.build.signed.size)}, SHA-256 pinned): its maker's files, with Castellan's signed copies of its own; no installer`);
+    else lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
     if (n.runtime) lines.push(`  get  ${n.runtime.what} (${mb(n.runtime.size)}, SHA-256 pinned), beside ${path.win32.basename(n.exe)}: no administrator`);
     if (n.patch) lines.push(`  ${n.patch.have ? 'have' : 'get '} ${n.patch.what.split(':')[0]} (${mb(n.patch.patched.size)}, SHA-256 pinned), in place of the server's own ${n.patch.file}`);
     for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
@@ -1253,18 +1278,62 @@ export function unpack(zip: string, into: string): void {
   if (r.status !== 0) throw new Error(`tar couldn't unpack ${zip}: ${r.stderr || r.error?.message}`);
   // Some zips wrap their files in a folder.
   const entries = readdirSync(tmp);
-  const from = entries.length === 1 && statSync(path.join(tmp, entries[0])).isDirectory() ? path.join(tmp, entries[0]) : tmp;
+  putInPlace(entries.length === 1 && statSync(path.join(tmp, entries[0])).isDirectory() ? path.join(tmp, entries[0]) : tmp, into);
+  rmSync(tmp, { recursive: true, force: true });
+}
+
+/** Moves a folder made beside `into` there: whole, in one rename, where nothing is there yet; else each of its files and folders in, in place of the one there. */
+function putInPlace(from: string, into: string): void {
   if (!existsSync(into)) {
     mkdirSync(path.dirname(into), { recursive: true });
     renameSync(from, into);
-    rmSync(tmp, { recursive: true, force: true });
     return;
   }
   for (const e of readdirSync(from)) {
     rmSync(path.join(into, e), { recursive: true, force: true });
     renameSync(path.join(from, e), path.join(into, e));
   }
-  rmSync(tmp, { recursive: true, force: true });
+}
+
+/**
+ * Puts Castellan's signed build of the NPU's server in place of its installer (kit 2.108.0, NpuSignedBuild): the
+ * maker's zip of the version's files and Castellan's of the signed copies downloaded (each checked against its pinned
+ * SHA-256), the server's folder taken from the maker's, the signed copies laid over it file by file, and the folder put
+ * where the installer puts the server. Nothing of it runs while it's put together, and no installer runs at all. Null
+ * when it's in place, else the step that failed and why.
+ */
+export async function installSignedBuild(server: string, b: NonNullable<NpuPlan['build']>, io: Pick<NpuIo, 'log' | 'download' | 'unpack' | 'overlay'>): Promise<{ step: 'download' | 'install'; why: string } | null> {
+  for (const d of [b.files, b.signed]) {
+    io.log(`downloading ${d.what} (${mb(d.size)})`);
+    try {
+      await (io.download ?? download)({ what: d.what, url: d.url, size: d.size, sha256: d.sha256, dest: d.dest, have: false }, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
+    } catch (e: any) {
+      return { step: 'download', why: `${d.what}'s download failed: ${e?.message ?? e}` };
+    }
+  }
+  // Beside where it goes, so a build put together halfway never looks like the server.
+  const files = `${b.into}.files`;
+  const signed = `${b.into}.signed`;
+  const clear = () => {
+    for (const f of [files, signed]) rmSync(f, { recursive: true, force: true });
+  };
+  clear();
+  io.log(`putting ${server} together from ${b.files.what}, with Castellan's signed copies of its own files (no installer)`);
+  try {
+    (io.unpack ?? unpack)(b.files.dest, files);
+    (io.unpack ?? unpack)(b.signed.dest, signed);
+    const folder = path.join(files, b.files.folder);
+    if (!existsSync(folder)) throw new Error(`${b.files.what} has no ${b.files.folder} folder`);
+    const ours = readdirSync(signed, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => path.relative(signed, path.join(e.parentPath, e.name)));
+    (io.overlay ?? overlayFiles)(signed, folder, ours);
+    putInPlace(folder, b.into);
+  } catch (e: any) {
+    clear();
+    return { step: 'install', why: `${server} couldn't be put together: ${e?.message ?? e}` };
+  }
+  clear();
+  for (const d of [b.files, b.signed]) rmSync(d.dest, { force: true });
+  return null;
 }
 
 /**
@@ -1333,10 +1402,17 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
   const entries: Accelerator[] = [];
   // What Windows blocked of the servers tried (the NPU's and each build's), file by file.
   const blocked: BlockedServerFile[] = [];
+  // Castellan's catalogs of everything this run may start (kit 2.108.0), before any of it runs: the NPU's server's, and
+  // NVIDIA's runtime beside a CUDA build (one the NPU's work may go to too), in one administrator prompt where Smart App
+  // Control is on.
+  const catalogs = catalogsOnce(io);
+  const cuda = plan.targets.some((t) => t.variant?.cudart && t.folder) || (plan.leftToNpu ?? []).some((l) => /nvidia/i.test(l.name));
+  const wanted = [...(plan.npu?.catalogs ?? []), ...(cuda ? LLAMA_CATALOGS : [])];
+  if (wanted.length) await catalogs(wanted, [...(plan.npu?.catalogs?.length ? [plan.npu.vendor] : []), ...(cuda && LLAMA_CATALOGS.length ? ['cuda'] : [])], (io.smartAppControl ?? smartAppControlOutsideTests)());
   // The NPU first: its entry is written only once its server has answered a test request.
   let npu: NpuSetup | undefined;
   if (plan.npu) {
-    npu = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), io);
+    npu = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), { ...io, catalogs });
     blocked.push(...(npu.blocked ?? []));
     problems.push(...npu.problems);
     if (npu.entry) entries.push({ ...npu.entry, name: core.deviceName(plan.npu.support.label) });
@@ -1460,6 +1536,8 @@ export interface NpuIo {
   testRerank?: (ep: Endpoint) => Promise<string[]>;
   /** Copies the route's server's files over the embedding server's (overlayFiles). */
   overlay?: (from: string, into: string, files: string[]) => number;
+  /** Puts a signed build together where its installer would put the server (installSignedBuild). */
+  installBuild?: typeof installSignedBuild;
   /** A file's SHA-256 (the pinned model files). */
   hash?: (file: string) => Promise<string>;
   /** Copies one file (the runtime's DLLs beside the server). */
@@ -1475,6 +1553,34 @@ export interface NpuIo {
   blockedIn?: (folder: string, withinMs: number) => Promise<Block[]>;
   /** Smart App Control's state, for the words a block is said in (smartAppControlOutsideTests: none in a test run). */
   smartAppControl?: () => SacState | null;
+  /**
+   * Castellan's signed catalogs installed where Smart App Control is on, and `routes`' older ones removed (catalogs.ts
+   * ensureCatalogs): the NPU's server's, NVIDIA's runtime's. Setup asks once a run (catalogsOnce).
+   */
+  catalogs?: (wanted: NpuSignedCatalog[], routes: string[], sac: SacState | null) => Promise<CatalogsDone>;
+}
+
+const ONCE = Symbol('catalogsOnce');
+
+/**
+ * Setup's catalogs (catalogs.ts, kit 2.108.0): `io.catalogs` (ensureCatalogs where it gives none), with its line logged,
+ * asked again only for a catalog it wasn't asked for before. So one run puts up one administrator prompt for everything
+ * it starts, and one turned down isn't put up again for the NPU's second models or the card set up in its place.
+ */
+export function catalogsOnce(io: NpuIo): NonNullable<NpuIo['catalogs']> {
+  const had = io.catalogs as (NpuIo['catalogs'] & { [ONCE]?: true }) | undefined;
+  if (had?.[ONCE]) return had;
+  const asked = new Set<string>();
+  let last: CatalogsDone | null = null;
+  const once = async (wanted: NpuSignedCatalog[], routes: string[], sac: SacState | null): Promise<CatalogsDone> => {
+    if (last && wanted.every((c) => asked.has(c.file.toLowerCase()))) return last;
+    for (const c of wanted) asked.add(c.file.toLowerCase());
+    last = await (had ?? ((w: NpuSignedCatalog[], r: string[], s: SacState | null) => ensureCatalogs(w, { routes: r, sac: s, log: io.log })))(wanted, routes, sac);
+    const said = catalogsSay(last);
+    if (said) io.log(said);
+    return last;
+  };
+  return Object.assign(once, { [ONCE]: true as const });
 }
 
 /**
@@ -1560,6 +1666,7 @@ export function overlayFiles(from: string, into: string, files: string[]): numbe
     if (!s) throw new Error(`${src} isn't there`);
     const d = statSync(dst, { throwIfNoEntry: false });
     if (d && d.size === s.size && Math.abs(d.mtimeMs - s.mtimeMs) < 2_000) continue;
+    if (!d) mkdirSync(path.dirname(dst), { recursive: true });
     copyFileSync(src, dst);
     utimesSync(dst, s.atime, s.mtime);
     copied++;
@@ -1753,6 +1860,7 @@ function nowHere(n: NpuPlan, tools: string, exists: (p: string) => boolean): Npu
     ...n,
     installed,
     download: installed ? null : n.download,
+    build: installed ? null : n.build,
     runtime: n.runtime && installed && n.runtime.files.every((f) => exists(path.join(n.runtime!.into, f))) ? null : n.runtime,
     models: n.models.map((m) => ({ ...m, have: m.have || (!!m.present && exists(expandRoute(m.present, { tools }))) })),
     embed: e && { ...e, download: e.download && exists(e.exe) ? null : e.download, modelDownload: e.modelDownload && exists(e.modelDownload.dest) ? null : e.modelDownload, modelPull: e.modelPull && e.model && exists(e.model) ? null : e.modelPull },
@@ -1766,7 +1874,9 @@ function nowHere(n: NpuPlan, tools: string, exists: (p: string) => boolean): Npu
  * first try met goes in the log and in `fellBack`, never in the problems: the NPU still has chat, and nothing to
  * show as an error. The first try's outcome when the fallback fails as well.
  */
-export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<NpuSetup> {
+export async function setUpNpu(n: NpuPlan, tools: string, given: NpuIo): Promise<NpuSetup> {
+  // Its catalogs asked for once, whichever models it tries.
+  const io = { ...given, catalogs: catalogsOnce(given) };
   if (!n.fallback) return setUpNpuOnce(n, tools, io);
   const first = await setUpNpuOnce(n, tools, io, { seeRed: true });
   if (first.entry || !first.failed || !FALLBACK_STEPS.includes(first.failed)) return first;
@@ -1824,10 +1934,21 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
     const reason = `${sac === 'on' ? "Windows' Smart App Control" : "Windows' application control"} blocks its model server, as its maker doesn't sign it`;
     return { ...fail(why, 'not-supported', reason), blocked };
   };
+  // Castellan's signed catalog of the server's files (kit 2.108.0), before anything of it runs: where Smart App Control
+  // is on, its maker's unsigned files would be blocked, and the catalog lets them run as the maker built them. One
+  // administrator prompt at most; turned down, the server is blocked as before, and the step that ran it says so.
+  if (n.catalogs?.length) await catalogsOnce(io)(n.catalogs, [n.vendor], sac);
   const env = serverEnv({ env: routeEnv(n.route, tools) });
   // Its files put in place, in the PC's shared folder one account at a time (inSharedTools): a server another account
   // installed meanwhile isn't installed again.
   const placed = await inSharedTools(tools, io.log, async (shared): Promise<NpuSetup | null> => {
+    // Castellan's signed build in place of the maker's installer (kit 2.108.0: GenieX's, whose installer and own files
+    // aren't signed), so nothing unsigned runs where Smart App Control is on.
+    if (!n.installed && n.build && !(shared && exists(n.exe))) {
+      const failed = await (io.installBuild ?? installSignedBuild)(n.route.server, n.build, io);
+      if (failed) return fail(failed.why, failed.step);
+      if (!exists(n.exe)) return fail(`${n.route.server} was put together, but ${n.exe} isn't there`, 'install');
+    }
     if (!n.installed && n.download && !(shared && exists(n.exe))) {
       const d: Download = { what: n.download.what, url: n.download.url, size: n.download.size, sha256: n.download.sha256, dest: n.download.dest, have: false };
       io.log(`downloading ${n.route.server} ${n.route.version} (${mb(d.size)})`);
@@ -2759,10 +2880,99 @@ export interface SetupOptions {
   npuReportFile?: string | null;
   /** Where what Windows blocked is kept (blockedFile(), kit 2.104.0; tests give their own, and a given detection keeps none). */
   blockedFile?: string | null;
+  /** Where who signed the servers' files is kept (signaturesFile(), kit 2.108.0; tests give their own, and a given detection keeps none). */
+  signaturesFile?: string | null;
   /** The app running setup, for the NPU's report ("manor 0.16.200"). */
   app?: string;
   /** Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu() read now, when left out). */
   gpuWithNpu?: boolean;
+  /**
+   * The person said yes to the download already (kit 2.113.5): setup's own run outside a packaged app (outside-run.ts),
+   * which was asked in the app. Its plan isn't said again, and a second download (the card's, the processor's, in the
+   * NPU's place) isn't made without `yes`: nobody is there to ask.
+   */
+  asked?: boolean;
+  /**
+   * The packaged app setup runs inside (outside.ts' packagedApp), or null; and how it runs outside it (runOutside).
+   * Asked only when setup isn't given a detection or io of its own; none in a test run unless the test gives one.
+   */
+  packaged?: () => Promise<unknown>;
+  outside?: (job: OutsideJob) => Promise<OutsideSetupResult>;
+}
+
+/**
+ * What a plan would write under AppData (outside.ts' inAppData), each in a few words. In a packaged app (the Claude
+ * desktop app is one) those writes would land in the app's own folder, which nothing outside it sees: setup runs
+ * outside it instead, and refuses them where it can't (setupCommand). From kit 2.113.5:
+ * - Qualcomm's route: GenieX itself (its installer installs it for this user in %LOCALAPPDATA%\GenieX CLI, and writes
+ *   HKCU; Castellan's signed build is put together there), and the kit's build of its plugin (npu-patch.ts) over its
+ *   llama_cpp folder. Its models go in %USERPROFILE%\.cache\geniex, and the Hexagon embedding server (llama.cpp's,
+ *   over copies of GenieX's libraries) in the tools home: neither is AppData.
+ * - Intel's (OpenVINO Model Server, Castellan's OpenVINO GenAI build, its compile cache, its models) and AMD's
+ *   (FastFlowLM and its models in %USERPROFILE%\.flm) are unpacked in the tools home, and llama.cpp's builds and the
+ *   models for the graphics and the processor are downloaded there: none of them is AppData, unless the tools home is.
+ * Any installer counts, wherever its program goes: an installer's registry writes are redirected too.
+ */
+export function writesAppData(plan: SetupPlan, env: NodeJS.ProcessEnv = process.env): string[] {
+  const out: string[] = [];
+  const tools = path.dirname(plan.modelsDir);
+  const add = (what: string, p: string | null | undefined) => {
+    if (p && inAppData(p, env) && !out.some((x) => x.endsWith(`(${p})`))) out.push(`${what} (${p})`);
+  };
+  for (const n of [plan.npu, plan.npu?.fallback]) {
+    if (!n) continue;
+    const server = `${n.route.server} ${n.route.version}`;
+    if (!n.installed && n.download && n.route.install.kind === 'inno') out.push(`${server}'s installer, which installs it for this user (${path.dirname(n.exe)})`);
+    else if (!n.installed) add(server, path.dirname(n.exe));
+    add(`${n.route.server}'s runtime`, n.runtime?.into);
+    if (n.patch) add(`Castellan's build of ${n.route.server}'s ${n.patch.file}`, path.join(expandRoute(n.patch.folder, { tools, env }), n.patch.file));
+    if (n.embed && (n.embed.download || n.embed.server.overlay)) add(`${n.embed.server.server}, for the NPU's embeddings`, n.embed.folder);
+    add(`the NPU's embedding model`, n.embed?.modelDownload?.dest);
+    for (const m of n.models.filter((m) => !m.have)) add(m.id, m.present ? expandRoute(m.present, { tools, env }) : null);
+  }
+  for (const d of plan.downloads.filter((d) => !d.have)) add(d.what, d.unpackTo ?? d.dest);
+  return out;
+}
+
+/**
+ * The rest of setup run outside the packaged app it was started in (kit 2.113.5: outside.ts), once the person has seen
+ * the plan and said yes: as a one-off task Task Scheduler starts, its lines passed on as they come. Its exit code and
+ * entries; null when Task Scheduler won't run it and nothing it writes is in AppData (setup then runs here, as before).
+ * Where something is, it's refused, in plain words.
+ */
+async function setUpOutside(o: SetupOptions, plan: SetupPlan, x: { configFile: string; home: string; gpuWithNpu: boolean }, log: (line: string) => void): Promise<{ code: number; plan: SetupPlan; entries?: Accelerator[] } | null> {
+  log("This runs inside a packaged app (the Claude desktop app is one), where Windows keeps what's written to AppData to that app alone, out of the staff's sight. So setup runs from Task Scheduler instead; its lines follow.");
+  const options: Extract<OutsideJob, { kind: 'setup' }>['options'] = {
+    ids: o.ids,
+    ...(o.kinds?.length ? { kinds: o.kinds } : {}),
+    ...(o.yes ? { yes: true } : {}),
+    configFile: x.configFile,
+    home: x.home,
+    gpuWithNpu: x.gpuWithNpu,
+    ...(o.app ? { app: o.app } : {}),
+    ...(o.noneConfigured ? { noneConfigured: o.noneConfigured } : {}),
+    ...(o.npuNoteFile ? { npuNoteFile: o.npuNoteFile } : {}),
+    ...(o.npuReportFile !== undefined ? { npuReportFile: o.npuReportFile } : {}),
+    ...(o.blockedFile !== undefined ? { blockedFile: o.blockedFile } : {}),
+    ...(o.signaturesFile !== undefined ? { signaturesFile: o.signaturesFile } : {}),
+  };
+  try {
+    const r = await (o.outside ?? ((job: OutsideJob) => runOutside<OutsideSetupResult>(job, { log })))({ kind: 'setup', options });
+    return { code: r.code, plan, entries: r.entries as Accelerator[] };
+  } catch (e: any) {
+    const why = String(e?.message ?? e).split(/\r?\n/)[0];
+    if (!(e instanceof OutsideUnavailable)) {
+      log(`problem: setup outside the app stopped: ${why}`);
+      return { code: 1, plan };
+    }
+    const writes = writesAppData(plan, o.env as NodeJS.ProcessEnv | undefined);
+    if (writes.length) {
+      log(`problem: setup couldn't run outside the app (${why}), and inside it these would be the app's alone: ${writes.join('; ')}. So nothing is set up. Set up local AI from Manor's page, or run setup from a terminal outside the app.`);
+      return { code: 1, plan };
+    }
+    log(`note: setup couldn't run outside the app (${why}). Nothing it sets up goes in AppData, so it runs here.`);
+    return null;
+  }
 }
 
 /**
@@ -2806,11 +3016,12 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   // What this PC has, for every program that reads Reeve's config: a model is never called the NPU on a PC without one.
   const hw = o.detection ? null : hardwareOf(detection);
   if (hw) rememberHardware(hw);
-  log(`Looking up what this PC needs (llama.cpp ${LLAMA_PIN.build} and the models, as this kit pins them)...`);
+  // Setup's own run outside a packaged app (outside-run.ts) was planned, said and asked in the app already.
+  if (!o.asked) log(`Looking up what this PC needs (llama.cpp ${LLAMA_PIN.build} and the models, as this kit pins them)...`);
   const releases = await (o.releases ?? llamaReleases)();
   const withNpu = o.gpuWithNpu ?? gpuWithNpu().on;
   const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu, npuRefresh: readNpuRefresh(configFile) });
-  for (const l of describePlan(plan)) log(l);
+  if (!o.asked) for (const l of describePlan(plan)) log(l);
   const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu || !!plan.npuRerank;
   if (!settingUp && !plan.dropNpu) {
     log('Nothing to set up.');
@@ -2822,14 +3033,24 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     log('Dry run: nothing downloaded, config.json unchanged.');
     return { code: 0, plan };
   }
-  if (settingUp && plan.downloadBytes && !o.yes) {
+  if (settingUp && plan.downloadBytes && !o.yes && !o.asked) {
     const ok = o.confirm ? await o.confirm(`Download ${mb(plan.downloadBytes)}${plan.terms.length ? ', under the terms above' : ''}? [y/N] `) : false;
     if (!ok) {
       log(o.confirm ? 'Not downloading.' : `It would download ${mb(plan.downloadBytes)}: run again with --yes.`);
       return { code: 1, plan };
     }
   }
-  const r = await runSetup(plan, file.raw, { log, ...o.io });
+  // Inside a packaged app (the Claude desktop app), what setup and the servers it tries write to AppData would be that
+  // app's alone: the rest runs outside it, from Task Scheduler (kit 2.113.5). Asked only for the PC's own setup, not a test's.
+  const packaged = o.asked ? null : (o.packaged ?? (o.io || o.detection ? null : packagedOutsideTests));
+  if (settingUp && packaged && (await packaged())) {
+    const outside = await setUpOutside(o, plan, { configFile, home: o.home ?? toolsHome(), gpuWithNpu: withNpu }, log);
+    if (outside) return outside;
+  }
+  // One ask for catalogs for the whole command: its runs for the card and the processor too.
+  const base = { log, ...o.io };
+  const runIo = { ...base, catalogs: catalogsOnce(base) };
+  const r = await runSetup(plan, file.raw, runIo);
   // The NPU failing is no error: its work goes to the card or the processor, and its note says why, quietly.
   const npuDetails = new Set(r.npu?.problems ?? []);
   for (const p of r.problems) log(`${npuDetails.has(p) ? 'note' : 'problem'}: ${p}`);
@@ -2843,12 +3064,16 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   // What the NPU couldn't do after all goes to a card that left it to the NPU: set up again now, for the work the NPU
   // turned out not to serve (the NPU's entry as written decides, as for requests), beside what the card does already.
   const missing = npuMissing(plan, entries);
-  const cardsFor = (plan.leftToNpu ?? []).filter((l) => l.kinds.some((k) => missing.includes(k))).map((l) => l.id);
+  // Each goes where its generation's order sends it after the NPU (npu-vendors.json's `order`, kit 2.111.0): a graphics
+  // card, then the processor, unless the order puts the processor first. No generation does yet.
+  const cpuFirst = missing.filter((k) => k !== 'rerank' && fallbackDevices(plan.npu?.route, plan.npu?.support.generation, k)[0] === 'cpu');
+  const toCards = missing.filter((k) => !cpuFirst.includes(k));
+  const cardsFor = (plan.leftToNpu ?? []).filter((l) => l.kinds.some((k) => toCards.includes(k))).map((l) => l.id);
   // The NPU's pictures are its chat server's (Intel's Qwen3-VL-2B, kit 2.103.0): the card that takes its chat takes them too.
-  const taken = ENDPOINT_KINDS.filter((k) => missing.includes(k) || (k === 'vision' && missing.includes('chat') && plan.npu?.kinds.includes('vision')));
+  const taken = ENDPOINT_KINDS.filter((k) => toCards.includes(k) || (k === 'vision' && toCards.includes('chat') && plan.npu?.kinds.includes('vision')));
   // Windows blocked the card's build too (kit 2.104.0): the processor is tried next, as with no card.
   let cardBlocked = false;
-  if (missing.length && cardsFor.length) {
+  if (toCards.length && cardsFor.length) {
     const plan2 = await planSetup({ detection, ids: cardsFor, skipNpu: true, raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
     // An NPU entry kept from before (a 4B whose 2B failed) still chats: the card takes only what it plans.
     const takes = taken.filter((k) => plan2.targets.some((t) => t.kinds.includes(k)));
@@ -2856,7 +3081,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
     const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the graphics card? [y/N] `) : false);
     if (go) {
-      const r2 = await runSetup(plan2, raw, { log, ...o.io });
+      const r2 = await runSetup(plan2, raw, runIo);
       for (const p of r2.problems) log(`problem: ${p}`);
       problems.push(...r2.problems);
       blocked.push(...(r2.blocked ?? []));
@@ -2867,22 +3092,24 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   }
   // With no card to take it, what the NPU couldn't do goes to the processor: set up now, beside what it had. Its
   // reranker always does: a card beside the NPU reranks only while Manor's gpuWithNpu is on. So does what a card
-  // Windows blocked couldn't take.
-  if (missing.length && (!cardsFor.length || cardBlocked) && (cardBlocked || !entries.some((e) => e.kind === 'gpu') || missing.every((k) => k === 'rerank')) && detection.cpu) {
+  // Windows blocked couldn't take, and what its order sends to the processor first.
+  const cardsCant = toCards.length > 0 && (!cardsFor.length || cardBlocked) && (cardBlocked || !entries.some((e) => e.kind === 'gpu') || toCards.every((k) => k === 'rerank'));
+  const toCpu = [...cpuFirst, ...(cardsCant ? toCards : [])];
+  if (toCpu.length && detection.cpu) {
     const had = readAccelerators(raw).accelerators.find((a) => a.id === 'cpu');
-    const cpuKinds = [...new Set([...ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had && serves(had, k)), ...missing])];
-    log(`The processor takes the NPU's ${missing.join(' and ')} instead: setting it up for ${cpuKinds.join(' and ')}.`);
+    const cpuKinds = [...new Set([...ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had && serves(had, k)), ...toCpu])];
+    log(`The processor takes the NPU's ${toCpu.join(' and ')} instead: setting it up for ${cpuKinds.join(' and ')}.`);
     const plan2 = await planSetup({ detection, ids: ['cpu'], skipNpu: true, cpuKinds, raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists });
     for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
     const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the processor? [y/N] `) : false);
     if (go) {
-      const r2 = await runSetup(plan2, raw, { log, ...o.io });
+      const r2 = await runSetup(plan2, raw, runIo);
       for (const p of r2.problems) log(`problem: ${p}`);
       problems.push(...r2.problems);
       blocked.push(...(r2.blocked ?? []));
       raw = r2.raw;
       entries = [...entries.filter((e) => !r2.entries.some((x) => x.id === e.id)), ...r2.entries];
-    } else log(`Not downloading for the processor: the NPU's ${missing.join(' and ')} stay unserved until setup runs again.`);
+    } else log(`Not downloading for the processor: the NPU's ${toCpu.join(' and ')} stay unserved until setup runs again.`);
   }
   // Why the NPU, or its embeddings, isn't used, kept for the accelerators' report: cleared once it's set up whole on
   // values setup knows. An NPU kept on guessed values says so, beside the plan's own note (its embeddings left off).
@@ -2897,6 +3124,9 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   if (plain) log(`note: ${plain}`);
   keepNpuReport(o, detection, plan, r.npu, log);
   if (!entries.length && !plan.dropNpu) return { code: 1, plan };
+  // Each work's order on this PC, from its NPU's generation (kit 2.111.0): written whether or not the NPU could be set up,
+  // so requests and the fallback above agree; with none recorded, none (the NPU first).
+  raw = withWorkOrder(raw, detection.npu?.supported && detection.npu.vendor ? workOrderFor(NPU_CATALOG.routes[detection.npu.vendor], detection.npu.generation) : null);
   const saved = writeConfigFile(configFile, raw, o.validate ?? validateKeeperConfig);
   if (saved.problems.length) {
     log(`config.json not written: ${saved.problems.join('; ')}`);
@@ -2904,6 +3134,9 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   }
   // The NPU's command is this kit's now: a keeper on an older kit leaves it alone (npu-refresh.ts).
   if (entries.some((e) => e.kind === 'npu')) rememberNpuRefresh(configFile, { kit: kitVersion(), at: new Date().toISOString(), did: 'set-up' });
+  // Who signed each program file the servers now run, for a round of signing (signatures.ts, kit 2.108.0).
+  const signaturesAt = o.signaturesFile !== undefined ? o.signaturesFile : o.detection ? null : signaturesFile();
+  if (signaturesAt) await rememberSignatures(raw, signaturesAt, { env: o.env, sac: detection.smartAppControl ?? null });
   const read = readAccelerators(raw);
   const order = orderAccelerators(read.accelerators, read.order).map((a) => a.id);
   const changed = [...entries.map((e) => e.id), ...(plan.dropNpu ? ['npu removed'] : [])];

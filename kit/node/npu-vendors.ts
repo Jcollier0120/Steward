@@ -4,6 +4,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeF
 import os from 'node:os';
 import path from 'node:path';
 import { type AcceleratorEntry, type Endpoint, OWN_MEMORY_GB, type Quirk, type ServeKind } from './accelerator-config.ts';
+import type { WorkOrder } from './accelerators.ts';
 
 /**
  * The NPU on every Copilot+ PC (spec/NPU-VENDORS.md): which maker's NPU this is and which generation, whether the
@@ -147,6 +148,13 @@ export interface NpuRoute {
    * GenAI's, which Qwen3-VL needs on Intel's NPUs (npu-patch.ts).
    */
   pluginPatch?: NpuPluginPatch;
+  /** Castellan's signed catalogs of its server's files, a version each (NpuSignedCatalog): FastFlowLM's, whose maker signs none. */
+  catalogs?: NpuSignedCatalog[];
+  /**
+   * Castellan's signed builds of its server, a version each (NpuSignedBuild): GenieX's, whose installer and own files
+   * aren't signed. Setup installs a version that has one from it, never running the installer.
+   */
+  signedBuilds?: NpuSignedBuild[];
   licence: string;
   /** Its maker's terms for the server and what it carries, named before it's downloaded (GenieX, the QAIRT runtime inside it). */
   terms?: MakerTerms[];
@@ -162,6 +170,20 @@ export interface NpuMeasuredSpeeds {
   coldStartS: number;
   /** The day the Exchequer counted them. */
   at: string;
+}
+
+/** The work a generation's `order` may order: what requests are routed for (a reranker isn't). */
+export type OrderedWork = 'chat' | 'vision' | 'embed';
+
+/** One work's order on a generation (its `order`), and the figures behind it. */
+export interface NpuWorkOrder {
+  /** The kinds of device, first preferred: npu, gpu, cpu, each at most once. */
+  devices: ('npu' | 'gpu' | 'cpu')[];
+  /** A device whose server is up goes before one whose server isn't, the order kept otherwise. */
+  runningFirst?: boolean;
+  /** With runningFirst: from this many of the work waiting, the order is kept whoever's server is up (a batch starts the first device's). */
+  batchAt?: number;
+  basis: string;
 }
 
 /** One generation of a maker's NPU. */
@@ -217,6 +239,15 @@ export interface NpuGeneration {
    * kit doesn't use it itself. No generation sets one yet.
    */
   testedUpTo?: { params: number; basis: string };
+  /**
+   * Where each work runs best on PCs of this generation, by its measured energy (kit 2.111.0): the kinds of device, first
+   * preferred, and the figures behind them (`basis`, the device named beside each figure). A work it leaves out goes to
+   * the NPU first (the auto order). Setup writes it into config.json as `workOrder` (workOrderFor), which requests follow
+   * (the core's candidates), and its fallback when the NPU can't be set up follows it too (fallbackDevices). AMD's Ryzen
+   * AI 300 sends pictures to the Radeon, and to the NPU only when FastFlowLM is up and the Radeon's server isn't
+   * (`runningFirst`), until 4 or more wait (`batchAt`): those start the Radeon's (the owner's rule, 2026-10-23).
+   */
+  order?: Partial<Record<OrderedWork, NpuWorkOrder>>;
   /**
    * Its speed as its owners' reports measured it (npu-reports.ts, spec/NPU-REPORTS.md), for the website: the medians
    * of the PCs that passed, on the server and model named. Only while those are the route's does the site show it.
@@ -288,6 +319,52 @@ export interface PinnedFile {
   size: number;
   sha256: string;
 }
+
+/**
+ * Castellan's signed catalog of one version of the route's server (catalogs.ts, kit 2.108.0): the hashes of its maker's
+ * unsigned program files, which the kit carries (kit\node\catalogs\) and setup installs in Windows' catalog database
+ * where Smart App Control is on or weighing it, so they run as the maker built them, from the maker's own download.
+ * `file` is its name there too: castellan-<route>-<server>-<version>.cat.
+ */
+export interface NpuSignedCatalog extends PinnedFile {
+  /** The server version whose files it lists: installed only where the route runs that version. */
+  serverVersion: string;
+  file: string;
+  /** What it lists, in words: "FastFlowLM 1.0.7's 23 program files". */
+  covers: string;
+}
+
+/**
+ * Castellan's signed build of one version of the route's server (kit 2.108.0), for a maker whose installer and own files
+ * aren't signed: Smart App Control blocks GenieX's installer as it unpacks its own setup program, and then its files.
+ * Setup takes the version's files from the maker's own zip of them, as the maker publishes it (GenieX's SDK zip, its
+ * QAIRT runtime signed by Qualcomm), puts them where the installer would, and lays Castellan's signed copies over the
+ * ones the maker leaves unsigned (its program among them), so nothing unsigned runs and no installer does.
+ */
+export interface NpuSignedBuild {
+  /** The server version it is: setup takes it only to install that version. */
+  serverVersion: string;
+  /** The maker's zip of the version's files, and the folder in it (its one wrapping folder taken off) that is the server's folder. */
+  files: NpuRoute['download'] & { folder: string };
+  /** Castellan's zip of the signed copies, in the server's folder's layout: laid over the maker's files. */
+  signed: NpuRoute['download'];
+  /**
+   * Each file it signed, by its path in the server's folder: the maker's file and its signed copy. A check of the
+   * maker's file by its hash (a pluginPatch's `stock` and `needs`) takes its signed copy as that file.
+   */
+  copies: Record<string, { stock: PinnedFile; signed: PinnedFile }>;
+  basis: string;
+}
+
+/** The route's signed build of its version, when it has one. */
+export const signedBuildOf = (route: NpuRoute): NpuSignedBuild | undefined => route.signedBuilds?.find((b) => b.serverVersion === route.version);
+
+/**
+ * Whether a file whose SHA-256 is `sha256` is the maker's whose SHA-256 is `want`: that file, or the signed copy of it
+ * in the route's signed build of its version (NpuSignedBuild.copies), the same file signed.
+ */
+export const sameFile = (route: NpuRoute | undefined, want: string, sha256: string): boolean =>
+  sha256 === want || (!!route && Object.values(signedBuildOf(route)?.copies ?? {}).some((c) => c.stock.sha256 === want && c.signed.sha256 === sha256));
 
 /**
  * A file of the route's server that the keeper replaces with the kit's own build of it (npu-patch.ts), only on its
@@ -596,6 +673,31 @@ export function generationOf(route: NpuRoute, id: string | null | undefined): Np
   if (!id) return undefined;
   if (Object.hasOwn(route.generations, id)) return route.generations[id];
   return id === UNKNOWN_GENERATION ? (unknownGeneration(route) ?? undefined) : undefined;
+}
+
+/** The order with no figures to go by: the NPU first, then a graphics card, then the processor (the auto order). */
+export const NPU_FIRST: readonly ('npu' | 'gpu' | 'cpu')[] = Object.freeze(['npu', 'gpu', 'cpu']);
+
+/**
+ * config.json's `workOrder` for PCs of this generation (kit 2.111.0): its `order`, each work's devices and runningFirst,
+ * without the figures; null when it records none, and every work goes to the NPU first.
+ */
+export function workOrderFor(route: NpuRoute, generation: string | null | undefined): WorkOrder | null {
+  const order = generationOf(route, generation)?.order;
+  if (!order) return null;
+  const out: WorkOrder = {};
+  for (const [w, o] of Object.entries(order) as [OrderedWork, NpuWorkOrder][]) out[w] = { devices: [...o.devices], ...(o.runningFirst ? { runningFirst: true } : {}), ...(o.batchAt ? { batchAt: o.batchAt } : {}) };
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * Where a work goes when the NPU can't take it (setup's fallback: Smart App Control blocked its server, or its test
+ * failed): the devices after the NPU in its generation's order for it, else a graphics card, then the processor.
+ */
+export function fallbackDevices(route: NpuRoute | null | undefined, generation: string | null | undefined, work: OrderedWork): ('gpu' | 'cpu')[] {
+  const devices = (route && generationOf(route, generation)?.order?.[work]?.devices) || NPU_FIRST;
+  const rest = devices.filter((d): d is 'gpu' | 'cpu' => d !== 'npu');
+  return [...rest, ...(['gpu', 'cpu'] as const).filter((d) => !rest.includes(d))];
 }
 
 /** Compares dotted version numbers (a driver's): negative, 0 or positive, as a before, the same as, or after b. */
@@ -1137,7 +1239,7 @@ export interface NpuPlan {
   exe: string;
   /** The server's program is already where it installs. */
   installed: boolean;
-  /** Its installer or zip, unless it's installed. */
+  /** Its installer or zip, unless it's installed or has a signed build (`build`). */
   download: NpuDownload | null;
   /** Each model it pulls, and whether it is already here (unknown counts as not). */
   models: (NpuModel & { have: boolean })[];
@@ -1150,6 +1252,13 @@ export interface NpuPlan {
    * server version: where it's kept, and whether it's there. Setup puts it in place of the server's own before testing.
    */
   patch: (NpuPluginPatch & { dest: string; have: boolean }) | null;
+  /** Castellan's signed catalogs of the server's files at the route's version (NpuSignedCatalog): setup installs them first where Smart App Control is on. */
+  catalogs: NpuSignedCatalog[];
+  /**
+   * Castellan's signed build of the route's version (NpuSignedBuild), unless the server is installed: the maker's zip of
+   * its files and the signed copies, setup's in place of its installer (`download` is then null).
+   */
+  build: { files: NpuDownload & { folder: string }; signed: NpuDownload; into: string } | null;
   /**
    * The route's embedding server, when it has one: where it goes, and its zip and model unless they're here (its
    * model downloaded as a file, or pulled by the route's program: the arguments that pull it).
@@ -1204,7 +1313,10 @@ export function planNpu(o: {
   const exe = serverExe(route, o.tools, o.env);
   const installed = exists(exe);
   const dest = path.join(o.downloadsDir, route.download.file);
-  const download = installed ? null : { what: route.download.file, url: route.download.url, size: route.download.size, sha256: route.download.sha256, dest, have: false };
+  const sb = signedBuildOf(route);
+  const asDownload = (d: NpuRoute['download']) => ({ what: d.file, url: d.url, size: d.size, sha256: d.sha256, dest: path.join(o.downloadsDir, d.file), have: false });
+  const build = installed || !sb ? null : { files: { ...asDownload(sb.files), folder: sb.files.folder }, signed: asDownload(sb.signed), into: path.dirname(exe) };
+  const download = installed || build ? null : { what: route.download.file, url: route.download.url, size: route.download.size, sha256: route.download.sha256, dest, have: false };
   const models = route.models.map((m) => {
     const present = m.present ? expandRoute(m.present, { tools: o.tools, env: o.env }) : '';
     return { ...m, pull: m.pull.map((a) => expandRoute(a, { tools: o.tools, model: m.id, env: o.env })), have: !!present && exists(present) };
@@ -1228,6 +1340,7 @@ export function planNpu(o: {
   }
   const downloadBytes =
     (download ? download.size : 0) +
+    (build ? build.files.size + build.signed.size : 0) +
     (runtime ? runtime.size : 0) +
     (patch && !patch.have ? patch.patched.size : 0) +
     models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0) +
@@ -1235,7 +1348,8 @@ export function planNpu(o: {
     (embed?.modelDownload?.size ?? 0) +
     (embed?.modelPull ? embed.server.model.size : 0);
   const powerTool = route.powerTool ? { ...route.powerTool, exe: expandRoute(route.powerTool.exe, { tools: o.tools, env: o.env }) } : undefined;
-  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, patch, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
+  const catalogs = (route.catalogs ?? []).filter((c) => c.serverVersion === route.version);
+  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, build, runtime, patch, catalogs, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
 }
 
 /**
@@ -1245,7 +1359,7 @@ export function planNpu(o: {
  * when nothing they cover is downloaded: a PC set up already isn't asked again.
  */
 export function npuTerms(p: NpuPlan): MakerTerms[] {
-  const named = [...(p.download ? (p.route.terms ?? []) : []), ...[...p.models, ...(p.fallback?.models ?? [])].filter((m) => !m.have).flatMap((m) => m.terms ?? [])];
+  const named = [...(p.download || p.build ? (p.route.terms ?? []) : []), ...[...p.models, ...(p.fallback?.models ?? [])].filter((m) => !m.have).flatMap((m) => m.terms ?? [])];
   return named.filter((t, i) => !named.slice(i + 1).some((u) => u.url === t.url));
 }
 

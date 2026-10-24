@@ -1,4 +1,5 @@
-import { createPublicKey, verify, type JsonWebKey } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { createHash, createPublicKey, verify, type JsonWebKey } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -9,8 +10,8 @@ import path from 'node:path';
  * Exchequer. The token is Manor's secret for the Exchequer: nothing here uses it, and nothing here writes the file.
  *
  * Shared by Manor (its license.ts reads and keeps the license) and the agents (license-check.ts, the trial's end):
- * one copy of the keys, the payload and the check of a signature. Nothing here imports the agent's app.ts, so Manor
- * and any agent can use it as it is.
+ * one copy of the keys, the payload and the check of a signature, and of this PC's id (deviceIdFor, isThisPc, kit
+ * 2.110.0). Nothing here imports the agent's app.ts, so Manor and any agent can use it as it is.
  */
 
 /** licence.json, in Manor's folder: the file name keeps Manor's spelling, as it is on disk. */
@@ -144,4 +145,64 @@ export function readHeldFile(home: string): { held: Held } | { missing: true } |
 export function readHeld(home: string): Held | null {
   const r = readHeldFile(home);
   return 'held' in r ? r.held : null;
+}
+
+// ---------------------------------------------------------------- this PC
+
+/** device.json, beside licence.json (or in an Everyone install's shared license folder): the id a license's `sub` names. */
+export const DEVICE_FILE = 'device.json';
+
+/** An id made from this PC (deviceIdFor), a version 8 UUID. One from before 2026-10-21 is random (version 4). */
+const MADE_HERE = /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * The id a PC takes (Manor's license.ts deviceIdFor, the setup's LicenseFiles.DeviceIdFor): Windows' id for this
+ * installation (MachineGuid) and Manor's folder, hashed (SHA-256, as a version 8 UUID). Nothing in it can be read back.
+ */
+export function deviceIdFor(guid: string, home: string): string {
+  const h = createHash('sha256').update(`castellan/device/v1\n${guid.trim().toLowerCase()}\n${path.resolve(home).toLowerCase()}`, 'utf8').digest();
+  h[6] = (h[6] & 0x0f) | 0x80;
+  h[8] = (h[8] & 0x3f) | 0x80;
+  const x = h.subarray(0, 16).toString('hex');
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
+}
+
+let guidRead: string | null | undefined;
+
+/** Windows' id for this installation (HKLM\SOFTWARE\Microsoft\Cryptography's MachineGuid), asked once; null where there's none. */
+export function machineGuid(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (guidRead !== undefined) return guidRead;
+  guidRead = null;
+  if (process.platform !== 'win32') return guidRead;
+  // reg.exe by its full path: never one found first in the folder it runs in, or on PATH.
+  const reg = path.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', 'reg.exe');
+  const r = spawnSync(reg, ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid', '/reg:64'], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  guidRead = r.status === 0 ? (/MachineGuid\s+REG_SZ\s+([0-9a-f-]{36})/i.exec(r.stdout)?.[1] ?? null) : null;
+  return guidRead;
+}
+
+/** device.json's id in `folder`, or null when there's none to read. */
+export function readDeviceId(folder: string): string | null {
+  try {
+    const j = JSON.parse(readFileSync(path.join(folder, DEVICE_FILE), 'utf8').replace(/^﻿/, '')) as { id?: unknown };
+    return typeof j?.id === 'string' ? j.id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a license's `sub` is this PC's, looked for in Manor's folder and, in an Everyone install, the shared license
+ * folder (`folders`, where device.json is kept):
+ * - device.json's id where one is kept, as Manor's readLicense has it;
+ * - with none (a licence.json copied from another PC alone), an id made from a PC (version 8) is made again here from
+ *   MachineGuid and each folder, and must be the same.
+ * An id from before 2026-10-21 (random) with no device.json, or a PC whose MachineGuid can't be read: there's nothing
+ * to check it by, so it is this PC's.
+ */
+export function isThisPc(sub: string, folders: readonly string[], guid: string | null = machineGuid()): boolean {
+  const kept = folders.map(readDeviceId).filter((id): id is string => !!id);
+  if (kept.length) return kept.includes(sub);
+  if (!MADE_HERE.test(sub) || !guid) return true;
+  return folders.some((f) => deviceIdFor(guid, f) === sub);
 }
