@@ -16,9 +16,10 @@ import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, fallbackDevices, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage, workOrderFor } from './npu-vendors.ts';
+import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, fallbackDevices, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, plannedAt, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage, workOrderFor } from './npu-vendors.ts';
 import { inAppData, type OutsideJob, type OutsideSetupResult, OutsideUnavailable, packagedOutsideTests, runOutside } from './outside.ts';
 import { RETIRED_GRACE_MS } from './retired.ts';
+import type { StageDeps } from './set-up-again.ts';
 import { rememberSignatures, signaturesFile } from './signatures.ts';
 
 /**
@@ -962,7 +963,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     const small = smallPc(o.detection.ramBytes);
     const generic = det.vendor ? NPU_CATALOG.routes[det.vendor] : null;
     const version = generic ? await (o.serverVersion ?? ((r: NpuRoute) => installedVersion(r, { tools: o.home, env: o.env, exists })))(generic) : null;
-    const route = generic ? routeFor(atVersion(pinnedRoute(generic, det.generation), version), det.generation, small) : null;
+    const route = generic ? routeFor(plannedAt(pinnedRoute(generic, det.generation), version), det.generation, small) : null;
     const fit: { chat: boolean; embed: boolean; why?: string } = route ? npuMemoryFit(route, o.detection.ramBytes) : { chat: true, embed: true };
     if (!askedNpu && leftForSetup && !fit.chat) npuNote = leftAsIs;
     else if (!fit.chat) {
@@ -1530,8 +1531,8 @@ export interface NpuIo {
   testNpu?: (entry: AcceleratorEntry, o?: Parameters<typeof testNpuEntry>[1]) => Promise<string[]>;
   /** Stops whatever `program` serves `base` and waits until it's gone (keeper.ts' stopServerAt): between setup's tries of the NPU's models. */
   stopServer?: (program: string, base: string) => Promise<void>;
-  /** The embedding server's test request (testNpuEmbed): problems, none when it gave a vector. */
-  testEmbed?: (entry: AcceleratorEntry) => Promise<string[]>;
+  /** The embedding server's test request (testNpuEmbed), of a model of `dims` dimensions when known: problems, none when it gave a vector. */
+  testEmbed?: (entry: AcceleratorEntry, dims?: number) => Promise<string[]>;
   /** The NPU's reranker's test request (testNpuRerank): problems, none when it ranked the passage that answers first. */
   testRerank?: (ep: Endpoint) => Promise<string[]>;
   /** Copies the route's server's files over the embedding server's (overlayFiles). */
@@ -2062,7 +2063,7 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
   if (embedAt && n.embed) {
     io.log(`asking ${n.embed.server.server} for a test embedding on the NPU`);
     const asked = Date.now();
-    const bad = await (io.testEmbed ?? ((e: AcceleratorEntry) => testNpuEmbed(e, { dims: n.embed!.server.model.dims })))(entry);
+    const bad = await (io.testEmbed ?? ((e: AcceleratorEntry, dims?: number) => testNpuEmbed(e, { dims })))(entry, n.embed.server.model.dims);
     if (bad.length) {
       delete entry.embed;
       // Windows may have blocked the embedding server alone (a Snapdragon's is llama.cpp's Hexagon build): said so, and kept.
@@ -2898,6 +2899,17 @@ export interface SetupOptions {
    */
   packaged?: () => Promise<unknown>;
   outside?: (job: OutsideJob) => Promise<OutsideSetupResult>;
+  /** Exactly what the processor serves, over its defaults (planSetup's cpuKinds): the keeper's setting it up again. */
+  cpuKinds?: EndpointKind[];
+  /**
+   * The keeper's setting up again when the kit's pins move on (set-up-again.ts, kit 2.115.0): the new builds, models
+   * and NPU server go beside the old ones, the old entry serves meanwhile, and each new one is written only once it has
+   * answered its test in its accelerator's turn, its old servers stopped. Nothing goes in another's place (the NPU's
+   * work never goes to the card), no note or report is kept of what wasn't set up, and downloads go at the manor's pace.
+   */
+  staged?: boolean;
+  /** A staged setup's PC (set-up-again.ts' stageDefaults: the keeper's turns and stops); tests give their own. */
+  stage?: StageDeps;
 }
 
 /**
@@ -2940,7 +2952,7 @@ export function writesAppData(plan: SetupPlan, env: NodeJS.ProcessEnv = process.
  * entries; null when Task Scheduler won't run it and nothing it writes is in AppData (setup then runs here, as before).
  * Where something is, it's refused, in plain words.
  */
-async function setUpOutside(o: SetupOptions, plan: SetupPlan, x: { configFile: string; home: string; gpuWithNpu: boolean }, log: (line: string) => void): Promise<{ code: number; plan: SetupPlan; entries?: Accelerator[] } | null> {
+async function setUpOutside(o: SetupOptions, plan: SetupPlan, x: { configFile: string; home: string; gpuWithNpu: boolean }, log: (line: string) => void): Promise<{ code: number; plan: SetupPlan; entries?: Accelerator[]; busy?: boolean; blocked?: boolean } | null> {
   log("This runs inside a packaged app (the Claude desktop app is one), where Windows keeps what's written to AppData to that app alone, out of the staff's sight. So setup runs from Task Scheduler instead; its lines follow.");
   const options: Extract<OutsideJob, { kind: 'setup' }>['options'] = {
     ids: o.ids,
@@ -2955,10 +2967,12 @@ async function setUpOutside(o: SetupOptions, plan: SetupPlan, x: { configFile: s
     ...(o.npuReportFile !== undefined ? { npuReportFile: o.npuReportFile } : {}),
     ...(o.blockedFile !== undefined ? { blockedFile: o.blockedFile } : {}),
     ...(o.signaturesFile !== undefined ? { signaturesFile: o.signaturesFile } : {}),
+    ...(o.cpuKinds?.length ? { cpuKinds: o.cpuKinds } : {}),
+    ...(o.staged ? { staged: true } : {}),
   };
   try {
     const r = await (o.outside ?? ((job: OutsideJob) => runOutside<OutsideSetupResult>(job, { log })))({ kind: 'setup', options });
-    return { code: r.code, plan, entries: r.entries as Accelerator[] };
+    return { code: r.code, plan, entries: r.entries as Accelerator[], ...(r.busy ? { busy: true } : {}), ...(r.blocked ? { blocked: true } : {}) };
   } catch (e: any) {
     const why = String(e?.message ?? e).split(/\r?\n/)[0];
     if (!(e instanceof OutsideUnavailable)) {
@@ -3004,7 +3018,7 @@ function keepNpuReport(o: SetupOptions, detection: Detection, plan: SetupPlan, n
 }
 
 /** Accelerator setup as a command: plan, ask, download, find devices, write config.json. Exit code. */
-export async function setupCommand(o: SetupOptions): Promise<{ code: number; plan?: SetupPlan; entries?: Accelerator[] }> {
+export async function setupCommand(o: SetupOptions): Promise<{ code: number; plan?: SetupPlan; entries?: Accelerator[]; busy?: boolean; blocked?: boolean }> {
   const log = o.log ?? console.log;
   const configFile = o.configFile ?? acceleratorConfigFile();
   const file = readConfigFile(configFile);
@@ -3020,7 +3034,13 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   if (!o.asked) log(`Looking up what this PC needs (llama.cpp ${LLAMA_PIN.build} and the models, as this kit pins them)...`);
   const releases = await (o.releases ?? llamaReleases)();
   const withNpu = o.gpuWithNpu ?? gpuWithNpu().on;
-  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu, npuRefresh: readNpuRefresh(configFile) });
+  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, ...(o.cpuKinds?.length ? { cpuKinds: o.cpuKinds } : {}), raw: file.raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu, npuRefresh: readNpuRefresh(configFile) });
+  // Set up again beside an NPU entry on its generation's own models, its fallback isn't tried: the present entry is better.
+  if (o.staged && plan.npu?.fallback) {
+    const had = readAccelerators(file.raw).accelerators.find((a) => a.kind === 'npu');
+    const route = NPU_CATALOG.routes[plan.npu.vendor];
+    if (!route || !generationOf(route, plan.npu.support.generation)?.fallback?.models.includes(had?.chat?.model ?? '')) delete plan.npu.fallback;
+  }
   if (!o.asked) for (const l of describePlan(plan)) log(l);
   const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu || !!plan.npuRerank;
   if (!settingUp && !plan.dropNpu) {
@@ -3049,11 +3069,14 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   }
   // One ask for catalogs for the whole command: its runs for the card and the processor too.
   const base = { log, ...o.io };
-  const runIo = { ...base, catalogs: catalogsOnce(base) };
+  // Set up again beside the old entries (kit 2.115.0): paced downloads, and each new server tested in its turn.
+  const again = o.staged ? await import('./set-up-again.ts') : null;
+  const staged = again ? again.stage({ old: readAccelerators(file.raw).accelerators, given: base, log, deps: o.stage ?? (await again.stageDefaults()) }) : null;
+  const runIo = { ...base, ...(staged?.io ?? {}), catalogs: catalogsOnce(base) };
   const r = await runSetup(plan, file.raw, runIo);
   // The NPU failing is no error: its work goes to the card or the processor, and its note says why, quietly.
   const npuDetails = new Set(r.npu?.problems ?? []);
-  for (const p of r.problems) log(`${npuDetails.has(p) ? 'note' : 'problem'}: ${p}`);
+  for (const p of r.problems) log(`${npuDetails.has(p) || staged ? 'note' : 'problem'}: ${p}`);
   // The NPU's reranker failing is no error either: the processor reranks, as before.
   for (const p of r.rerank ?? []) log(`note: ${p}`);
   const problems = r.problems.filter((p) => !npuDetails.has(p));
@@ -3061,9 +3084,12 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   let entries = r.entries;
   // What Windows blocked of the servers tried, file by file: kept in blocked.json below (kit 2.104.0).
   const blocked = [...(r.blocked ?? [])];
+  // Staged, each new entry is written only once it has answered in its turn; the NPU's only when it was set up (not its
+  // old entry with a reranker made on it), and its work goes nowhere else: its present entry still serves it.
+  if (staged) entries = await staged.settle(plan.npu && !r.npu?.entry ? entries.filter((e) => e.kind !== 'npu') : entries, !!plan.npu);
   // What the NPU couldn't do after all goes to a card that left it to the NPU: set up again now, for the work the NPU
   // turned out not to serve (the NPU's entry as written decides, as for requests), beside what the card does already.
-  const missing = npuMissing(plan, entries);
+  const missing = staged ? [] : npuMissing(plan, entries);
   // Each goes where its generation's order sends it after the NPU (npu-vendors.json's `order`, kit 2.111.0): a graphics
   // card, then the processor, unless the order puts the processor first. No generation does yet.
   const cpuFirst = missing.filter((k) => k !== 'rerank' && fallbackDevices(plan.npu?.route, plan.npu?.support.generation, k)[0] === 'cpu');
@@ -3118,11 +3144,28 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   const blockedNote = plan.npu && r.npu?.blocked && !r.npu.entry ? npuBlockedNote(plan.npu.support.label, detection.smartAppControl ?? null, chatInstead(readAccelerators(raw).accelerators, detection)) : undefined;
   const plain = plan.npu ? (blockedNote ?? said ?? plan.npuPlain ?? null) : plan.npuPlain;
   const blockedAt = o.blockedFile !== undefined ? o.blockedFile : o.detection ? null : blockedFile();
-  if (blockedAt) rememberBlocked(blocked, detection.smartAppControl ?? null, blockedAt);
-  const noteFile = o.npuNoteFile ?? (o.detection ? null : npuNoteFile());
-  if (plain !== undefined && noteFile) rememberNpuNote(plain, noteFile);
-  if (plain) log(`note: ${plain}`);
-  keepNpuReport(o, detection, plan, r.npu, log);
+  // Staged, only what it found blocked is kept: what an earlier setup found stays as it was.
+  if (blockedAt && (!staged || blocked.length)) rememberBlocked(blocked, detection.smartAppControl ?? null, blockedAt);
+  // Staged, the NPU's note and report are of an NPU set up again; one that wasn't keeps its present entry, and its note.
+  const npuSetUp = entries.some((e) => e.kind === 'npu');
+  if (!staged || npuSetUp) {
+    const noteFile = o.npuNoteFile ?? (o.detection ? null : npuNoteFile());
+    if (plain !== undefined && noteFile) rememberNpuNote(plain, noteFile);
+    if (plain) log(`note: ${plain}`);
+    keepNpuReport(o, detection, plan, r.npu, log);
+  }
+  if (staged && !entries.length) return { code: 1, plan, ...(staged.busy() ? { busy: true } : {}), ...(blocked.length ? { blocked: true } : {}) };
+  if (staged) {
+    // Over config.json as it is now, unless an entry being set up again changed meanwhile (Settings, another setup).
+    const now = readConfigFile(configFile);
+    const was = (id: string, x: Record<string, any>) => JSON.stringify(readAccelerators(x).accelerators.find((a) => a.id === id) ?? null);
+    if (now.error || entries.some((e) => was(e.id, now.raw) !== was(e.id, file.raw))) {
+      log(`config.json changed while ${entries.map((e) => e.id).join(', ')} ${entries.length > 1 ? 'were' : 'was'} set up again: left as it is now, and a later look tries again`);
+      await staged.restore();
+      return { code: 1, plan, busy: true };
+    }
+    raw = mergeEntries(now.raw, entries);
+  }
   if (!entries.length && !plan.dropNpu) return { code: 1, plan };
   // Each work's order on this PC, from its NPU's generation (kit 2.111.0): written whether or not the NPU could be set up,
   // so requests and the fallback above agree; with none recorded, none (the NPU first).
@@ -3130,6 +3173,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   const saved = writeConfigFile(configFile, raw, o.validate ?? validateKeeperConfig);
   if (saved.problems.length) {
     log(`config.json not written: ${saved.problems.join('; ')}`);
+    await staged?.restore();
     return { code: 1, plan };
   }
   // The NPU's command is this kit's now: a keeper on an older kit leaves it alone (npu-refresh.ts).
@@ -3139,8 +3183,10 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   if (signaturesAt) await rememberSignatures(raw, signaturesAt, { env: o.env, sac: detection.smartAppControl ?? null });
   const read = readAccelerators(raw);
   const order = orderAccelerators(read.accelerators, read.order).map((a) => a.id);
-  const changed = [...entries.map((e) => e.id), ...(plan.dropNpu ? ['npu removed'] : [])];
+  const changed = [...entries.map((e) => e.id), ...(plan.dropNpu && !staged ? ['npu removed'] : [])];
   log(`Wrote ${configFile}: ${changed.join(', ')}. Order: ${order.join(' > ') || (o.noneConfigured ?? 'none configured')}.`);
+  // Staged, an accelerator that answered is set up whatever else of the plan didn't come to be.
+  if (staged) return { code: 0, plan, entries };
   return { code: problems.length || (settingUp && !entries.length) ? 1 : 0, plan, entries };
 }
 

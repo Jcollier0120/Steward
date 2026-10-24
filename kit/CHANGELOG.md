@@ -23,6 +23,29 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing for an agent. On an Intel NPU 3720 whose local AI is set up, the reader fetches 199 MB once, in the background: ONNX Runtime 77 MB, OpenVINO's plugin 118 MB and the model 4 MB. It keeps 131 MB, plus 48 MB of compiled graphs.
 
+## 2.115.0
+
+**The keeper sets an accelerator up again by itself when a later kit pins another llama.cpp build, model or NPU server; and setup finds a packaged app through gaps in its process chain.**
+
+### What's new
+
+- **set-up-again.ts**: the keeper's look sets up again, in the background, a card, the processor or the NPU whose entry is behind the kit's pins (spec/NPU-VENDORS.md, "Set up again when the kit's pins move on").
+  - `behindPins` finds them from a plan made from the pins alone. A card's or the processor's entry on the kit's llama.cpp and models folders is behind when its build or model files aren't the pins'. The NPU's is behind when the NPU refresh left it `needs-setup` for this kit. An entry of the person's own is left alone.
+  - `setUpAgain` sets up one a look, once it has been unused for 2 minutes, never while the manor is stopped, through `setupCommand`'s new `staged` option. A failure is tried again after 6 hours, one found in use after 10 minutes; what Smart App Control blocked waits for a later kit. Its tries are kept in `set-up-again.json` beside config.json.
+  - A `staged` setup puts the new build, models and NPU server beside the old, which keeps serving. Then, in the accelerator's turn, it stops the old servers and tests the new ones (chat, pictures, embeddings, reranking). It writes only an entry that answered and serves all the old one did, and never moves the NPU's work to a card. GenieX, installed in one place, is swapped in the NPU's turn with its old folder kept aside, and put back if the new entry isn't written. At the manor's gentle pace, downloads go at 4 MB a second at most (`pacedFetch`).
+  - `removeReplaced` removes the old build folders and model files 3 days after nothing names them: config.json, or a running server's command line.
+- **outside.ts** `redirectedTo`: whether this process's writes to %LOCALAPPDATA% land in a package's folder. `packagedApp` asks it when the walk up the parents finds no packaged app, as when a parent has already exited.
+- **setup.ts**: `SetupOptions.cpuKinds` (exactly what the processor serves) and `staged`. `NpuIo.testEmbed` is given the model's dimensions.
+
+### What changed
+
+- **A GenieX older than its generation's pin is replaced by the pin** (npu-vendors.ts' `plannedAt`). Setup installs the pin over it, and the NPU refresh leaves it `needs-setup`, which the keeper now sets up by itself. Until now a Snapdragon X2 set up with GenieX 0.8.0 or 0.9.1 kept it. A later one than the pin (the Smith's Use it) still runs as it is.
+- **The keeper's look** (`startRepairs`) runs `setUpAgain` at most every 10 minutes, after a missing server's repair, then `removeReplaced`. The NPU's refresh waits while the NPU is being set up again.
+
+### Before you update
+
+- Nothing for an agent to do: the keeper runs it. On a PC behind the pins, a look soon after the update downloads what the new pins need, in the background.
+
 ## 2.114.0
 
 **The text reader reads with our own model on the NPU: on a Snapdragon it reads 1,211 of the check's 1,253 lines exactly, where Windows OCR read 733.**

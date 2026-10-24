@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,8 @@ import { powershell } from './ps.ts';
  * staff, started by Task Scheduler, found no geniex.exe, and every NPU chat failed with ENOENT.
  *
  * So what setup writes runs outside the package. A setup that finds it runs inside one (packagedApp: one of the
- * processes that started it runs from WindowsApps) runs itself again as a one-off Task Scheduler task, as Manor's
+ * processes that started it runs from WindowsApps, or, from kit 2.115.0, a marker it writes in AppData lands in a
+ * package's folder) runs itself again as a one-off Task Scheduler task, as Manor's
  * `manor install` does (Manor's install.ts hop), and follows that run's log (runOutside). The keeper's look at the
  * NPU server's plugin (npu-patch.ts) does the same for its two file moves. Where Task Scheduler won't run it, a step
  * that writes under AppData is refused with a plain message rather than written into the package (setup.ts'
@@ -67,21 +68,59 @@ export function packagedAncestor(table: Map<number, Proc>, pid: number): Proc | 
 /** The variable a run outside has (outside-run.ts), so it never looks for a package again. */
 export const OUTSIDE_ENV = 'KIT_OUTSIDE';
 
+export interface RedirectProbe {
+  env?: NodeJS.ProcessEnv;
+  /** Where a write to `file` lands: Windows decides (the file itself, or its package's copy); a test's stands in. */
+  lands?: (file: string) => string;
+}
+
+/**
+ * The package that keeps this process's writes to %LOCALAPPDATA% (kit 2.115.0), as a Proc whose exe is the package's
+ * folder (%LOCALAPPDATA%\Packages\<package>), or null. The walk up the parents (packagedAncestor) stops at one that
+ * has exited, as when a session's command runs under Git's `timeout`, and Windows' own GetCurrentPackageFullName
+ * says "no package" for a session's processes though their writes are redirected. So the redirect itself is the test:
+ * a marker written in %LOCALAPPDATA% that shows under a package's LocalCache\Local was kept by that package; one that
+ * shows under none went where it was written. The marker is removed either way.
+ */
+export function redirectedTo(o: RedirectProbe = {}): Proc | null {
+  const local = (o.env ?? process.env).LOCALAPPDATA;
+  if (!local || !path.win32.isAbsolute(local)) return null;
+  const name = `kit-redirect-${process.pid}-${randomBytes(4).toString('hex')}.tmp`;
+  const written = (o.lands ?? ((f: string) => f))(path.win32.join(local, name));
+  try {
+    writeFileSync(written, '');
+  } catch {
+    return null;
+  }
+  try {
+    const packages = path.win32.join(local, 'Packages');
+    for (const p of readdirSync(packages)) if (existsSync(path.win32.join(packages, p, 'LocalCache', 'Local', name))) return { pid: 0, parent: 0, exe: path.win32.join(packages, p) };
+    return null;
+  } catch {
+    return null;
+  } finally {
+    rmSync(written, { force: true });
+  }
+}
+
 let asked: Promise<Proc | null> | undefined;
 
 /**
- * The packaged app this process runs inside (its nearest ancestor from WindowsApps), or null: not on Windows, in a run
- * outside (OUTSIDE_ENV), or when the table can't be read. Asked once in the process, unless `table` is given (a test's).
+ * The packaged app this process runs inside, or null: not on Windows, or in a run outside (OUTSIDE_ENV). Its nearest
+ * ancestor from WindowsApps; where the walk finds none (a gap, a table that can't be read), the package its writes
+ * to AppData land in (redirectedTo). Asked once in the process, unless `table` or `pid` is given (a test's).
  */
-export function packagedApp(o: { pid?: number; table?: () => Promise<string>; env?: NodeJS.ProcessEnv } = {}): Promise<Proc | null> {
+export function packagedApp(o: { pid?: number; table?: () => Promise<string>; env?: NodeJS.ProcessEnv; probe?: (p: RedirectProbe) => Proc | null } = {}): Promise<Proc | null> {
   const env = o.env ?? process.env;
   if (process.platform !== 'win32' || env[OUTSIDE_ENV] === '1') return Promise.resolve(null);
   const look = async () => {
     try {
-      return packagedAncestor(parseProcessTable(await (o.table ?? (() => powershell(PROCESS_TABLE_PS, { timeoutMs: 30_000 })))()), o.pid ?? process.pid);
+      const found = packagedAncestor(parseProcessTable(await (o.table ?? (() => powershell(PROCESS_TABLE_PS, { timeoutMs: 30_000 })))()), o.pid ?? process.pid);
+      if (found) return found;
     } catch {
-      return null;
+      // Not read: the probe still answers.
     }
+    return (o.probe ?? redirectedTo)({ env });
   };
   if (o.table || o.pid !== undefined) return look();
   return (asked ??= look());
@@ -128,6 +167,9 @@ export interface OutsideSetupOptions {
   npuReportFile?: string | null;
   blockedFile?: string | null;
   signaturesFile?: string | null;
+  /** Exactly what the processor serves (setup's cpuKinds), and the keeper's setting up again beside the old entry (staged, kit 2.115.0). */
+  cpuKinds?: string[];
+  staged?: boolean;
 }
 
 /** What runs outside: a setup (setup.ts' setupCommand), or the keeper's moves of the NPU server's plugin (npu-patch.ts). */
@@ -140,6 +182,9 @@ export type OutsideJob =
 export interface OutsideSetupResult {
   code: number;
   entries: Record<string, any>[];
+  /** A staged setup's (kit 2.115.0): its accelerator was in use, or Windows blocked what it set up. */
+  busy?: boolean;
+  blocked?: boolean;
 }
 
 /** Task Scheduler wouldn't run it: the step it was for is refused where it writes under AppData. */

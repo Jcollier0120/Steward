@@ -16,6 +16,28 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. On an Intel NPU 3720 whose local AI is set up, the reader fetches 199 MB once, in the background, and Windows OCR reads until it's there. A PC whose local AI isn't set up yet reads with Windows OCR until it is.
 
+## 0.36.201
+
+**It hands out the kit 2.115.0: when an update brings a newer llama.cpp, model or NPU server, your graphics card, processor and NPU move to it by themselves, in the background.**
+
+### What's new
+
+- **Local AI keeps up with updates by itself.** Until now, a newer llama.cpp build, model or NPU server in an update reached a PC only when someone pressed Set up local AI again. Now, when an update pins one (such as AMD's FastFlowLM, or GenieX 0.9.3 on a Snapdragon X2), the manor sets that accelerator up again in the background, with nothing for you to do.
+  - Downloads go gently, at 4 MB a second at most, and each file is checked against the size and fingerprint the kit pins.
+  - What you have keeps serving while the new one downloads. The switch waits for a moment when nobody is using that accelerator, and the new servers must answer their test first. If they don't, what you had stays, and it's tried again later.
+  - The old build and models are removed 3 days after the switch.
+  - If Windows' Smart App Control blocks the new server, the PC keeps what it has, says so once in the log, and doesn't try again until a later update.
+  - A program or model file of your own in the settings is left alone.
+
+### What changed
+
+- **A Snapdragon X2 still on GenieX 0.8.0 or 0.9.1** moves to GenieX 0.9.3, the version the kit pins.
+- **Setting up local AI from the Claude desktop app** now notices it runs inside the app even when a process between them has already closed, so what it sets up is never hidden from the staff.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Afterwards, a PC whose local AI is behind the new pins downloads what it needs in the background, which can take a while on a slow connection. Everything keeps working meanwhile.
+
 ## 0.36.200
 
 **It hands out the kit 2.114.0: on a Snapdragon, the staff read text in pictures with the manor's own model on the NPU, and read 1,211 of the check's 1,253 lines exactly, where Windows OCR read 733.**

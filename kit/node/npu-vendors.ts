@@ -920,6 +920,17 @@ export function pinnedRoute(route: NpuRoute, generation: string | null | undefin
 /** The route at another version of its server (the PC's own: installedVersion), so routeFor runs it as that version runs; the route itself when none is given. */
 export const atVersion =(route: NpuRoute, version: string | null | undefined): NpuRoute => (version && version !== route.version ? { ...route, version } : route);
 
+/** Whether the PC's own version of a route's server (installedVersion) is older than its generation's pin (pinnedRoute's). */
+export const olderThanPin = (pinned: NpuRoute, version: string | null | undefined): boolean => !!version && compareVersions(version, pinned.version) < 0;
+
+/**
+ * The route as setup plans it on this PC (kit 2.115.0): at the PC's own version where that's the pin or later (a later
+ * one the Smith's Use it left), else at the pin, which setup puts in place of an older one (the keeper's setting up
+ * again, set-up-again.ts). Until kit 2.115.0 an older one was run as it was, and a pin's next version never reached a PC
+ * set up before it.
+ */
+export const plannedAt = (pinned: NpuRoute, version: string | null | undefined): NpuRoute => atVersion(pinned, olderThanPin(pinned, version) ? null : version);
+
 /** The entry of the route's `versions` its version runs by: the newest at or before it; none for an earlier version. */
 export function serverVersionOf(route: NpuRoute): NpuServerVersion | undefined {
   let best: NpuServerVersion | undefined;
@@ -1308,10 +1319,13 @@ export function planNpu(o: {
   // version (setup, the refresh), the route as this PC runs it: at that version, else its generation's pin, which setup
   // installs (pinnedRoute). Otherwise the route as given: a caller's own, already at its version (npu-check's, a Smith try's).
   const given = (o.catalog ?? NPU_CATALOG).routes[o.support.vendor];
-  const generic = routeFor(o.serverVersion === undefined ? given : atVersion(pinnedRoute(given, o.support.generation), o.serverVersion), o.support.generation, o.small, { fallback: o.fallback });
+  const pinned = pinnedRoute(given, o.support.generation);
+  // An older version than the pin, where its program stays in one place (GenieX's): the pin installed over it (kit 2.115.0).
+  const older = o.serverVersion !== undefined && olderThanPin(pinned, o.serverVersion);
+  const generic = routeFor(o.serverVersion === undefined ? given : plannedAt(pinned, o.serverVersion), o.support.generation, o.small, { fallback: o.fallback });
   const route: NpuRoute = o.noEmbed ? { ...generic, embedServer: undefined, models: generic.models.filter((m) => !(m.kinds.length === 1 && m.kinds[0] === 'embed')) } : generic;
   const exe = serverExe(route, o.tools, o.env);
-  const installed = exists(exe);
+  const installed = exists(exe) && !older;
   const dest = path.join(o.downloadsDir, route.download.file);
   const sb = signedBuildOf(route);
   const asDownload = (d: NpuRoute['download']) => ({ what: d.file, url: d.url, size: d.size, sha256: d.sha256, dest: path.join(o.downloadsDir, d.file), have: false });
