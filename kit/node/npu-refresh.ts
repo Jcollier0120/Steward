@@ -1,11 +1,11 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { type AcceleratorEntry, readConfigFile, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
-import { expandEnv } from './accelerators.ts';
+import { expandEnv, type WorkOrder } from './accelerators.ts';
 import type { Detection } from './detect.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
-import { compareVersions, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, npuEntry, npuMemoryFit, type NpuRoute, pinnedRoute, plannedAt, planNpu, routeFor, runsRoute, serverExe, smallPc } from './npu-vendors.ts';
-import { mergeEntries, type NpuEmbedOffer, type NpuRefreshRecord, overlayFiles, portablePath, readNpuRefresh, rememberNpuRefresh } from './setup.ts';
+import { compareVersions, expandRoute, generationOf, installedVersion, NPU_CATALOG, type NpuCatalog, npuEntry, npuMemoryFit, type NpuRoute, pinnedRoute, plannedAt, planNpu, routeFor, runsRoute, serverExe, smallPc, workOrderFor } from './npu-vendors.ts';
+import { mergeEntries, type NpuEmbedOffer, type NpuRefreshRecord, overlayFiles, portablePath, readNpuRefresh, rememberNpuRefresh, withWorkOrder } from './setup.ts';
 
 /**
  * The NPU's servers brought up to this kit's command on a PC set up by an older one. Setup writes the
@@ -199,6 +199,27 @@ const portOf = (url: string | undefined) => {
   }
 };
 
+/**
+ * config.json's `workOrder` brought to this kit's for the PC's NPU generation (workOrderFor), as setup writes it (kit
+ * 2.135.1). Setup writes it once, so a PC kept the order of the kit that set it up until someone pressed Set up again:
+ * AMD's pictures went to the NPU while only FastFlowLM was up, after the owner's ruling sent them all to the Radeon. Only
+ * setup writes it (no page edits it), so it's written over whatever it says, with the rest of config.json as it is now.
+ * Whatever the NPU's servers come to below: it doesn't wait for them.
+ */
+function orderNow(d: NpuRefreshDeps, order: WorkOrder | null): void {
+  const now = readConfigFile(d.configFile);
+  if (now.error) return;
+  const next = withWorkOrder(now.raw, order);
+  if (next === now.raw) return;
+  const saved = writeConfigFile(d.configFile, next, d.validate ?? validateKeeperConfig);
+  if (saved.problems.length) {
+    d.log(`each work's order from this kit (${d.kit}) wasn't written to config.json: ${saved.problems.join('; ')}`);
+    return;
+  }
+  const words = order ? Object.entries(order).map(([w, o]) => `${w} ${o!.devices.join(', ')}${o!.runningFirst ? ', those whose server is up first' : ''}${o!.batchAt ? `, unless ${o!.batchAt} wait` : ''}`).join('; ') : 'none, the NPU first for every work';
+  d.log(`each work's order is now this kit's (${d.kit}): ${words}`);
+}
+
 /** One look (refreshNpu above). Never throws for a PC that can't be looked at: the outcome says why. */
 export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> {
   const had = readNpuRefresh(d.configFile);
@@ -217,13 +238,17 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   if (file.error) return { did: 'unreadable', problems: [file.error] };
   const list: any[] = Array.isArray(file.raw.accelerators) ? file.raw.accelerators : [];
   const entry = list.find((a) => a && typeof a === 'object' && a.id === 'npu' && a.kind === 'npu');
-  if (!entry?.chat?.startCommand?.length) return done('no-npu');
+  const hasServer = !!entry?.chat?.startCommand?.length;
+  // Without the NPU's server, only the work order setup wrote is looked at (orderNow).
+  if (!hasServer && file.raw.workOrder === undefined) return done('no-npu');
   const detected = await d.detect();
   const npu = detected.npu;
   const cards = detected.cards ?? [];
   if (!npu?.supported || !npu.vendor) return done('no-npu');
   const catalog = d.catalog ?? NPU_CATALOG;
   const route = catalog.routes[npu.vendor];
+  if (route) orderNow(d, workOrderFor(route, npu.generation));
+  if (!hasServer) return done('no-npu');
   if (!route || !runsRoute(entry, route, d.tools)) return done('not-route');
 
   // What setup would write now, on the same ports, and the models this PC's generation and memory take (a Snapdragon
