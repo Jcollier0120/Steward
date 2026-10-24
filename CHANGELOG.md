@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## Unreleased
+
+**The guide's figures for a picture on an Intel Core Ultra's graphics are now those of the card server setup gives today.**
+
+### What changed
+
+- **On Intel's NPU 3720, pictures still stay on the NPU, with the right figures.** The card figure came from a PC still on an older setup (Qwen3-VL-4B on llama.cpp b11669). Setup now gives the graphics Qwen3-VL-2B on b11734. Measured in turn with the NPU, it spent 36 J on a picture against the NPU's 20 J. It's faster and holds 3.2 GB rather than 4.9 GB, but still costs about 1.8 times the NPU's energy.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Where pictures go doesn't change.
+
 ## 0.36.196
 
 **It hands out the kit 2.113.2: the guide says why pictures on an Intel Core Ultra stay on the NPU, though the graphics read one for less energy in the benchmark.**

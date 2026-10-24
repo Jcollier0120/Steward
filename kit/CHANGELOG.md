@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+
+**The guide's card figure for Intel's pictures is the current setup's.**
+
+### What changed
+
+- spec/NPU-VENDORS.md (Intel's pictures stay on the NPU) is measured again on a Core Ultra 5 225U on 2026-10-24, with the manor running, in three rounds that took three servers in turn:
+  - the card as setup gives it now (LLAMA_PIN b11734, Qwen3-VL-2B Q4_K_M with its Q8_0 projector): 36 J a picture warm (30–48 J), in 1.9 s; 20–68 J to start and read a first picture; 3.2 GB;
+  - the NPU: 20 J (18–26 J), in 1.4 s;
+  - the 4B on b11669 that an older kit set up: 46 J, in 2.7 s; 4.9 GB.
+  The 41 J before was that older setup's. No `batchAt` pays either way, and Intel's generations still record no `order`.
+- spec/NPU-BENCHMARK.md: the 225U's picture bullet gives the same figures.
+
+### Before you update
+
+- Nothing: take the kit as usual. Only the guides change.
+
 ## 2.113.2
 
 **Intel's pictures stay on the NPU, and the guide says why.**
