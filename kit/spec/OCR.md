@@ -252,14 +252,14 @@ The last two kinds can't be told apart by shape. Only the words around them tell
   - the compiled graphs (EP context) kept in the cache.
 
   A program that compiled its graphs is started again at once, because Qualcomm's compiler holds about 2 GB until its program ends.
-- **The working folder.** The program runs in the cache folder, so whatever a runtime leaves in its working folder stays there, never in a person's folder: VitisAI's signature `.txt` files, when AMD's route comes.
+- **The working folder.** The program runs in the cache folder, so whatever a runtime leaves in its working folder stays there, never in a person's folder. VitisAI writes `original-info-signature.txt` and `original-model-signature.txt` there (checked on a Ryzen AI 7 350).
 - **The NPU queue** (`npu-queue.ts`). Reading on the NPU takes the NPU's turn as any model work does (`acceleratorTurn`), eight pages a turn (`TURN_PAGES`, about half a second), in the caller's lane. A background read waits its turn. When the NPU's line is too long (four waiting), or no turn comes within 10 minutes, Windows OCR reads the rest instead of waiting.
 - **The self-check.** Before it reads anything, the program reads a picture it draws itself, on the NPU and on the processor. An NPU that reads it differently isn't used, and Windows OCR reads for the next six hours (`REFUSED_MS`). So does a program that can't start.
 - **The settings:**
   - `KIT_OCR_ENGINE=windows` reads with Windows OCR alone;
   - `KIT_OCR_ENGINE=model` reads with the model wherever it can, the processor included;
   - unset, the model reads where it's worth it;
-  - `KIT_OCR_NPU=none` keeps the model off the NPU, and `KIT_OCR_NPU=openvino` tries Intel's (a test);
+  - `KIT_OCR_NPU=none` keeps the model off the NPU, `KIT_OCR_NPU=openvino` tries Intel's and `KIT_OCR_NPU=vitisai` AMD's (tests);
   - under `node:test`, Windows OCR reads unless `KIT_OCR_ENGINE` says otherwise, so no test fetches the model.
 
 ### On the processor

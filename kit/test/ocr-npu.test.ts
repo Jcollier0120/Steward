@@ -40,7 +40,22 @@ test('the plugin a PC takes: Qualcomm\'s on Arm, none on x64 unless Intel\'s is 
   assert.equal(m.packFor('arm64', {}), m.QNN_PACK);
   assert.equal(m.packFor('x64', {}), null, "Intel's and AMD's NPUs are still to be measured");
   assert.equal(m.packFor('x64', { KIT_OCR_NPU: 'openvino' }), m.OPENVINO_PACK);
+  assert.equal(m.packFor('x64', { KIT_OCR_NPU: ' VitisAI' }), m.VITISAI_PACK);
+  assert.equal(m.packFor('arm64', { KIT_OCR_NPU: 'vitisai' }), m.QNN_PACK, "an Arm PC has no AMD NPU");
   assert.equal(m.packFor('arm64', { KIT_OCR_NPU: 'none' }), null);
+});
+
+test("AMD's: Windows ML's DLL in its own folder, the program told to load only compiled graphs where it reads", () => {
+  const place = m.placeOf(path.join(home, 'amd'), 'x64', m.VITISAI_PACK);
+  assert.equal(place.pack, path.join(home, 'amd', 'winml-2.4.89'), "Envoy's folder name, so one PC keeps one copy");
+  assert.equal(place.graphs, m.AMD_GRAPHS ? path.join(home, 'amd', `amd-graphs-${m.MODEL_VERSION}-${m.AMD_GRAPHS.plugin}`) : null);
+  assert.deepEqual(m.missingIn(place), [place.models, place.ort, place.pack, place.graphs].filter(Boolean));
+  const args = m.readerArgs(place, m.VITISAI_PACK);
+  assert.equal(args[args.indexOf('--on') + 1], 'npu');
+  assert.equal(args[args.indexOf('--vitisai') + 1], place.pack);
+  assert.ok(args.includes('--compiled-only'), 'compiling is prepareReader\'s, in the background');
+  assert.ok(!args.includes('--qnn') && !args.includes('--openvino'));
+  assert.ok(!m.readerArgs(place, m.QNN_PACK).includes('--compiled-only'));
 });
 
 test("which engine reads: the model where it's worth it, Windows' OCR under node:test unless told", () => {
@@ -51,7 +66,14 @@ test("which engine reads: the model where it's worth it, Windows' OCR under node
 });
 
 test('every file the reader fetches is pinned by size and SHA-256, from its maker or the manor\'s releases', () => {
-  const pins = [...Object.values(m.ORT_ZIPS), m.QNN_PACK.package, m.OPENVINO_PACK.package, ...Object.values(m.MODEL_FILES)];
+  const pins = [
+    ...Object.values(m.ORT_ZIPS),
+    m.QNN_PACK.package,
+    m.OPENVINO_PACK.package,
+    m.VITISAI_PACK.package,
+    ...Object.values(m.MODEL_FILES),
+    ...(m.AMD_GRAPHS ? [m.AMD_GRAPHS.zip] : []),
+  ];
   for (const p of pins) {
     assert.match(p.sha256, /^[0-9a-f]{64}$/);
     assert.ok(p.size > 0);
@@ -119,17 +141,29 @@ test('a zip without a member it should have: nothing put in place, nothing left 
 
 /**
  * A stand-in for ocr-npu.exe: its hello (with its working folder; on the NPU, that it compiled its graphs the first time
- * in that folder), then an answer per line; a path with "die" ends it, "slow" is never answered.
+ * in that folder, or on AMD's, that they're to be prepared until "prepared" is there), then an answer per line; a path
+ * with "die" ends it, "slow" is never answered. With --prepare: noise first, as AMD's compiler prints, then what it did.
  */
 const fake = path.join(home, 'fake-reader.mjs');
 writeFileSync(
   fake,
   `import { existsSync, writeFileSync } from 'node:fs';
 import readline from 'node:readline';
-const on = process.argv.includes('--on') ? process.argv[process.argv.indexOf('--on') + 1] : 'npu';
-const fail = process.argv.includes('--fail');
-const compiled = on === 'npu' && !existsSync('compiled') ? (writeFileSync('compiled', ''), 9) : 0;
-console.log(JSON.stringify(fail ? { hello: 1, error: 'no runtime' } : { hello: 1, on, ep: on === 'npu' ? 'qnn' : 'cpu', why: process.cwd(), compiled }));
+const has = (a) => process.argv.includes(a);
+if (has('--prepare')) {
+  console.log('{ "not": "the program\\'s line"');
+  console.log('[vitisai] compiling');
+  writeFileSync('prepared', '');
+  console.log(JSON.stringify({ prepared: 1, graphs: 5, compiled: 5, atOnce: 3, ms: 60000, args: process.argv.slice(2) }));
+  process.exit(0);
+}
+const on = has('--on') ? process.argv[process.argv.indexOf('--on') + 1] : 'npu';
+const fail = has('--fail');
+const ep = on !== 'npu' ? 'cpu' : has('--vitisai') ? 'vitisai' : 'qnn';
+const prepare = has('--compiled-only') && !existsSync('prepared');
+const compiled = on === 'npu' && ep !== 'vitisai' && !existsSync('compiled') ? (writeFileSync('compiled', ''), 9) : 0;
+console.log(JSON.stringify(fail ? { hello: 1, error: 'no runtime' } : { hello: 1, on, ep, why: process.cwd(), compiled, prepare }));
+if (prepare) process.exit(0);
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const [id, scale, orient, file] = line.split('\\t');
   if (file.includes('die')) process.exit(3);
@@ -235,6 +269,117 @@ test("an NPU that fails the program's check isn't used, and isn't tried again fo
     assert.equal(await m.modelReader({ env: {}, arch: 'arm64', home: where, start }), null);
     assert.equal(starts, 1, 'not started again');
   }
+});
+
+/** What modelReader logged, and a wait for a line it hasn't yet. */
+function logs() {
+  const lines: string[] = [];
+  const waits: { re: RegExp; done: () => void }[] = [];
+  return {
+    lines,
+    log(line: string) {
+      lines.push(line);
+      for (const w of waits.filter((x) => x.re.test(line))) w.done();
+    },
+    seen: (re: RegExp) =>
+      lines.some((l) => re.test(l)) ? Promise.resolve() : new Promise<void>((done) => waits.push({ re, done: () => setImmediate(done) })),
+  };
+}
+
+/** AMD's compile, stood in for: it waits for `gate`, then leaves what --prepare leaves (the fake reads "prepared"). */
+function amdPrepare(said: { prepared: 0 | 1; error?: string } = { prepared: 1 }) {
+  const calls: string[] = [];
+  let open!: () => void;
+  const gate = new Promise<void>((r) => (open = r));
+  let called!: () => void;
+  const first = new Promise<void>((r) => (called = r));
+  const prepare = async (place: any, pack: any) => {
+    calls.push(pack.id);
+    called();
+    await gate;
+    mkdirSync(place.cache, { recursive: true });
+    if (said.prepared) writeFileSync(path.join(place.cache, 'prepared'), '');
+    return { graphs: 5, compiled: said.prepared ? 5 : 0, atOnce: 3, ms: 60_000, ...said };
+  };
+  return { calls, open, first, prepare };
+}
+
+test("AMD's NPU: its graphs compiled once, in the background, while Windows' OCR reads; then read there", async () => {
+  const where = readyPlace('x64', m.VITISAI_PACK);
+  const started: string[][] = [];
+  const start = (args: string[], cwd: string) => (started.push(args), startFake(args, cwd));
+  const amd = amdPrepare();
+  const l = logs();
+  const o = { env: { KIT_OCR_NPU: 'vitisai' }, arch: 'x64', home: where, start, prepare: amd.prepare, log: l.log };
+  assert.equal(await m.modelReader(o), null, "Windows' OCR reads while they compile");
+  assert.ok(started[0].includes('--compiled-only'), 'the program reading never compiles');
+  await amd.first;
+  assert.deepEqual(amd.calls, ['vitisai']);
+  assert.equal(await m.modelReader(o), null);
+  assert.equal(started.length, 1, 'not started again while compiling');
+  amd.open();
+  await l.seen(/AMD's NPU compiled the text reader's model \(5 graphs, 3 at once, in 1 min\)/);
+  const r = await m.modelReader(o);
+  assert.equal(r?.engine, 'model-npu');
+  assert.equal(started.length, 2, 'its graphs compiled already: started once');
+  assert.deepEqual(amd.calls, ['vitisai'], 'compiled once');
+  const got = await r!.read([{ file: path.join(home, 'amd.png'), scale: 1, orient: true }]);
+  assert.equal(got[0]?.engine, 'model-npu');
+  assert.equal(existsSync(path.join(path.dirname(process.env.NPU_AGENT_NPU_LOCK!), 'ocr-prepare')), false, 'the lock given back');
+});
+
+test("AMD's NPU: a compile that fails leaves Windows' OCR reading, and isn't tried again for a while", async () => {
+  const where = readyPlace('x64', m.VITISAI_PACK);
+  let starts = 0;
+  const start = (args: string[], cwd: string) => (starts++, startFake(args, cwd));
+  const amd = amdPrepare({ prepared: 0, error: 'the compiler ended' });
+  const l = logs();
+  const o = { env: { KIT_OCR_NPU: 'vitisai' }, arch: 'x64', home: where, start, prepare: amd.prepare, log: l.log };
+  assert.equal(await m.modelReader(o), null);
+  amd.open();
+  await l.seen(/couldn't compile the text reader's model \(the compiler ended\)/);
+  assert.equal(await m.modelReader(o), null);
+  assert.equal(await m.modelReader({ ...o, now: Date.now() + 11 * 60_000 }), null);
+  assert.equal(starts, 1, 'not started again');
+  assert.deepEqual(amd.calls, ['vitisai']);
+});
+
+test("AMD's NPU: while another agent compiles, this one doesn't, and looks again in a while", async () => {
+  const L = await import('./fixture/src/kit/lock.ts');
+  const where = readyPlace('x64', m.VITISAI_PACK);
+  const started: string[][] = [];
+  const start = (args: string[], cwd: string) => (started.push(args), startFake(args, cwd));
+  const amd = amdPrepare();
+  const l = logs();
+  const o = { env: { KIT_OCR_NPU: 'vitisai' }, arch: 'x64', home: where, start, prepare: amd.prepare, log: l.log };
+  let release!: () => void;
+  const held = L.withLock(path.join(L.locksDir, 'ocr-prepare'), () => new Promise<void>((r) => (release = r)));
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(await m.modelReader(o), null);
+  await l.seen(/another agent on this PC is compiling/);
+  assert.deepEqual(amd.calls, [], 'not compiled twice');
+  assert.equal(await m.modelReader(o), null);
+  assert.equal(started.length, 1, 'not started again yet');
+  release();
+  await held;
+  amd.open();
+  const later = { ...o, now: Date.now() + 11 * 60_000 };
+  assert.equal(await m.modelReader(later), null, 'ten minutes on: still not compiled here, so compiled now');
+  await l.seen(/AMD's NPU compiled/);
+  assert.deepEqual(amd.calls, ['vitisai']);
+  assert.equal((await m.modelReader(later))?.engine, 'model-npu');
+});
+
+test("AMD's compile: the program with --prepare and without --compiled-only, its answer found below the compiler's noise", async () => {
+  const place = m.placeOf(readyPlace('x64', m.VITISAI_PACK), 'x64', m.VITISAI_PACK);
+  const viaFake = ((_exe: string, args: readonly string[], opts: any) => spawnImpl(process.execPath, [fake, ...args], opts)) as typeof spawn;
+  const p: any = await m.prepareReader(place, m.VITISAI_PACK, { exe: 'ocr-npu.exe', spawnImpl: viaFake });
+  assert.equal(p.prepared, 1);
+  assert.equal(p.atOnce, 3);
+  assert.ok(p.args.includes('--prepare'));
+  assert.ok(!p.args.includes('--compiled-only'));
+  assert.equal(p.args[p.args.indexOf('--vitisai') + 1], place.pack);
+  assert.ok(existsSync(path.join(place.cache, 'prepared')), 'run in the cache folder');
 });
 
 test("the program's name carries its references and manifest, the older helpers' names don't change", () => {

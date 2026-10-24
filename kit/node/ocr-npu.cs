@@ -3,8 +3,9 @@
 // signs like its other helpers (prebuilt.ts); C# 5, as Windows PowerShell's Add-Type compiles it.
 //
 //   ocr-npu.exe --ort <folder of onnxruntime.dll> --models <folder> --cache <folder> [--on npu|cpu]
-//               [--qnn <folder>] [--openvino <folder>] [--threads N] [--htp <performance mode>] [--idle <seconds>]
-//               [--batches n,n,..] [--bench]
+//               [--qnn <folder>] [--openvino <folder>] [--vitisai <folder of Windows ML's DLL>] [--threads N]
+//               [--htp <performance mode>] [--idle <seconds>] [--widths n,n,..] [--batches n,n,..] [--bench]
+//               [--graphs <folder>] [--compiled-only] [--prepare [--export <folder>]]
 //
 // The models folder has det.onnx (the detector: [1,3,h,w] -> [1,1,h,w]), rec.onnx (the recognizer: [n,3,48,w] ->
 // [n,w/s,classes], a step every s columns, 8 or 4) and charset.txt (the recognizer's characters, class 1 onwards; 0 is
@@ -13,8 +14,14 @@
 // The processor reads the same tiles and widths, so both give the same answer. --bench prints each graph's time a run,
 // and exits. The cache is the working folder, and has a folder for each pair of models as compiled.
 //
+// AMD's NPU (--vitisai) compiles each graph for minutes, so it has fewer widths (AmdWidths), each compiled by a program of
+// its own, as many at once as the PC's cores and memory allow (--prepare does only that, and exits; --export then copies
+// them out for a release). --graphs gives graphs compiled ahead, used when this PC's plugin is the one that compiled
+// them; --compiled-only starts on the processor, the hello saying "prepare":true, rather than compile.
+//
 // It says hello once, on one line of JSON: {"hello":1,"on":"npu"|"cpu","ep":"qnn"|...,"why":...,"loadMs":n,"compiled":n,...}
-// (compiled: the graphs it compiled rather than loaded; Qualcomm's compiler holds 2 GB until the program ends).
+// (compiled: the graphs it compiled rather than loaded; Qualcomm's compiler holds 2 GB until the program ends). What
+// the runtimes print goes to stderr, so stdout carries the program's lines alone.
 // Then each line on stdin, <id> TAB <scale> TAB <orient 1|0> TAB <path>, gets one line back (orient 1 turns a photo the
 // way its EXIF says; the width, height and boxes are the picture's own, as turned): {"id":n,"width":w,"height":h,"ms":n,
 // "lines":[{"text":..,"words":[{"t":..,"x":..,"y":..,"w":..,"h":..}]}]} or {"id":n,"error":".."}. Answers are ASCII
@@ -314,6 +321,177 @@ namespace KitOcrNpu
         }
     }
 
+    /// <summary>
+    /// Windows ML's catalog of NPU plugins, through the C API of Microsoft.Windows.AI.MachineLearning.dll (ocr-npu.ts
+    /// fetches that one file from Microsoft's NuGet package), as Envoy asks it (native/EnvoyMedia/WindowsMl.cs): Windows
+    /// fetches the plugin for this PC's NPU from its maker (AMD's VitisAI), keeps it updated, and says where it is, and
+    /// the program registers it with its own ONNX Runtime. Windows 11 24H2 (build 26100) or later.
+    /// </summary>
+    public static class WindowsMl
+    {
+        public const string Dll = "Microsoft.Windows.AI.MachineLearning.dll";
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr LoadLibraryExW(string path, IntPtr file, uint flags);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true, BestFitMapping = false)]
+        static extern IntPtr GetProcAddress(IntPtr module, string name);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool DeviceIoControl(Microsoft.Win32.SafeHandles.SafeFileHandle h, uint code, byte[] input, int inputSize, [Out] byte[] output, int outputSize, out int returned, IntPtr overlapped);
+
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate int CatalogCreateFn(out IntPtr catalog);
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate void CatalogReleaseFn(IntPtr catalog);
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate int FindProviderFn(IntPtr catalog, byte[] name, IntPtr version, out IntPtr provider);
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate int ReadyStateFn(IntPtr provider, out int state);
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate int EnsureReadyFn(IntPtr provider);
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate int PathSizeFn(IntPtr provider, out UIntPtr size);
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate int PathFn(IntPtr provider, UIntPtr size, [Out] byte[] buffer, out UIntPtr used);
+
+        static IntPtr lib;
+
+        static T Export<T>(string dll, string name) where T : class
+        {
+            if (lib == IntPtr.Zero)
+            {
+                lib = LoadLibraryExW(dll, IntPtr.Zero, 0x00000008);
+                if (lib == IntPtr.Zero) throw new OrtException("Windows ML's " + Dll + " didn't load (error " + Marshal.GetLastWin32Error() + ")");
+            }
+            IntPtr f = GetProcAddress(lib, name);
+            if (f == IntPtr.Zero) throw new OrtException("Windows ML's " + Dll + " has no " + name);
+            return Marshal.GetDelegateForFunctionPointer(f, typeof(T)) as T;
+        }
+
+        static void Check(int hr, string call)
+        {
+            if (hr < 0) throw new OrtException("Windows ML's " + call + " failed (0x" + hr.ToString("X8", CultureInfo.InvariantCulture) + ")");
+        }
+
+        /// <summary>Windows' build: its own version check would say 9200 to a program without Windows 10 in its manifest.</summary>
+        public static int Build()
+        {
+            using (Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+            {
+                int b;
+                return k != null && int.TryParse(k.GetValue("CurrentBuildNumber") as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out b) ? b : 0;
+            }
+        }
+
+        /// <summary>
+        /// The plugin DLL Windows has for <paramref name="ep"/> ("VitisAIExecutionProvider", the full name), installed by
+        /// Windows first when it isn't on the PC yet (seconds to minutes, once).
+        /// </summary>
+        public static string Plugin(string dll, string ep, string what)
+        {
+            if (Build() < 26100) throw new OrtException(what + " comes through Windows ML, which needs Windows 11 24H2 or later.");
+            if (!File.Exists(dll)) throw new OrtException(what + " needs Windows ML's " + Dll + ", not fetched yet.");
+            CatalogCreateFn create = Export<CatalogCreateFn>(dll, "WinMLEpCatalogCreate");
+            CatalogReleaseFn release = Export<CatalogReleaseFn>(dll, "WinMLEpCatalogRelease");
+            FindProviderFn find = Export<FindProviderFn>(dll, "WinMLEpCatalogFindProvider");
+            ReadyStateFn state = Export<ReadyStateFn>(dll, "WinMLEpGetReadyState");
+            EnsureReadyFn ensure = Export<EnsureReadyFn>(dll, "WinMLEpEnsureReady");
+            PathSizeFn pathSize = Export<PathSizeFn>(dll, "WinMLEpGetLibraryPathSize");
+            PathFn path = Export<PathFn>(dll, "WinMLEpGetLibraryPath");
+            IntPtr catalog;
+            Check(create(out catalog), "WinMLEpCatalogCreate");
+            try
+            {
+                IntPtr p;
+                if (find(catalog, Encoding.UTF8.GetBytes(ep + "\0"), IntPtr.Zero, out p) < 0 || p == IntPtr.Zero)
+                    throw new OrtException("Windows offers no " + what + " for this PC: its NPU driver may be missing or too old.");
+                int s;
+                Check(state(p, out s), "WinMLEpGetReadyState");
+                if (s == 2) throw new OrtException("Windows offers no " + what + " for this PC: its NPU driver may be missing or too old.");
+                // Ready (0), or not yet in this process (1): Windows installs it first if it must.
+                Check(ensure(p), "WinMLEpEnsureReady");
+                UIntPtr n, used;
+                Check(pathSize(p, out n), "WinMLEpGetLibraryPathSize");
+                byte[] buf = new byte[(int)n];
+                Check(path(p, n, buf, out used), "WinMLEpGetLibraryPath");
+                string found = Encoding.UTF8.GetString(buf).TrimEnd('\0');
+                if (found.Length == 0) throw new OrtException("Windows ML didn't say where " + what + " is.");
+                return found;
+            }
+            finally { release(catalog); }
+        }
+
+        /// <summary>
+        /// <paramref name="dll"/> through a junction at <paramref name="link"/> to its folder, made, or pointed again after
+        /// Windows updates the plugin into a new folder. AMD's needs it: from its own folder under WindowsApps its compiler
+        /// can't open itself (found in Heiward). The path as it was when no junction can be made.
+        /// </summary>
+        public static string Through(string dll, string link)
+        {
+            string target = Path.GetDirectoryName(dll), through = Path.Combine(link, Path.GetFileName(dll));
+            try
+            {
+                if (Directory.Exists(link))
+                {
+                    string now = (File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0 ? Target(link) : null;
+                    if (now != null && string.Equals(now.TrimEnd('\\'), target.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return through;
+                    // A junction alone goes (never what it points to); a real folder that isn't empty throws.
+                    Directory.Delete(link, false);
+                }
+                Directory.CreateDirectory(link);
+                MountPoint(link, target);
+                return through;
+            }
+            catch (Exception e)
+            {
+                if (!(e is IOException || e is UnauthorizedAccessException || e is System.ComponentModel.Win32Exception)) throw;
+                return dll;
+            }
+        }
+
+        const uint MountPointTag = 0xA0000003, OpenExisting = 3, BackupSemantics = 0x02000000, OpenReparsePoint = 0x00200000;
+
+        static Microsoft.Win32.SafeHandles.SafeFileHandle Open(string folder, uint access)
+        {
+            Microsoft.Win32.SafeHandles.SafeFileHandle h = CreateFileW(folder, access, 7, IntPtr.Zero, OpenExisting, BackupSemantics | OpenReparsePoint, IntPtr.Zero);
+            if (h.IsInvalid) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            return h;
+        }
+
+        /// <summary>Where the junction <paramref name="link"/> points (its print name); null for another kind of link.</summary>
+        static string Target(string link)
+        {
+            byte[] buf = new byte[16 * 1024];
+            int got;
+            using (Microsoft.Win32.SafeHandles.SafeFileHandle h = Open(link, 0x80000000))
+                if (!DeviceIoControl(h, 0x000900A8, null, 0, buf, buf.Length, out got, IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            if (BitConverter.ToUInt32(buf, 0) != MountPointTag) return null;
+            int at = BitConverter.ToUInt16(buf, 12), length = BitConverter.ToUInt16(buf, 14);
+            if (length > 0) return Encoding.Unicode.GetString(buf, 16 + at, length);
+            // No print name (another tool's junction): its NT path.
+            string nt = Encoding.Unicode.GetString(buf, 16 + BitConverter.ToUInt16(buf, 8), BitConverter.ToUInt16(buf, 10));
+            return nt.StartsWith(@"\??\", StringComparison.Ordinal) ? nt.Substring(4) : nt;
+        }
+
+        /// <summary>Makes the empty folder <paramref name="link"/> a junction to <paramref name="target"/> (a mount point: no administrator needed).</summary>
+        static void MountPoint(string link, string target)
+        {
+            // REPARSE_DATA_BUFFER, IO_REPARSE_TAG_MOUNT_POINT: tag, data length, reserved, then the NT path ("\??\C:\…") and
+            // the path as shown, each with its offset and length in bytes and each ending in a NUL.
+            byte[] nt = Encoding.Unicode.GetBytes(@"\??\" + target), shown = Encoding.Unicode.GetBytes(target);
+            int names = nt.Length + 2 + shown.Length + 2;
+            byte[] buf = new byte[16 + names];
+            BitConverter.GetBytes(MountPointTag).CopyTo(buf, 0);
+            BitConverter.GetBytes((ushort)(8 + names)).CopyTo(buf, 4);
+            BitConverter.GetBytes((ushort)nt.Length).CopyTo(buf, 10);
+            BitConverter.GetBytes((ushort)(nt.Length + 2)).CopyTo(buf, 12);
+            BitConverter.GetBytes((ushort)shown.Length).CopyTo(buf, 14);
+            nt.CopyTo(buf, 16);
+            shown.CopyTo(buf, 16 + nt.Length + 2);
+            int got;
+            using (Microsoft.Win32.SafeHandles.SafeFileHandle h = Open(link, 0x40000000))
+                if (!DeviceIoControl(h, 0x000900A4, buf, buf.Length, null, 0, out got, IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+    }
+
     /// <summary>A picture as rows of blue, green, red bytes, three to a pixel, no padding.</summary>
     public sealed class Picture
     {
@@ -534,7 +712,8 @@ namespace KitOcrNpu
     public sealed class Reader : IDisposable
     {
         public const int Tile = 640, Overlap = 64, Height = 48, MaxWidth = 2048;
-        public static readonly int[] Buckets = { 128, 256, 384, 512, 768, 1024, 1536, 2048 };
+        // Fewer on AMD's NPU (Program.AmdWidths), where each is a compile of minutes; --widths sets them for a test.
+        public static int[] Buckets = { 128, 256, 384, 512, 768, 1024, 1536, 2048 };
         // The detector's settings (PP-OCR's DB post-processing, axis-aligned): what counts as text, a box's least mean
         // score, and how far a box grows past the shrunk text it finds.
         const float Thresh = 0.3f, BoxThresh = 0.5f, Unclip = 1.6f;
@@ -920,6 +1099,10 @@ namespace KitOcrNpu
         static long lastActivity = Environment.TickCount;
         /// <summary>The graphs compiled by this start (not loaded from the cache): said in the hello.</summary>
         static int compiledNow;
+        /// <summary>The arguments the compilers it starts take too: ONNX Runtime's folder, the models', AMD's graphs compiled ahead.</summary>
+        static string ortDir, modelsDir, graphsDir;
+        /// <summary>--compilers: how many of AMD's compilers run at once, when not as CompilersAtOnce finds.</summary>
+        static int compilersGiven;
         /// <summary>The longest side a picture is read at: a 4K screen's as it is.</summary>
         const int MaxSide = 4096;
 
@@ -944,6 +1127,31 @@ namespace KitOcrNpu
         }
 
         static string Num(double v) { return Math.Round(v, 1).ToString(CultureInfo.InvariantCulture); }
+
+        [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr GetStdHandle(int which);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetStdHandle(int which, IntPtr handle);
+        [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool DuplicateHandle(IntPtr fromProcess, IntPtr handle, IntPtr toProcess, out IntPtr copy, uint access, bool inherit, uint options);
+        [DllImport("ucrtbase.dll", CallingConvention = CallingConvention.Cdecl)] static extern int _dup2(int from, int to);
+
+        /// <summary>
+        /// The answers keep stdout to themselves: the program writes them through its own copy of it, and what the
+        /// runtimes print there (VitisAI's compiler, 1.4 MB of it for the nine graphs) goes to stderr instead.
+        /// </summary>
+        static void KeepStdoutForAnswers()
+        {
+            IntPtr stdout = GetStdHandle(-11), mine;
+            if (stdout == IntPtr.Zero || stdout == new IntPtr(-1)) return;
+            if (!DuplicateHandle(GetCurrentProcess(), stdout, GetCurrentProcess(), out mine, 0, false, 2)) return;
+            Stream answers = new FileStream(new Microsoft.Win32.SafeHandles.SafeFileHandle(mine, true), FileAccess.Write);
+            Console.SetOut(new StreamWriter(answers, new UTF8Encoding(false)));
+            SetStdHandle(-11, GetStdHandle(-12));
+            // The C runtime's own stdout, for what's already loaded (DLLs loaded later take the handle set above).
+            try { _dup2(2, 1); }
+            catch (DllNotFoundException) { }
+            catch (EntryPointNotFoundException) { }
+        }
 
         static void Say(string line)
         {
@@ -1045,6 +1253,401 @@ namespace KitOcrNpu
             finally { ort.ReleaseOptions(o); }
         }
 
+        const string VitisAi = "VitisAIExecutionProvider", AmdRuntime = "AMD's NPU runtime (VitisAI)";
+        // A graph VitisAI couldn't compile this many times isn't tried again until its driver or plugin changes.
+        const int AmdTries = 2;
+        /// <summary>
+        /// The recognizer's widths on AMD's NPU: a compile each, of 4 to 6 minutes on one core (measured on a Ryzen AI 7
+        /// 350), so fewer than elsewhere; a line takes the narrowest it fits.
+        /// </summary>
+        public static readonly int[] AmdWidths = { 256, 512, 1024, 2048 };
+        static string vitisAiPlugin, amdKey;
+        static bool vitisAiRegistered;
+
+        /// <summary>The plugin Windows ML has for AMD's NPU (WindowsMl.Plugin), asked once.</summary>
+        static string VitisAiPlugin(string winml)
+        {
+            if (vitisAiPlugin == null) vitisAiPlugin = WindowsMl.Plugin(Path.Combine(winml, WindowsMl.Dll), VitisAi, AmdRuntime);
+            return vitisAiPlugin;
+        }
+
+        /// <summary>
+        /// The plugin through the cache's vitisai-plugin junction (WindowsMl.Through), made before any compiler starts:
+        /// compilers started together would race to make it.
+        /// </summary>
+        static string VitisAiThrough(string winml, string root)
+        {
+            return WindowsMl.Through(VitisAiPlugin(winml), Path.Combine(root, "vitisai-plugin"));
+        }
+
+        /// <summary>AMD's NPU, its VitisAI plugin registered with ONNX Runtime: its devices.</summary>
+        static List<IntPtr> VitisAiNpus(Ort ort, string winml, string root)
+        {
+            if (!vitisAiRegistered)
+            {
+                ort.Register(VitisAi, VitisAiThrough(winml, root));
+                vitisAiRegistered = true;
+            }
+            List<IntPtr> npus = ort.Devices(VitisAi, 2);
+            if (npus.Count == 0) throw new OrtException(AmdRuntime + " found no NPU on this PC.");
+            return npus;
+        }
+
+        /// <summary>
+        /// 12 hex characters naming AMD's compiles, as Envoy's AmdKey does: the NPU's driver and the plugin Windows ML
+        /// gave (the models are already in the cache folder's name), so an update to either compiles afresh.
+        /// </summary>
+        static string AmdKey(string plugin)
+        {
+            if (amdKey != null) return amdKey;
+            StringBuilder named = new StringBuilder();
+            // The NPU's driver, as Windows lists it among its compute accelerators.
+            using (Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\{f01a9d53-3ff6-48d2-9f97-c8a7004be10c}"))
+                if (k != null)
+                {
+                    string[] names = k.GetSubKeyNames();
+                    Array.Sort(names, StringComparer.Ordinal);
+                    foreach (string n in names)
+                    {
+                        try
+                        {
+                            using (Microsoft.Win32.RegistryKey d = k.OpenSubKey(n))
+                                if (d != null) named.Append(d.GetValue("DriverDesc")).Append('=').Append(d.GetValue("DriverVersion")).Append('|');
+                        }
+                        catch (System.Security.SecurityException) { }
+                    }
+                }
+            named.Append(plugin).Append('|');
+            try { named.Append(FileVersionInfo.GetVersionInfo(plugin).FileVersion).Append('|').Append(new FileInfo(plugin).Length); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            using (SHA256 sha = SHA256.Create())
+                amdKey = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(named.ToString())), 0, 6).Replace("-", "").ToLowerInvariant();
+            return amdKey;
+        }
+
+        /// <summary>
+        /// AMD's plugin as Windows ML installed it: its package's version (…\Microsoft.WinML.AMD.NPU.EP.Framework.2_1.8.75.0_x64__…\),
+        /// else its DLL's. Graphs compiled ahead (--graphs) are used only by the plugin that compiled them.
+        /// </summary>
+        static string AmdPluginVersion(string plugin)
+        {
+            System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(plugin, @"\\[^\\_]+_(\d+(?:\.\d+){3})_[^\\]*\\");
+            if (m.Success) return m.Groups[1].Value;
+            try { return FileVersionInfo.GetVersionInfo(plugin).FileVersion ?? "unknown"; }
+            catch (IOException) { return "unknown"; }
+        }
+
+        /// <summary>This driver's and plugin's folder of AMD's compiles in the models' cache folder.</summary>
+        static string VitisAiDir(string winml, string cache)
+        {
+            return Path.Combine(cache, "vitisai-" + AmdKey(VitisAiPlugin(winml)));
+        }
+
+        static int Tries(string failed)
+        {
+            try { return int.Parse(File.ReadAllLines(failed)[0], CultureInfo.InvariantCulture); }
+            catch (Exception e)
+            {
+                if (e is IOException || e is FormatException || e is IndexOutOfRangeException) return 0;
+                throw;
+            }
+        }
+
+        /// <summary>The graphs not compiled yet in <paramref name="dir"/>; throws for one VitisAI has refused AmdTries times.</summary>
+        static List<Graph> VitisAiMissing(string dir, List<Graph> graphs)
+        {
+            List<Graph> missing = new List<Graph>();
+            foreach (Graph g in graphs)
+            {
+                string graph = Path.Combine(dir, g.Name);
+                if (File.Exists(graph + ".ready") && Directory.Exists(graph)) continue;
+                int tries = Tries(graph + ".failed");
+                if (tries >= AmdTries) throw new OrtException(AmdRuntime + " couldn't compile the " + g.Name + " graph (" + tries + " tries); it's tried again when AMD's NPU driver or runtime updates.");
+                missing.Add(g);
+            }
+            return missing;
+        }
+
+        /// <summary>
+        /// The graph compiled ahead for this plugin and these models (--graphs: graphs.txt, and a .rai file each, as
+        /// --prepare --export writes them), or null.
+        /// </summary>
+        static string ShippedGraph(string winml, string models, string name)
+        {
+            if (graphsDir == null) return null;
+            string about = Path.Combine(graphsDir, "graphs.txt"), rai = Path.Combine(graphsDir, name + ".rai");
+            if (!File.Exists(about) || !File.Exists(rai)) return null;
+            Dictionary<string, string> said = new Dictionary<string, string>();
+            foreach (string line in File.ReadAllLines(about))
+            {
+                int eq = line.IndexOf('=');
+                if (eq > 0) said[line.Substring(0, eq).Trim()] = line.Substring(eq + 1).Trim();
+            }
+            string plugin, tag;
+            if (!said.TryGetValue("plugin", out plugin) || plugin != AmdPluginVersion(VitisAiPlugin(winml))) return null;
+            if (!said.TryGetValue("models", out tag) || tag != ModelTag(models)) return null;
+            return rai;
+        }
+
+        /// <summary>
+        /// A session on AMD's NPU through VitisAI, every shape fixed and the processor never taking part. VitisAI compiles
+        /// each graph (the FP32 model runs in BF16) into its own folder in <paramref name="dir"/> once, and opens it from
+        /// there after that; a graph compiled ahead for this plugin (--graphs) is put there instead of compiling it. A
+        /// compile cut short is started again, and one that fails twice isn't tried again until the folder's key changes.
+        /// </summary>
+        static Ort.Session VitisAiSession(Ort ort, string winml, string root, string models, string dir, Graph g, out bool shipped)
+        {
+            List<IntPtr> npus = VitisAiNpus(ort, winml, root);
+            string graph = Path.Combine(dir, g.Name), ready = graph + ".ready", failed = graph + ".failed";
+            int tries = Tries(failed);
+            if (tries >= AmdTries) throw new OrtException(AmdRuntime + " couldn't compile the " + g.Name + " graph (" + tries + " tries); it's tried again when AMD's NPU driver or runtime updates.");
+            bool compiled = File.Exists(ready) && Directory.Exists(graph);
+            string ahead = compiled ? null : ShippedGraph(winml, models, g.Name);
+            shipped = false;
+            Directory.CreateDirectory(dir);
+            if (!compiled && Directory.Exists(graph)) Directory.Delete(graph, true);
+            if (ahead != null)
+            {
+                Directory.CreateDirectory(graph);
+                File.Copy(ahead, Path.Combine(graph, g.Name + ".rai"), true);
+                shipped = true;
+            }
+            Ort.Session s = null;
+            Exception last = null;
+            // Twice when a graph compiled ahead wasn't taken: then compiled here.
+            for (int attempt = 0; attempt < 2 && s == null; attempt++)
+            {
+                IntPtr o = ort.Options(1);
+                try
+                {
+                    ort.Config(o, "session.disable_cpu_ep_fallback", "1");
+                    foreach (KeyValuePair<string, long> d in g.Dims) ort.FixDimension(o, d.Key, d.Value);
+                    Dictionary<string, string> settings = new Dictionary<string, string>();
+                    settings["cache_dir"] = dir;
+                    settings["cache_key"] = g.Name;
+                    ort.Append(o, npus, settings);
+                    s = ort.Open(g.Model, o);
+                }
+                catch (OrtException e)
+                {
+                    last = e;
+                    if (!shipped) break;
+                    shipped = false;
+                    if (Directory.Exists(graph)) Directory.Delete(graph, true);
+                }
+                finally { ort.ReleaseOptions(o); }
+            }
+            if (s == null)
+            {
+                if (!compiled) File.WriteAllText(failed, (tries + 1).ToString(CultureInfo.InvariantCulture) + "\n" + last.Message + "\n");
+                throw last;
+            }
+            if (!compiled)
+            {
+                File.WriteAllText(ready, shipped ? "shipped\n" : "");
+                File.Delete(failed);
+                compiledNow++;
+            }
+            return s;
+        }
+
+        /// <summary>Only this driver's and plugin's compiles are kept: an older one's folder goes once these have opened.</summary>
+        static void KeepOnlyVitisAi(string cache)
+        {
+            string keep = "vitisai-" + amdKey;
+            foreach (string d in Directory.GetDirectories(cache, "vitisai-*"))
+            {
+                if (string.Equals(Path.GetFileName(d), keep, StringComparison.OrdinalIgnoreCase)) continue;
+                try { Directory.Delete(d, true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        sealed class MemoryStatus
+        {
+            public uint Length = 64, Load;
+            public ulong TotalPhys, AvailPhys, TotalPageFile, AvailPageFile, TotalVirtual, AvailVirtual, AvailExtendedVirtual;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool GlobalMemoryStatusEx([In, Out] MemoryStatus status);
+
+        // What one of AMD's compilers holds at most, with room to spare (1.2 GB measured, the detector's).
+        const long CompilerBytes = 1536L << 20;
+
+        /// <summary>How many graphs compile at once (--compilers, else one a core, as the memory free now allows), at least one.</summary>
+        static int CompilersAtOnce(int graphs)
+        {
+            if (compilersGiven > 0) return Math.Min(graphs, compilersGiven);
+            int cores = Math.Max(1, Environment.ProcessorCount / 2);
+            MemoryStatus m = new MemoryStatus();
+            long byMemory = GlobalMemoryStatusEx(m) ? (long)m.AvailPhys / CompilerBytes : 1;
+            return (int)Math.Max(1, Math.Min(graphs, Math.Min(cores, byMemory)));
+        }
+
+        static string Quote(string arg)
+        {
+            if (arg.Length > 0 && arg.IndexOfAny(new char[] { ' ', '\t', '"' }) < 0) return arg;
+            StringBuilder b = new StringBuilder("\"");
+            int slashes = 0;
+            foreach (char c in arg)
+            {
+                if (c == '\\') { slashes++; continue; }
+                b.Append('\\', c == '"' ? slashes * 2 + 1 : slashes);
+                slashes = 0;
+                b.Append(c);
+            }
+            return b.Append('\\', slashes * 2).Append('"').ToString();
+        }
+
+        /// <summary>
+        /// Compiles <paramref name="missing"/> for AMD's NPU, each in a program of its own (--compile; AMD's compiler
+        /// uses about one core), as many at once as CompilersAtOnce allows, the longest first, below normal priority so
+        /// the PC's own work comes first. Each's time, and why for one that failed, as JSON.
+        /// </summary>
+        static string CompileInParallel(string winml, string root, List<Graph> missing, out int failures, out int atOnce)
+        {
+            // The junction before any compiler starts, so none races another to make it.
+            VitisAiThrough(winml, root);
+            string exe = Process.GetCurrentProcess().MainModule.FileName;
+            int n = CompilersAtOnce(missing.Count);
+            atOnce = n;
+            SemaphoreSlim slots = new SemaphoreSlim(n, n);
+            string[] said = new string[missing.Count];
+            List<Thread> threads = new List<Thread>();
+            int failed = 0;
+            for (int i = 0; i < missing.Count; i++)
+            {
+                int at = i;
+                Thread t = new Thread(delegate ()
+                {
+                    slots.Wait();
+                    try
+                    {
+                        StringBuilder a = new StringBuilder();
+                        foreach (string s in new string[] { "--ort", ortDir, "--models", modelsDir, "--cache", root, "--vitisai", winml, "--compile", missing[at].Name })
+                            a.Append(Quote(s)).Append(' ');
+                        if (graphsDir != null) a.Append("--graphs ").Append(Quote(graphsDir));
+                        ProcessStartInfo start = new ProcessStartInfo(exe, a.ToString().Trim());
+                        start.UseShellExecute = false;
+                        start.CreateNoWindow = true;
+                        start.RedirectStandardOutput = true;
+                        string answer = null;
+                        using (Process p = Process.Start(start))
+                        {
+                            try { p.PriorityClass = ProcessPriorityClass.BelowNormal; }
+                            catch (InvalidOperationException) { }
+                            catch (System.ComponentModel.Win32Exception) { }
+                            string line;
+                            while ((line = p.StandardOutput.ReadLine()) != null) if (line.StartsWith("{\"compiled\":", StringComparison.Ordinal)) answer = line;
+                            p.WaitForExit();
+                            if (p.ExitCode != 0 || answer == null || answer.Contains("\"error\":")) Interlocked.Increment(ref failed);
+                        }
+                        said[at] = answer ?? "{\"compiled\":" + Json(missing[at].Name) + ",\"error\":\"it ended without saying\"}";
+                    }
+                    finally { slots.Release(); }
+                });
+                t.IsBackground = true;
+                threads.Add(t);
+                t.Start();
+                // In order: the longest (the first) takes a slot first.
+                Thread.Sleep(50);
+            }
+            foreach (Thread t in threads) t.Join();
+            failures = failed;
+            return "[" + string.Join(",", said) + "]";
+        }
+
+        /// <summary>The compilers' working folders, once they've ended.</summary>
+        static void CleanWork(string dir)
+        {
+            foreach (string w in Directory.GetDirectories(dir, "work-*"))
+            {
+                try { Directory.Delete(w, true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        /// <summary>--compile: one graph for AMD's NPU, compiled (or put in place, when compiled ahead), opened once and closed.</summary>
+        static int CompileOne(string root, string winml, string name)
+        {
+            Stopwatch sw = Stopwatch.StartNew();
+            try
+            {
+                Graph g = GraphNamed(modelsDir, name);
+                string dir = VitisAiDir(winml, ModelCache(root, modelsDir));
+                Directory.CreateDirectory(dir);
+                // Its own working folder in the cache, for what VitisAI leaves there (its signature files), as no other compile's.
+                string work = Path.Combine(dir, "work-" + name);
+                Directory.CreateDirectory(work);
+                Environment.CurrentDirectory = work;
+                Ort ort = new Ort(ortDir);
+                bool shipped;
+                using (VitisAiSession(ort, winml, root, modelsDir, dir, g, out shipped)) { }
+                Process me = Process.GetCurrentProcess();
+                Say("{\"compiled\":" + Json(name) + ",\"ms\":" + sw.ElapsedMilliseconds + ",\"shipped\":" + (shipped ? "true" : "false") +
+                    ",\"peakMb\":" + (me.PeakPagedMemorySize64 >> 20) + ",\"cpuMs\":" + (long)me.TotalProcessorTime.TotalMilliseconds + "}");
+                return 0;
+            }
+            catch (Exception e)
+            {
+                Say("{\"compiled\":" + Json(name) + ",\"ms\":" + sw.ElapsedMilliseconds + ",\"error\":" + Json(e.Message) + "}");
+                return 1;
+            }
+        }
+
+        /// <summary>
+        /// --prepare: every graph of AMD's NPU not compiled yet, compiled (CompileInParallel), so the program starts on it
+        /// in seconds after that; --export copies them, compiled, into a folder for --graphs (a release's).
+        /// </summary>
+        static int Prepare(string root, string winml, int[] given, string export)
+        {
+            Stopwatch sw = Stopwatch.StartNew();
+            try
+            {
+                try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal; }
+                catch (System.ComponentModel.Win32Exception) { }
+                List<Graph> graphs = Graphs(modelsDir, given);
+                string cache = ModelCache(root, modelsDir), dir = VitisAiDir(winml, cache);
+                List<Graph> missing = VitisAiMissing(dir, graphs);
+                int failures = 0, atOnce = 0;
+                string each = "[]";
+                if (missing.Count > 0) each = CompileInParallel(winml, root, missing, out failures, out atOnce);
+                CleanWork(dir);
+                if (failures == 0)
+                {
+                    KeepOnlyVitisAi(cache);
+                    if (export != null) Export(winml, dir, graphs, export);
+                }
+                long bytes = 0;
+                foreach (Graph g in graphs)
+                {
+                    string graph = Path.Combine(dir, g.Name);
+                    if (Directory.Exists(graph)) foreach (string f in Directory.GetFiles(graph, "*", SearchOption.AllDirectories)) bytes += new FileInfo(f).Length;
+                }
+                Say("{\"prepared\":" + (failures == 0 ? "1" : "0") + ",\"graphs\":" + graphs.Count + ",\"compiled\":" + missing.Count + ",\"failed\":" + failures +
+                    ",\"atOnce\":" + atOnce + ",\"ms\":" + sw.ElapsedMilliseconds + ",\"bytes\":" + bytes + ",\"plugin\":" + Json(AmdPluginVersion(VitisAiPlugin(winml))) + ",\"each\":" + each + "}");
+                return failures == 0 ? 0 : 1;
+            }
+            catch (Exception e)
+            {
+                Say("{\"prepared\":0,\"ms\":" + sw.ElapsedMilliseconds + ",\"error\":" + Json(e.Message) + "}");
+                return 1;
+            }
+        }
+
+        /// <summary>The compiled graphs and graphs.txt (the plugin and the models they're for), for --graphs on another PC.</summary>
+        static void Export(string winml, string dir, List<Graph> graphs, string into)
+        {
+            Directory.CreateDirectory(into);
+            foreach (Graph g in graphs) File.Copy(Path.Combine(dir, g.Name, g.Name + ".rai"), Path.Combine(into, g.Name + ".rai"), true);
+            File.WriteAllText(Path.Combine(into, "graphs.txt"), "plugin=" + AmdPluginVersion(VitisAiPlugin(winml)) + "\nmodels=" + ModelTag(modelsDir) + "\n");
+        }
         static Ort.Session CpuSession(Ort ort, string model, int threads)
         {
             IntPtr o = ort.Options(threads);
@@ -1085,41 +1688,98 @@ namespace KitOcrNpu
             return here;
         }
 
-        static Reader NpuReader(Ort ort, string models, string charset, string root, string qnn, string openvino, string htpMode, int[] given, out string ep)
+        /// <summary>One of the NPU's graphs: its name in the cache ("det", "rec512x1"), its model, and its fixed shape.</summary>
+        sealed class Graph
         {
-            string detPath = Path.Combine(models, "det.onnx"), recPath = Path.Combine(models, "rec.onnx");
-            string tag = Hash(detPath) + "-" + Hash(recPath) + "-" + Compiled;
-            string cache = CacheFor(root, tag);
-            Func<string, string, Dictionary<string, long>, Ort.Session> open;
+            public string Name, Model;
+            public readonly Dictionary<string, long> Dims = new Dictionary<string, long>();
+        }
+
+        /// <summary>The NPU's graphs: the detector's tile, then the recognizer at each width, so many lines at a time (1 unless given).</summary>
+        static List<Graph> Graphs(string models, int[] given)
+        {
+            List<Graph> all = new List<Graph> { GraphNamed(models, "det") };
+            for (int k = 0; k < Reader.Buckets.Length; k++) all.Add(GraphNamed(models, "rec" + Reader.Buckets[k] + "x" + (given != null ? given[k] : 1)));
+            return all;
+        }
+
+        static Graph GraphNamed(string models, string name)
+        {
+            Graph g = new Graph { Name = name };
+            if (name == "det")
+            {
+                g.Model = Path.Combine(models, "det.onnx");
+                g.Dims["h"] = Reader.Tile;
+                g.Dims["w"] = Reader.Tile;
+                return g;
+            }
+            System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(name, "^rec([0-9]+)x([0-9]+)$");
+            if (!m.Success) throw new OrtException("No graph is named " + name);
+            g.Model = Path.Combine(models, "rec.onnx");
+            g.Dims["n"] = long.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+            g.Dims["w"] = long.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+            return g;
+        }
+
+        /// <summary>The models as compiled now: both files' hashes, and how they're compiled.</summary>
+        static string ModelTag(string models)
+        {
+            return Hash(Path.Combine(models, "det.onnx")) + "-" + Hash(Path.Combine(models, "rec.onnx")) + "-" + Compiled;
+        }
+
+        static string ModelCache(string root, string models) { return CacheFor(root, ModelTag(models)); }
+
+        /// <summary>AMD's NPU's graphs aren't all compiled, and --compiled-only says not to here: --prepare compiles them.</summary>
+        sealed class NotReady : Exception
+        {
+            public NotReady(string message) : base(message) { }
+        }
+
+        static Reader NpuReader(Ort ort, string models, string charset, string root, string qnn, string openvino, string vitisai, string htpMode, int[] given, bool compiledOnly, out string ep)
+        {
+            string cache = ModelCache(root, models);
+            List<Graph> graphs = Graphs(models, given);
+            Func<Graph, Ort.Session> open;
             if (qnn != null)
             {
                 ep = "qnn";
-                open = delegate (string model, string name, Dictionary<string, long> dims) { return QnnSession(ort, qnn, model, cache, name, dims, htpMode); };
+                open = delegate (Graph g) { return QnnSession(ort, qnn, g.Model, cache, g.Name, g.Dims, htpMode); };
             }
             else if (openvino != null)
             {
                 ep = "openvino";
-                open = delegate (string model, string name, Dictionary<string, long> dims) { return OpenVinoSession(ort, openvino, model, cache, dims); };
+                open = delegate (Graph g) { return OpenVinoSession(ort, openvino, g.Model, cache, g.Dims); };
+            }
+            else if (vitisai != null)
+            {
+                ep = "vitisai";
+                string dir = VitisAiDir(vitisai, cache);
+                List<Graph> missing = VitisAiMissing(dir, graphs);
+                if (missing.Count > 0)
+                {
+                    if (compiledOnly) throw new NotReady(AmdRuntime + " hasn't compiled the text reader's model yet (" + missing.Count + " of its " + graphs.Count + " graphs)");
+                    int failures, atOnce;
+                    string each = CompileInParallel(vitisai, root, missing, out failures, out atOnce);
+                    CleanWork(dir);
+                    if (failures > 0) throw new OrtException(AmdRuntime + " couldn't compile the text reader's model: " + each);
+                    compiledNow += missing.Count;
+                }
+                open = delegate (Graph g) { bool shipped; return VitisAiSession(ort, vitisai, root, models, dir, g, out shipped); };
             }
             else throw new OrtException("No NPU runtime was given.");
-            Dictionary<string, long> detDims = new Dictionary<string, long>();
-            detDims["h"] = Reader.Tile;
-            detDims["w"] = Reader.Tile;
-            Ort.Session det = open(detPath, "det", detDims);
-            List<IDisposable> owned = new List<IDisposable> { det };
-            Dictionary<int, Ort.Session> recs = new Dictionary<int, Ort.Session>();
             int[] batches = new int[Reader.Buckets.Length];
             for (int k = 0; k < batches.Length; k++) batches[k] = given != null ? given[k] : 1;
-            // Every width compiled now, so the first picture doesn't wait for one.
+            List<IDisposable> owned = new List<IDisposable>();
+            Ort.Session det = open(graphs[0]);
+            owned.Add(det);
+            Dictionary<int, Ort.Session> recs = new Dictionary<int, Ort.Session>();
+            // Every width opened (compiled, the first time) now, so the first picture doesn't wait for one.
             for (int k = 0; k < Reader.Buckets.Length; k++)
             {
-                int b = Reader.Buckets[k];
-                Dictionary<string, long> dims = new Dictionary<string, long>();
-                dims["n"] = batches[k];
-                dims["w"] = b;
-                recs[b] = open(recPath, "rec" + b + "x" + batches[k], dims);
-                owned.Add(recs[b]);
+                recs[Reader.Buckets[k]] = open(graphs[k + 1]);
+                owned.Add(recs[Reader.Buckets[k]]);
             }
+            if (ep == "vitisai") KeepOnlyVitisAi(cache);
             return new Reader(det, delegate (int w) { return recs[w]; }, batches, true, charset, owned);
         }
 
@@ -1180,9 +1840,28 @@ namespace KitOcrNpu
 
         public static int Main(string[] args)
         {
+            KeepStdoutForAnswers();
             Console.InputEncoding = new UTF8Encoding(false);
-            string ortDir = Arg(args, "--ort", null), models = Arg(args, "--models", null), cache = Arg(args, "--cache", null);
-            string on = Arg(args, "--on", "npu"), qnn = Arg(args, "--qnn", null), openvino = Arg(args, "--openvino", null);
+            ortDir = Arg(args, "--ort", null);
+            string models = modelsDir = Arg(args, "--models", null), cache = Arg(args, "--cache", null);
+            string on = Arg(args, "--on", "npu"), qnn = Arg(args, "--qnn", null), openvino = Arg(args, "--openvino", null), vitisai = Arg(args, "--vitisai", null);
+            graphsDir = Arg(args, "--graphs", null);
+            compilersGiven = int.Parse(Arg(args, "--compilers", "0"), CultureInfo.InvariantCulture);
+            bool compiledOnly = Array.IndexOf(args, "--compiled-only") >= 0;
+            string widthList = Arg(args, "--widths", null);
+            if (widthList != null)
+            {
+                List<int> widths = new List<int>();
+                foreach (string w in widthList.Split(',')) widths.Add(int.Parse(w, CultureInfo.InvariantCulture));
+                for (int k = 0; k < widths.Count; k++)
+                    if (widths[k] % 8 != 0 || (k > 0 && widths[k] <= widths[k - 1]) || (k == widths.Count - 1 && widths[k] != Reader.MaxWidth))
+                    {
+                        Say("{\"hello\":1,\"error\":\"--widths takes widths in order, each a multiple of 8, the last " + Reader.MaxWidth + "\"}");
+                        return 2;
+                    }
+                Reader.Buckets = widths.ToArray();
+            }
+            else if (vitisai != null) Reader.Buckets = AmdWidths;
             // Qualcomm's NPU held at power_saver, as Envoy holds it: burst reads a picture a few per cent faster, but holds
             // the NPU awake while the program waits; and asking for burst for each run and power_saver after costs more
             // (10 ms or so a run, measured) than burst saves.
@@ -1207,9 +1886,22 @@ namespace KitOcrNpu
                 Say("{\"hello\":1,\"error\":\"usage: ocr-npu --ort <folder> --models <folder> --cache <folder>\"}");
                 return 2;
             }
+            string compileOne = Arg(args, "--compile", null);
+            if (compileOne != null || Array.IndexOf(args, "--prepare") >= 0)
+            {
+                if (vitisai == null)
+                {
+                    Say("{\"prepared\":0,\"error\":\"--prepare and --compile are for AMD's NPU (--vitisai)\"}");
+                    return 2;
+                }
+                Directory.CreateDirectory(cache);
+                Environment.CurrentDirectory = cache;
+                return compileOne != null ? CompileOne(cache, vitisai, compileOne) : Prepare(cache, vitisai, batches, Arg(args, "--export", null));
+            }
             Stopwatch load = Stopwatch.StartNew();
             Reader reader;
             string ep = "cpu", why = null, check = null;
+            bool prepare = false;
             try
             {
                 // Run in the cache, where what a runtime leaves in the working folder (VitisAI's signature files) belongs.
@@ -1224,7 +1916,7 @@ namespace KitOcrNpu
                     Reader npu = null;
                     try
                     {
-                        npu = NpuReader(ort, models, charset, cache, qnn, openvino, htpMode, batches, out ep);
+                        npu = NpuReader(ort, models, charset, cache, qnn, openvino, vitisai, htpMode, batches, compiledOnly, out ep);
                         Picture pic = SelfCheckPicture();
                         string want = Texts(cpu.ReadPicture(pic)), got = Texts(npu.ReadPicture(pic));
                         check = got;
@@ -1236,11 +1928,12 @@ namespace KitOcrNpu
                     {
                         if (npu != null) npu.Dispose();
                         why = e.Message;
+                        prepare = e is NotReady;
                         ep = "cpu";
                         on = "cpu";
                     }
                 }
-                Say("{\"hello\":1,\"on\":" + Json(on) + ",\"ep\":" + Json(ep) + ",\"why\":" + Json(why) + ",\"runtime\":" + Json(ort.Version) + ",\"loadMs\":" + load.ElapsedMilliseconds + ",\"compiled\":" + compiledNow + ",\"check\":" + Json(check) + "}");
+                Say("{\"hello\":1,\"on\":" + Json(on) + ",\"ep\":" + Json(ep) + ",\"why\":" + Json(why) + ",\"runtime\":" + Json(ort.Version) + ",\"loadMs\":" + load.ElapsedMilliseconds + ",\"compiled\":" + compiledNow + ",\"check\":" + Json(check) + ",\"prepare\":" + (prepare ? "true" : "false") + "}");
                 if (Array.IndexOf(args, "--bench") >= 0)
                 {
                     Say("{\"bench\":" + reader.Bench(20) + "}");

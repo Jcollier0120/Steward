@@ -35,7 +35,8 @@ import { download, type Download } from './setup.ts';
  *
  * KIT_OCR_ENGINE: `windows` reads with Windows' OCR alone, `model` with the model wherever it can (on the processor
  * too); unset, the model where it's worth it. Under node:test it's Windows' OCR unless KIT_OCR_ENGINE says otherwise,
- * so no test fetches the model. KIT_OCR_NPU: `none` keeps the model off the NPU; `openvino` tries Intel's NPU (a test).
+ * so no test fetches the model. KIT_OCR_NPU: `none` keeps the model off the NPU; `openvino` tries Intel's NPU, `vitisai`
+ * AMD's (tests).
  */
 
 /** A file the reader fetches: where from, and what it must be. */
@@ -65,7 +66,7 @@ const ORT_NOTICES = ['LICENSE', 'ThirdPartyNotices.txt'];
 
 /** An NPU maker's plugin for ONNX Runtime, as its NuGet package carries it, and what of it is kept. */
 export interface NpuPack {
-  id: 'qnn' | 'openvino';
+  id: 'qnn' | 'openvino' | 'vitisai';
   what: string;
   version: string;
   package: Pinned;
@@ -74,6 +75,8 @@ export interface NpuPack {
   keep: readonly string[];
   /** The license and notices, kept in notices\. */
   notices: readonly string[];
+  /** Its folder in the reader's, when it isn't <id>-<version>. */
+  folder?: string;
 }
 
 /** Qualcomm's plugin 2.6.0, as Envoy and Heiward pin it: the plugin and its HTP (NPU) files, not its GPU parts. */
@@ -134,6 +137,26 @@ export const OPENVINO_PACK: NpuPack = {
   notices: ['README.md', 'Intel.ML.OnnxRuntime.EP.OpenVINO.nuspec', 'runtimes/win-x64/native/third-party-programs.txt'],
 };
 
+/**
+ * AMD's: Windows ML's DLL from Microsoft's NuGet package 2.4.89, as Envoy pins it (52 MB fetched, 1 MB kept). The
+ * program asks it for AMD's VitisAI plugin, which Windows installs for the PC's NPU and keeps updated (ocr-npu.cs'
+ * WindowsMl), so nothing of AMD's is fetched here.
+ */
+export const VITISAI_PACK: NpuPack = {
+  id: 'vitisai',
+  what: "Windows ML (for AMD's NPU runtime, VitisAI)",
+  version: '2.4.89',
+  package: {
+    url: 'https://api.nuget.org/v3-flatcontainer/microsoft.windows.ai.machinelearning/2.4.89/microsoft.windows.ai.machinelearning.2.4.89.nupkg',
+    size: 51_594_185,
+    sha256: '5c68ecfb947223267abf159a023f5192ad42725e4e9cc995e7c1470dd54dff63',
+  },
+  native: 'runtimes/win-x64/native',
+  keep: ['Microsoft.Windows.AI.MachineLearning.dll'],
+  notices: ['license.txt', 'ThirdPartyNotices.txt', 'README.md'],
+  folder: 'winml-2.4.89',
+};
+
 /** The model's version: its release in the manor's public releases is ocr-model-v<version>. */
 export const MODEL_VERSION = '1';
 const MODEL_RELEASE = `https://github.com/Jcollier0120/Manor-releases/releases/download/ocr-model-v${MODEL_VERSION}`;
@@ -173,31 +196,45 @@ export interface ReaderPlace {
   models: string;
   /** The program's working folder: the NPUs' compiled graphs, and what their runtimes leave. */
   cache: string;
+  /** AMD's NPU's graphs compiled ahead (AMD_GRAPHS), where some are pinned for this model; else null. */
+  graphs: string | null;
 }
 
 const READY = 'ready';
+
+/**
+ * AMD's NPU's graphs for this model, compiled ahead on a Ryzen AI PC (the program's --prepare --export, zipped and put
+ * in the manor's releases): a PC whose plugin compiled them puts them in its cache instead of compiling for half an
+ * hour. Only that plugin's version (the program checks graphs.txt); any other compiles its own. Null: none yet.
+ */
+export const AMD_GRAPHS: { plugin: string; zip: Pinned; files: readonly string[] } | null = null;
 
 export function placeOf(home: string, arch: OcrArch, pack: NpuPack | null): ReaderPlace {
   return {
     home,
     ort: path.join(home, `onnxruntime-${ORT_VERSION}-${arch}`),
-    pack: pack ? path.join(home, `${pack.id}-${pack.version}`) : null,
+    pack: pack ? path.join(home, pack.folder ?? `${pack.id}-${pack.version}`) : null,
     models: path.join(home, `model-${MODEL_VERSION}`),
     cache: path.join(home, 'cache'),
+    graphs: pack?.id === 'vitisai' && AMD_GRAPHS ? path.join(home, `amd-graphs-${MODEL_VERSION}-${AMD_GRAPHS.plugin}`) : null,
   };
 }
 
 /** The folders of `place` not yet whole. */
 export function missingIn(place: ReaderPlace, exists: (p: string) => boolean = existsSync): string[] {
-  return [place.models, place.ort, place.pack].filter((d): d is string => !!d && !exists(path.join(d, READY)));
+  return [place.models, place.ort, place.pack, place.graphs].filter((d): d is string => !!d && !exists(path.join(d, READY)));
 }
 
-/** The NPU maker's plugin this PC's reader takes: Qualcomm's on an Arm PC; Intel's only as a test (KIT_OCR_NPU=openvino). */
+/**
+ * The NPU maker's plugin this PC's reader takes: Qualcomm's on an Arm PC; Intel's and AMD's only as tests
+ * (KIT_OCR_NPU=openvino, vitisai).
+ */
 export function packFor(arch: string, env: NodeJS.ProcessEnv = process.env): NpuPack | null {
   const want = env.KIT_OCR_NPU?.trim().toLowerCase();
   if (want === 'none') return null;
   if (arch === 'arm64') return QNN_PACK;
   if (arch === 'x64' && want === 'openvino') return OPENVINO_PACK;
+  if (arch === 'x64' && want === 'vitisai') return VITISAI_PACK;
   return null;
 }
 
@@ -282,6 +319,9 @@ export async function fetchReader(place: ReaderPlace, arch: OcrArch, pack: NpuPa
       ...pack.notices.map((f) => ({ member: f, as: `notices/${path.basename(f)}` })),
     ]);
   }
+  if (AMD_GRAPHS && place.graphs && !exists(place.graphs)) {
+    await fetchZip("AMD's NPU's graphs, compiled ahead", AMD_GRAPHS.zip, 'amd-graphs.zip', place.graphs, AMD_GRAPHS.files.map((f) => ({ member: f, as: f })));
+  }
 }
 
 /** No second fetch sooner than this after one failed, so an offline PC isn't asked every batch. */
@@ -340,6 +380,8 @@ export interface Hello {
   loadMs?: number;
   /** The NPU's graphs it compiled, rather than loaded from the cache (a PC's first start). */
   compiled?: number;
+  /** AMD's NPU's graphs aren't compiled yet (it was started --compiled-only): prepareReader compiles them. */
+  prepare?: boolean;
   error?: string;
 }
 
@@ -511,12 +553,76 @@ export interface ModelReader {
 
 const NPU = { id: 'npu', name: 'NPU', slots: 1 };
 
-/** The program's arguments for the reader's folder: on the NPU with `pack`'s plugin, on the processor without one. */
-function readerArgs(place: ReaderPlace, pack: NpuPack | null): string[] {
+/**
+ * The program's arguments for the reader's folder: on the NPU with `pack`'s plugin, on the processor without one. On
+ * AMD's NPU it never compiles where it's started to read (--compiled-only): prepareReader does that.
+ */
+export function readerArgs(place: ReaderPlace, pack: NpuPack | null): string[] {
   const args = ['--ort', place.ort, '--models', place.models, '--cache', place.cache, '--on', pack ? 'npu' : 'cpu', '--idle', '120'];
   if (pack?.id === 'qnn') args.push('--qnn', place.pack!);
   if (pack?.id === 'openvino') args.push('--openvino', place.pack!);
+  if (pack?.id === 'vitisai') {
+    args.push('--vitisai', place.pack!, '--compiled-only');
+    if (place.graphs) args.push('--graphs', place.graphs);
+  }
   return args;
+}
+
+/** What the program's --prepare said: its graphs, how many it compiled and how many at once, and each one's time. */
+export interface Prepared {
+  prepared: 0 | 1;
+  graphs?: number;
+  compiled?: number;
+  failed?: number;
+  atOnce?: number;
+  ms?: number;
+  bytes?: number;
+  /** AMD's plugin's version, as Windows ML installed it. */
+  plugin?: string;
+  each?: { compiled: string; ms: number; shipped?: boolean; error?: string }[];
+  error?: string;
+}
+
+/**
+ * How long AMD's NPU's graphs may take to compile: the detector alone took 18 minutes, on the one core AMD's compiler
+ * uses (measured on a Ryzen AI 7 350), and fewer cores are free on a busy PC.
+ */
+export const PREPARE_MS = 90 * 60_000;
+
+/**
+ * AMD's NPU's graphs compiled (the program's --prepare): each by a program of its own, as many at once as the PC's
+ * cores and memory allow, below normal priority, or put in place from the graphs compiled ahead (place.graphs) when
+ * they're this PC's plugin's. Processor work, so the NPU's turn isn't taken. Resolves with what it said.
+ */
+export async function prepareReader(place: ReaderPlace, pack: NpuPack, o: { exe?: string; spawnImpl?: typeof spawn; timeoutMs?: number } = {}): Promise<Prepared> {
+  const exe = o.exe ?? (await readerExe());
+  mkdirSync(place.cache, { recursive: true });
+  return new Promise<Prepared>((resolve, reject) => {
+    const proc = (o.spawnImpl ?? spawn)(exe, [...readerArgs(place, pack).filter((a) => a !== '--compiled-only'), '--prepare'], {
+      cwd: place.cache,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+    let said: Prepared | null = null;
+    const timer = setTimeout(() => proc.kill(), o.timeoutMs ?? PREPARE_MS);
+    createInterface({ input: proc.stdout! }).on('line', (line) => {
+      try {
+        const msg = JSON.parse(line);
+        if (msg && typeof msg === 'object' && 'prepared' in msg) said = msg as Prepared;
+      } catch {
+        // not the program's line
+      }
+    });
+    proc.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (said) resolve(said);
+      else reject(new Error(`the text reader's compile ended without saying (exit ${code})`));
+    });
+  });
 }
 
 /**
@@ -528,14 +634,22 @@ export async function startReader(on: 'npu' | 'cpu', o: { env?: NodeJS.ProcessEn
   const arch = o.arch ?? process.arch;
   if (arch !== 'arm64' && arch !== 'x64') throw new Error(`the text reader's model doesn't run on ${arch}`);
   const pack = on === 'npu' ? packFor(arch, env) : null;
-  if (on === 'npu' && !pack) throw new Error("no NPU plugin for this PC's reader (KIT_OCR_NPU=openvino tries Intel's)");
+  if (on === 'npu' && !pack) throw new Error("no NPU plugin for this PC's reader (KIT_OCR_NPU=openvino tries Intel's, vitisai AMD's)");
   const place = placeOf(o.home ?? ocrHome(env), arch, pack);
   if (missingIn(place).length) await fetchReader(place, arch, pack, { log: o.log });
+  if (pack?.id === 'vitisai') {
+    // AMD's NPU's graphs compiled first (a PC's first time: the better part of half an hour), then the program loads them.
+    const p = await prepareReader(place, pack);
+    o.log?.(`AMD's NPU's graphs: ${p.compiled ?? 0} of ${p.graphs ?? '?'} compiled (${p.atOnce ?? 0} at once) in ${Math.round((p.ms ?? 0) / 1000)} s; plugin ${p.plugin ?? '?'}`);
+    if (!p.prepared) throw new Error(`AMD's NPU couldn't compile the text reader's model: ${p.error ?? JSON.stringify(p.each)}`);
+  }
   return ReaderHost.start(await readerExe(), readerArgs(place, pack), place.cache);
 }
 
 /** How long the model is left alone after it couldn't be used here (no program, an NPU that failed its self-check). */
 const REFUSED_MS = 6 * 3600_000;
+/** How long before looking again when another agent on the PC is compiling AMD's NPU's graphs. */
+const PREPARE_WAIT_MS = 10 * 60_000;
 
 interface EngineState {
   host: ReaderHost | null;
@@ -543,9 +657,11 @@ interface EngineState {
   refusedUntil: number;
   /** The NPU failed the program's check (or the program found none): the program starts on the processor from then on. */
   npuFailed: boolean;
+  /** This agent is compiling AMD's NPU's graphs (prepareReader), in the background. */
+  preparing: boolean;
   said: Set<string>;
 }
-const state: EngineState = { host: null, starting: null, refusedUntil: 0, npuFailed: false, said: new Set() };
+const state: EngineState = { host: null, starting: null, refusedUntil: 0, npuFailed: false, preparing: false, said: new Set() };
 
 /** For tests: forget the program and any refusal. */
 export function resetModelReader(): void {
@@ -554,6 +670,7 @@ export function resetModelReader(): void {
   state.starting = null;
   state.refusedUntil = 0;
   state.npuFailed = false;
+  state.preparing = false;
   state.said.clear();
 }
 
@@ -562,9 +679,10 @@ export interface ReaderOptions {
   arch?: string;
   home?: string;
   log?: (line: string) => void;
-  /** Stand-ins for tests: the program's start, and the fetch. */
+  /** Stand-ins for tests: the program's start, the fetch, and AMD's compile. */
   start?: (args: string[], cwd: string) => Promise<ReaderHost>;
   fetch?: (place: ReaderPlace, arch: OcrArch, pack: NpuPack | null) => void;
+  prepare?: (place: ReaderPlace, pack: NpuPack) => Promise<Prepared>;
   now?: number;
 }
 
@@ -582,7 +700,7 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
   const onCpu = setting === 'model' || ON_PROCESSOR;
   if (!pack && !onCpu) return null;
   const now = o.now ?? Date.now();
-  if (now < state.refusedUntil) return null;
+  if (now < state.refusedUntil || state.preparing) return null;
   const place = placeOf(o.home ?? ocrHome(env), arch, pack);
   if (missingIn(place).length) {
     (o.fetch ?? ((p, a, k) => fetchInBackground(p, a, k, { log: o.log })))(place, arch, pack);
@@ -604,11 +722,50 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
     });
   const npu = () => !!pack && !state.npuFailed;
 
+  /**
+   * AMD's NPU's graphs compiled in the background, once for every agent on the PC (a lock beside the NPU's), while
+   * Windows' OCR reads; the program starts on the NPU from the first batch after.
+   */
+  const prepareInBackground = (k: NpuPack) => {
+    if (state.preparing) return;
+    state.preparing = true;
+    say(`AMD's NPU is compiling the text reader's model in the background (once, up to half an hour, below normal priority): Windows' OCR reads until then`);
+    withLock(path.join(locksDir, 'ocr-prepare'), () => (o.prepare ?? ((p, kk) => prepareReader(p, kk)))(place, k), { waitMs: 0, staleMs: PREPARE_MS + 10 * 60_000 })
+      .then((p) => {
+        if (p.prepared) {
+          o.log?.(`AMD's NPU compiled the text reader's model (${p.compiled ?? 0} graphs, ${p.atOnce ?? 0} at once, in ${Math.round((p.ms ?? 0) / 60_000)} min): it reads there from the next batch`);
+          return;
+        }
+        state.refusedUntil = Date.now() + REFUSED_MS;
+        const why = p.error ?? p.each?.find((e) => e.error)?.error ?? 'it failed';
+        o.log?.(`AMD's NPU couldn't compile the text reader's model (${String(why).slice(0, 300)}): Windows' OCR reads`);
+      })
+      .catch((e) => {
+        // Another agent on the PC is compiling them: this one looks again in a while.
+        if (e instanceof LockTimeout) {
+          state.refusedUntil = Date.now() + PREPARE_WAIT_MS;
+          say(`another agent on this PC is compiling the text reader's model for AMD's NPU: Windows' OCR reads until then`);
+          return;
+        }
+        state.refusedUntil = Date.now() + REFUSED_MS;
+        o.log?.(`AMD's NPU couldn't compile the text reader's model (${String(e?.message ?? e).slice(0, 300)}): Windows' OCR reads`);
+      })
+      .finally(() => {
+        state.preparing = false;
+      });
+  };
+
   /** The program, started if it isn't running (it ends itself when idle); null when it can't be used here. */
   const ensure = (): Promise<ReaderHost | null> => {
     if (state.host?.alive) return Promise.resolve(state.host);
     return (state.starting ??= start(readerArgs(place, npu() ? pack : null), place.cache)
       .then((h) => {
+        if (h.hello.prepare && pack && npu()) {
+          // AMD's NPU's graphs aren't compiled yet: compiled in the background, and the NPU tried again after.
+          h.close();
+          prepareInBackground(pack);
+          return null;
+        }
         if (h.hello.on === 'cpu' && npu()) {
           // Its NPU read the program's own picture differently, or the program found none: not tried again here.
           state.npuFailed = true;
