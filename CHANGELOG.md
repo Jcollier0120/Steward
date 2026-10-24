@@ -4,7 +4,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.204
 
-**It hands out the kit 2.118.0: the staff's calls to Castellan carry Castellan's sign-in, one step before the staff's pages open only from Castellan.**
+**It hands out the kit 2.118.0: the staff's calls to Castellan carry Castellan's sign-in, one step before the staff's pages open only from Castellan. This release brings 0.36.201 and 0.36.203 too, never released on their own.**
 
 ### What changed
 

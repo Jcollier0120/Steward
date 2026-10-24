@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.118.0
 
-**The kit's calls to Castellan carry its token, and a page's token is found by its address: the callers' step before page sign-in goes on (kit 2.96.0's plan).**
+**The kit's calls to Castellan carry its token, and a page's token is found by its address: the callers' step before page sign-in goes on (kit 2.96.0's plan). This release brings 2.115.0 and 2.117.0 too, never released on their own.**
 
 ### What's new
 
