@@ -27,7 +27,7 @@ const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '
  * it by themselves). Strict (strictPages), a GET that is neither gets only what OPEN_GETS names. A browser opening
  * the page is sent to Manor (manorOpenUrl), which opens that same address signed in; while Manor isn't answering it
  * gets lockedPage, with a button to open it there. A program's GET / gets lockedPage too, never the token; anything
- * else 401. Strict is the default from kit 2.130.0, once every staff member installed in the account has that kit, all
+ * else 401. Strict is the default from kit 2.133.0, once every staff member installed in the account has that kit, all
  * of whose staff send the token (strictByDefault). Not strict (KIT_STRICT_PAGES=0, or one of them is older), every GET
  * is answered as before, and a launch URL still signs the browser in, so pages are ready when it is. POSTs are as before: the token, from the page's own origin or none; a cookie alone never presses a
  * button.
@@ -37,13 +37,13 @@ const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '
 export const STRICT_ENV = 'KIT_STRICT_PAGES';
 
 /**
- * The kit that turns the sign-in on by default (kit 2.130.0): the first whose staff all send the token on their GETs to
+ * The kit that turns the sign-in on by default (kit 2.133.0): the first whose staff all send the token on their GETs to
  * another page (kit 2.118.0's callers, and each staff member's own, merged before this kit reached it).
  */
-export const STRICT_FROM = '2.130.0';
+export const STRICT_FROM = '2.133.0';
 
 /**
- * Whether GETs need the sign-in (the token or the cookie): as KIT_STRICT_PAGES says, else by default (kit 2.130.0) once
+ * Whether GETs need the sign-in (the token or the cookie): as KIT_STRICT_PAGES says, else by default (kit 2.133.0) once
  * no staff member installed in this account runs a kit older than STRICT_FROM (strictByDefault). The staff update one at
  * a time, and one from before then GETs other pages without the token: until the last of them has updated, every page
  * answers as before.
@@ -111,7 +111,7 @@ const LOOK_MS = 60_000;
 let looked: { at: number; strict: boolean } | null = null;
 
 /**
- * The default (kit 2.130.0): strict once no staff member installed in this account runs a kit older than STRICT_FROM
+ * The default (kit 2.133.0): strict once no staff member installed in this account runs a kit older than STRICT_FROM
  * (olderStaff), looked at once a minute. Never under node --test unless the test gives the home to look in: a test's
  * pages answer as before, whatever this PC has installed.
  */

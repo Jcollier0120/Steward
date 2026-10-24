@@ -2,9 +2,9 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.216
+## 0.36.221
 
-**It hands out the kit 2.130.0: your staff's pages open only from Castellan, so no other program or Windows account on the PC can read them or press their buttons.**
+**It hands out the kit 2.133.0: your staff's pages open only from Castellan, so no other program or Windows account on the PC can read them or press their buttons.**
 
 ### What changed
 
@@ -17,6 +17,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. If one of your staff hasn't taken this update (its updates are paused, say), the pages stay open as before until it does.
+
+## 0.36.219
+
+**It hands out the kit 2.132.1: the small program that runs our own text-reading model comes signed again, so a PC doesn't build its own copy.**
+
+### What changed
+
+- **Reading text in pictures with our own model** uses the signed helper again, where since 2.127.0 each PC built an unsigned one itself the first time. With Smart App Control on, Windows may block a program a PC built itself.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.36.215
 

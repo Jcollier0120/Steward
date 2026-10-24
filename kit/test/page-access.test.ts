@@ -139,7 +139,7 @@ test("another staff member's token, from its server.json in this account's own d
   assert.deepEqual(A.staffHeaders('wright', { env: {}, home: fake }), {}, 'only a token');
 });
 
-test('strict by default (kit 2.130.0) once no staff member installed in the account runs an older kit, Manor too', () => {
+test('strict by default (kit 2.133.0) once no staff member installed in the account runs an older kit, Manor too', () => {
   const profile = path.join(home, 'profile-installed');
   const install = (dir: string, kit: string | null, o: { pinOnly?: boolean } = {}) => {
     mkdirSync(path.join(dir, 'app', 'src', 'kit'), { recursive: true });
@@ -151,22 +151,22 @@ test('strict by default (kit 2.130.0) once no staff member installed in the acco
   assert.deepEqual(A.olderStaff(o), [], 'nothing installed');
   assert.equal(A.strictByDefault(o), true);
   install(path.join(profile, '.wright'), A.STRICT_FROM);
-  install(path.join(profile, '.manor'), '2.131.3');
+  install(path.join(profile, '.manor'), '2.134.3');
   mkdirSync(path.join(profile, '.vscode', 'extensions'), { recursive: true });
   mkdirSync(path.join(profile, '.ssh'), { recursive: true });
   mkdirSync(path.join(profile, '.reeve-dev'), { recursive: true });
   assert.equal(A.strictByDefault(o), true, 'every one at the kit or later; folders without an agent are no staff');
   install(path.join(profile, '.aletaster'), '2.83.0');
-  install(path.join(profile, '.auditor'), '2.129.9', { pinOnly: true });
+  install(path.join(profile, '.auditor'), '2.132.9', { pinOnly: true });
   install(path.join(profile, '.toller'), null);
-  assert.deepEqual(A.olderStaff(o), [{ id: 'aletaster', kit: '2.83.0' }, { id: 'auditor', kit: '2.129.9' }, { id: 'toller', kit: 'none' }], "src\\kit\\VERSION, else kit.json's pin; one that isn't a version is older");
+  assert.deepEqual(A.olderStaff(o), [{ id: 'aletaster', kit: '2.83.0' }, { id: 'auditor', kit: '2.132.9' }, { id: 'toller', kit: 'none' }], "src\\kit\\VERSION, else kit.json's pin; one that isn't a version is older");
   assert.equal(A.strictByDefault(o), false, 'an older one GETs other pages without the token: every page answers as before');
   const moved = path.join(home, 'elsewhere', 'aletaster');
-  install(moved, '2.130.1');
+  install(moved, '2.133.1');
   assert.deepEqual(A.olderStaff({ home: profile, env: { ALETASTER_HOME: moved, AUDITOR_HOME: '' } }).map((s) => s.id), ['auditor', 'toller'], 'its <ID>_HOME holds the install when set');
-  install(path.join(profile, '.auditor'), '2.130.0');
+  install(path.join(profile, '.auditor'), '2.133.0');
   install(path.join(profile, '.toller'), '3.0.0');
-  install(path.join(profile, '.aletaster'), '2.130.0');
+  install(path.join(profile, '.aletaster'), '2.133.0');
   assert.equal(A.strictByDefault(o), true, 'the last of them updated');
   assert.equal(A.strictPages({ KIT_STRICT_PAGES: '0' }), false, 'KIT_STRICT_PAGES=0 keeps a page open whatever is installed');
   const kit = readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim().split('.').map(Number);
