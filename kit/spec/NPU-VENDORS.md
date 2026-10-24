@@ -443,13 +443,13 @@ So pictures go to the Radeon first. Starting its server costs about 56 J over a 
 **Intel's pictures stay on the NPU** (the NPU 3720 on a Core Ultra 5 225U, 2026-10-24). In the benchmark's Arc run, OpenVINO Model Server on the graphics, a picture cost 13.3 J over rest. On the NPU it cost 17.5 J, and 14.6 J of that was the cores', since the NPU route's picture encoder runs on the processor (Qwen3-VL-2B on Intel's NPU, above). By AMD's rule, the Arc would take batches, and single pictures once its server is warm. But neither of the Arc's servers gives that saving with the right answers:
 
 - **OpenVINO on the graphics misreads fine text.** With its encoder on the Arc, it read the 896 × 896 tally picture (TALLY 4827 in greyscale) as 4877 three times in four. The 513, 449 and 448 px pictures it read the same each time, as the processor does. That is the misread it made with the NPU route's encoder moved to the graphics (above). The NPU and the processor read the 896 px picture right, and a screenshot is larger still. Setup also gives the Arc no OpenVINO server: it would be a third server beside the NPU's two, and those two already hold the 16 GB PC's whole budget (Memory on a 16 GB Intel PC, above).
-- **The card's own server spends twice the NPU's.** Setup gives Intel's integrated graphics llama.cpp's Vulkan build with the picture encoder on the processor (setup.ts' `encodesOnProcessor`: with the encoder on the graphics, they lose the device). This PC's card has b11669 with Qwen3-VL-4B Q4_K_M and its Q8_0 projector, as it was set up. Setup now gives Qwen3-VL-2B, whose projector is about the same size (445 MB against 454 MB) and also runs on the processor. Measured in two rounds with the manor running:
-  - each new picture, warm: 41 J over rest (28–49 J), in 1.7–2.7 s, 26–44 J of it the cores';
-  - its start and a first picture: 56–66 J in 4.7–8.3 s;
-  - memory held: 4.6 GB;
-  - answers: the suite's four, the same as the NPU's.
+- **The card's own server spends more than the NPU's.** Setup gives Intel's integrated graphics llama.cpp's Vulkan build with the picture encoder on the processor (setup.ts' `encodesOnProcessor`: with the encoder on the graphics, they lose the device). Measured with the manor running, in three rounds that took three servers in turn, the order rotating. Each started from stopped and read one picture, then read the suite's four pictures twice, warm. The first warm picture is left out: it repeats the start's picture, and llama-server answered it from its cache.
+  - **The card as setup gives it now** (LLAMA_PIN b11734, Qwen3-VL-2B Q4_K_M with its Q8_0 projector, MODEL_PINS): 36 J a new picture over rest (30–48 J, the middle half) in 1.9 s; 20–68 J to start and read a first picture, in 3.6–6.1 s; 3.2 GB held.
+  - **The NPU in the same rounds:** 20 J a picture (18–26 J) in 1.4 s; 57–90 J to start and read a first picture, in about 7 s. The benchmark's 17.5 J was measured with the manor stopped.
+  - **This PC's card as an older kit set it up** (b11669, Qwen3-VL-4B Q4_K_M): 46 J (35–59 J) in 2.7 s; 73–96 J to start; 4.9 GB. A card moves to the 2B at its next Set up local AI, which plans every card again; the keeper's look downloads nothing.
+  - **Answers:** the suite's four, the same on all three.
 
-So as the manor runs it, a picture costs more on the Arc than on the NPU, whatever the batch size. No `batchAt` pays, and Intel's vision has no order. That changes if OpenVINO's encoder on the graphics reads fine text right, or if llama.cpp's Vulkan build keeps its device with the encoder on Intel's graphics.
+So as the manor runs it, a picture costs about 1.8 times as much on the Arc as on the NPU, whatever the batch size. No `batchAt` pays, and Intel's vision has no order. That changes if OpenVINO's encoder on the graphics reads fine text right, or if llama.cpp's Vulkan build keeps its device with the encoder on Intel's graphics.
 
 ## Ports
 
