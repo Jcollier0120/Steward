@@ -328,9 +328,9 @@ async function build(readable = false, publishing = false): Promise<Built> {
   const sources = native ? [...nativeSources(native), ...native.notices] : [];
   const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, ANNOUNCEMENT, ...sources) !== '';
   const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString(), kit: kit.kit, form: readable ? 'readable' : 'minified' };
-  // Whether the Exchequer sells it, as its list says when it's published (kit 2.110.0): a sold agent checks the license
-  // itself (license-check.ts), whatever Manor's own files say. When the Exchequer can't say, release.json says nothing,
-  // and the agent goes by what Manor last heard.
+  // Whether the Exchequer sells it, as its list says when it's published (kit 2.110.0). The license check doesn't read it
+  // (kit 2.113.0: every agent but Manor and Heiward needs a license, sold or not). When the Exchequer can't say,
+  // release.json says nothing.
   if (publishing) {
     const sale = await saleOf(APP.id);
     if (sale.forSale === null) console.log(`  release.json doesn't say whether ${APP.id} is sold: ${sale.line}`);

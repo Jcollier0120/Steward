@@ -1,30 +1,28 @@
 import type { JsonWebKey } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import path from 'node:path';
-import { APP, appRoot } from '../app.ts';
+import { APP } from '../app.ts';
 import { sharedLicenseFolder } from './everyone.ts';
 import { isThisPc, LICENSE_FILE, readHeldFile, trustedKeys, verifyLicense, type LicensePayload } from './license.ts';
 import { MANOR_DEFAULT_NAME, manorHome, manorLink } from './manor.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 
 /**
- * The license, checked by the agent itself (kit 2.45.0; closed when there's none, kit 2.110.0). Manor takes the staff
- * it sells off duty when a 7-day trial ends or the PC holds no license (its developer.ts settleLicenseDuty); this is
- * the same rule inside each agent, so an agent started by hand (its scheduled task, its CLI, Run now) doesn't run
- * without one either.
+ * The license, checked by the agent itself (kit 2.45.0; closed when there's none, kit 2.110.0; every agent but Manor
+ * and Heiward, kit 2.113.0). Manor takes its staff off duty when a 7-day trial ends or the PC holds no license (its
+ * developer.ts settleLicenseDuty); this is the same rule inside each agent, so an agent started by hand (its scheduled
+ * task, its CLI, Run now) doesn't run without one either.
  *
- * Who checks: only an agent the Exchequer sells. Its release says so: release.json's `sold`, which the kit's release.ts
- * stamps from the Exchequer's list as it publishes (kit 2.110.0), so no file of Manor's decides it. A copy without it
- * (a release from before, a checkout, a build that wasn't published) goes by what Manor last heard: the Exchequer's GET
- * /agents in Manor's exchequer.json (`agents`: each id with its tier), as `household` or `workshop`, and Manor's
- * staff.json neither holding it back nor marking it internal (as Manor's soldTiers has it). Manor and Heiward, which
- * are free, never check, and nor does an internal agent (the Wright, the Bailiff), which the Exchequer never lists.
+ * Who checks: every agent but Manor and Heiward (NEVER_CHECKED), which are free on any PC. No staff member works for
+ * free, so nothing else decides it: not whether the Exchequer lists the agent or with what tier, not Manor's staff.json
+ * holding it back or marking it internal (the Wright, the Bailiff, the Crier), not its release.json. Before kit
+ * 2.113.0 only a sold agent checked, so a missing exchequer.json or a release saying `"sold": false` let one run.
  *
  * What it reads: Manor's licence.json, verified offline against the public keys (license.ts), and this PC's id
  * (device.json, or made again from MachineGuid: license.ts isThisPc). It never asks the Exchequer: Manor fetches the
  * license, and refreshes it every hour.
  *
- * What holds a sold agent: a trial whose `runsUntil` has passed, or no license for this PC (no licence.json, one that
+ * What holds an agent: a trial whose `runsUntil` has passed, or no license for this PC (no licence.json, one that
  * can't be read, one whose signature doesn't verify, or one made for another PC). Then its rounds wait (schedule.ts),
  * Run now with them, its page says "The trial ended: a license brings it back" or "This PC holds no license for it:
  * signing in brings it back", and its ping says it isn't running. Its settings and data are kept, its page stays up,
@@ -47,14 +45,17 @@ import { dataFile, readJson, writeJson } from './store.ts';
 /** What the page says, in plain words, when the trial has ended. */
 export const TRIAL_ENDED_TEXT = 'The trial ended: a license brings it back';
 
-/** What the page says when this PC holds no license for a sold agent (kit 2.110.0). */
+/** What the page says when this PC holds no license for the agent (kit 2.110.0). */
 export const NO_LICENSE_TEXT = 'This PC holds no license for it: signing in brings it back';
 
 /** How often it reads the license again, unless licence.json changes first. */
 export const LICENSE_CHECK_MS = 60 * 60_000;
 
-/** Never checked, whatever exchequer.json or release.json says: free on any PC. */
+/** Never checked: free on any PC. Every other agent needs a license for this PC (kit 2.113.0). */
 const NEVER_CHECKED = new Set(['manor', 'heiward']);
+
+/** Whether agent `id` checks the license: every one but Manor and Heiward. */
+export const checksLicense = (id: string): boolean => !NEVER_CHECKED.has(id);
 
 /**
  * How the license stands for this agent:
@@ -65,7 +66,7 @@ const NEVER_CHECKED = new Set(['manor', 'heiward']);
 export type LicenseCheckState = 'trial' | 'trial-ended' | 'paid' | 'lapsed' | 'pending' | 'missing' | 'unreadable' | 'bad-signature' | 'another-pc';
 
 export interface LicenseCheck {
-  /** Whether this agent checks at all: false for one the Exchequer doesn't sell (free, internal), which never holds. */
+  /** Whether this agent checks at all: false only for Manor and Heiward (and under the tests), which never hold. */
   checked: boolean;
   /** null when it isn't checked. */
   state: LicenseCheckState | null;
@@ -81,50 +82,10 @@ export interface LicenseCheck {
 
 export const NOT_CHECKED: LicenseCheck = Object.freeze({ checked: false, state: null, held: false, ended: false, runsUntil: null, problem: null });
 
-const readJsonFile = (file: string): unknown => JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
-
-/**
- * Whether this copy's release says it's sold (release.json's `sold`, stamped as it was published: kit 2.110.0); null
- * when it doesn't say (a release from before, a checkout, a build that wasn't published).
- */
-export function ownSale(root = appRoot): boolean | null {
-  try {
-    const sold = (readJsonFile(path.join(root, 'release.json')) as { sold?: unknown } | null)?.sold;
-    return typeof sold === 'boolean' ? sold : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Whether the Exchequer sells this agent, as Manor last heard (exchequer.json's `agents`), and Manor's staff.json
- * neither holds it back nor marks it internal. False when either can't say: for a copy whose release doesn't say.
- */
-export function soldHere(id: string, home: string): boolean {
-  if (NEVER_CHECKED.has(id)) return false;
-  let agents: unknown;
-  try {
-    agents = (readJsonFile(path.join(home, 'exchequer.json')) as { agents?: unknown } | null)?.agents;
-  } catch {
-    return false;
-  }
-  if (!Array.isArray(agents)) return false;
-  const listed = (agents as { id?: unknown; tier?: unknown }[]).find((a) => a && a.id === id);
-  if (!listed || (listed.tier !== 'household' && listed.tier !== 'workshop')) return false;
-  // Manor's staff.json, in its app folder: one held back (not offered yet) or internal isn't sold, whatever the Exchequer lists.
-  try {
-    const staff = (readJsonFile(path.join(home, 'app', 'staff.json')) as { agents?: unknown } | null)?.agents;
-    const entry = Array.isArray(staff) ? (staff as Record<string, unknown>[]).find((a) => a?.id === id) : undefined;
-    if (entry && (entry.heldBack === true || entry.internal === true)) return false;
-  } catch {
-    // No staff.json to read (a Manor checkout, or one being updated): the Exchequer's list says.
-  }
-  return true;
-}
-
 /** What licence.json holds, for this agent: read and verified, not yet held against the time. */
 export interface LicenseReading {
-  sold: boolean;
+  /** Whether it checks (checksLicense): false for Manor and Heiward alone. */
+  checked: boolean;
   /** The verified payload, this PC's; null when there's none to trust (state says why). */
   payload: LicensePayload | null;
   state: 'ok' | 'missing' | 'unreadable' | 'bad-signature' | 'another-pc';
@@ -134,24 +95,23 @@ export interface LicenseReading {
 const HOLDS = 'so its rounds wait until this PC holds one';
 
 /**
- * Reads and verifies Manor's licence.json for agent `id`; never throws. `sold` is what its release says (ownSale),
- * `guid` this PC's MachineGuid (license.ts machineGuid when left out).
+ * Reads and verifies Manor's licence.json for agent `id`; never throws. `guid` is this PC's MachineGuid (license.ts
+ * machineGuid when left out).
  */
-export function readLicenseFor(o: { id: string; home: string; sold?: boolean | null; guid?: string | null; env?: NodeJS.ProcessEnv; keys?: readonly JsonWebKey[] }): LicenseReading {
-  const sold = NEVER_CHECKED.has(o.id) ? false : typeof o.sold === 'boolean' ? o.sold : soldHere(o.id, o.home);
-  if (!sold) return { sold: false, payload: null, state: 'ok', problem: null };
+export function readLicenseFor(o: { id: string; home: string; guid?: string | null; env?: NodeJS.ProcessEnv; keys?: readonly JsonWebKey[] }): LicenseReading {
+  if (!checksLicense(o.id)) return { checked: false, payload: null, state: 'ok', problem: null };
   const file = readHeldFile(o.home);
-  if ('missing' in file) return { sold: true, payload: null, state: 'missing', problem: `This PC holds no license, ${HOLDS}.` };
-  if ('unreadable' in file) return { sold: true, payload: null, state: 'unreadable', problem: `The license file on this PC can't be used: ${file.unreadable}, ${HOLDS}.` };
+  if ('missing' in file) return { checked: true, payload: null, state: 'missing', problem: `This PC holds no license, ${HOLDS}.` };
+  if ('unreadable' in file) return { checked: true, payload: null, state: 'unreadable', problem: `The license file on this PC can't be used: ${file.unreadable}, ${HOLDS}.` };
   const env = o.env ?? process.env;
   const v = verifyLicense(file.held.licence, o.keys ?? trustedKeys(env));
-  if ('error' in v) return { sold: true, payload: null, state: 'bad-signature', problem: `The license on this PC doesn't verify: ${v.error}, ${HOLDS}.` };
+  if ('error' in v) return { checked: true, payload: null, state: 'bad-signature', problem: `The license on this PC doesn't verify: ${v.error}, ${HOLDS}.` };
   const shared = sharedLicenseFolder(env);
   const folders = shared ? [o.home, shared] : [o.home];
   if (!(o.guid === undefined ? isThisPc(v.payload.sub, folders) : isThisPc(v.payload.sub, folders, o.guid))) {
-    return { sold: true, payload: null, state: 'another-pc', problem: `The license on this PC was made for another PC, ${HOLDS}.` };
+    return { checked: true, payload: null, state: 'another-pc', problem: `The license on this PC was made for another PC, ${HOLDS}.` };
   }
-  return { sold: true, payload: v.payload, state: 'ok', problem: null };
+  return { checked: true, payload: v.payload, state: 'ok', problem: null };
 }
 
 /**
@@ -159,7 +119,7 @@ export function readLicenseFor(o: { id: string; home: string; sold?: boolean | n
  * this agent has seen), whichever is latest, so a clock set back can't bring an ended trial back. Never throws.
  */
 export function judgeLicense(r: LicenseReading, now: number, latestSeen = 0): LicenseCheck {
-  if (!r.sold) return NOT_CHECKED;
+  if (!r.checked) return NOT_CHECKED;
   const base = { checked: true, held: false, ended: false, runsUntil: null, problem: r.problem };
   // No license for this PC: it holds, and problem says why.
   if (r.state !== 'ok' || !r.payload) return { ...base, state: r.state === 'ok' ? 'missing' : r.state, held: true };
@@ -178,7 +138,7 @@ export function judgeLicense(r: LicenseReading, now: number, latestSeen = 0): Li
 }
 
 /** The license checked for agent `id` against Manor's folder `home`, at `now`. */
-export function checkLicense(o: { id: string; home: string; now?: number; latestSeen?: number; sold?: boolean | null; guid?: string | null; env?: NodeJS.ProcessEnv; keys?: readonly JsonWebKey[] }): LicenseCheck {
+export function checkLicense(o: { id: string; home: string; now?: number; latestSeen?: number; guid?: string | null; env?: NodeJS.ProcessEnv; keys?: readonly JsonWebKey[] }): LicenseCheck {
   return judgeLicense(readLicenseFor(o), o.now ?? Date.now(), o.latestSeen ?? 0);
 }
 
@@ -206,7 +166,7 @@ function stampOf(file: string): string {
 }
 
 function refresh(home: string, stamp: string, now: number): NonNullable<typeof kept> {
-  const reading = readLicenseFor({ id: APP.id, home, sold: ownSale() });
+  const reading = readLicenseFor({ id: APP.id, home });
   const stored = readJson<{ latestSeen?: unknown }>(seenFile(), {}).latestSeen;
   const savedSeen = typeof stored === 'number' && Number.isFinite(stored) ? stored : 0;
   const latestSeen = Math.max(savedSeen, kept?.latestSeen ?? 0, now);
@@ -238,11 +198,12 @@ function sayOnce(c: LicenseCheck): void {
 
 /**
  * How the license stands for this agent now. Read again once an hour, or as soon as licence.json changes; the trial's
- * end is held against the time at every call. Any error of its own is no reason to stop: it says not checked.
+ * end is held against the time at every call. An error of its own holds it too (kit 2.113.0), as a license it can't
+ * read does: Manor and Heiward alone never hold.
  */
 export function licenseNow(o: { now?: number; env?: NodeJS.ProcessEnv } = {}): LicenseCheck {
+  if (!licenseCheckOn(o.env) || !checksLicense(APP.id)) return NOT_CHECKED;
   try {
-    if (!licenseCheckOn(o.env)) return NOT_CHECKED;
     const home = manorHome();
     const now = o.now ?? Date.now();
     const stamp = stampOf(path.join(home, LICENSE_FILE));
@@ -251,8 +212,10 @@ export function licenseNow(o: { now?: number; env?: NodeJS.ProcessEnv } = {}): L
     const c = judgeLicense(kept.reading, now, kept.latestSeen);
     sayOnce(c);
     return c;
-  } catch {
-    return NOT_CHECKED;
+  } catch (e) {
+    const c: LicenseCheck = { checked: true, state: 'unreadable', held: true, ended: false, runsUntil: null, problem: `The license on this PC couldn't be checked: ${(e as Error).message}, ${HOLDS}.` };
+    sayOnce(c);
+    return c;
   }
 }
 
