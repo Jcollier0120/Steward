@@ -273,10 +273,11 @@ test("GET /api/peer/result answers this agent's own result for one tree, from al
   mkdirSync(path.join(manor, 'app'), { recursive: true });
   const manorPort = await freePort();
   writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ port: manorPort }));
-  const seen: { url: string; peer: unknown }[] = [];
+  writeFileSync(path.join(manor, 'server.json'), JSON.stringify({ app: 'manor', port: manorPort, token: 'manor_token_0123456789' }));
+  const seen: { url: string; peer: unknown; token: unknown }[] = [];
   let answer: [number, unknown] = [200, { v: 1, result: { ...passed(), pc: { id: 'pc-2', name: 'LAPTOP' } }, asked: 1 }];
   const fake = http.createServer((req, res) => {
-    seen.push({ url: req.url ?? '', peer: req.headers['x-castellan-peer'] });
+    seen.push({ url: req.url ?? '', peer: req.headers['x-castellan-peer'], token: req.headers['x-manor-token'] });
     res.writeHead(answer[0], { 'content-type': 'application/json' }).end(JSON.stringify(answer[1]));
   });
   await new Promise<void>((resolve) => fake.listen(manorPort, '127.0.0.1', resolve));
@@ -287,6 +288,7 @@ test("GET /api/peer/result answers this agent's own result for one tree, from al
     assert.equal(url.pathname, '/api/peers/result');
     assert.deepEqual(Object.fromEntries(url.searchParams), { agent: 'steward', kind: 'checks', repo: 'Me/Reeve', tree: TREE, node: tc.node.split('.')[0], platform: tc.platform });
     assert.equal(seen[0].peer, 'steward');
+    assert.equal(seen[0].token, 'manor_token_0123456789', "Manor's token, from its server.json (kit 2.118.0): its page may need it");
     answer = [404, { error: 'not found' }];
     assert.equal(await passOnOtherPcs(asked, { agent: 'steward', home: manor }), null, "an older Manor's 404: none");
     answer = [200, { v: 1, result: null, asked: 0, why: 'Other PCs is off here.' }];

@@ -1,3 +1,4 @@
+import { pageToken } from './page-access.ts';
 import { runRoundsSoon } from './schedule.ts';
 
 /**
@@ -11,8 +12,8 @@ import { runRoundsSoon } from './schedule.ts';
  * - `/api/ping`'s `repairs` lists the kinds it takes, so an asker sends only those.
  * - Every agent takes `round`: its scheduled rounds start now, at the pace (schedule.ts's runSoon), for rounds that
  *   stopped coming or have gone stale. An agent adds its own with onRepair().
- * - askRepair() is the asker's side: the page's token (from the agent's server.json, staffToken(), or else read from
- *   its page, as its own script reads it), then the POST.
+ * - askRepair() is the asker's side: the page's token (from the agent's server.json, staffToken() or pageToken(), or
+ *   else read from its page, as its own script reads it), then the POST.
  */
 
 export interface RepairAsk {
@@ -68,7 +69,8 @@ const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost|[\w-]+\.localhost)(:\d+)?(\/|$)
 
 /**
  * Asks the agent whose page is at `origin` for a repair: its token as given (`token`: staffToken(id), from its
- * server.json, kit 2.96.0), else read from its page (`<meta name="page-token">`, which a page whose GETs are strict
+ * server.json, kit 2.96.0), else from the server.json of the page `origin` names (pageToken, kit 2.118.0: by its
+ * <id>.localhost address and port), else read from its page (`<meta name="page-token">`, which a page whose GETs are strict
  * gives only a signed-in browser), then the POST, with no Origin, as a script that read the page. `{ error }` when it
  * couldn't be asked: not a local page, no answer, no token, or an agent older than kit 2.51.0 (404).
  */
@@ -77,7 +79,7 @@ export async function askRepair(origin: string, ask: RepairAsk, o: { timeoutMs?:
   const f = o.fetch ?? fetch;
   const timeoutMs = o.timeoutMs ?? 10_000;
   try {
-    let token = o.token ?? null;
+    let token = o.token ?? pageToken(origin);
     if (!token) {
       const page = await f(new URL('/', origin), { signal: AbortSignal.timeout(timeoutMs) });
       token = /<meta name="page-token" content="([0-9A-Za-z_-]{16,200})">/.exec(await page.text())?.[1] ?? null;

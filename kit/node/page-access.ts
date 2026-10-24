@@ -226,14 +226,24 @@ export function lockedPage(o: { name: string; manor: { name: string; url: string
 /** Another staff member's data folder: <ID>_HOME, else .<id> in this account's home, as its app.ts places it. */
 export const staffHome = (id: string, env: NodeJS.ProcessEnv = process.env, home = os.homedir()) => env[`${id.toUpperCase().replace(/-/g, '_')}_HOME`] || path.join(home, `.${id}`);
 
-/** Another staff member's page token, from the server.json its page writes in its data folder; null when there's none (not here, or never started). */
-export function staffToken(id: string, o: { env?: NodeJS.ProcessEnv; home?: string } = {}): string | null {
+/**
+ * A page's port and token, from the server.json it writes in its data folder `dir`: a staff member's, or Manor's (its
+ * page has the same sign-in); null when there's none (not here, or never started) or no token.
+ */
+export function serverFile(dir: string): { port: number | null; token: string } | null {
   try {
-    const s = JSON.parse(readFileSync(path.join(staffHome(id, o.env, o.home), 'server.json'), 'utf8').replace(/^﻿/, ''));
-    return typeof s.token === 'string' && /^[0-9A-Za-z_-]{16,200}$/.test(s.token) ? s.token : null;
+    const s = JSON.parse(readFileSync(path.join(dir, 'server.json'), 'utf8').replace(/^﻿/, ''));
+    if (typeof s.token !== 'string' || !/^[0-9A-Za-z_-]{16,200}$/.test(s.token)) return null;
+    const port = Number(s.port);
+    return { port: Number.isInteger(port) && port > 0 && port < 65536 ? port : null, token: s.token };
   } catch {
     return null;
   }
+}
+
+/** Another staff member's page token, from the server.json its page writes in its data folder; null when there's none (not here, or never started). */
+export function staffToken(id: string, o: { env?: NodeJS.ProcessEnv; home?: string } = {}): string | null {
+  return serverFile(staffHome(id, o.env, o.home))?.token ?? null;
 }
 
 /**
@@ -242,5 +252,33 @@ export function staffToken(id: string, o: { env?: NodeJS.ProcessEnv; home?: stri
  */
 export function staffHeaders(id: string, o: { env?: NodeJS.ProcessEnv; home?: string } = {}): Record<string, string> {
   const token = staffToken(id, o);
+  return token ? { 'x-token': token } : {};
+}
+
+/**
+ * The token for a local page by its address (kit 2.118.0): `http://<id>.localhost:<port>/…`, as Manor's agents.json and
+ * the kit's agentUrl give a staff member's page (and Manor's own, manor.localhost), from that page's server.json, only
+ * when it names the same port: a checkout's page, 10000 above, is never sent its installed copy's. Null for any other
+ * address (127.0.0.1: staffHeaders(id) there).
+ */
+export function pageToken(url: string | URL, o: { env?: NodeJS.ProcessEnv; home?: string } = {}): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const id = /^([a-z][a-z0-9-]*)\.localhost$/.exec(u.hostname.toLowerCase())?.[1];
+  if (u.protocol !== 'http:' || !id) return null;
+  const s = serverFile(staffHome(id, o.env, o.home));
+  return s && s.port === Number(u.port || 80) ? s.token : null;
+}
+
+/**
+ * The headers that sign a GET to a local page in by its address (pageToken): `x-token`, which a staff member's page and
+ * Manor's both take; none for an address that names no page here. For a staff member's agentUrl, or Manor's link.
+ */
+export function pageHeaders(url: string | URL, o: { env?: NodeJS.ProcessEnv; home?: string } = {}): Record<string, string> {
+  const token = pageToken(url, o);
   return token ? { 'x-token': token } : {};
 }
