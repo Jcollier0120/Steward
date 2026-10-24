@@ -2,6 +2,34 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.210
+
+**It hands out the kit 2.124.0: wherever a PC's NPU can't read with our own model, the staff read the text in pictures with it on the processor, a Snapdragon's included.**
+
+### What changed
+
+- **If a PC's NPU fails the text reader's own test, our model still reads, on the processor.** Before, Windows' own text recognition took over. This takes more of the processor and more power for each picture, and reads far more of the text right.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.209
+
+**It hands out the kit 2.123.0: the staff's PowerShell scripts are signed when they're released, so a PC with Smart App Control on runs them as written.**
+
+### What's new
+
+- **The staff's scripts are signed.** Every PowerShell script a staff member's release carries is signed with Castellan's code-signing certificate and timestamped, as their programs already are. Smart App Control holds back what an unsigned script may do; a signed one runs in full.
+
+### What changed
+
+- **A release waits for the signing key only when it has a script to sign.** Each signed script is kept on the PC that releases Castellan, and the releases after it take the kept copy, so most releases need no key at all. One that has a new or changed script waits while SimplySign Desktop isn't connected, as a release with programs to sign already does, and goes on by itself once it is.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.208
 
 **It hands out the kit 2.122.0: on an Intel PC without an NPU we've measured, the staff read the text in pictures with our own model too.**

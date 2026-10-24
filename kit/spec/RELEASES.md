@@ -103,3 +103,35 @@ Some agents need a program that isn't Node, such as Envoy's media host (`envoy-m
 
 - What the build puts in `<out>\<arch>\` is redistributed with the agent. Carry only what its license allows inside an application, and keep its notices.
 - Qualcomm's QNN runtime is licensed only "as incorporated in your application" and is revocable, so Envoy doesn't carry it: the agent fetches it from Qualcomm's own NuGet package on first use.
+
+## Signed scripts (`node/signed-scripts.ts`, kit 2.123.0)
+
+Smart App Control, and any Windows that enforces App Control for scripts, runs a PowerShell script it can't trust in Constrained Language Mode, where `Add-Type` and most .NET calls stop. A script signed with a certificate Windows trusts runs as written. So a **published** release signs every `.ps1`, `.psm1` and `.psd1` it ships, the way it signs native files: Authenticode, SHA-256, an RFC 3161 timestamp, the newest Windows SDK's **x64** signtool.
+
+**Which certificate:**
+
+- kit.json's `native.thumbprint`, when it has one.
+- Else, on the PC that releases Castellan (a releases repository), the owner's (`prebuilt.ts`' `SIGNED_BY`).
+- Else none: anyone else's agent ships its scripts unsigned, and the build says so.
+- A local build or `--install` signs nothing, as with native files.
+
+**When the key can't be reached:**
+
+- When a script has no signed copy kept (below), the signer check (a timestamped test signature) runs before anything is built.
+- If this PC can't sign, the release isn't built: `Not published: its scripts can't be signed: ...`. The Steward knows those words and waits, as it does for native files.
+- A release from the PC that releases Castellan is never published with unsigned scripts.
+
+**What ships is what was signed:**
+
+- Signing appends a signature block (`# SIG # Begin signature block` … `# SIG # End signature block`) and changes nothing before it. Any later change to the script breaks its signature.
+- Scripts are signed last, after everything else is staged. After zipping, the release unpacks the scripts from the zip and checks each one's SHA-256 against what was signed. Any difference stops the release.
+- An install and the kit's copy into `src\kit\` copy files as they are, so the signatures stay valid on the PC that installs them.
+- A staged `.json` that lists a script's SHA-256 gets the signed script's hash instead, so an installer that checks scripts against it accepts them. Example: a guard's `manifest.json`, which its `install-guard.ps1` checks before copying. An agent's page that compares a guard's installed scripts with the release's will ask once to update the guard.
+- A script that already carries a Valid signature is its maker's, and ships as it is. A script whose signature no longer checks out loses that signature and is signed again.
+
+**Signed copies kept:**
+
+- Every signed script is kept in one store for every agent on this PC (`KIT_SIGNED_SCRIPTS`, else `%USERPROFILE%\.steward\signed-scripts`). It's keyed by the certificate and the script's text, with plain line ends.
+- A later release takes the kept copy when the copy is exactly that script plus its signature block, and the signature is still Valid, the certificate's and timestamped. Most releases then need no key: the kit's scripts are the same in every agent.
+- A copy no release has taken for 90 days is removed.
+- The Steward reads the same keys, so a release whose scripts are all kept isn't held while this PC can't sign.

@@ -34,8 +34,8 @@ import { download, type Download } from './setup.ts';
  *   OCR instead of waiting.
  * - Before it reads anything, the program reads a picture it draws itself on the NPU and on the processor; an NPU that
  *   reads it differently isn't used. Where there's no NPU the model can use (AMD's is still to be measured, and Intel
- *   generations other than OPENVINO_GENERATIONS), it reads on the processor of an AMD or Intel PC (ON_PROCESSOR_MAKERS),
- *   or of any PC when ON_PROCESSOR says so; else Windows' OCR.
+ *   generations other than OPENVINO_GENERATIONS), or an NPU that fails that check, it reads on the processor
+ *   (ON_PROCESSOR).
  *
  * KIT_OCR_ENGINE: `windows` reads with Windows' OCR alone, `model` with the model wherever it can (on the processor
  * too); unset, the model where it's worth it. Under node:test it's Windows' OCR unless KIT_OCR_ENGINE says otherwise,
@@ -167,7 +167,7 @@ export const VITISAI_PACK: NpuPack = {
  * 3720 shows Meteor Lake's 7D1D), 2026-10-24: 1,212 of 1,253 lines exactly against Windows' OCR's 736, no group worse,
  * and 55 ms of processor a picture against 61. It spends more a picture than Windows' OCR (859 mJ against 465 mJ over
  * rest, the package's): the owner chose the model for how much better it reads. Other generations read with the model
- * on the processor until they're measured (ON_PROCESSOR_MAKERS).
+ * on the processor until they're measured (ON_PROCESSOR).
  */
 export const OPENVINO_GENERATIONS: readonly string[] = ['meteor-lake'];
 
@@ -194,26 +194,14 @@ export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt
 };
 
 /**
- * Whether the model reads on the processor where no NPU can (spec/OCR.md, "On the processor"): measured on a Snapdragon
- * X2 Elite's processor against Windows' OCR.
+ * Whether the model reads on the processor where no NPU can: on an AMD PC until its NPU's route (VitisAI) is measured,
+ * an Intel PC whose NPU isn't of OPENVINO_GENERATIONS or that has none, and a PC whose NPU fails the program's check
+ * (kit 2.124.0; AMD's and Intel's since 2.121.0 and 2.122.0). Windows' OCR costs less there, but the owner's rule,
+ * 2026-10-24, is never to trade how well it reads for less power. On a Core Ultra 5 225U's processor it reads the
+ * check's lines as on the NPU, 1,212 of 1,253 against Windows' OCR's 736, at 16 times the processor time a picture;
+ * on a Snapdragon X2 Elite's, 20 times (spec/OCR.md, "On the processor").
  */
-export const ON_PROCESSOR = false;
-
-/**
- * The processor makers, as Windows' PROCESSOR_IDENTIFIER ends ("AMD64 Family 26 Model 36 Stepping 0, AuthenticAMD"),
- * whose PCs read with the model on the processor where no NPU can, though Windows' OCR costs less there: AMD's (kit
- * 2.121.0), until its NPU's route (VitisAI) is measured, and Intel's (kit 2.122.0), where its NPU isn't of
- * OPENVINO_GENERATIONS or there's none. The owner's rule, 2026-10-24: never trade how well it reads for
- * less power. On a Core Ultra 5 225U's processor it reads the check's lines as on the NPU, 1,212 of 1,253 against
- * Windows' OCR's 736, at 16 times the processor time a picture (spec/OCR.md, "On the processor").
- */
-export const ON_PROCESSOR_MAKERS: readonly string[] = ['AuthenticAMD', 'GenuineIntel'];
-
-/** Whether the model reads on the processor here, where no NPU can: ON_PROCESSOR, or a processor of ON_PROCESSOR_MAKERS. */
-export function onProcessor(env: NodeJS.ProcessEnv = process.env): boolean {
-  const id = env.PROCESSOR_IDENTIFIER?.trim() ?? '';
-  return ON_PROCESSOR || ON_PROCESSOR_MAKERS.some((maker) => id.endsWith(maker));
-}
+export const ON_PROCESSOR = true;
 
 /** How many pages are read in one turn of the NPU: about half a second's work, so other model work comes in between. */
 export const TURN_PAGES = 8;
@@ -733,7 +721,7 @@ export interface ReaderOptions {
 
 /**
  * The model's reader for this PC, or null when Windows' OCR reads instead: set so (KIT_OCR_ENGINE), not fetched yet
- * (the fetch starts here, in the background), or not worth it here (no NPU it can use, and not onProcessor).
+ * (the fetch starts here, in the background), or not worth it here (no NPU it can use, and ON_PROCESSOR false).
  */
 export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | null> {
   const env = o.env ?? process.env;
@@ -742,7 +730,7 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
   const arch = o.arch ?? process.arch;
   if (arch !== 'arm64' && arch !== 'x64') return null;
   const pack = packFor(arch, env);
-  const onCpu = setting === 'model' || onProcessor(env);
+  const onCpu = setting === 'model' || ON_PROCESSOR;
   if (!pack && !onCpu) return null;
   const clock = () => o.now ?? Date.now();
   if (clock() < state.refusedUntil) return null;
