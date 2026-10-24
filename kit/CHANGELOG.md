@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.132.2
+## 2.134.1
 
 **The text reader reads with our model 2 (`ocr-model-v2`). Fine-tuned again on small screen text, it reads 1,223 of the check's 1,253 lines exactly on a Snapdragon's NPU, against model 1's 1,211 and Windows OCR's 733, and no group worse than either.**
 
@@ -28,6 +28,22 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing to do. After the update, each PC fetches model 2 (4 MB) once, in the background, and reads as before until it's in place. An NPU compiles model 2's graphs on its first start, about 17 s on a Snapdragon. Model 1's folder stays, for agents on older kits.
 - Model 2 hasn't been measured on Intel's or AMD's PCs yet. The program's self-check still compares each NPU's read with the processor's before it reads.
+
+## 2.133.0
+
+**Page sign-in is on by default (kit 2.96.0's plan, its last step): a page's GETs need its token or its cookie once every staff member installed in the account runs this kit or a later one.**
+
+### What changed
+
+- **page-access.ts** `strictPages()`: `KIT_STRICT_PAGES=1` always, `0` never, unset `strictByDefault()`.
+  - `strictByDefault()` is strict once `olderStaff()` finds no staff member installed in this account with a kit before `STRICT_FROM` (2.133.0). An install is a `.<id>\app` folder in the home with a kit.json, Manor's too, or one in an `<ID>_HOME`; its kit is its `src\kit\VERSION`, else kit.json's pin. It looks once a minute.
+  - Under node --test it is never strict unless the test gives it a home to look in, so a test's pages answer as before.
+- **react/page-data.ts**: a page whose `/api/page` answers 401 reloads itself. A tab opened before strict, in a browser without the cookie, goes through Castellan and comes back signed in.
+
+### Before you update
+
+- An agent whose code GETs another page (or its own, from its CLI or MCP server) must send the token before it takes this kit: 2.118.0's `pageHeaders(url)` or `staffHeaders(id)`. Put that change on its main before this kit's bump. Pages refuse only once every installed staff member has 2.133.0, so an older one is never turned away.
+- A developer's script that reads a page's GETs needs the token from its server.json. `KIT_STRICT_PAGES=0` in the page's environment keeps it open.
 
 ## 2.132.1
 
