@@ -164,7 +164,7 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
         // Before, it stood as failed until the next round saw the tag on GitHub and let it go, and no Manor was offered it.
         const missed = step.what === 'steward' ? missedExchequer(`${r.out}\n${r.err}`) : null;
         if (missed && (await hostFor(ctx).viewRelease(ctx.settings.stewardRepo, step.tag, 'tagName')).code === 0) return onGitHubOnly(ctx, step, missed);
-        // Its scripts couldn't be signed (kit 2.121.0: SimplySign Desktop not connected): nothing failed, and a round that
+        // Its scripts couldn't be signed (kit 2.123.0: SimplySign Desktop not connected): nothing failed, and a round that
         // can sign releases it.
         const down = signingDown(`${r.out}\n${r.err}`);
         if (down) return selfResult('skipped', `${step.tag} waits until this PC can sign: ${down}`, { version: step.version, commit: at, again: true });

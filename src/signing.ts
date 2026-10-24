@@ -46,7 +46,7 @@ import { checksLogOf } from './stages/bump.ts';
  * takes its signed native files from a release before (KEEPS_SIGNED_KIT, the kit's signed-native.ts) is looked at only
  * when it will sign (needsSigning): most then don't wait for SimplySign at all.
  *
- * And from kit 2.121.0 a published release signs its PowerShell scripts (0.36.207, the kit's signed-scripts.ts): on the
+ * And from kit 2.123.0 a published release signs its PowerShell scripts (0.36.209, the kit's signed-scripts.ts): on the
  * PC that releases Castellan with the owner's certificate when kit.json names none. Each signed script is kept by its
  * text for every agent, so a release waits for the key only when it ships a script with no signed copy kept
  * (scriptsUnkept); its releases don't take the signing lane, since most sign nothing.
@@ -109,13 +109,13 @@ export function noteSigningAhead(a: SigningAhead | null): void {
 const THUMBPRINT = /^[0-9a-f]{40}$/i;
 
 /** The kit from which a published release signs its PowerShell scripts (the kit's signed-scripts.ts). */
-export const SIGNS_SCRIPTS_KIT = '2.121.0';
+export const SIGNS_SCRIPTS_KIT = '2.123.0';
 
 /**
  * The certificate a release at a commit signs with (its SHA-1 thumbprint), or null when it signs nothing the Steward can
  * see: kit.json's `native.thumbprint` (kit 2.62.0) when its release command publishes; else, on the PC that releases
  * Castellan (`castellan`: a releases repository), the owner's for a kit that signs its scripts (SIGNS_SCRIPTS_KIT, Steward
- * 0.36.207); else a tools/sign.ts that names one (`THUMBPRINT = '…'`, Manor's, whose setup is always signed).
+ * 0.36.209); else a tools/sign.ts that names one (`THUMBPRINT = '…'`, Manor's, whose setup is always signed).
  */
 export function signsWith(o: { kitJson: string | null; signTs: string | null; release: string; castellan?: boolean }): string | null {
   try {

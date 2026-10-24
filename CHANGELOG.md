@@ -2,9 +2,9 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.207
+## 0.36.209
 
-**It hands out the kit 2.121.0: the staff's PowerShell scripts are signed when they're released, so a PC with Smart App Control on runs them as written.**
+**It hands out the kit 2.123.0: the staff's PowerShell scripts are signed when they're released, so a PC with Smart App Control on runs them as written.**
 
 ### What's new
 
@@ -13,6 +13,30 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - **A release waits for the signing key only when it has a script to sign.** Each signed script is kept on the PC that releases Castellan, and the releases after it take the kept copy, so most releases need no key at all. One that has a new or changed script waits while SimplySign Desktop isn't connected, as a release with programs to sign already does, and goes on by itself once it is.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.208
+
+**It hands out the kit 2.122.0: on an Intel PC without an NPU we've measured, the staff read the text in pictures with our own model too.**
+
+### What changed
+
+- **More Intel PCs read text with our own model.** On an Intel Core Ultra with the NPU 3720, it already read on the NPU. Now every other Intel PC reads with it on the processor, until we've measured its NPU: the other Core Ultras, and PCs without an NPU. In our check Windows' own text recognition read 736 of 1,253 lines exactly, and ours 1,212. It uses more of the processor and more power for each picture than Windows' own did. The first time, it fetches about 81 MB in the background, and Windows' own reads until that's done.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.207
+
+**It hands out the kit 2.121.0: on an AMD PC the staff read the text in pictures with our own model, which reads far more of it right than Windows' own.**
+
+### What changed
+
+- **AMD PCs read text with our own model.** The Clerk, the Scribe, the Warrener and Reeve read the words in pictures and scans with our own text-reading model on an AMD PC, on its processor, until it runs on AMD's NPU. In our check, Windows' own text recognition read 736 of 1,253 lines exactly, and ours 1,212. It uses more of the processor and more power for each picture than Windows' own did. The first time, it fetches about 81 MB in the background, and Windows' own reads until that's done.
 
 ### Before you update
 

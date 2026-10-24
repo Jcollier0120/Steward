@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.121.0
+## 2.123.0
 
 **A published release signs its PowerShell scripts, as it signs its native files: Smart App Control runs a signed script as written, and an unsigned one in Constrained Language Mode.**
 
@@ -25,6 +25,37 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **Don't change a script after the release signs it.** Nothing in the kit does: an install and the kit's fill copy files byte for byte. A script an agent writes or rewrites at run time isn't signed, and runs in Constrained Language Mode where Smart App Control is on.
 - **An agent with a guard** (the Lamplighter, the Watchman): its `manifest.json` now lists the signed scripts' SHA-256. A PC whose guard has the unsigned scripts sees them as behind the release, and the agent's page offers to update the guard once.
 - **An agent whose release isn't the kit's `release.ts`** signs nothing from this: it needs its own signing.
+
+## 2.122.0
+
+**An Intel PC whose NPU isn't measured yet, or that has none, reads text with our own model on the processor, as an AMD PC does since 2.121.0. The owner chose how well it reads over the power it costs.**
+
+### What changed
+
+- **ocr-npu.ts** `ON_PROCESSOR_MAKERS` is `['AuthenticAMD', 'GenuineIntel']`. On Intel, the NPU 3720 (`OPENVINO_GENERATIONS`) still reads with the model on the NPU. Every other Intel PC now reads with the model on the processor, where it read with Windows OCR: Lunar Lake's NPU 4000 and later, the 200S and 200HX, and PCs with no NPU. An Intel NPU 3720 that fails its self-check falls back to the processor too, no longer to Windows OCR.
+- **What it costs:** like an AMD PC, it fetches about 81 MB once for the whole PC, and keeps 19 MB. On a Core Ultra 5 225U's processor a picture costs 326 ms and 972 ms of processor time, against Windows OCR's 59 ms and 61 ms (spec/OCR.md, "On the processor").
+- **A Snapdragon is unchanged.**
+
+### Before you update
+
+- Nothing. `KIT_OCR_ENGINE=windows` still keeps Windows OCR.
+
+## 2.121.0
+
+**An AMD PC's text reader reads with our own model, on the processor: Windows OCR read 736 of the check's 1,253 lines exactly, the model 1,212. It costs more processor time and power than Windows OCR, and the owner chose it for how much better it reads, until AMD's NPU route is measured.**
+
+### What's new
+
+- **ocr-npu.ts** `ON_PROCESSOR_MAKERS` (`['AuthenticAMD']`) and `onProcessor(env)`: whether the model reads on the processor where no NPU can, by Windows' `PROCESSOR_IDENTIFIER`. `ON_PROCESSOR` stays false for every other PC.
+
+### What changed
+
+- **On an AMD PC, `modelReader` reads with the model on the processor**, where it read with Windows OCR. The reader fetches about 81 MB once for every agent on the PC (ONNX Runtime and the model, no NPU plugin) and keeps 19 MB. Until it's there, Windows OCR reads, as before. Measured on an Intel Core Ultra 5 225U's processor, a picture costs 326 ms and 972 ms of processor time, against Windows OCR's 59 ms and 61 ms (spec/OCR.md, "On the processor").
+- **Intel PCs are unchanged:** the NPU 3720 reads with the model, and other generations with Windows OCR.
+
+### Before you update
+
+- Nothing. `KIT_OCR_ENGINE=windows` still keeps Windows OCR.
 
 ## 2.118.0
 

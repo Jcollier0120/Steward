@@ -104,7 +104,7 @@ Some agents need a program that isn't Node, such as Envoy's media host (`envoy-m
 - What the build puts in `<out>\<arch>\` is redistributed with the agent. Carry only what its license allows inside an application, and keep its notices.
 - Qualcomm's QNN runtime is licensed only "as incorporated in your application" and is revocable, so Envoy doesn't carry it: the agent fetches it from Qualcomm's own NuGet package on first use.
 
-## Signed scripts (`node/signed-scripts.ts`, kit 2.121.0)
+## Signed scripts (`node/signed-scripts.ts`, kit 2.123.0)
 
 Smart App Control, and any Windows that enforces App Control for scripts, runs a PowerShell script it can't trust in Constrained Language Mode, where `Add-Type` and most .NET calls stop. A script signed with a certificate Windows trusts runs as written. So a **published** release signs every `.ps1`, `.psm1` and `.psd1` it ships, the way it signs native files: Authenticode, SHA-256, an RFC 3161 timestamp, the newest Windows SDK's **x64** signtool.
 

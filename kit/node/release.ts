@@ -52,7 +52,7 @@
  * is published, signs the programs and libraries that aren't signed already (sign.ts), or takes the ones a release
  * before signed from the same native sources (signed-native.ts, kit 2.92.0); install keeps this PC's.
  *
- * A published release signs its PowerShell scripts too (.ps1, .psm1, .psd1: signed-scripts.ts, kit 2.121.0), with
+ * A published release signs its PowerShell scripts too (.ps1, .psm1, .psd1: signed-scripts.ts, kit 2.123.0), with
  * kit.json's native certificate, else on the PC that releases Castellan the owner's: the ones a release before signed are
  * taken from the store every agent shares, and the rest are signed, so the key is needed only for a script that changed.
  * The zip must carry each one exactly as it was signed. Anyone else's agent, with no certificate, ships them unsigned,
@@ -322,7 +322,7 @@ export function signingFor(native: Native, o: { dirty: boolean; version: string;
 }
 
 /**
- * The certificate a published release signs its PowerShell scripts with (kit 2.121.0): kit.json's native one, else, on
+ * The certificate a published release signs its PowerShell scripts with (kit 2.123.0): kit.json's native one, else, on
  * the PC that releases Castellan (a releases repository: releasesRepo), the owner's (prebuilt.ts' SIGNED_BY); null for
  * anyone else's agent, which has given none.
  */

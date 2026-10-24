@@ -41,7 +41,7 @@ test("the plugin a PC takes: Qualcomm's on Arm, Intel's on a generation measured
   assert.equal(m.packFor('arm64', {}), m.QNN_PACK);
   assert.equal(m.packFor('x64', {}), null, 'no NPU report in a test run');
   assert.equal(m.packFor('x64', {}, intel('meteor-lake')), m.OPENVINO_PACK, "Intel's NPU 3720 was measured");
-  assert.equal(m.packFor('x64', {}, intel('lunar-lake')), null, 'a generation not measured yet keeps Windows OCR');
+  assert.equal(m.packFor('x64', {}, intel('lunar-lake')), null, 'a generation not measured yet: no plugin, the processor reads');
   assert.equal(m.packFor('x64', {}, intel(null)), null);
   assert.equal(m.packFor('x64', {}, () => ({ vendor: 'amd' as const, generation: 'xdna2' })), null, "AMD's NPU is still to be measured");
   assert.equal(m.packFor('x64', {}, () => null), null, 'no NPU, or no setup yet');
@@ -211,6 +211,28 @@ test('on the processor when told: its program started there once, and every page
   assert.equal(started.length, 1);
   assert.equal(started[0][started[0].indexOf('--on') + 1], 'cpu');
   assert.ok(!started[0].includes('--qnn'));
+});
+
+test("an AMD or Intel PC reads with the model on the processor where no NPU can: fetched without a plugin, and started there", async () => {
+  const amd = { PROCESSOR_IDENTIFIER: 'AMD64 Family 26 Model 36 Stepping 0, AuthenticAMD' };
+  const intel = { PROCESSOR_IDENTIFIER: 'Intel64 Family 6 Model 189 Stepping 1, GenuineIntel' };
+  const snapdragon = { PROCESSOR_IDENTIFIER: 'ARMv8 (64-bit) Family 8 Model 1 Revision 201, Qualcomm Technologies Inc' };
+  assert.equal(m.onProcessor(amd), true);
+  assert.equal(m.onProcessor(intel), true, "an Intel NPU not measured yet, or none: the processor");
+  assert.equal(m.onProcessor(snapdragon), m.ON_PROCESSOR, "a Snapdragon's reader keeps to its NPU, or Windows' OCR");
+  assert.equal(m.onProcessor({}), m.ON_PROCESSOR);
+  const fetches: [string, unknown][] = [];
+  const fetch = (p: any, _arch: string, pack: unknown) => void fetches.push([p.home, pack]);
+  const empty = path.join(home, 'empty-amd');
+  assert.equal(await m.modelReader({ env: amd, arch: 'x64', home: empty, fetch }), null, "Windows' OCR reads while it's fetched");
+  assert.deepEqual(fetches, [[empty, null]], 'ONNX Runtime and the model, no plugin');
+  const where = readyPlace('x64', null);
+  const started: string[][] = [];
+  const start = (args: string[], cwd: string) => (started.push(args), startFake(args, cwd));
+  const r = await m.modelReader({ env: amd, arch: 'x64', home: where, start });
+  assert.equal(r?.engine, 'model-cpu');
+  assert.equal(started[0][started[0].indexOf('--on') + 1], 'cpu');
+  assert.ok(!started[0].includes('--openvino'));
 });
 
 test("on the NPU: started again once it has compiled, its turn taken, pages answered; a page that ends the program leaves the rest to Windows' OCR", async () => {

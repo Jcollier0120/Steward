@@ -22,7 +22,7 @@ import { CERTUM_TIMESTAMP } from './native.ts';
  * trial is a real signature, timestamped as a release's are, that must succeed before anything is built; signtool's
  * words for a key it can't reach include the CSP's; and anything else it says is tried once more, then said as it is.
  *
- * A release's PowerShell scripts are signed the same way (signed-scripts.ts, kit 2.121.0).
+ * A release's PowerShell scripts are signed the same way (signed-scripts.ts, kit 2.123.0).
  */
 
 /** The longest one signtool run may take: a cloud key's sign-in, waiting where no one sees it, would hang a release. */

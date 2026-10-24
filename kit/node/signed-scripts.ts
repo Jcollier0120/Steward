@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * A release's PowerShell scripts, signed (kit 2.121.0). Smart App Control, and any Windows that enforces App Control for
+ * A release's PowerShell scripts, signed (kit 2.123.0). Smart App Control, and any Windows that enforces App Control for
  * scripts, runs a script it can't trust in Constrained Language Mode, where most of what the staff's scripts do (Add-Type,
  * .NET calls) stops; a script signed with a certificate Windows trusts runs as written. So a published release signs
  * every .ps1, .psm1 and .psd1 it ships, as it signs its native files (sign.ts): Authenticode, SHA-256, timestamped
