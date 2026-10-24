@@ -30,8 +30,9 @@ import { download, type Download } from './setup.ts';
  *   until no picture has come for two minutes. It runs in the cache folder, where what a runtime leaves in its working
  *   folder (VitisAI's signature files) belongs, and keeps each NPU's compiled graphs there.
  * - On the NPU, reads take the NPU's turn as any model work does (npu.ts' acceleratorTurn), a few pages a turn, in the
- *   caller's lane: background reads wait their turn, and a background batch the line is too long for goes to Windows'
- *   OCR instead of waiting.
+ *   caller's lane: background reads wait their turn, and a background batch the line is too long for is read instead
+ *   by a second program on the processor (ON_PROCESSOR, kit 2.126.0), started beside the NPU's and ending itself when
+ *   idle as it does; else by Windows' OCR.
  * - Before it reads anything, the program reads a picture it draws itself on the NPU and on the processor; an NPU that
  *   reads it differently isn't used. Where there's no NPU the model can use (AMD's is still to be measured, and Intel
  *   generations other than OPENVINO_GENERATIONS), or an NPU that fails that check, it reads on the processor
@@ -243,6 +244,27 @@ export function engineSetting(env: NodeJS.ProcessEnv = process.env): 'windows' |
 
 const tarExe = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
 
+/** Errors with which Windows refuses a rename for a moment: an antivirus or the indexer has a file just unpacked open. */
+const BRIEFLY_REFUSED = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const sleepSync = (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/**
+ * A rename tried again every 100 ms for up to five seconds while Windows refuses it for a moment (kit 2.126.0): a
+ * folder tar.exe has just filled, with an NPU plugin's DLLs in it, is often still being scanned. Any other error, or
+ * one that lasts, is thrown.
+ */
+export function renameSoon(from: string, to: string, o: { rename?: typeof renameSync; sleep?: (ms: number) => void } = {}): void {
+  const rename = o.rename ?? renameSync;
+  for (let t = 1; ; t++) {
+    try {
+      return rename(from, to);
+    } catch (e) {
+      if (t >= 50 || !BRIEFLY_REFUSED.has((e as NodeJS.ErrnoException).code ?? '')) throw e;
+      (o.sleep ?? sleepSync)(100);
+    }
+  }
+}
+
 /**
  * Takes the members of a zip (a .nupkg is one) into a new folder `into`, each where `as` says, with READY written
  * last: through a folder of its own, put in place in one rename, so a reader never finds half of it.
@@ -257,12 +279,12 @@ export function unpackMembers(zip: string, into: string, files: { member: string
     if (r.status !== 0) throw new Error(`${path.basename(zip)} didn't unpack: ${(r.stderr || r.error?.message || `tar.exe exit ${r.status}`).trim().slice(0, 300)}`);
     for (const f of files) {
       mkdirSync(path.dirname(path.join(tmp, f.as)), { recursive: true });
-      renameSync(path.join(raw, f.member), path.join(tmp, f.as));
+      renameSoon(path.join(raw, f.member), path.join(tmp, f.as));
     }
     rmSync(raw, { recursive: true, force: true });
     writeFileSync(path.join(tmp, READY), `${new Date().toISOString()}\n`);
     rmSync(into, { recursive: true, force: true });
-    renameSync(tmp, into);
+    renameSoon(tmp, into);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -287,7 +309,7 @@ export async function fetchReader(place: ReaderPlace, arch: OcrArch, pack: NpuPa
     for (const [name, f] of Object.entries(MODEL_FILES)) await get({ what: `the text reader's ${name}`, ...f, dest: path.join(tmp, name), have: false });
     writeFileSync(path.join(tmp, READY), `${new Date().toISOString()}\n`);
     rmSync(place.models, { recursive: true, force: true });
-    renameSync(tmp, place.models);
+    renameSoon(tmp, place.models);
   }
   const fetchZip = async (what: string, f: Pinned, name: string, into: string, files: { member: string; as: string }[]) => {
     io.log?.(`fetching ${what} for the text reader (${Math.round(f.size / 1e6)} MB)`);
@@ -570,18 +592,24 @@ const REFUSED_MS = 6 * 3600_000;
 interface EngineState {
   host: ReaderHost | null;
   starting: Promise<ReaderHost | null> | null;
+  /** The program on the processor beside the NPU's, for what the NPU's line is too long for. */
+  cpuHost: ReaderHost | null;
+  cpuStarting: Promise<ReaderHost | null> | null;
   refusedUntil: number;
   /** The NPU failed the program's check (or the program found none): the program starts on the processor from then on. */
   npuFailed: boolean;
   said: Set<string>;
 }
-const state: EngineState = { host: null, starting: null, refusedUntil: 0, npuFailed: false, said: new Set() };
+const state: EngineState = { host: null, starting: null, cpuHost: null, cpuStarting: null, refusedUntil: 0, npuFailed: false, said: new Set() };
 
 /** For tests: forget the program and any refusal. */
 export function resetModelReader(): void {
   state.host?.close();
   state.host = null;
   state.starting = null;
+  state.cpuHost?.close();
+  state.cpuHost = null;
+  state.cpuStarting = null;
   state.refusedUntil = 0;
   state.npuFailed = false;
   state.said.clear();
@@ -592,9 +620,10 @@ export interface ReaderOptions {
   arch?: string;
   home?: string;
   log?: (line: string) => void;
-  /** Stand-ins for tests: the program's start, and the fetch. */
+  /** Stand-ins for tests: the program's start, the fetch, and the NPU's turn (npu.ts' acceleratorTurn). */
   start?: (args: string[], cwd: string) => Promise<ReaderHost>;
   fetch?: (place: ReaderPlace, arch: OcrArch, pack: NpuPack | null) => void;
+  turn?: typeof acceleratorTurn;
   now?: number;
 }
 
@@ -663,9 +692,29 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
       }));
   };
 
+  /**
+   * The program on the processor beside the NPU's, started when the NPU's line is first too long for a batch (kit
+   * 2.126.0), and ending itself when idle as the NPU's does; null when it can't start, and Windows' OCR reads.
+   */
+  const processor = (): Promise<ReaderHost | null> => {
+    if (state.cpuHost?.alive) return Promise.resolve(state.cpuHost);
+    return (state.cpuStarting ??= start(readerArgs(place, null), place.cache)
+      .then((h) => (state.cpuHost = h))
+      .catch((e) => {
+        say(`the text reader couldn't start on the processor (${String(e?.message ?? e).slice(0, 300)}): Windows' OCR reads what the NPU's line is too long for`);
+        return null;
+      })
+      .finally(() => {
+        state.cpuStarting = null;
+      }));
+  };
+  /** The NPU's line too long, or no turn in time: the processor reads instead (ON_PROCESSOR), else Windows' OCR. */
+  const busyOrNull = (e: unknown): Promise<ReaderHost | null> | null => (e instanceof NpuBusy && onCpu ? processor() : null);
+
+  const turn = o.turn ?? acceleratorTurn;
   /** The program within the NPU's turn when it will start on the NPU (loading its graphs is NPU work). */
-  const ready = (lane: Lane): Promise<ReaderHost | null> => (state.host?.alive || !npu() ? ensure() : acceleratorTurn(NPU, ensure, { lane }));
-  const first = await ready(currentLane()).catch(() => null);
+  const ready = (lane: Lane): Promise<ReaderHost | null> => (state.host?.alive || !npu() ? ensure() : turn(NPU, ensure, { lane }));
+  const first = await ready(currentLane()).catch(busyOrNull);
   if (!first) return null;
   const engineOf = (h: ReaderHost): ModelEngine => (h.hello.on === 'npu' ? 'model-npu' : 'model-cpu');
 
@@ -692,7 +741,7 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
           continue;
         }
         try {
-          const more = await acceleratorTurn(
+          const more = await turn(
             NPU,
             async () => {
               const h = await ensure();
@@ -704,9 +753,10 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
           );
           if (!more) break;
         } catch (e) {
-          // The NPU's line too long, or no turn in time: Windows' OCR reads the rest.
-          if (e instanceof NpuBusy) break;
-          throw e;
+          if (!(e instanceof NpuBusy)) throw e;
+          const h = await busyOrNull(e);
+          if (h) await readAll(h, pages.slice(at), out, at, ro.timeoutMs);
+          break;
         }
       }
       return out;
