@@ -2,6 +2,43 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.121.0
+
+**An AMD PC's text reader reads with our own model, on the processor: Windows OCR read 736 of the check's 1,253 lines exactly, the model 1,212. It costs more processor time and power than Windows OCR, and the owner chose it for how much better it reads, until AMD's NPU route is measured.**
+
+### What's new
+
+- **ocr-npu.ts** `ON_PROCESSOR_MAKERS` (`['AuthenticAMD']`) and `onProcessor(env)`: whether the model reads on the processor where no NPU can, by Windows' `PROCESSOR_IDENTIFIER`. `ON_PROCESSOR` stays false for every other PC.
+
+### What changed
+
+- **On an AMD PC, `modelReader` reads with the model on the processor**, where it read with Windows OCR. The reader fetches about 81 MB once for every agent on the PC (ONNX Runtime and the model, no NPU plugin) and keeps 19 MB. Until it's there, Windows OCR reads, as before. Measured on an Intel Core Ultra 5 225U's processor, a picture costs 326 ms and 972 ms of processor time, against Windows OCR's 59 ms and 61 ms (spec/OCR.md, "On the processor").
+- **Intel PCs are unchanged:** the NPU 3720 reads with the model, and other generations with Windows OCR.
+
+### Before you update
+
+- Nothing. `KIT_OCR_ENGINE=windows` still keeps Windows OCR.
+
+## 2.118.0
+
+**The kit's calls to Castellan carry its token, and a page's token is found by its address: the callers' step before page sign-in goes on (kit 2.96.0's plan). This release brings 2.115.0 and 2.117.0 too, never released on their own.**
+
+### What's new
+
+- **page-access.ts**:
+  - `pageToken(url)` and `pageHeaders(url)`: the token for a local page by its address, `http://<id>.localhost:<port>/…` as `agentUrl` and Manor's link give it, from that page's server.json. It goes only to the port server.json names, so a checkout's page 10000 above is never sent the installed copy's token. Manor's address gets Manor's token, which its page takes as `x-token`.
+  - `serverFile(dir)`: a page's port and token from the server.json in its data folder.
+- **manor.ts** `manorHeaders(link)`: Manor's token (`x-manor-token`), from server.json in its folder, only for the port its settings name.
+
+### What changed
+
+- **The kit's calls to Castellan carry its token**: `passOnOtherPcs` (`GET /api/peers/result`) and `manorIcon` (`/favicon.svg`). A Castellan from before its sign-in writes no server.json, and they go without it, as before.
+- **askRepair** takes the page's token from the server.json its address names (`pageToken`) before it reads `GET /` for it, which a strict page never gives.
+
+### Before you update
+
+- An agent that GETs another staff member's page (`/api/*`, or `GET /` for its token) must send its token: `pageHeaders(url)` for an `agentUrl` address, `staffHeaders(id)` for a 127.0.0.1 one. So must an agent's CLI or MCP server that GETs its own page from another process. A later kit makes the GETs need it, and only once every staff member installed in the account runs that kit, so nothing breaks before then. A refused call answers 401: let it degrade quietly.
+
 ## 2.117.0
 
 **The text reader reads with our own model on Intel's NPU 3720 too: on a Core Ultra 5 225U it reads 1,212 of the check's 1,253 lines exactly, where Windows OCR read 736.**

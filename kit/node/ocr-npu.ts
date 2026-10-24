@@ -24,7 +24,8 @@ import { download, type Download } from './setup.ts';
  *   generation measured for it: OPENVINO_GENERATIONS), and the model from the manor's releases, each pinned by size and
  *   SHA-256, keeping only the files it uses and their notices. About 226 MB to fetch on a Snapdragon, 242 MB kept
  *   (Qualcomm's compiler alone is 182 MB), and 13 MB of compiled graphs; 199 MB on an Intel Core Ultra, 131 MB kept
- *   (OpenVINO's plugin is 112 MB), and 48 MB of compiled graphs. Until all of it is there, Windows' OCR reads, as before.
+ *   (OpenVINO's plugin is 112 MB), and 48 MB of compiled graphs; 81 MB on an AMD PC, which reads on the processor, 19 MB
+ *   kept. Until all of it is there, Windows' OCR reads, as before.
  * - The program (a kit helper, signed: prebuilt.ts) loads the model once and stays, reading picture after picture,
  *   until no picture has come for two minutes. It runs in the cache folder, where what a runtime leaves in its working
  *   folder (VitisAI's signature files) belongs, and keeps each NPU's compiled graphs there.
@@ -33,8 +34,8 @@ import { download, type Download } from './setup.ts';
  *   OCR instead of waiting.
  * - Before it reads anything, the program reads a picture it draws itself on the NPU and on the processor; an NPU that
  *   reads it differently isn't used. Where there's no NPU the model can use (AMD's is still to be measured, and Intel
- *   generations other than OPENVINO_GENERATIONS), it reads on the processor only when ON_PROCESSOR says that's worth
- *   it; else Windows' OCR.
+ *   generations other than OPENVINO_GENERATIONS), it reads on the processor of an AMD PC (ON_PROCESSOR_MAKERS), or of
+ *   any PC when ON_PROCESSOR says so; else Windows' OCR.
  *
  * KIT_OCR_ENGINE: `windows` reads with Windows' OCR alone, `model` with the model wherever it can (on the processor
  * too); unset, the model where it's worth it. Under node:test it's Windows' OCR unless KIT_OCR_ENGINE says otherwise,
@@ -197,6 +198,21 @@ export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt
  * X2 Elite's processor against Windows' OCR.
  */
 export const ON_PROCESSOR = false;
+
+/**
+ * The processor makers, as Windows' PROCESSOR_IDENTIFIER ends ("AMD64 Family 26 Model 36 Stepping 0, AuthenticAMD"),
+ * whose PCs read with the model on the processor where no NPU can, though Windows' OCR costs less there (kit 2.121.0):
+ * AMD's, until its NPU's route (VitisAI) is measured. The owner's rule, 2026-10-24: never trade how well it reads for
+ * less power. On a Core Ultra 5 225U's processor it reads the check's lines as on the NPU, 1,212 of 1,253 against
+ * Windows' OCR's 736, at 16 times the processor time a picture (spec/OCR.md, "On the processor").
+ */
+export const ON_PROCESSOR_MAKERS: readonly string[] = ['AuthenticAMD'];
+
+/** Whether the model reads on the processor here, where no NPU can: ON_PROCESSOR, or a processor of ON_PROCESSOR_MAKERS. */
+export function onProcessor(env: NodeJS.ProcessEnv = process.env): boolean {
+  const id = env.PROCESSOR_IDENTIFIER?.trim() ?? '';
+  return ON_PROCESSOR || ON_PROCESSOR_MAKERS.some((maker) => id.endsWith(maker));
+}
 
 /** How many pages are read in one turn of the NPU: about half a second's work, so other model work comes in between. */
 export const TURN_PAGES = 8;
@@ -710,7 +726,7 @@ export interface ReaderOptions {
 
 /**
  * The model's reader for this PC, or null when Windows' OCR reads instead: set so (KIT_OCR_ENGINE), not fetched yet
- * (the fetch starts here, in the background), or not worth it here (no NPU it can use, and ON_PROCESSOR false).
+ * (the fetch starts here, in the background), or not worth it here (no NPU it can use, and not onProcessor).
  */
 export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | null> {
   const env = o.env ?? process.env;
@@ -719,7 +735,7 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
   const arch = o.arch ?? process.arch;
   if (arch !== 'arm64' && arch !== 'x64') return null;
   const pack = packFor(arch, env);
-  const onCpu = setting === 'model' || ON_PROCESSOR;
+  const onCpu = setting === 'model' || onProcessor(env);
   if (!pack && !onCpu) return null;
   const now = o.now ?? Date.now();
   if (now < state.refusedUntil || state.preparing) return null;

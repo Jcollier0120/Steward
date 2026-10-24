@@ -519,6 +519,21 @@ function getText(url: string, ms: number, headers: Record<string, string> = {}):
   });
 }
 
+/**
+ * The header that signs a GET to Manor's page in (kit 2.118.0): its token, from the server.json its page writes in its
+ * folder, only when that names the port Manor's settings say, so a token never goes to another page. Manor's page takes
+ * it as its own programs send it; one from before its sign-in writes no server.json, and needs none. Read here, not
+ * through page-access.ts (its serverFile): Manor's settings.ts loads this file before its app.ts, which that one needs.
+ */
+export function manorHeaders(link: Pick<ManorLink, 'port'>, home = manorHome()): Record<string, string> {
+  try {
+    const s = JSON.parse(readFileSync(path.join(home, 'server.json'), 'utf8').replace(/^﻿/, '')) as { port?: unknown; token?: unknown };
+    return Number(s.port) === link.port && typeof s.token === 'string' && /^[0-9A-Za-z_-]{16,200}$/.test(s.token) ? { 'x-manor-token': s.token } : {};
+  } catch {
+    return {};
+  }
+}
+
 let kept: { at: number; port: number; svg: string } | null = null;
 const KEEP_MS = 10 * 60_000;
 
@@ -530,7 +545,7 @@ export async function manorIcon(home = manorHome(), now = Date.now()): Promise<s
   const link = manorLink(home);
   if (!link) return HOUSE_SVG;
   if (kept && kept.port === link.port && now - kept.at < KEEP_MS) return kept.svg;
-  const r = await getText(`http://127.0.0.1:${link.port}/favicon.svg`, 1500);
+  const r = await getText(`http://127.0.0.1:${link.port}/favicon.svg`, 1500, manorHeaders(link, home));
   if (r && r.status === 200 && safeSvg(r.body)) {
     kept = { at: now, port: link.port, svg: r.body };
     return r.body;
@@ -563,7 +578,7 @@ export async function passOnOtherPcs(q: PassQuery, o: { agent: string; home?: st
   if (!link) return null;
   const node = process.versions.node.split('.')[0];
   const ask = new URLSearchParams({ agent: o.agent, kind: q.kind, repo: q.repo, tree: q.tree, node, platform: process.platform });
-  const r = await getText(`http://127.0.0.1:${link.port}/api/peers/result?${ask}`, o.ms ?? PASS_ASK_MS, { 'x-castellan-peer': o.agent });
+  const r = await getText(`http://127.0.0.1:${link.port}/api/peers/result?${ask}`, o.ms ?? PASS_ASK_MS, { 'x-castellan-peer': o.agent, ...manorHeaders(link, o.home ?? manorHome()) });
   if (!r || r.status !== 200) return null;
   try {
     const body = JSON.parse(r.body);
