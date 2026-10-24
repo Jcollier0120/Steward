@@ -112,3 +112,20 @@ test("a ticket's doing: said only when given, cut to DOING_MAX, read back for a 
   assert.ok('waiting' in w);
   assert.deepEqual(w.waiting.map((x) => x.doing?.length ?? x.doing), ['search index: Porter (3 of 90 files)'.length, undefined, core.DOING_MAX]);
 });
+
+test("a ticket's work (kit 2.111.0): said only when it's a kind of request, read back for counting the pictures waiting", () => {
+  assert.deepEqual(JSON.parse(core.ticketText('background', 1_700_000_000_000_000, 42, 'reeve', undefined, 'vision')), { pid: 42, since: 1_700_000_000_000, lane: 'background', who: 'reeve', work: 'vision' });
+  assert.equal(core.ticketText('background', 1, 42, 'reeve', undefined, 'pictures'), core.ticketText('background', 1, 42, 'reeve'), 'not a kind of request: none');
+  const now = Date.now();
+  const name = (pid: number) => core.ticketName('background', now * 1000 + pid, pid, 'abcd1234');
+  const entries = [
+    { name: name(1), mtimeMs: now, text: core.ticketText('background', now * 1000 + 1, 1, 'manor', 'a caption', 'vision') },
+    { name: name(2), mtimeMs: now, text: core.ticketText('background', now * 1000 + 2, 2, 'reeve', undefined, 'embed') },
+    { name: name(3), mtimeMs: now, text: JSON.stringify({ pid: 3, who: 'odd', work: 'everything' }) },
+    { name: name(4), mtimeMs: now, text: JSON.stringify({ pid: 4, who: 'heiward' }) },
+  ];
+  const rules = core.checkRules(JSON.parse(readFileSync(new URL('../spec/rules.json', import.meta.url), 'utf8')));
+  const w = core.waitingOf(rules, entries, now, { 1: true, 2: true, 3: true, 4: true });
+  assert.ok('waiting' in w);
+  assert.deepEqual(w.waiting.map((x) => x.work), ['vision', 'embed', undefined, undefined]);
+});

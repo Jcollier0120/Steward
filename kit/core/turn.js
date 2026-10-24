@@ -124,6 +124,7 @@ import { holderState, judgeLine, ownerText, queueName, readOwner, ticketName, ti
  * @property {Lane} [lane] Default background.
  * @property {string} who Shown to whoever looks at the line.
  * @property {string} [doing] What this request is for, shown beside `who` ("search index: Heiward (17 of 673 files)"): informational, at most DOING_MAX characters.
+ * @property {string} [work] The request's kind (chat, vision, embed, rerank), in its ticket: informational (kit 2.111.0).
  * @property {string} [what] The accelerator in messages (default: "the NPU", or the folder's name).
  * @property {number} [waitMs] How long to wait in line (default rules.lock.waitMs).
  * @property {number} [staleMs] When a holder counts as overstayed (default rules.lock.staleMs).
@@ -198,7 +199,7 @@ export function startTurn(rules, o) {
     machine: 'turn',
     queue: queueName(slots[0]),
     ticket: ticketName(lane, o.nowUs, o.pid, o.nonce),
-    body: ticketText(lane, o.nowUs, o.pid, o.who, o.doing),
+    body: ticketText(lane, o.nowUs, o.pid, o.who, o.doing, o.work),
     what: o.what ?? whatOf(slots[0]),
     waitMs: o.waitMs ?? rules.lock.waitMs,
     staleMs: o.staleMs ?? rules.lock.staleMs,

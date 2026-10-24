@@ -47,6 +47,10 @@ export type Waiting = {
      * What the request is for, from the ticket's contents, when it says.
      */
     doing?: string;
+    /**
+     * The request's kind (chat, vision, embed, rerank), from the ticket's contents, when it says.
+     */
+    work?: string;
 };
 /**
  * A ticket from its file name, or null for anything that isn't one.
@@ -67,15 +71,17 @@ export declare function ticketName(lane: Lane, timeUs: number, pid: number, nonc
 export declare const DOING_MAX = 80;
 /**
  * A ticket's contents, which are only informational: `{"pid", "since", "lane", "who"}`, and `"doing"` when the
- * waiter says what the request is for ("search index: Heiward (17 of 673 files)"), at most DOING_MAX characters.
+ * waiter says what the request is for ("search index: Heiward (17 of 673 files)"), at most DOING_MAX characters, and
+ * `"work"` when it says its kind (kit 2.111.0: chat, vision, embed or rerank; anything else is left out).
  * @param {Lane} lane
  * @param {number} timeUs
  * @param {number} pid
  * @param {string} who
  * @param {string} [doing]
+ * @param {string} [work]
  * @returns {string}
  */
-export declare function ticketText(lane: Lane, timeUs: number, pid: number, who: string, doing?: string): string;
+export declare function ticketText(lane: Lane, timeUs: number, pid: number, who: string, doing?: string, work?: string): string;
 /**
  * A clock's next reading in microseconds, strictly increasing within a process: the wall clock's, or one
  * past the last when the wall clock hasn't moved on. The driver keeps the last.

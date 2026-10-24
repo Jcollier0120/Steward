@@ -150,6 +150,10 @@ export type TurnOptions = {
      */
     doing?: string;
     /**
+     * The request's kind (chat, vision, embed, rerank), in its ticket: informational (kit 2.111.0).
+     */
+    work?: string;
+    /**
      * The accelerator in messages (default: "the NPU", or the folder's name).
      */
     what?: string;

@@ -29,7 +29,7 @@ Every model Castellan runs today is a Qwen model, at 4-bit weights except Intel'
 | Qualcomm X | GenieX 0.9.3 (its pin, kit 2.101.0) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0), as on the X2; Qwen3-VL-4B-Instruct (W4A16) its fallback | 4-bit; also does vision, on the Hexagon's second session |
 | Qualcomm X2 | GenieX 0.9.x (its llama.cpp plugin; the X2 pins 0.9.1) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Hexagon's second session (on the Adreno under 0.8.0) |
 | Intel | OpenVINO Model Server 2026.4.1, with Castellan's build of OpenVINO GenAI | Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov (kit 2.103.0; Qwen3-4B-Instruct-2507 int4-cw before) | 8-bit symmetric, per channel; also does vision |
-| AMD | FastFlowLM 1.0.7 | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
+| AMD | FastFlowLM 1.0.10 (kit 2.111.0; 1.0.7 before) | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
 
 They are not the same weights: each maker's NPU needs its own format, Qualcomm's are vision models, and AMD's is a smaller model that does both. So the chips board doesn't claim identical models. It compares what each chip delivers with its shipped model, names the model on every row, and shows a quality score beside the speed, so a faster chip whose model answers worse can't hide it.
 
@@ -356,6 +356,23 @@ The energy is the chip's (`rapl_package0_pkg`), not the whole PC's. AMD's counte
 - **Holding the model costs next to nothing**: 22 mW for FastFlowLM, where GenieX on the X2 costs the whole PC 1.1 W. llama.cpp loaded on the Radeon or the processor costs nothing the meter can tell.
 - **Speed is close for writing** (22.5–26.4 tokens a second); FastFlowLM's first answer after a start (8.1 s) and its short answer (708 ms) are the slowest, and the NPU answers two more quality items than llama.cpp does with the model's GGUF.
 - Two rests caught other work: the graphics' second run's rest with no model (10.1 W, against 4.0–4.6) and the processor's second run's rest with its model loaded. Each made only that run's "keeping it loaded" wrong. The medians leave them out.
+
+**FastFlowLM 1.0.10 against 1.0.7** (kit 2.111.0, which pins 1.0.10). The same PC, NPU driver 32.0.20102.4480, the quick profile, three runs of each version interleaved (1.0.10, 1.0.7, and so on), the NPU alone, means (range), 2026-10-23:
+
+| On the NPU | FastFlowLM 1.0.10 | FastFlowLM 1.0.7 |
+|---|---|---|
+| triage: each over rest | 25.0 J (23.1–26.4) | 26.2 J (25.6–27.4) |
+| reply: each over rest | 24.6 J (20.1–28.3) | 29.4 J (26.8–32.1) |
+| summary: each over rest | 47.4 J (43.1–51.9) | 51.7 J (43.0–67.4) |
+| reading 1,024 tokens: each over rest | 31.5 J (30.3–32.3) | 31.1 J (31.0–31.3) |
+| a picture: each over rest | 27.5 J (26.4–29.5) | 26.6 J (26.5–26.8) |
+| writing | 22.9 tokens/s | 22.5 tokens/s |
+| first answer after a start | 7.8 s | 8.0 s |
+| short answer | 720 ms | 716 ms |
+| job time | 7.96 s (7.9–8.1) | 10.23 s (8.0–14.5) |
+| quality (of 24), pictures (of 4) | 22, 3 | 22, 3 |
+
+The same within noise: each version's ranges overlap on every row. 1.0.7's job time is one slow run (14.5 s), its summary batch's 67 J with it. So the pin moved for 1.0.10's licences and fixes, not its speed (NPU-VENDORS.md, Licences). The NPU check on 1.0.10 passed every step: 22.2 tokens a second, 3,272 tokens read in 3.0 s, its slowest start to a first answer 11 s.
 
 ### On Intel and AMD
 

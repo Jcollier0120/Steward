@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.191
+
+**It hands out the kit 2.111.0: on an AMD Ryzen AI PC, pictures go to the graphics card, where they cost the least energy, and the NPU's server is updated to FastFlowLM 1.0.10.**
+
+### What's new
+
+- **Each kind of work goes where it costs least.** On a Ryzen AI 7 350 the manor measured each kind of work on the NPU, the Radeon graphics and the processor. Chat stays on the NPU: a triage costs it 26 J, the Radeon 41 J and the processor 89 J. A picture costs the Radeon 10 J and the NPU 27 J, so pictures now go to the Radeon. The owner's rule: "Radeon unless only NPU up", and "keep single pictures on the NPU when it's running, but send batches of 4 or more waiting pictures to the Radeon." So when the NPU's server is already running and the Radeon's isn't, a single picture goes to the NPU, as starting the Radeon's server for it would cost more (66 J). When 4 or more pictures are waiting, from any of the staff, they go to the Radeon: from the fourth, its start has paid for itself. Search (embeddings) stays on the Radeon, at 13 mJ a word-piece against the processor's 44.
+
+### What changed
+
+- **FastFlowLM 1.0.10.** AMD's NPU server is updated. It's as fast and as frugal as 1.0.7, and its new licence is as free. The manor's notices credit it: "Powered by FastFlowLM". Where Windows' Smart App Control is on, Castellan's signed list of its files lets it run, as 1.0.7's did. The old version's folder is deleted three days after nothing uses it; the model stays.
+- **When the NPU can't run** (Windows' Smart App Control blocking its server, say), each kind of its work goes where it costs least next.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An AMD PC moves to FastFlowLM 1.0.10, and to the new order, the next time its local AI is set up (Set up local AI) after the manor has looked at its NPU. That downloads 30 MB; the model stays. Where Smart App Control is on, that setup asks once for an administrator, to add 1.0.10's list of files and take 1.0.7's away. While the Radeon's picture server runs, it holds 2.8 GB of memory beside the NPU's, until it rests after 5 minutes unused.
+
 ## 0.36.190
 
 **It hands out the kit 2.110.0: the staff you pay for run only on a PC that holds your license.**
