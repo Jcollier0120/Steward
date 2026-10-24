@@ -14,10 +14,11 @@
 // The processor reads the same tiles and widths, so both give the same answer. --bench prints each graph's time a run,
 // and exits. The cache is the working folder, and has a folder for each pair of models as compiled.
 //
-// AMD's NPU (--vitisai) compiles each graph for minutes, so it has fewer widths (AmdWidths), each compiled by a program of
-// its own, as many at once as the PC's cores and memory allow (--prepare does only that, and exits; --export then copies
-// them out for a release). --graphs gives graphs compiled ahead, used when this PC's plugin is the one that compiled
-// them; --compiled-only starts on the processor, the hello saying "prepare":true, rather than compile.
+// AMD's NPU (--vitisai) compiles each graph for minutes, each by a program of its own, as many at once as the PC's cores
+// and memory allow (--prepare does only that, and exits; --export then copies them out for a release). Its compiler can't
+// place a recognizer wider than 1,024 (AmdWidths), so a longer line is narrowed to that. --graphs gives graphs compiled
+// ahead, used when this PC's plugin is the one that compiled them; --compiled-only reads on the processor rather than
+// compile, its hello saying "prepare":true.
 //
 // It says hello once, on one line of JSON: {"hello":1,"on":"npu"|"cpu","ep":"qnn"|...,"why":...,"loadMs":n,"compiled":n,...}
 // (compiled: the graphs it compiled rather than loaded; Qualcomm's compiler holds 2 GB until the program ends). What
@@ -1332,10 +1333,12 @@ namespace KitOcrNpu
         // A graph VitisAI couldn't compile this many times isn't tried again until its driver or plugin changes.
         const int AmdTries = 2;
         /// <summary>
-        /// The recognizer's widths on AMD's NPU: a compile each, of 4 to 6 minutes on one core (measured on a Ryzen AI 7
-        /// 350), so fewer than elsewhere; a line takes the narrowest it fits.
+        /// The recognizer's widths on AMD's NPU: a compile each, of 3.5 to 7.5 minutes (measured on a Ryzen AI 7 350, with
+        /// Windows ML's VitisAI plugin 1.8.75), several at once beside the detector's 18. Its compiler can't place one
+        /// 1,280 wide or more ("DMA channel location ... cannot access full range of the shared buffer memory space"), so
+        /// the widest is 1,024, and a longer line is narrowed to it.
         /// </summary>
-        public static readonly int[] AmdWidths = { 256, 512, 1024, 2048 };
+        public static readonly int[] AmdWidths = { 128, 256, 384, 512, 768, 1024 };
         static string vitisAiPlugin, amdKey;
         static bool vitisAiRegistered;
 

@@ -697,9 +697,14 @@ interface EngineState {
   npuFailed: boolean;
   /** This agent is compiling AMD's NPU's graphs (prepareReader), in the background. */
   preparing: boolean;
+  /**
+   * AMD's NPU isn't tried before then (its compile failed, or another agent is compiling): the processor reads meanwhile
+   * where the model reads there (onProcessor), else Windows' OCR.
+   */
+  npuWaitUntil: number;
   said: Set<string>;
 }
-const state: EngineState = { host: null, starting: null, refusedUntil: 0, npuFailed: false, preparing: false, said: new Set() };
+const state: EngineState = { host: null, starting: null, refusedUntil: 0, npuFailed: false, preparing: false, npuWaitUntil: 0, said: new Set() };
 
 /** For tests: forget the program and any refusal. */
 export function resetModelReader(): void {
@@ -709,6 +714,7 @@ export function resetModelReader(): void {
   state.refusedUntil = 0;
   state.npuFailed = false;
   state.preparing = false;
+  state.npuWaitUntil = 0;
   state.said.clear();
 }
 
@@ -737,8 +743,11 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
   const pack = packFor(arch, env);
   const onCpu = setting === 'model' || onProcessor(env);
   if (!pack && !onCpu) return null;
-  const now = o.now ?? Date.now();
-  if (now < state.refusedUntil || state.preparing) return null;
+  const clock = () => o.now ?? Date.now();
+  if (clock() < state.refusedUntil) return null;
+  /** AMD's NPU compiling its graphs, or not tried again yet. */
+  const npuWaits = () => state.preparing || clock() < state.npuWaitUntil;
+  if (pack && npuWaits() && !onCpu) return null;
   const place = placeOf(o.home ?? ocrHome(env), arch, pack);
   if (missingIn(place).length) {
     (o.fetch ?? ((p, a, k) => fetchInBackground(p, a, k, { log: o.log })))(place, arch, pack);
@@ -758,35 +767,36 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
       h.close();
       return begin(a, cwd);
     });
-  const npu = () => !!pack && !state.npuFailed;
+  const npu = () => !!pack && !state.npuFailed && !npuWaits();
+  const meanwhile = onCpu ? 'the model reads on the processor' : "Windows' OCR reads";
 
   /**
-   * AMD's NPU's graphs compiled in the background, once for every agent on the PC (a lock beside the NPU's), while
-   * Windows' OCR reads; the program starts on the NPU from the first batch after.
+   * AMD's NPU's graphs compiled in the background, once for every agent on the PC (a lock beside the NPU's), while the
+   * processor reads (onProcessor) or Windows' OCR; the program starts on the NPU from the first batch after.
    */
   const prepareInBackground = (k: NpuPack) => {
     if (state.preparing) return;
     state.preparing = true;
-    say(`AMD's NPU is compiling the text reader's model in the background (once, up to half an hour, below normal priority): Windows' OCR reads until then`);
+    say(`AMD's NPU is compiling the text reader's model in the background (once, up to half an hour, below normal priority): ${meanwhile} until then`);
     withLock(path.join(locksDir, 'ocr-prepare'), () => (o.prepare ?? ((p, kk) => prepareReader(p, kk)))(place, k), { waitMs: 0, staleMs: PREPARE_MS + 10 * 60_000 })
       .then((p) => {
         if (p.prepared) {
           o.log?.(`AMD's NPU compiled the text reader's model (${p.compiled ?? 0} graphs, ${p.atOnce ?? 0} at once, in ${Math.round((p.ms ?? 0) / 60_000)} min): it reads there from the next batch`);
           return;
         }
-        state.refusedUntil = Date.now() + REFUSED_MS;
+        state.npuWaitUntil = Date.now() + REFUSED_MS;
         const why = p.error ?? p.each?.find((e) => e.error)?.error ?? 'it failed';
-        o.log?.(`AMD's NPU couldn't compile the text reader's model (${String(why).slice(0, 300)}): Windows' OCR reads`);
+        o.log?.(`AMD's NPU couldn't compile the text reader's model (${String(why).slice(0, 300)}): ${meanwhile}`);
       })
       .catch((e) => {
         // Another agent on the PC is compiling them: this one looks again in a while.
         if (e instanceof LockTimeout) {
-          state.refusedUntil = Date.now() + PREPARE_WAIT_MS;
-          say(`another agent on this PC is compiling the text reader's model for AMD's NPU: Windows' OCR reads until then`);
+          state.npuWaitUntil = Date.now() + PREPARE_WAIT_MS;
+          say(`another agent on this PC is compiling the text reader's model for AMD's NPU: ${meanwhile} until then`);
           return;
         }
-        state.refusedUntil = Date.now() + REFUSED_MS;
-        o.log?.(`AMD's NPU couldn't compile the text reader's model (${String(e?.message ?? e).slice(0, 300)}): Windows' OCR reads`);
+        state.npuWaitUntil = Date.now() + REFUSED_MS;
+        o.log?.(`AMD's NPU couldn't compile the text reader's model (${String(e?.message ?? e).slice(0, 300)}): ${meanwhile}`);
       })
       .finally(() => {
         state.preparing = false;
@@ -795,14 +805,20 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
 
   /** The program, started if it isn't running (it ends itself when idle); null when it can't be used here. */
   const ensure = (): Promise<ReaderHost | null> => {
-    if (state.host?.alive) return Promise.resolve(state.host);
+    if (state.host?.alive) {
+      // On the processor while AMD's NPU compiled: ended, so the program starts on the NPU now.
+      if (!(npu() && state.host.hello.on === 'cpu')) return Promise.resolve(state.host);
+      state.host.close();
+      state.host = null;
+    }
     return (state.starting ??= start(readerArgs(place, npu() ? pack : null), place.cache)
       .then((h) => {
         if (h.hello.prepare && pack && npu()) {
-          // AMD's NPU's graphs aren't compiled yet: compiled in the background, and the NPU tried again after.
+          // AMD's NPU's graphs aren't compiled yet: compiled in the background, and the NPU tried again after; the
+          // processor reads meanwhile where the model reads there.
           h.close();
           prepareInBackground(pack);
-          return null;
+          return onCpu ? start(readerArgs(place, null), place.cache).then((c) => (state.host = c)) : null;
         }
         if (h.hello.on === 'cpu' && npu()) {
           // Its NPU read the program's own picture differently, or the program found none: not tried again here.
@@ -829,7 +845,7 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
   };
 
   /** The program within the NPU's turn when it will start on the NPU (loading its graphs is NPU work). */
-  const ready = (lane: Lane): Promise<ReaderHost | null> => (state.host?.alive || !npu() ? ensure() : acceleratorTurn(NPU, ensure, { lane }));
+  const ready = (lane: Lane): Promise<ReaderHost | null> => ((state.host?.alive && state.host.hello.on === 'npu') || !npu() ? ensure() : acceleratorTurn(NPU, ensure, { lane }));
   const first = await ready(currentLane()).catch(() => null);
   if (!first) return null;
   const engineOf = (h: ReaderHost): ModelEngine => (h.hello.on === 'npu' ? 'model-npu' : 'model-cpu');
