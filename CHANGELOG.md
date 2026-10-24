@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.225
+
+**It hands out the kit 2.135.1: on AMD PCs, pictures are read on the graphics card, which reads small numbers more reliably than the NPU.**
+
+### What changed
+
+- On AMD Ryzen AI 300 PCs, every picture is now read on the Radeon graphics. Before, a single picture went to the NPU when the NPU's model was already running.
+  - The graphics card read the test pictures right 8 times out of 8, against 6 out of 8 on the NPU.
+  - Once its model is running, it uses less energy for each picture.
+- A picture that has to start the graphics card's model takes a few seconds longer, and costs more energy than the NPU would. It's read right.
+- When the graphics card is busy, the next picture waits for it rather than going to the NPU. Indexing for search waits for it too, rather than using the processor, which spends about three times the energy.
+- The NPU still reads pictures when the graphics card can't: it failed recently, a game is using it, or "Use the graphics card for models when there's an NPU" is off in Manor's Settings.
+- PCs already set up get this by themselves. There's no need to set up local AI again.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.224
 
 **It hands out the kit 2.135.0: when our text-reading model reads on the processor in the background, it uses about half the energy it did.**

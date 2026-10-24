@@ -2,6 +2,33 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.135.1
+
+**On AMD's Ryzen AI 300, every picture goes to the Radeon, which reads small numbers more reliably than the NPU, and for less energy once its server is up. PCs already set up get the new order by themselves.**
+
+### What changed
+
+- **npu-vendors.json:** AMD's XDNA 2 order for pictures is the Radeon, then the NPU, then the processor, with no `runningFirst` or `batchAt`. This is the owner's ruling of 2026-10-24: "Yes: AMD single pictures go to the Radeon." Until now a lone picture went to the NPU while FastFlowLM was up and the Radeon's server wasn't, unless 4 or more waited.
+  - The Radeon read the suite's pictures right 8 times of 8, against the NPU's 6 of 8.
+  - A warm picture there costs 10.4 J, against 26.6 J on the NPU.
+  - Starting its server for a lone picture costs 66 J, the price of the better read.
+- **The core's `candidates`:** a work's order now puts its first device alone whatever the order, not only with `runningFirst` or a batch. When it's busy, it is waited for, not passed over for a free device that spends more.
+  - On AMD, pictures wait for a busy Radeon, and so do embeddings (12.8 mJ a token there, against the processor's 44.1).
+  - The NPU or the processor takes the work only when the first can't: it failed lately, a game is using it, or it's rested after a long line.
+  - `runningFirst` and `batchAt` stay, and are read as before. No generation's order has them now.
+  - The accelerator vectors have the new cases.
+- **npu-refresh.ts:** the keeper's look, once for each kit version, brings config.json's `workOrder` to this kit's (`workOrderFor` on the PC's NPU generation) when they differ, as setup writes it.
+  - It does so whatever comes of the NPU's servers, and also on a PC whose NPU has no entry but whose setup wrote an order.
+  - Its log names the new order.
+  - Before, only setup wrote it, so a changed order reached only PCs set up after it.
+- **Docs:** ACCELERATORS.md and NPU-VENDORS.md give the new rule and the ruling. ACCELERATORS.md no longer says Intel's NPU can't see: it has since kit 2.103.0.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+- An agent that routes on its own (Reeve's `src/routing.ts`) sends a picture to the Radeon when it's free. Until that agent mirrors the core's `candidates`, it still gives a picture to a free NPU while the Radeon is busy.
+- A PC set up before kit 2.111.0 has a Radeon with no vision model. Its pictures move only after Set up local AI, as before.
+
 ## 2.135.0
 
 **The text reader on the processor runs in Windows' efficiency mode at a gentle pace: the same lines read, for about half the energy a picture.**
