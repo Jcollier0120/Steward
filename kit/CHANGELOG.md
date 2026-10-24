@@ -2,6 +2,30 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.135.3
+
+**On AMD's Ryzen AI 300, pictures go to the Radeon even with "Use the graphics card for models when there's an NPU" off, Manor's default. The card's picture server starts when a picture comes and stops once unused. Chat stays on the NPU.**
+
+### What changed
+
+- **The core's rule beside the NPU:** with the switch off, a graphics card also keeps the work the PC's work order puts it first for, even though the NPU serves it. This is the owner's ruling of 2026-10-24: "Yes: on AMD, pictures go to the Radeon on demand even with the graphics-card switch off; chat stays off the card."
+  - Today that is AMD XDNA 2's pictures (its order: the Radeon, then the NPU, then the processor). Intel's and Snapdragon's generations have no order, so nothing changes there.
+  - Chat never goes to the card beside an NPU, whatever an order says, the NPU failed or not. The card's reranker stays out too.
+  - The order is config.json's `workOrder` as the core reads it: none with an `acceleratorOrder` list of the person's own, so their pictures stay on the NPU.
+  - `withoutGpuBesideNpu(list, gpuWithNpu, order)` and `cardWorkBesideNpu(kinds, npu, order)` take the order as a new last argument. Without it they work as before. The new `workOrderIn(raw)` reads the order from config.json as the core does.
+- **Every caller follows it:**
+  - npu.ts' `accelerators` passes config.json's order, so a picture request goes to the Radeon first and starts its server.
+  - keeper.ts' `gpuKeptOut`, `cardOnDemand` and `reapedServers` take the order, and `serversToReap` reads it. The keeper stops the picture server once unused (`gpuIdleStopMinutes`) and never starts it; it keeps the card's chat and reranker servers out.
+  - setup.ts' plan, with the switch off, sets the Radeon up for pictures and embeddings on a fresh AMD setup, not chat.
+  - set-up-again.ts' `orderAdds` adds the pictures with the switch off too: an AMD PC set up before gains them by itself, gently, as in kit 2.135.2.
+  - card-check.ts checks AMD's shape too: an NPU that sees, with the card first for pictures by the order.
+- **Tests:** the switch off on AMD (pictures to the Radeon on demand, stopped once unused, chat never to the card even with the NPU down, embeddings as before); Intel and Snapdragon unchanged; a person's own order; a fresh AMD setup's plan; the update path with the switch off; and the older calls without an order.
+- **Docs:** ACCELERATORS.md (The graphics card beside the NPU) and NPU-VENDORS.md (What setup does, Set up again).
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent that calls `withoutGpuBesideNpu` or `cardWorkBesideNpu` itself (Reeve's router) should pass config.json's order (`workOrderIn`) to route pictures the same way.
+
 ## 2.135.2
 
 **An AMD Ryzen AI 300 PC set up before kit 2.111.0 gets its pictures on the Radeon by itself: the keeper sets the card up again for them, gently, as it does when the pins move on.**

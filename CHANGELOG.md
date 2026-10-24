@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.227
+
+**It hands out the kit 2.135.3: on AMD PCs, pictures are read on the graphics card even when "Use the graphics card for models when there's an NPU" is off.**
+
+### What changed
+
+- On AMD Ryzen AI 300 PCs, pictures now go to the Radeon graphics with the switch off too, which is Manor's default. Until now the switch off kept every picture on the NPU, which reads small numbers less reliably.
+  - The graphics card's picture model starts when a picture comes, and stops again after a few minutes unused, so it doesn't hold the PC's memory while nothing needs it.
+  - Chat stays on the NPU. It never moves to the graphics card with the switch off, even when the NPU fails.
+  - A PC set up before downloads the picture model by itself, gently, in the background. There's no need to set up local AI again.
+- Nothing changes on Intel or Snapdragon PCs, or for an order of accelerators of your own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.226
 
 **It hands out the kit 2.135.2: an AMD PC set up before kit 2.111.0 gets its pictures on the graphics card by itself.**

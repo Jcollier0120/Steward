@@ -17,6 +17,7 @@ const { parseDetection } = await import('./fixture/src/kit/detect.ts');
 const { pinnedHfFiles, pinnedRelease, planSetup, runSetup, setupCommand } = await import('./fixture/src/kit/setup.ts');
 const { QueueFull } = await import('./fixture/src/kit/npu-queue.ts');
 const { RETIRED_GRACE_MS } = await import('./fixture/src/kit/retired.ts');
+const { serversToReap } = await import('./fixture/src/kit/keeper.ts');
 type StageDeps = Parameters<typeof A.stage>[0]['deps'];
 
 const CARD = `adapter|0|4318|17171480576|34225520640|0x00000000_0x0000d1f1|0|NVIDIA GeForce RTX 4080 SUPER
@@ -490,17 +491,27 @@ test("an AMD Radeon set up before kit 2.111.0, for embeddings only, is behind it
   assert.match(both.why[1], /^llama\.cpp-b\d+-vulkan-x64 in place of b11669-vulkan-x64$/);
 });
 
-test("the person's choices stand: Manor's switch off, their own acceleratorOrder, a card turned off or a model file of theirs add nothing; a card that serves the work already, or a PC with no order (Intel's, a Snapdragon's), is as it was", async () => {
+test("Manor's switch off adds the pictures too (kit 2.135.3), never chat; the person's choices stand: their own acceleratorOrder, a card turned off or a model file of theirs add nothing; a card that serves the work already, or a PC with no order (Intel's, a Snapdragon's), is as it was", async () => {
   const { tools, entry } = await cardFor(AMD_PC, RADEON_ID, ['embed'], RADEON_LIST);
   const behind = (raw: Record<string, any>, gpuWithNpu = true) => A.behindPins({ raw, detection: AMD_PC, kit: KIT, tools, gpuWithNpu });
-  // Manor's "Use the graphics card for models when there's an NPU" off: the card is kept out of the NPU's work, pictures included.
-  assert.deepEqual(await behind(amdConfig(entry), false), []);
-  // With it off, a card on an older build is set up again for what it serves, nothing added.
+  // Manor's "Use the graphics card for models when there's an NPU" off: the card still gains the pictures its work order
+  // puts it first for (the owner's ruling), run on demand; the same set-up as with the switch on.
+  const [off, ...rest] = await behind(amdConfig(entry), false);
+  assert.deepEqual(rest, []);
+  assert.deepEqual(off.kinds, ['vision', 'embed']);
+  assert.equal(off.why[0], "vision added: this PC's work order puts the graphics card first for it");
+  assert.equal(off.key, (await behind(amdConfig(entry), true))[0].key);
+  // With it off, a card on an older build is set up again with the pictures added too.
   const [old] = await behind(amdConfig(onOlderVulkan(entry)), false);
-  assert.deepEqual(old.kinds, ['embed']);
-  assert.ok(!old.why.some((w) => w.includes('added')), old.why.join('; '));
-  // An order of their own: the core reads no work order, so nothing is added.
+  assert.deepEqual(old.kinds, ['vision', 'embed']);
+  assert.equal(old.why[0], "vision added: this PC's work order puts the graphics card first for it");
+  // An order that put the card first for chat: chat is added only with the switch on; off, the pictures alone.
+  const chatFirst = { workOrder: { ...AMD_ORDER, chat: { devices: ['gpu', 'npu', 'cpu'] } } };
+  assert.deepEqual((await behind(amdConfig(entry, chatFirst), false))[0].kinds, ['vision', 'embed']);
+  assert.ok((await behind(amdConfig(entry, chatFirst), true))[0].kinds.includes('chat'));
+  // An order of their own: the core reads no work order, so nothing is added, the switch on or off.
   assert.deepEqual(await behind(amdConfig(entry, { acceleratorOrder: [RADEON_ID, 'npu'] })), []);
+  assert.deepEqual(await behind(amdConfig(entry, { acceleratorOrder: [RADEON_ID, 'npu'] }), false), []);
   assert.deepEqual(await behind(amdConfig({ ...entry, enabled: false })), []);
   const theirs = structuredClone(entry);
   const m = theirs.embed.startCommand.indexOf('-m');
@@ -532,7 +543,7 @@ ram|34359738368
   assert.deepEqual(old.kinds, ['embed']);
 });
 
-test("the update: the keeper's look asks setup for the Radeon's pictures and embeddings, staged; in its turn the new servers answer, pictures on a server of their own, and it's no longer behind; with Manor's switch off it isn't asked", async () => {
+test("the update, Manor's switch off (kit 2.135.3): the keeper's look asks setup for the Radeon's pictures and embeddings, staged; in its turn the new servers answer, pictures on a server of their own, run on demand, and it's no longer behind", async () => {
   const { tools, entry } = await cardFor(AMD_PC, RADEON_ID, ['embed'], RADEON_LIST);
   const dir = path.join(home, `pc-${++n}`);
   mkdirSync(dir, { recursive: true });
@@ -559,11 +570,6 @@ test("the update: the keeper's look asks setup for the Radeon's pictures and emb
     },
     log: (l) => log.push(l),
   };
-  // Manor's switch off: not behind, nothing asked.
-  assert.deepEqual(await A.setUpAgain(deps), { did: 'none' });
-  assert.equal(asked.length, 0);
-
-  deps.gpuWithNpu = () => true;
   const r = await A.setUpAgain(deps);
   assert.deepEqual(r, { did: 'set-up', id: RADEON_ID, code: 0 }, setupLog.join('\n'));
   assert.deepEqual(asked.map((x) => [x.ids, x.kinds, x.staged]), [[[RADEON_ID], ['vision', 'embed'], true]]);
@@ -575,6 +581,9 @@ test("the update: the keeper's look asks setup for the Radeon's pictures and emb
   assert.deepEqual(card.embed, entry.embed, 'its embeddings as they were');
   assert.deepEqual(after.accelerators.find((a: any) => a.id === 'npu'), FLM, "the NPU's entry untouched");
   assert.deepEqual(after.workOrder, AMD_ORDER);
+  // With the switch off, the keeper keeps none of the card's servers out: its pictures and embeddings run on demand, stopped once unused.
+  const kept = serversToReap(after, { withNpu: false }).filter((s) => s.acc.id === RADEON_ID);
+  assert.deepEqual(kept.map((s) => [s.base, !!s.keptOut]), [[card.vision.baseUrl, false], [card.embed.baseUrl, false]]);
   // Tested in the card's turn, its old servers stopped first.
   const turn = pc.did.indexOf(`turn ${RADEON_ID}`);
   assert.ok(turn >= 0, pc.did.join(', '));

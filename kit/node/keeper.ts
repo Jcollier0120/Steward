@@ -91,22 +91,25 @@ export const keeper = (env: NodeJS.ProcessEnv = process.env): 'smith' | 'reeve' 
 /**
  * Whether the graphics cards are kept out of model work now, all of it or the NPU's part: Manor's `gpuWithNpu`
  * (manor.ts's gpuWithNpu(), true unless Manor says false) is off and the list has an NPU that serves something, by the
- * core's own rule (withoutGpuBesideNpu), the one every agent's requests follow. cardOnDemand says what a card still does.
+ * core's own rule (withoutGpuBesideNpu, with config.json's work order `order` as the core reads it, core.workOrderIn),
+ * the one every agent's requests follow. cardOnDemand says what a card still does.
  */
-export const gpuKeptOut = (accs: Accelerator[], withNpu: boolean) => {
-  const kept = core.withoutGpuBesideNpu(accs, withNpu);
+export const gpuKeptOut = (accs: Accelerator[], withNpu: boolean, order?: core.WorkOrder) => {
+  const kept = core.withoutGpuBesideNpu(accs, withNpu, order);
   return kept.length < accs.length || kept.some((a) => !accs.includes(a));
 };
 
 /**
  * What the graphics cards still do while they're kept out beside the NPU (gpuKeptOut): the work no NPU here serves,
- * each card's server started by a request and stopped once unused (kit 2.69.0). Vision beside Intel's NPU; none
- * beside a Snapdragon's. Empty when the cards aren't kept out (they do everything they're set up for).
+ * and the work the PC's work order (`order`) puts the card first for (kit 2.135.3), never chat, each card's server
+ * started by a request and stopped once unused (kit 2.69.0). Vision beside Intel's NPU, and beside AMD's XDNA 2 (its
+ * order puts the Radeon first for pictures); none beside a Snapdragon's. Empty when the cards aren't kept out (they do
+ * everything they're set up for).
  */
-export function cardOnDemand(accs: Accelerator[], withNpu: boolean): { id: string; kinds: EndpointKind[] }[] {
-  if (!gpuKeptOut(accs, withNpu)) return [];
+export function cardOnDemand(accs: Accelerator[], withNpu: boolean, order?: core.WorkOrder): { id: string; kinds: EndpointKind[] }[] {
+  if (!gpuKeptOut(accs, withNpu, order)) return [];
   return core
-    .withoutGpuBesideNpu(accs, withNpu)
+    .withoutGpuBesideNpu(accs, withNpu, order)
     .filter((a) => a.kind === 'gpu' && a.enabled !== false)
     .map((a) => ({ id: a.id, kinds: ENDPOINT_KINDS.filter((k) => !!a[k]?.model) }))
     .filter((c) => c.kinds.length);
@@ -491,7 +494,8 @@ export function otherTurn(a: Accelerator, kind: EndpointKind, list: Accelerator[
  * Server, Intel's; npu-embed exits by itself), and a graphics card's or the processor's chat, vision, embedding and
  * reranking endpoints, when they have a startCommand. `lockDirs` gives an accelerator's lock folders (or is the NPU's lock
  * folder, the others beside it, as Reeve's reaper took it). `keptOut` marks a card's servers while gpuWithNpu keeps the card out
- * (`keepGpuOut`), all but those for the work no NPU here serves (the core's withoutGpuBesideNpu): the card on demand.
+ * (`keepGpuOut`), all but those for the work no NPU here serves and the work the PC's order (`workOrder`) puts the card
+ * first for (the core's withoutGpuBesideNpu): the card on demand.
  * `idle.npuMsFor`, when given, is an NPU server's own idle time by its program and kind, over `idle.npuMs`;
  * `idle.otherMsFor`, a card's or the processor's own by its accelerator, over `idle.otherMs` (undefined: `otherMs`).
  */
@@ -500,13 +504,13 @@ export function reapedServers(
   logDir = serverLogsDir(),
   idle: { npuMs?: number; otherMs?: number; npuMsFor?: (program: string, kind: EndpointKind) => number; otherMsFor?: (a: Accelerator) => number | undefined } = {},
   lockDirs: ((a: Accelerator) => string[]) | string = lockDirsOf,
-  o: { keepGpuOut?: boolean } = {},
+  o: { keepGpuOut?: boolean; workOrder?: core.WorkOrder } = {},
 ): ReapedServer[] {
   const out = new Map<string, ReapedServer>();
   // The card's servers it still runs on demand beside the NPU: the keeper's own idle stop looks after them.
   const onDemand = new Set<string>();
   if (o.keepGpuOut) {
-    for (const k of core.withoutGpuBesideNpu(accelerators, false)) {
+    for (const k of core.withoutGpuBesideNpu(accelerators, false, o.workOrder)) {
       if (k.kind !== 'gpu') continue;
       for (const kind of ENDPOINT_KINDS) {
         try {
@@ -795,7 +799,8 @@ export function serversToReap(raw: Record<string, any>, o: { withNpu?: boolean; 
   // The NPU's reranker stops as its embedding server does: the same program, as quick to start again.
   const npuMsFor = given ? undefined : (program: string, kind: EndpointKind) => npuIdleStopMinutes({ program, kind: kind === 'rerank' ? 'embed' : kind, ramBytes, otherwise: k.npuIdleStopMinutes }) * 60_000;
   const otherMsFor = gpuGiven ? undefined : (a: Accelerator) => (a.kind === 'gpu' ? cardIdleStopMinutes({ memoryGb: a.memoryGb, ramBytes, otherwise: k.gpuIdleStopMinutes }) * 60_000 : undefined);
-  return reapedServers(accs, o.logDir, { npuMs: k.npuIdleStopMinutes * 60_000, otherMs: k.gpuIdleStopMinutes * 60_000, npuMsFor, otherMsFor }, undefined, { keepGpuOut: gpuKeptOut(accs, o.withNpu ?? gpuWithNpu().on) });
+  const workOrder = core.workOrderIn(raw);
+  return reapedServers(accs, o.logDir, { npuMs: k.npuIdleStopMinutes * 60_000, otherMs: k.gpuIdleStopMinutes * 60_000, npuMsFor, otherMsFor }, undefined, { keepGpuOut: gpuKeptOut(accs, o.withNpu ?? gpuWithNpu().on, workOrder), workOrder });
 }
 
 // ------------------------------------------------------------------------------------------------

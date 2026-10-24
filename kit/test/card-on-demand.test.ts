@@ -8,8 +8,8 @@ import { after, test } from 'node:test';
 import { paced, stillFor, until } from './until.ts';
 
 // The graphics card on demand (kit 2.69.0): with Manor's gpuWithNpu off, beside an NPU, a card does only the work no
-// NPU here serves (vision beside Intel's NPU), its server started by a request and stopped by the keeper once unused;
-// the NPU's own work never goes to it. Fake model servers throughout, one a real process the kit starts.
+// NPU here serves (vision beside Intel's NPU), and the work the PC's work order puts it first for (AMD's pictures, kit
+// 2.135.3), its server started by a request and stopped by the keeper once unused; the NPU's chat never goes to it. Fake model servers throughout, one a real process the kit starts.
 const home = mkdtempSync(path.join(os.tmpdir(), 'card-demand-'));
 const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.meta.url), 'utf8'));
 process.env[`${String(pkg.name).toUpperCase().replace(/-/g, '_')}_HOME`] = path.join(home, 'agent');
@@ -24,7 +24,7 @@ const core = await import('../core/index.js');
 const { Npu, NpuError, resetNpuManners } = await import('./fixture/src/kit/npu.ts');
 const { acceleratorsDir } = await import('./fixture/src/kit/lock.ts');
 const { Reaper, serversToReap, cardOnDemand, gpuKeptOut } = await import('./fixture/src/kit/keeper.ts');
-const { testImage } = await import('./fixture/src/kit/npu-vendors.ts');
+const { NPU_CATALOG, testImage, workOrderFor } = await import('./fixture/src/kit/npu-vendors.ts');
 const { configuredAccelerators } = await import('./fixture/src/kit/accelerator-config.ts');
 const { longFetch, serverClient } = await import('./fixture/src/kit/npu-server.ts');
 const { cardCheck } = await import('./fixture/src/kit/card-check.ts');
@@ -252,6 +252,89 @@ test('Intel-like: a vision request starts the card\'s vision server; the keeper 
   }
 });
 
+// ---------------------------------------------------------------- AMD: pictures on the Radeon, on demand (kit 2.135.3)
+
+test("AMD-like, the switch off: a picture starts the Radeon's vision server (its work order puts the card first); the keeper stops it once unused; chat never goes to the card, the NPU failed or not; embeddings as before", async () => {
+  fresh();
+  const ORDER = workOrderFor(NPU_CATALOG.routes.amd, 'xdna2')!;
+  const npuChat = await fakeServer('ready');
+  const cardChat = await fakeServer();
+  const cardEmbed = await fakeServer();
+  const cardRerank = await fakeServer();
+  const cpuChat = await fakeServer('from the processor');
+  const port = await closedPort();
+  const stop = path.join(home, `radeon-vision-${port}.stop`);
+  const visionBase = `http://127.0.0.1:${port}`;
+  const radeon = card({ id: 'gpu-radeon', name: 'AMD Radeon 890M', chat: ep(cardChat.baseUrl, 'c', NEVER), vision: ep(visionBase, 'v', [NODE, SCRIPT, String(port), String(process.pid), stop]), embed: ep(cardEmbed.baseUrl, 'e', NEVER), rerank: ep(cardRerank.baseUrl, 'r', NEVER) });
+  const raw = {
+    gpuIdleStopMinutes: 3,
+    workOrder: ORDER,
+    accelerators: [
+      npu({ name: 'NPU Compute Accelerator Device', chat: ep(npuChat.baseUrl, 'qwen3.5:2b'), vision: { model: 'qwen3.5:2b' } }),
+      radeon,
+      { id: 'cpu', kind: 'cpu', name: 'CPU', maxContextTokens: 4000, chat: ep(cpuChat.baseUrl, 'c') },
+    ],
+  };
+  try {
+    const model = new Npu(config(raw), { gpuWithNpu: () => false });
+    assert.deepEqual(serving(model.accelerators), ['npu: chat vision', 'gpu-radeon: vision embed', 'cpu: chat']);
+    const chat = await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 8, lane: 'interactive' });
+    assert.equal(chat.accelerator.id, 'npu');
+    assert.equal(await A.probe(visionBase, 500), 'down', 'nothing on the card yet');
+
+    const seen = await model.vision(image, 'What is it?', { maxTokens: 8, lane: 'interactive' });
+    assert.equal(seen.accelerator.id, 'gpu-radeon', 'the Radeon first for pictures');
+    assert.equal(seen.text, 'a red square');
+    assert.equal(await A.probe(visionBase, 500), 'ready', 'started for the request');
+    assert.ok(!npuChat.seen.some((b) => JSON.stringify(b).includes('image_url')), 'no picture sent to the NPU');
+    assert.equal((await model.embed(['a', 'b'], { lane: 'interactive' })).accelerator.id, 'gpu-radeon', 'embeddings as before');
+    assert.equal(cardChat.seen.length + cardRerank.seen.length, 0, "the card's chat and reranker never asked");
+
+    // The keeper: the pictures and embeddings are the card's on demand; its chat and reranker are kept out.
+    const servers = serversToReap(raw, { withNpu: false });
+    const vision = servers.find((s: ReapedServer) => s.base === visionBase)!;
+    assert.equal(vision.keptOut, undefined);
+    assert.equal(vision.idleMs, 3 * MIN);
+    assert.deepEqual(servers.filter((s: ReapedServer) => s.acc.id === 'gpu-radeon').map((s: ReapedServer) => [s.base, !!s.keptOut]), [[cardChat.baseUrl, true], [visionBase, false], [cardEmbed.baseUrl, false], [cardRerank.baseUrl, true]]);
+    const accs = configuredAccelerators(raw);
+    assert.equal(gpuKeptOut(accs, false, core.workOrderIn(raw)), true);
+    assert.deepEqual(cardOnDemand(accs, false, core.workOrderIn(raw)), [{ id: 'gpu-radeon', kinds: ['vision', 'embed'] }]);
+    // The older calls, with no order: as before, the card keeps only its embeddings.
+    assert.deepEqual(cardOnDemand(accs, false), [{ id: 'gpu-radeon', kinds: ['embed'] }]);
+    assert.equal(gpuKeptOut(accs, false), true);
+
+    const { pc, reaper } = keeperOn(new Map([[visionBase, stop]]));
+    pc.clock = 3 * MIN - 1;
+    assert.equal((await reaper.look([vision]))[0].did, 'answering', 'not before gpuIdleStopMinutes');
+    pc.clock = 3 * MIN;
+    assert.equal((await reaper.look([vision]))[0].did, 'stopped');
+    await until(async () => (await A.probe(visionBase, 300)) === 'down', 10_000, 'the vision server to end');
+    pc.clock = 30 * MIN;
+    assert.equal((await reaper.look([vision]))[0].did, 'not-running');
+    assert.equal(pc.started, 0, 'never started by the keeper');
+
+    // The NPU fails: chat goes to the processor, never the card; the next picture starts the card again.
+    await npuChat.close();
+    resetNpuManners();
+    A.forgetServers();
+    const fallback = await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 8, lane: 'interactive' });
+    assert.equal(fallback.accelerator.id, 'cpu');
+    assert.equal(cardChat.seen.length, 0, 'never the card');
+    assert.equal((await model.vision(image, 'What is it?', { maxTokens: 8, lane: 'interactive' })).accelerator.id, 'gpu-radeon');
+    assert.equal(await A.probe(visionBase, 500), 'ready');
+
+    // A person's own list of accelerators: no work order, so pictures stay on the NPU and the card's vision server is kept out.
+    const theirs = { ...raw, acceleratorOrder: ['npu', 'gpu-radeon', 'cpu'] };
+    assert.deepEqual(serving(new Npu(config(theirs), { gpuWithNpu: () => false }).accelerators), ['npu: chat vision', 'gpu-radeon: embed', 'cpu: chat']);
+    assert.equal(serversToReap(theirs, { withNpu: false }).find((s: ReapedServer) => s.base === visionBase)?.keptOut, true);
+  } finally {
+    writeFileSync(stop, '');
+    await until(async () => (await A.probe(visionBase, 300)) === 'down', 10_000, 'the vision server to end');
+    await Promise.all([npuChat, cardChat, cardEmbed, cardRerank, cpuChat].map((s) => s.close()));
+    fresh();
+  }
+});
+
 test('Snapdragon-like: the NPU chats, sees and embeds; the card is never asked, and the keeper keeps all of it out', async () => {
   fresh();
   const n = await fakeServer('ready');
@@ -359,22 +442,23 @@ test('the keeper never starts a stopped card server by itself, on demand or kept
   assert.deepEqual(log, []);
 });
 
-// ---------------------------------------------------------------- the Intel PC's check, on fakes
+// ---------------------------------------------------------------- the PC's check (Intel's, AMD's), on fakes
 
-test("card-check: PASS when vision starts the card's server, it's stopped once unused (not sooner), and chat stays on the NPU", async () => {
+test("card-check: PASS when vision starts the card's server, it's stopped once unused (not sooner), and chat stays on the NPU; on Intel's shape and on AMD's", async () => {
   const raw = {
     accelerators: [
       npu({ chat: ep('http://127.0.0.1:18183/v3', 'c'), embed: ep('http://127.0.0.1:18185/v3', 'e') }),
       card({ chat: ep('http://127.0.0.1:18191', 'c', NEVER), vision: ep('http://127.0.0.1:18192', 'v', NEVER), embed: ep('http://127.0.0.1:18193', 'e', NEVER) }),
     ],
   };
-  const run = async (o: { stoppedBy?: 'keeper' | 'someone'; npuSees?: boolean } = {}) => {
+  const run = async (o: { stoppedBy?: 'keeper' | 'someone'; npuSees?: boolean; workOrder?: unknown } = {}) => {
     let clock = 0;
     let visionUp = false;
     const looks: string[] = [];
     const lines: string[] = [];
     const answer = (kind: string, id: string) => ({ text: 'ok', model: 'm', ms: 1000, truncated: false, promptTokens: 1, completionTokens: 1, accelerator: { id, kind, name: id } });
-    const cfg = o.npuSees ? { accelerators: [{ ...raw.accelerators[0], vision: { model: 'v' } }, raw.accelerators[1]] } : raw;
+    // AMD's: the NPU chats and sees, and makes no embeddings; its work order puts the card first for pictures.
+    const cfg = o.workOrder ? { workOrder: o.workOrder, accelerators: [npu({ chat: ep('http://127.0.0.1:18183/v3', 'c'), vision: { model: 'v' } }), raw.accelerators[1]] } : o.npuSees ? { accelerators: [{ ...raw.accelerators[0], vision: { model: 'v' } }, raw.accelerators[1]] } : raw;
     const r = await cardCheck({
       idleMinutes: 1,
       lookEveryMs: 10_000,
@@ -426,6 +510,12 @@ test("card-check: PASS when vision starts the card's server, it's stopped once u
   const sees = await run({ npuSees: true });
   assert.equal(sees.ok, false);
   assert.match(sees.steps[0].say, /the NPU serves vision itself/);
+
+  // AMD's shape (kit 2.135.3): the NPU sees, and its work order puts the card first for pictures: checked the same way.
+  const amd = await run({ workOrder: workOrderFor(NPU_CATALOG.routes.amd, 'xdna2') });
+  assert.equal(amd.ok, true, amd.lines.join('\n'));
+  assert.match(amd.steps[0].say, /^the NPU serves chat, vision; gpu-arc serves vision, embed on demand$/);
+  assert.ok(amd.steps[1].say.endsWith("; its embed on demand too; the card's other servers (http://127.0.0.1:18191) are kept out"), amd.steps[1].say);
 });
 
 // ---------------------------------------------------------------- npu-check's long requests
