@@ -96,7 +96,7 @@ test('cookies, secrets and where a launch URL may lead', () => {
   assert.equal(A.isNavigation({ 'sec-fetch-mode': 'navigate' }), true);
   assert.equal(A.isNavigation({ 'sec-fetch-mode': 'cors' }), false, "a script's fetch");
   assert.equal(A.isNavigation({}), false, 'a program');
-  assert.deepEqual([A.strictPages({}), A.strictPages({ KIT_STRICT_PAGES: '1' }), A.strictPages({ KIT_STRICT_PAGES: 'yes' })], [false, true, false]);
+  assert.deepEqual([A.strictPages({}), A.strictPages({ KIT_STRICT_PAGES: '1' }), A.strictPages({ KIT_STRICT_PAGES: '0' }), A.strictPages({ KIT_STRICT_PAGES: 'yes' })], [false, true, false, false], 'unset or another word: the default, never under node --test without a home to look in');
 });
 
 test('a launch code works once, while it lasts; the oldest give way past the most outstanding', () => {
@@ -137,6 +137,41 @@ test("another staff member's token, from its server.json in this account's own d
   assert.deepEqual(A.staffHeaders('bailiff', { env: {}, home: fake }), {}, 'none there: no header, as before');
   writeFileSync(path.join(fake, '.wright', 'server.json'), '{"token":"x\\r\\nHost: evil"}');
   assert.deepEqual(A.staffHeaders('wright', { env: {}, home: fake }), {}, 'only a token');
+});
+
+test('strict by default (kit 2.120.0) once no staff member installed in the account runs an older kit, Manor too', () => {
+  const profile = path.join(home, 'profile-installed');
+  const install = (dir: string, kit: string | null, o: { pinOnly?: boolean } = {}) => {
+    mkdirSync(path.join(dir, 'app', 'src', 'kit'), { recursive: true });
+    writeFileSync(path.join(dir, 'app', 'kit.json'), JSON.stringify({ kit: kit ?? 'none' }));
+    if (kit && !o.pinOnly) writeFileSync(path.join(dir, 'app', 'src', 'kit', 'VERSION'), `${kit}\r\n`);
+  };
+  const o = { home: profile, env: {} };
+  mkdirSync(profile, { recursive: true });
+  assert.deepEqual(A.olderStaff(o), [], 'nothing installed');
+  assert.equal(A.strictByDefault(o), true);
+  install(path.join(profile, '.wright'), A.STRICT_FROM);
+  install(path.join(profile, '.manor'), '2.121.3');
+  mkdirSync(path.join(profile, '.vscode', 'extensions'), { recursive: true });
+  mkdirSync(path.join(profile, '.ssh'), { recursive: true });
+  mkdirSync(path.join(profile, '.reeve-dev'), { recursive: true });
+  assert.equal(A.strictByDefault(o), true, 'every one at the kit or later; folders without an agent are no staff');
+  install(path.join(profile, '.aletaster'), '2.83.0');
+  install(path.join(profile, '.auditor'), '2.119.9', { pinOnly: true });
+  install(path.join(profile, '.toller'), null);
+  assert.deepEqual(A.olderStaff(o), [{ id: 'aletaster', kit: '2.83.0' }, { id: 'auditor', kit: '2.119.9' }, { id: 'toller', kit: 'none' }], "src\\kit\\VERSION, else kit.json's pin; one that isn't a version is older");
+  assert.equal(A.strictByDefault(o), false, 'an older one GETs other pages without the token: every page answers as before');
+  const moved = path.join(home, 'elsewhere', 'aletaster');
+  install(moved, '2.120.1');
+  assert.deepEqual(A.olderStaff({ home: profile, env: { ALETASTER_HOME: moved, AUDITOR_HOME: '' } }).map((s) => s.id), ['auditor', 'toller'], 'its <ID>_HOME holds the install when set');
+  install(path.join(profile, '.auditor'), '2.120.0');
+  install(path.join(profile, '.toller'), '3.0.0');
+  install(path.join(profile, '.aletaster'), '2.120.0');
+  assert.equal(A.strictByDefault(o), true, 'the last of them updated');
+  assert.equal(A.strictPages({ KIT_STRICT_PAGES: '0' }), false, 'KIT_STRICT_PAGES=0 keeps a page open whatever is installed');
+  const kit = readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim().split('.').map(Number);
+  const from = A.STRICT_FROM.split('.').map(Number);
+  assert.ok(from[0] < kit[0] || (from[0] === kit[0] && (from[1] < kit[1] || (from[1] === kit[1] && from[2] <= kit[2]))), `STRICT_FROM (${A.STRICT_FROM}) is a kit at or before this one: a later one would hold every page open`);
 });
 
 test("a page's token by its address (kit 2.118.0): <id>.localhost on the port its server.json names, Manor's too, nothing else", () => {

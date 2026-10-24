@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { get as httpGet } from 'node:http';
 import type http from 'node:http';
 import os from 'node:os';
@@ -27,17 +27,107 @@ const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '
  * it by themselves). Strict (strictPages), a GET that is neither gets only what OPEN_GETS names. A browser opening
  * the page is sent to Manor (manorOpenUrl), which opens that same address signed in; while Manor isn't answering it
  * gets lockedPage, with a button to open it there. A program's GET / gets lockedPage too, never the token; anything
- * else 401. Not strict (until Manor and every staff member that reads another's
- * data send the token), every GET is answered as before, and a launch URL still signs the browser in, so pages are
- * ready when it is. POSTs are as before: the token, from the page's own origin or none; a cookie alone never presses a
+ * else 401. Strict is the default from kit 2.120.0, once every staff member installed in the account has that kit, all
+ * of whose staff send the token (strictByDefault). Not strict (KIT_STRICT_PAGES=0, or one of them is older), every GET
+ * is answered as before, and a launch URL still signs the browser in, so pages are ready when it is. POSTs are as before: the token, from the page's own origin or none; a cookie alone never presses a
  * button.
  */
 
-/** The switch that makes the page's GETs need the sign-in: KIT_STRICT_PAGES=1. Off by default for now. */
+/** The switch for the page's GETs needing the sign-in: KIT_STRICT_PAGES=1 always, 0 never, unset by default (strictByDefault). */
 export const STRICT_ENV = 'KIT_STRICT_PAGES';
 
-/** Whether GETs need the sign-in (the token or the cookie). */
-export const strictPages = (env: NodeJS.ProcessEnv = process.env) => env[STRICT_ENV] === '1';
+/**
+ * The kit that turns the sign-in on by default (kit 2.120.0): the first whose staff all send the token on their GETs to
+ * another page (kit 2.118.0's callers, and each staff member's own, merged before this kit reached it).
+ */
+export const STRICT_FROM = '2.120.0';
+
+/**
+ * Whether GETs need the sign-in (the token or the cookie): as KIT_STRICT_PAGES says, else by default (kit 2.120.0) once
+ * no staff member installed in this account runs a kit older than STRICT_FROM (strictByDefault). The staff update one at
+ * a time, and one from before then GETs other pages without the token: until the last of them has updated, every page
+ * answers as before.
+ */
+export function strictPages(env: NodeJS.ProcessEnv = process.env): boolean {
+  const said = env[STRICT_ENV];
+  if (said === '1') return true;
+  if (said === '0') return false;
+  return strictByDefault();
+}
+
+/** A kit version's parts, compared in order; a version that isn't one is older than any. */
+function kitBefore(v: string | null, than: string): boolean {
+  const a = /^(\d+)\.(\d+)\.(\d+)$/.exec(v ?? '');
+  if (!a) return true;
+  const b = than.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if (Number(a[i + 1]) !== b[i]) return Number(a[i + 1]) < b[i];
+  return false;
+}
+
+/** An installed agent's kit: src\kit\VERSION, which its release carries, else kit.json's pin; null when it has neither. */
+function installedKit(app: string): string | null {
+  try {
+    return readFileSync(path.join(app, 'src', 'kit', 'VERSION'), 'utf8').trim();
+  } catch {
+    try {
+      const kit = JSON.parse(readFileSync(path.join(app, 'kit.json'), 'utf8').replace(/^﻿/, ''))?.kit;
+      return typeof kit === 'string' ? kit : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * The staff installed in this account whose kit is older than `from` (STRICT_FROM): each folder in the home that holds an
+ * agent's install (`.<id>\app` with a kit.json, Manor's too), and each `<ID>_HOME` that does. Their id and kit, by id.
+ */
+export function olderStaff(o: { home?: string; env?: NodeJS.ProcessEnv; from?: string } = {}): { id: string; kit: string | null }[] {
+  const home = o.home ?? os.homedir();
+  const env = o.env ?? process.env;
+  const apps = new Map<string, string>();
+  let names: string[] = [];
+  try {
+    names = readdirSync(home);
+  } catch {
+    // No home to look in: nothing installed here.
+  }
+  for (const n of names) if (/^\.[a-z][a-z0-9-]*$/.test(n)) apps.set(n.slice(1), path.join(home, n, 'app'));
+  for (const [k, v] of Object.entries(env)) {
+    const m = /^([A-Z][A-Z0-9_]*)_HOME$/.exec(k);
+    if (m && v) apps.set(m[1].toLowerCase().replace(/_/g, '-'), path.join(v, 'app'));
+  }
+  const older: { id: string; kit: string | null }[] = [];
+  for (const [id, app] of [...apps].sort(([a], [b]) => a.localeCompare(b))) {
+    if (!existsSync(path.join(app, 'kit.json'))) continue;
+    const kit = installedKit(app);
+    if (kitBefore(kit, o.from ?? STRICT_FROM)) older.push({ id, kit });
+  }
+  return older;
+}
+
+/** How long what strictByDefault found is kept: every GET asks, and an update moves it at most once a minute or so. */
+const LOOK_MS = 60_000;
+let looked: { at: number; strict: boolean } | null = null;
+
+/**
+ * The default (kit 2.120.0): strict once no staff member installed in this account runs a kit older than STRICT_FROM
+ * (olderStaff), looked at once a minute. Never under node --test unless the test gives the home to look in: a test's
+ * pages answer as before, whatever this PC has installed.
+ */
+export function strictByDefault(o: { home?: string; env?: NodeJS.ProcessEnv; now?: number } = {}): boolean {
+  if (process.env.NODE_TEST_CONTEXT && !o.home) return false;
+  const now = o.now ?? Date.now();
+  if (!o.home && looked && now - looked.at < LOOK_MS) return looked.strict;
+  const strict = olderStaff(o).length === 0;
+  if (!o.home) looked = { at: now, strict };
+  return strict;
+}
+
+/** For tests: look again at the next strictByDefault. */
+export const forgetStrictLook = () => {
+  looked = null;
+};
 
 /**
  * The GETs anyone on this PC may make, signed in or not: whether the page is up (Manor, the setup, the Steward, the

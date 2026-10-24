@@ -101,6 +101,9 @@ export function usePageData<Body>(): { data: PageData<Body>; reload: () => Promi
     try {
       const r = await fetch('/api/page', { headers: { accept: 'application/json' } });
       if (r.ok) setData((await r.json()) as PageData<Body>);
+      // Not signed in (kit 2.120.0): a page opened before its GETs needed the sign-in, in a browser without its cookie.
+      // Opened again, it goes through Castellan and comes back signed in, or says to open it from there.
+      else if (r.status === 401) location.reload();
     } catch {
       // The page is restarting, or this PC is busy: the next look.
     } finally {
