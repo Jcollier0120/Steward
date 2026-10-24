@@ -13,7 +13,7 @@
 # - orient false reads a photo as stored, ignoring its EXIF orientation.
 # - pages (PDFs): the pages to read, 0-based; null for the first pdfMaxPages. A PDF's pages are rendered to PNGs in
 #   tmpDir, read, and deleted. `thumb` is where to save a small render of page 1 for the page's thumbnail.
-# - render (kit 2.107.0): PDFs' pages are only rendered, for the model to read (ocr-npu.ts): each is kept in tmpDir and
+# - render (kit 2.114.0): PDFs' pages are only rendered, for the model to read (ocr-npu.ts): each is kept in tmpDir and
 #   answered as {"page","png","frame"} in "rendered" instead of "read" (frame: the width it was rendered for, at pdfScale;
 #   Windows may render it wider, at the display's scale). No OCR language is needed for it.
 # Every answer is ASCII: anything else goes as \uXXXX, so no console code page can change it (437 made a bullet a bell,

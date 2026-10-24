@@ -40,7 +40,8 @@ the model must learn from the words around them which it is, and the repository'
 `draw.py` draws each line as GDI and GDI+ draw it (ClearType, grey, grid-fitted and black-and-white, through
 `render-lines.ps1`, in the fonts that have its every character, as `fonts.ps1` finds them) or as Edge draws it at 100%
 to 250%. The check's held-out fonts and their near twins are never used. Drawing 200,000 lines takes about an hour.
-`fixtures.ts` draws the check's own pictures, which training only scores against.
+`fixtures.ts` draws the check's own pictures, which training only scores against (with the kit filled in the
+repository: `npm run kit`).
 
 ```
 python -I -X utf8 train.py models data/train data/val fx runs/r2 --steps 24000 --lr 5e-4 --every 2000 --workers 3

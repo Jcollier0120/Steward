@@ -2,7 +2,7 @@
 // lines}), for train.py and run.py to score against: node tools/ocr-model/fixtures.ts <dir>
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { drawBrowser, drawGdi, findEdge } from '../../kit/node/ocr-check.ts';
+import { drawBrowser, drawGdi, findEdge } from '../../src/kit/ocr-check.ts';
 
 const dir = path.resolve(process.argv[2]);
 mkdirSync(dir, { recursive: true });

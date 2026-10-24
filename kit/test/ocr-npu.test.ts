@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
 
-// The text reader's own model (ocr-npu.ts, kit 2.107.0): which engine and plugin a PC takes, the fetch into the
+// The text reader's own model (ocr-npu.ts, kit 2.114.0): which engine and plugin a PC takes, the fetch into the
 // reader's folder (real zips, unpacked by Windows' tar), the program's protocol (a stand-in program, so no model is
 // needed), and the engine's choices. The real program on a real NPU is spec/OCR.md's measuring, not a test here.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-ocr-npu-'));

@@ -9,7 +9,7 @@ import { powershell, psQuote } from './ps.ts';
 /**
  * The staff's one text reader (kit 2.102.0, spec/OCR.md): the text in pictures (screenshots, scans, photos of pages)
  * and in PDFs, for the Clerk, the Scribe, Reeve and the Warrener.
- * - Pictures, and PDF pages that have no text of their own (scans), are read by the engine. From kit 2.107.0 that is
+ * - Pictures, and PDF pages that have no text of their own (scans), are read by the engine. From kit 2.114.0 that is
  *   the kit's own model, on the NPU where it can (ocr-npu.ts), PDF pages rendered for it by ocr.ps1; Windows' built-in
  *   OCR (Windows.Media.Ocr, on the processor, through ocr.ps1) reads where the model can't, and whatever it didn't
  *   read. The engine sits behind this API: the staff never name it, and each result says which one read it.

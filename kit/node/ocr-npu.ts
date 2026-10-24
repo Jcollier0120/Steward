@@ -12,7 +12,7 @@ import { powershell, psStart } from './ps.ts';
 import { download, type Download } from './setup.ts';
 
 /**
- * The staff's text reader's own model (kit 2.107.0, spec/OCR.md "Our own model"): PP-OCRv6 tiny's text detector and
+ * The staff's text reader's own model (kit 2.114.0, spec/OCR.md "Our own model"): PP-OCRv6 tiny's text detector and
  * its recognizer fine-tuned on screen and document text (Apache-2.0; tools/ocr-model), read by ocr-npu.cs on the NPU
  * through ONNX Runtime and the NPU maker's plugin for it. ocr.ts reads with it where it can, and with Windows' OCR
  * where it can't, so the staff never wait on it:

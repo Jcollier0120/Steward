@@ -52,7 +52,7 @@ export const SIGNED_BY = '6B654D9C34800D4307D42ACD63B925EDA5CE8D33';
 
 /**
  * A helper's source and output type, hashed with plain line ends: a checkout's CRLF names the same helper. Its
- * references and manifest, when it has them, are hashed too (the helpers before kit 2.107.0 have neither, and keep
+ * references and manifest, when it has them, are hashed too (the helpers before kit 2.114.0 have neither, and keep
  * their names).
  */
 export function helperHash(helper: Helper, source: string): string {
