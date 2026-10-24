@@ -6,14 +6,15 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { hasObject, readBatch, showFile } from '../src/git.ts';
 import { run, type Runner } from '../src/run.ts';
+import { gitExe } from '../src/kit/git-exe.ts';
 
 // Files read at a commit together, one `git cat-file --batch` for the reads asked of a repository at once (Steward 0.35.47).
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-show-'));
 after(() => rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
-const g = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
+const g = (cwd: string, ...args: string[]) => execFileSync(gitExe(), args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 
 const repo = path.join(home, 'repo');
-execFileSync('git', ['init', '-q', '-b', 'main', repo], { windowsHide: true });
+execFileSync(gitExe(), ['init', '-q', '-b', 'main', repo], { windowsHide: true });
 g(repo, 'config', 'user.email', 't@example.test');
 g(repo, 'config', 'user.name', 't');
 g(repo, 'config', 'core.autocrlf', 'false');
@@ -46,7 +47,7 @@ function counting() {
 
 const shown = (spec: string) => {
   try {
-    return execFileSync('git', ['show', spec], { cwd: repo, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    return execFileSync(gitExe(), ['show', spec], { cwd: repo, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
   } catch {
     return null;
   }

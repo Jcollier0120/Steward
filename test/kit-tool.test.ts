@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { gitExe } from '../src/kit/git-exe.ts';
 
 // tools/kit.ts, the one file every agent carries: it fills src/kit from a kit tree, a sibling Steward
 // checkout, the cache, or a kit release (here a local server stands in for GitHub).
@@ -205,7 +206,7 @@ test("a release that doesn't match its SHA256SUMS.txt is refused, and nothing is
 /** A Steward clone whose kit\ is at `version`, with the tags kit-v<v> its fetch brought for each released `v`. */
 function stewardClone(dir: string, version: string, released: string[]): string {
   kitTree(path.join(dir, 'kit'), version);
-  const git = (...a: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=Steward test', '-c', 'user.email=steward@example.com', ...a], { stdio: 'ignore', windowsHide: true });
+  const git = (...a: string[]) => execFileSync(gitExe(), ['-C', dir, '-c', 'user.name=Steward test', '-c', 'user.email=steward@example.com', ...a], { stdio: 'ignore', windowsHide: true });
   git('init', '--quiet');
   git('add', '-A');
   git('commit', '--quiet', '-m', `kit ${version}`);

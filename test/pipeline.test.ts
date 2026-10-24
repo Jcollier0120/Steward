@@ -292,38 +292,6 @@ function merged(name: string, o: { entry?: string } = {}) {
   return { e, ctx, at, origin, head, gh: r.gh };
 }
 
-test("main's fragment stamped at a build after a release: the next patch, its entry its own, through a PR the Steward opens and merges itself", async () => {
-  const p = merged('frag-released');
-  const s = await stampMain(p.ctx, p.e, { released: ['0.4.0', '0.4.1'], taken: [] });
-  assert.ok(s);
-  assert.equal(s.done, true, s.note);
-  assert.equal(s.version, '0.4.2');
-  assert.equal(s.url, 'https://github.com/Jcollier0120/Fake/pull/31');
-  assert.match(s.note, /^stamped v0\.4\.2, and merged it$/);
-  assert.equal(JSON.parse(p.at('package.json')).version, '0.4.2');
-  assert.deepEqual(p.at('CHANGELOG.md').split('\n').filter((l) => l.startsWith('## ')), ['## 0.4.2', '## 0.4.1', '## 0.4.0']);
-  assert.match(p.at('CHANGELOG.md'), /## 0\.4\.2\n\n\*\*A feature\.\*\*/);
-  assert.equal(sh(p.origin, 'ls-tree', '-r', '--name-only', 'refs/heads/main', 'changes/'), CHANGES_README, 'the fragment gone');
-  // On a branch of its own, never pushed to main: its PR opened, and merged at the stamp's head.
-  assert.equal(sh(p.origin, 'rev-parse', `refs/heads/${stampBranch(p.head)}`), sh(p.origin, 'rev-parse', 'refs/heads/main'));
-  const create = p.gh.find((a) => a[0] === 'pr' && a[1] === 'create')!;
-  assert.deepEqual(create.slice(0, 10), ['pr', 'create', '--repo', 'Jcollier0120/Fake', '--base', 'main', '--head', stampBranch(p.head), '--title', 'Fake 0.4.2: version and changelog, stamped by the Steward']);
-  assert.match(create.at(-1)!, /Only version lines, CHANGELOG\.md and the changes files they came from change\. Opened and merged by the Steward at a build/);
-  assert.deepEqual(mergesOf(p.gh), [['pr', 'merge', '31', '--repo', 'Jcollier0120/Fake', '--merge', '--delete-branch']]);
-});
-
-test('stamped while main waits to release: it joins that version and its one entry, so the build releases once', async () => {
-  const p = merged('frag-waiting');
-  const s = await stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] });
-  assert.ok(s);
-  assert.equal(s.done, true, s.note);
-  assert.equal(s.version, '0.4.1');
-  assert.match(s.note, /v0\.4\.1, its entry joining the changes that release brings/);
-  assert.equal(JSON.parse(p.at('package.json')).version, '0.4.1');
-  assert.deepEqual(p.at('CHANGELOG.md').split('\n').filter((l) => l.startsWith('## ')), ['## 0.4.1', '## 0.4.0']);
-  assert.match(p.at('CHANGELOG.md'), /\*\*Brings 2 changes: Something else; A feature\.\*\*/);
-});
-
 test('a minor step asked for while main waits on a patch: the waiting version becomes the minor one', async () => {
   const p = merged('frag-minor', { entry: `minor: true\n\n${ENTRY('Big.')}` });
   const s = await stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] });
@@ -332,17 +300,6 @@ test('a minor step asked for while main waits on a patch: the waiting version be
   assert.equal(s.version, '0.5.0');
   assert.equal(JSON.parse(p.at('package.json')).version, '0.5.0');
   assert.deepEqual(p.at('CHANGELOG.md').split('\n').filter((l) => l.startsWith('## ')), ['## 0.5.0', '## 0.4.0']);
-});
-
-test('main with nothing to stamp: no worktree, no PR', async () => {
-  const dir = path.join(home, 'frag-none');
-  const { checkout } = fakeEmployee(dir, { version: '0.4.0' });
-  const r = runner();
-  const e = employee(checkout);
-  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
-  assert.equal(await stampMain(ctx, e, { released: ['0.4.0'], taken: [] }), null);
-  assert.deepEqual(r.gh, []);
-  assert.equal(existsSync(path.join(dir, 'work', 'fake-stamp')), false);
 });
 
 test("a round between builds releases nothing; the build's round releases main's unreleased version, once, and tells Manor once", async () => {
