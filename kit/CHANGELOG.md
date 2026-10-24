@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.124.0
+
+**Wherever no NPU can read with our own model, it reads on the processor: an NPU that fails its self-check, a Snapdragon's included, no longer leaves the reading to Windows OCR. The owner chose how well it reads over the power it costs.**
+
+### What changed
+
+- **ocr-npu.ts** `ON_PROCESSOR` is true. A Snapdragon or an Intel NPU 3720 whose NPU reads the program's own picture differently now reads with the model on the processor. Before, Windows OCR read. AMD and Intel PCs read on the processor as in 2.121.0 and 2.122.0.
+- **`ON_PROCESSOR_MAKERS` and `onProcessor(env)` (2.121.0) are gone**: with every maker on the processor, `ON_PROCESSOR` says it.
+- **Windows OCR still reads** until the model has been fetched, when `KIT_OCR_ENGINE=windows` says so, and for a background batch the NPU's line is too long for.
+
+### Before you update
+
+- Nothing. No staff member uses `ON_PROCESSOR_MAKERS` or `onProcessor`.
+
 ## 2.123.0
 
 **A published release signs its PowerShell scripts, as it signs its native files: Smart App Control runs a signed script as written, and an unsigned one in Constrained Language Mode.**

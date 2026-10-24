@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.210
+
+**It hands out the kit 2.124.0: wherever a PC's NPU can't read with our own model, the staff read the text in pictures with it on the processor, a Snapdragon's included.**
+
+### What changed
+
+- **If a PC's NPU fails the text reader's own test, our model still reads, on the processor.** Before, Windows' own text recognition took over. This takes more of the processor and more power for each picture, and reads far more of the text right.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.209
 
 **It hands out the kit 2.123.0: the staff's PowerShell scripts are signed when they're released, so a PC with Smart App Control on runs them as written.**
