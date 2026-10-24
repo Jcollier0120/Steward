@@ -11,7 +11,7 @@ import { after, test } from 'node:test';
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-ocr-'));
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { batches, ocrFiles, ocrImages, parseAnswers, OCR_ENGINE } = await import('./fixture/src/kit/ocr.ts');
+const { batches, ocrFiles, ocrImages, parseAnswers, readInLanguage, OCR_ENGINE } = await import('./fixture/src/kit/ocr.ts');
 const { powershell, psQuote } = await import('./fixture/src/kit/ps.ts');
 const pdfMake = await import('./fixture/src/kit/pdf-make.ts');
 
@@ -263,4 +263,93 @@ test("the model reads what it can, in the caller's lane; Windows' OCR reads what
   assert.deepEqual(s.layout![0].lines[0].words[0], { t: 'model', x: 81.6, y: 163.2, w: 244.8, h: 40.8 });
   assert.ok(readFileSync(thumb).length > 100, 'page 1 rendered for the thumbnail');
   assert.deepEqual(readdirSync(tmpRoot), [], 'the rendered pages removed with the batch');
+});
+
+test("a page the model read as if in another alphabet is read again by Windows' OCR in it; only that alphabet's lines replace the model's", { skip: process.platform !== 'win32' }, async () => {
+  const dir = path.join(home, 'again');
+  mkdirSync(dir, { recursive: true });
+  const ru = path.join(dir, 'ru.png');
+  const en = path.join(dir, 'en.png');
+  await makeTextPng(ru, 'Invoice 4521');
+  copyFileSync(ru, en);
+  const jpg = path.join(dir, 'scan.jpg');
+  await makeTextPng(jpg, 'Receipt 7731', true);
+  const scan = path.join(dir, 'scan.pdf');
+  writeFileSync(scan, pdfMake.makePdf([{ jpeg: readFileSync(jpg) }]));
+  // The model reads Russian as Latin look-alikes; en.png it reads well.
+  const word = (t: string, y: number) => ({ t, x: 100, y, w: 300, h: 50 });
+  const model = {
+    engine: 'model-npu' as const,
+    async read(pages: any[]) {
+      return pages.map((p, id) => ({
+        id,
+        width: 2000,
+        height: 1000,
+        ms: 3,
+        engine: 'model-npu' as const,
+        lines:
+          path.basename(p.file) === 'en.png'
+            ? [{ text: 'Invoice 4521 is paid', words: [word('Invoice', 200)] }]
+            : [
+                { text: 'CuëT N9 4521 oT 12 MapTa', words: [word('CuëT', 200)] },
+                { text: 'Total: 184 EUR', words: [word('Total:', 300)] },
+              ],
+      }));
+    },
+  };
+  const asked: any[] = [];
+  const readAgain = async (pages: any[], language: string) => {
+    asked.push({ language, pages: pages.map((p) => [path.basename(p.file).replace(/^job\d+-/, ''), p.scale, p.orient]) });
+    const read = { page: 0, width: 2000, height: 1000, lines: [{ text: 'Счёт № 4521 от 12 марта', words: [{ t: 'Счёт', x: 100, y: 200, w: 320, h: 50 }] }, { text: 'Tota1: 184 EUR', words: [word('Tota1:', 300)] }] };
+    return new Map(pages.map((_, i) => [i, { i, ok: true, ms: 40, pageCount: 1, read: [read] }]));
+  };
+  const logged: string[] = [];
+  const tmpRoot = path.join(dir, 'tmp');
+  const [r, e, s] = await ocrFiles([{ path: ru, kind: 'image' }, { path: en, kind: 'image' }, { path: scan, kind: 'pdf' }], {
+    tmpRoot,
+    boxes: true,
+    modelReader: async () => model,
+    otherAlphabets: async () => ['ru-RU'],
+    readAgain,
+    log: (l) => logged.push(l),
+  });
+  assert.deepEqual(asked, [{ language: 'ru-RU', pages: [['ru.png', 1, true], ['p0.png', 1, false]] }], 'only the pages that look unread, each as the model read it');
+  assert.equal(r.engine, 'model-npu+windows');
+  assert.equal(r.text, 'Счёт № 4521 от 12 марта\nTotal: 184 EUR', "the Russian line is Windows', the Latin one stays the model's");
+  assert.equal(r.ms, 43);
+  assert.equal(e.engine, 'model-npu');
+  assert.equal(e.text, 'Invoice 4521 is paid');
+  assert.equal(s.engine, 'model-npu+windows');
+  assert.deepEqual(s.layout![0].lines[0].words[0], { t: 'Счёт', x: 81.6, y: 163.2, w: 261.1, h: 40.8 }, "Windows' boxes at pdfScale, as the model's");
+  assert.deepEqual(logged.filter((l) => /again/.test(l)), ["read 2 pages again with Windows' OCR in ru-RU: kept 2 of its lines"]);
+  assert.deepEqual(readdirSync(tmpRoot), []);
+});
+
+test("Windows' OCR reads again in the language asked, at each picture's scale; Latin text keeps the model's read, and a language that's gone changes nothing", { skip: process.platform !== 'win32' }, async () => {
+  const dir = path.join(home, 'language');
+  mkdirSync(dir, { recursive: true });
+  const png = path.join(dir, 'printer.png');
+  await makeTextPng(png, 'Error 25006: the printer is offline');
+  const got = await readInLanguage([{ file: png, scale: 2, orient: false }], 'en-US', dir);
+  const a = got.get(0);
+  assert.ok(a?.ok, a?.error);
+  assert.match(a.read[0].text, /printer is offline/);
+  assert.deepEqual([a.read[0].width, a.read[0].height], [900, 160], "the picture's own size, read twice as big");
+  const w = a.read[0].lines[0].words[0];
+  assert.ok(w.x >= 0 && w.x + w.w <= 900 && w.y + w.h <= 160, `its boxes in the picture's own pixels: ${JSON.stringify(w)}`);
+  await assert.rejects(readInLanguage([{ file: png, scale: 1, orient: true }], 'xx-XX', dir), /no OCR language xx-XX/);
+
+  // The model's read looks like another alphabet; Windows reads it in a Latin one, or can't: the model's read stands.
+  const model = {
+    engine: 'model-npu' as const,
+    async read(pages: any[]) {
+      return pages.map((_, id) => ({ id, width: 900, height: 160, ms: 3, engine: 'model-npu' as const, lines: [{ text: 'CuëT N9 25006 oT MapTa', words: [{ t: 'CuëT', x: 20, y: 50, w: 600, h: 40 }] }] }));
+    },
+  };
+  for (const language of ['en-US', 'xx-XX']) {
+    const [r] = await ocrFiles([{ path: png, kind: 'image' }], { tmpRoot: path.join(dir, 'tmp'), modelReader: async () => model, otherAlphabets: async () => [language] });
+    assert.ok(r.ok, r.error);
+    assert.equal(r.engine, 'model-npu', language);
+    assert.equal(r.text, 'CuëT N9 25006 oT MapTa', language);
+  }
 });

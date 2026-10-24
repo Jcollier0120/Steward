@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Lane } from './npu-queue.ts';
 import { modelReader, type ModelReader, type PageAnswer, type PageAsk } from './ocr-npu.ts';
+import { keepBetter, looksUnread, otherAlphabetLanguages } from './ocr-reread.ts';
 import { needsOcr, PDF_TEXT_MAX_BYTES, readPdfText, type PdfTextPage } from './pdf-text.ts';
 import { powershell, psQuote } from './ps.ts';
 
@@ -12,7 +13,9 @@ import { powershell, psQuote } from './ps.ts';
  * - Pictures, and PDF pages that have no text of their own (scans), are read by the engine. From kit 2.114.0 that is
  *   the kit's own model, on the NPU where it can (ocr-npu.ts), PDF pages rendered for it by ocr.ps1; Windows' built-in
  *   OCR (Windows.Media.Ocr, on the processor, through ocr.ps1) reads where the model can't, and whatever it didn't
- *   read. The engine sits behind this API: the staff never name it, and each result says which one read it.
+ *   read. From kit 2.129.0 it also reads again, in that language, a page the model read as if in another alphabet,
+ *   where Windows has an OCR language of one (ocr-reread.ts). The engine sits behind this API: the staff never name
+ *   it, and each result says which one read it.
  * - A PDF that carries its text is read from its text layer (pdf-text.ts): exact, and nothing is rendered.
  * Many files go to one PowerShell script (in the kit's PowerShell worker, ps.ts): starting one costs about a second.
  */
@@ -64,7 +67,11 @@ export interface OcrResult {
   cloudOnly?: boolean;
   /** A PDF's text from its own text layer (`text`), the engine (`ocr`), or some pages each (`mixed`). */
   source?: 'text' | 'ocr' | 'mixed';
-  /** The engine that read what was OCRed: 'model-npu' or 'model-cpu' (the kit's model, ocr-npu.ts), or 'windows' (Windows.Media.Ocr). */
+  /**
+   * The engine that read what was OCRed: 'model-npu' or 'model-cpu' (the kit's model, ocr-npu.ts), or 'windows'
+   * (Windows.Media.Ocr); 'model-npu+windows' or 'model-cpu+windows' when some lines are Windows' read again in another
+   * alphabet (ocr-reread.ts).
+   */
   engine?: string;
   /** With `boxes`: each page read, its lines with their words' boxes. */
   layout?: OcrPage[];
@@ -95,6 +102,10 @@ export interface OcrOptions {
   lane?: Lane;
   /** For tests: the model's reader (ocr-npu.ts' modelReader), or null for Windows' OCR alone. */
   modelReader?: () => Promise<ModelReader | null>;
+  /** For tests: Windows' OCR languages in an alphabet other than Latin (ocr-reread.ts' otherAlphabetLanguages); none reads the model's pages as they are. */
+  otherAlphabets?: () => Promise<string[]>;
+  /** For tests: Windows' OCR in a language, over these pictures (ocr.ps1), its answers by index. */
+  readAgain?: (pages: PageAsk[], language: string) => Promise<Map<number, any>>;
   /** Told what's worth a line in the agent's log: the model fetched, or why it isn't used. */
   log?: (line: string) => void;
 }
@@ -322,8 +333,10 @@ async function readWithModel(model: ModelReader, sent: Sent[], dir: string, opts
     if (r?.ok) for (const p of Array.isArray(r.rendered) ? r.rendered : []) asks.push({ s, page: Number(p.page), frame: Number(p.frame), ask: { file: String(p.png), scale: 1, orient: false } });
   }
   const got = asks.length ? await model.read(asks.map((a) => a.ask), { lane: opts.lane }) : [];
+  const mixed = await readOtherAlphabets(asks.map((a) => a.ask), got, dir, opts);
 
   const byJob = new Map<number, { read: any[]; ms: number; engine: string; failed: boolean }>();
+  const plus = `+${OCR_ENGINE}`;
   asks.forEach((a, k) => {
     const job = byJob.get(a.s.i) ?? { read: [], ms: 0, engine: model.engine, failed: false };
     byJob.set(a.s.i, job);
@@ -332,7 +345,7 @@ async function readWithModel(model: ModelReader, sent: Sent[], dir: string, opts
       job.failed = true;
       return;
     }
-    job.engine = g.engine;
+    job.engine = g.engine + (mixed.has(k) || job.engine.endsWith(plus) ? plus : '');
     job.ms += Number(g.ms ?? 0);
     // A PDF's page, as rendered wider at the display's scale: its size and boxes given at pdfScale, as the text layer's.
     job.read.push(modelPage(g, a.page, a.frame && g.width ? a.frame / g.width : 1));
@@ -345,6 +358,55 @@ async function readWithModel(model: ModelReader, sent: Sent[], dir: string, opts
     if (s.j.kind === 'pdf' && r?.ok && !job?.failed) out.set(s.i, { i: s.i, ok: true, ms: Number(r.ms ?? 0) + (job?.ms ?? 0), pageCount: Number(r.pageCount ?? 0), read: job?.read ?? [], engine: job?.engine ?? model.engine });
   }
   return out;
+}
+
+/**
+ * The pages the model read as if in another alphabet (ocr-reread.ts' looksUnread), read again by Windows' OCR in each
+ * language of another alphabet Windows has, the better read kept line by line in `got`. The pages that kept some of
+ * Windows' lines, by index.
+ */
+async function readOtherAlphabets(asks: PageAsk[], got: (PageAnswer | null)[], dir: string, opts: BatchOptions): Promise<Set<number>> {
+  const mixed = new Set<number>();
+  const unread = asks.map((_, k) => k).filter((k) => got[k] && !got[k]!.error && looksUnread(got[k]!.lines ?? []));
+  if (!unread.length) return mixed;
+  const readAgain = opts.readAgain ?? ((pages: PageAsk[], language: string) => readInLanguage(pages, language, dir));
+  for (const language of await (opts.otherAlphabets ?? otherAlphabetLanguages)()) {
+    // Windows can't read it now (the language removed, PowerShell gone): the model's read stands.
+    const again = await readAgain(unread.map((k) => asks[k]), language).catch(() => new Map<number, any>());
+    let kept = 0;
+    unread.forEach((k, n) => {
+      const a = again.get(n);
+      const page = a?.ok && Array.isArray(a.read) ? a.read[0] : null;
+      if (!page || !Array.isArray(page.lines)) return;
+      const better = keepBetter(got[k]!.lines ?? [], page.lines);
+      if (!better.taken) return;
+      kept += better.taken;
+      got[k] = { ...got[k]!, lines: better.lines, ms: Number(got[k]!.ms ?? 0) + Number(a.ms ?? 0) };
+      mixed.add(k);
+    });
+    opts.log?.(`read ${unread.length} page${unread.length === 1 ? '' : 's'} again with Windows' OCR in ${language}: kept ${kept} of its lines`);
+  }
+  return mixed;
+}
+
+/** Windows' OCR in `language` over these pictures, each at its own scale and orientation, with their lines' boxes: ocr.ps1's answers by index. */
+export async function readInLanguage(pages: PageAsk[], language: string, dir: string): Promise<Map<number, any>> {
+  const listFile = path.join(dir, `again-${language}.json`);
+  writeFileSync(
+    listFile,
+    JSON.stringify({
+      scale: 1,
+      boxes: true,
+      orient: true,
+      pdfMaxPages: 1,
+      pdfScale: 1,
+      render: false,
+      language,
+      tmpDir: path.resolve(dir),
+      jobs: pages.map((p, i) => ({ i, path: path.resolve(p.file), kind: 'image', thumb: null, pages: null, scale: p.scale, orient: p.orient })),
+    }),
+  );
+  return parseAnswers(await powershell(`$ListFile = ${psQuote(listFile)}\n${OCR_SCRIPT}`, { timeoutMs: 30_000 + pages.length * 15_000 }));
 }
 
 /** A PDF's result from its text pages and the pages the engine read, in page order. */

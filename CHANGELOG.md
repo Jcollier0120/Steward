@@ -18,6 +18,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. If one of your staff hasn't taken this update (its updates are paused, say), the pages stay open as before until it does.
 
+## 0.36.215
+
+**It hands out the kit 2.129.0: text in another alphabet (Russian, Greek, Chinese, Arabic…) is read again by Windows' own text recognition, where Windows has that language's OCR installed. Our own model reads the Latin alphabet alone, and every Latin line keeps its read.**
+
+### What changed
+
+- **On a PC whose Windows has an OCR language of another alphabet**, a page our model read as Latin look-alikes is read again by Windows' own OCR in that language. Windows' lines in that alphabet replace the model's, and every other line stays the model's.
+- **On any other PC**, nothing changes.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.213
 
 **It hands out the kit 2.127.0: AMD's NPU was tried for reading the text in pictures, and reads it worse, so an AMD PC keeps reading it with our own model on the processor.**

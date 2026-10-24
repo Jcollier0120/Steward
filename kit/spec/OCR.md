@@ -1,6 +1,6 @@
 # The text reader
 
-> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/OCR.md` in the Steward's repository, and `src/kit/spec/OCR.md` in every agent that takes the part. The reader is the kit's node part: `ocr.ts` (the API), `pdf-text.ts` (PDFs' text layer), `ocr-npu.ts` with `ocr-npu.cs` (our own model on the NPU), `ocr.ps1` (Windows' OCR, and PDFs' pages rendered), and its check, `ocr-check.ts` with `ocr-fixtures.ps1` and `ocr-check.json`. The model is made by `tools/ocr-model` in the Steward's repository.
+> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/OCR.md` in the Steward's repository, and `src/kit/spec/OCR.md` in every agent that takes the part. The reader is the kit's node part: `ocr.ts` (the API), `pdf-text.ts` (PDFs' text layer), `ocr-npu.ts` with `ocr-npu.cs` (our own model on the NPU), `ocr-reread.ts` (other alphabets, read again by Windows' OCR), `ocr.ps1` (Windows' OCR, and PDFs' pages rendered), and its check, `ocr-check.ts` with `ocr-fixtures.ps1` and `ocr-check.json`. The model is made by `tools/ocr-model` in the Steward's repository.
 
 The staff that read text in pictures read it through one reader, the kit's, since kit 2.102.0 (decided 2026-10-23):
 
@@ -33,7 +33,7 @@ const pages = await ocrImages(['shot.png']);
 - `ok`, `text` (a line a line, pages apart by a blank line), `ms`, `pages` (read), `pageCount` (in the file), `error`.
 - `cloudOnly`: OneDrive's online-only. Opening the file would download it, so it isn't read (PDFs are checked before Node opens them, pictures in `ocr.ps1`).
 - `source`: `'text'` (the PDF's own text layer), `'ocr'` (the engine), or `'mixed'` (some pages each).
-- `engine`: the engine that read what was OCRed (`'model-npu'`, `'model-cpu'`, or `'windows'`, `OCR_ENGINE`); none when nothing was.
+- `engine`: the engine that read what was OCRed (`'model-npu'`, `'model-cpu'`, or `'windows'`, `OCR_ENGINE`); none when nothing was. It's `'model-npu+windows'` or `'model-cpu+windows'` when some lines are Windows OCR's, read again in another alphabet ([Other alphabets](#other-alphabets)), and then `ms` counts both reads.
 - `layout`, with `boxes`: each page read (`OcrPage`: `file`, `page`, `width`, `height`, `lines`, `source`), each line's words (`OcrWord`: `t`, `x`, `y`, `w`, `h`) in the picture's own pixels. A PDF page's are in the page as rendered at `pdfScale` (96 dpi times it), whether its text came from the text layer or the engine, so one frame holds both.
 
 Its options:
@@ -280,6 +280,26 @@ No group reads worse with the model than with Windows OCR. A picture costs 7.0 t
 **And so does any PC whose NPU fails its self-check (kit 2.124.0, the owner's call, 2026-10-24).** A Snapdragon whose NPU reads the program's own picture differently, or an Intel NPU 3720 that does, reads on the processor rather than with Windows OCR. With every maker's PC on the processor, the list of makers went: `ON_PROCESSOR` is simply true. On the X2's processor that is the 498 ms and 1,452 ms of processor a picture above, and a Snapdragon fetches its usual files (Qualcomm's plugin is used only on the NPU). Windows OCR still reads until the model has been fetched, and when `KIT_OCR_ENGINE=windows` says so. Since kit 2.126.0 a background batch the NPU's line is too long for is read on the processor too ([How it runs](#how-it-runs), the NPU queue).
 
 What could change that: reading a picture in one piece on the processor rather than in the NPU's tiles (a 1280×720 screenshot is six tiles, 2.7 times its pixels), or an int8 copy. Neither is measured yet. `KIT_OCR_ENGINE=model` reads on the processor anyway.
+
+### Other alphabets
+
+The model reads the Latin alphabet alone. Its 189 characters are ASCII, Latin-1's letters (é, ü, ñ, ß) and some symbols. Text in another alphabet comes out of it as Latin look-alikes or scraps. On Intel's NPU, Russian "Счёт № 4521 от 12 марта" reads as "CuëT N9 4521 oT 12 MapTa", and Chinese "发票号码 4521" as "S18 4521". Windows OCR reads such text where the account has its OCR language installed. So since kit 2.129.0 (the owner's call, 2026-10-24), Windows OCR reads again what the model reads so (`ocr-reread.ts`):
+
+- **Which PCs.** Those where Windows has an OCR language of another alphabet for the account: Russian, Greek, Serbian in Cyrillic, Arabic, Chinese, Japanese or Korean. `otherAlphabetLanguages` finds them among `AvailableRecognizerLanguages` (those whose script isn't `Latn`), asking once an hour. On any other PC nothing changes.
+- **Which pages.** A page whose model read looks like another alphabet (`looksUnread`):
+  - a line with two odd words, or with half its words odd. A word is odd when its case changes inside it ("MapTa") or signs sit among its letters ("O/IaTUTb");
+  - or a page mostly in capitals, since Cyrillic and Greek capitals read as plain Latin ones ("ИТОГО" as "TOTO").
+
+  Latin text sometimes looks so too (getElementById, iPhone, a poster). Such text is read again for nothing, and keeps the model's read.
+- **The read again.** Windows OCR reads the page again in each such language (`ocr.ps1` with `language`). It reads at the scale and orientation the model used, and returns its lines' boxes.
+- **The better read, line by line** (`keepBetter`).
+  - A line of Windows' read holds another alphabet when at least two of its letters, and 15% of them, are neither Latin nor drawn like Latin. Letters drawn like Latin include Cyrillic а, е, о, р, с, Т and Greek Α, Ο, ρ.
+  - Such a line replaces the model's lines it overlaps (by half the smaller box). Windows' other lines there come with it, left to right, so a line of both alphabets reads whole. A line where the model found nothing goes in by its height.
+  - Every other line stays the model's. Text in the Latin alphabet always keeps the model's read, which reads 1,212 of the check's 1,253 lines exactly against Windows OCR's 736.
+- **What it says.** `engine` ends in `+windows` when Windows' lines are in the result. The agent's log has a line for each read again. `ocr-check` measures each engine alone, without it.
+- **What it costs.** A Windows OCR read of each such page, beside the model's: 465 mJ a picture on a Core Ultra 5 225U and 698 mJ on a Ryzen AI 7 350. The model's own read costs 859 mJ on Intel's NPU, and 4.9 to 7.0 J on a processor.
+- **Not yet measured on such a PC.** The PCs here have English alone. So the read again was tested with Windows' English OCR, and with Windows' lines given in Russian. Pictures drawn in Russian (capitals too), Greek, Chinese, Japanese and Arabic all set it off, as does Russian among English. English prose doesn't.
+- **Not covered: Latin letters the model hasn't got.** Polish, Czech, Slovak, Hungarian, Romanian, Turkish and Croatian use letters beyond Latin-1 (ł, ż, č, ř, ő, ș, ğ, ı). The model reads them as the nearest letter it has: "Zażółć" as "Zazóté", "numarası" as "numaras:". Those reads look plain, so nothing reads them again.
 
 ### Intel and AMD
 

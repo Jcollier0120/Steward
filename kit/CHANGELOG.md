@@ -18,6 +18,32 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - An agent whose code GETs another page (or its own, from its CLI or MCP server) must send the token before it takes this kit: 2.118.0's `pageHeaders(url)` or `staffHeaders(id)`. Put that change on its main before this kit's bump. Pages refuse only once every installed staff member has 2.130.0, so an older one is never turned away.
 - A developer's script that reads a page's GETs needs the token from its server.json. `KIT_STRICT_PAGES=0` in the page's environment keeps it open.
 
+## 2.129.0
+
+**Text in an alphabet other than Latin (Cyrillic, Greek, Chinese, Arabic…) is read again by Windows' own OCR, where Windows has an OCR language of that alphabet for the account. Windows' lines replace the model's only where they hold that alphabet; text in the Latin alphabet keeps the model's read. This was the owner's call.**
+
+### What's new
+
+- **ocr-reread.ts:**
+  - `looksUnread`: the model's read of a page looks like another alphabet. That's a line with two odd words, or with half its words odd (case changing inside a word, or signs among its letters), or a page mostly in capitals.
+  - `otherAlphabet`: a line of Windows' read holds another alphabet. At least two of its letters, and 15% of them, are neither Latin nor drawn like Latin.
+  - `keepBetter`: the page's lines, with the better read kept line by line.
+  - `otherAlphabetLanguages`: Windows' OCR languages whose script isn't Latin, asked once an hour.
+- **ocr.ts** reads such pages again with Windows OCR in each such language (`readInLanguage`), at the scale and orientation the model read them, and keeps the better read line by line.
+  - `OcrResult.engine` is `'model-npu+windows'` or `'model-cpu+windows'` when some lines are Windows', and `ms` counts both reads.
+  - A line in the agent's log reports each read again.
+  - `OcrOptions.otherAlphabets` and `readAgain` are for tests.
+- **ocr.ps1** takes `language`, a tag such as `ru-RU`: it reads in that OCR language rather than the account's first. A picture job may also carry its own `scale` and `orient`.
+
+### What changed
+
+- **ocr-check.ts** measures each engine alone, without reading again.
+- **A PC whose Windows has only Latin-alphabet OCR languages** reads as before.
+
+### Before you update
+
+- Nothing to do. An agent that looks at `engine` should read a `+windows` ending as the model's read, with some lines from Windows OCR.
+
 ## 2.127.0
 
 **AMD's NPU, through VitisAI, can read with our own model as a test (`KIT_OCR_NPU=vitisai`). Measured on a Ryzen AI 7 350, it reads worse, so the program's self-check refuses it, and an AMD PC reads on the processor as since 2.121.0.**
