@@ -48,12 +48,12 @@ const capOf = (e: Record<string, any>) => {
 
 let n = 0;
 /** A PC with config.json holding `entry` beside a graphics card, the keeper's deps faked, and what each did. */
-function fakePc(entry: Record<string, any> | null, o: { record?: object; idle?: boolean; answers?: string[]; embeds?: string[]; exists?: (p: string) => boolean; during?: (file: string) => void; cards?: object[] } = {}) {
+function fakePc(entry: Record<string, any> | null, o: { record?: object; workOrder?: object; support?: object; idle?: boolean; answers?: string[]; embeds?: string[]; exists?: (p: string) => boolean; during?: (file: string) => void; cards?: object[] } = {}) {
   const dir = path.join(home, `pc-${++n}`);
   mkdirSync(dir, { recursive: true });
   const configFile = path.join(dir, 'config.json');
   const card = { id: 'gpu-arc', kind: 'gpu', chat: { baseUrl: 'http://127.0.0.1:18191', model: 'qwen3-4b', startCommand: ['llama-server.exe', '--port', '18191'] } };
-  writeFileSync(configFile, JSON.stringify({ accelerators: [card, ...(entry ? [entry] : [])], acceleratorOrder: 'auto', jobs: { toast: false } }, null, 2));
+  writeFileSync(configFile, JSON.stringify({ accelerators: [card, ...(entry ? [entry] : [])], acceleratorOrder: 'auto', jobs: { toast: false }, ...(o.workOrder ? { workOrder: o.workOrder } : {}) }, null, 2));
   if (o.record) writeFileSync(npuRefreshFile(configFile), JSON.stringify(o.record));
   const did: string[] = [];
   const log: string[] = [];
@@ -64,7 +64,7 @@ function fakePc(entry: Record<string, any> | null, o: { record?: object; idle?: 
     tools,
     home,
     now: () => Date.parse('2026-10-14T12:00:00Z'),
-    detect: async () => (did.push('detect'), { npu: support, ...(o.cards ? { cards: o.cards } : {}) } as any),
+    detect: async () => (did.push('detect'), { npu: o.support ?? support, ...(o.cards ? { cards: o.cards } : {}) } as any),
     exists: o.exists ?? (() => true),
     validate: () => [],
     idle: () => o.idle ?? true,
@@ -550,6 +550,47 @@ test('a command that needs a download, another server, or no NPU at all: left fo
   const none = fakePc(null);
   assert.deepEqual(await refreshNpu(none.deps), { did: 'no-npu' });
   assert.deepEqual(none.did, [], 'no NPU in config.json: this PC not asked');
+});
+
+const STRIX = 'npu2|32.0.203.376|2026-06-01|Advanced Micro Devices, Inc.|PCI\\VEN_1022&DEV_17F0&SUBSYS_88EE103C&REV_10\\4&2EA2F1A3&0&0141|NPU Compute Accelerator Device';
+
+test("each work's order brought to this kit's (kit 2.135.1): an AMD PC set up when its pictures went to the NPU while only FastFlowLM was up gets the Radeon first for every picture, whatever its NPU's entry; a generation with no order loses one", async () => {
+  const amd = parseNpus(STRIX, 'x64')[0];
+  const OLD = { chat: { devices: ['npu', 'gpu', 'cpu'] }, vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true, batchAt: 4 }, embed: { devices: ['gpu', 'cpu'] } };
+  const order = V.workOrderFor(V.NPU_CATALOG.routes.amd, amd.generation)!;
+  assert.deepEqual(order.vision, { devices: ['gpu', 'npu', 'cpu'] }, "AMD's pictures: the Radeon first, no runningFirst or batchAt");
+  const words = /^each work's order is now this kit's \(2\.75\.0\): .*vision gpu, npu, cpu(;|$)/;
+
+  // A person's own server on the NPU: its entry left alone, the order written all the same, the rest of config.json kept.
+  const other = olderEntry();
+  other.chat.startCommand = ['C:\\Tools\\llama-server.exe', '--port', '18185'];
+  const pointed = fakePc(other, { workOrder: OLD, support: amd });
+  assert.deepEqual(await refreshNpu(pointed.deps), { did: 'not-route' });
+  assert.deepEqual(pointed.config().workOrder, order);
+  assert.deepEqual(pointed.npu(), other);
+  assert.equal(pointed.config().acceleratorOrder, 'auto');
+  assert.deepEqual(pointed.config().jobs, { toast: false });
+  assert.match(pointed.log.join('\n'), words);
+  // Once a kit: the next look with this kit asks nothing.
+  assert.deepEqual(await refreshNpu(pointed.deps), { did: 'looked' });
+  assert.deepEqual(pointed.did, ['detect']);
+
+  // No NPU entry (its server never set up), but the order setup wrote: brought up too.
+  const unserved = fakePc(null, { workOrder: OLD, support: amd });
+  assert.deepEqual(await refreshNpu(unserved.deps), { did: 'no-npu' });
+  assert.deepEqual(unserved.config().workOrder, order);
+  // Already this kit's: config.json not written, nothing said.
+  const current = fakePc(null, { workOrder: order, support: amd });
+  const before = readFileSync(current.configFile, 'utf8');
+  assert.deepEqual(await refreshNpu(current.deps), { did: 'no-npu' });
+  assert.equal(readFileSync(current.configFile, 'utf8'), before);
+  assert.deepEqual(current.log, []);
+
+  // An Intel NPU 3720, whose generation has no order: one written by mistake is taken out, as setup does; its NPU's entry current.
+  const intel = fakePc(setUpEntry(), { workOrder: OLD });
+  assert.deepEqual(await refreshNpu(intel.deps), { did: 'current' });
+  assert.equal(intel.config().workOrder, undefined);
+  assert.match(intel.log.join('\n'), /each work's order is now this kit's \(2\.75\.0\): none, the NPU first for every work/);
 });
 
 test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once setup has pulled it, never pulled here; an X Elite on the 4B keeps it (its fallback)", async () => {

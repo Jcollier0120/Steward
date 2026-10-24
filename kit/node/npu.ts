@@ -128,8 +128,9 @@ export interface AskOptions {
   onWaking?: (w: Waking) => void;
   /**
    * How many requests of this kind the caller is sending together, this one included, when it knows: a folder of
-   * screenshots, say. They count with those already waiting toward the work's order's batchAt (kit 2.111.0): on AMD's
-   * Ryzen AI 300, 4 or more pictures go to the Radeon even while only FastFlowLM is up.
+   * screenshots, say. They count with those already waiting toward the work's order's batchAt (kit 2.111.0), which no
+   * generation's order has since kit 2.135.1 (until then, on AMD's Ryzen AI 300, 4 or more pictures went to the Radeon
+   * even while only FastFlowLM was up).
    */
   batch?: number;
 }
@@ -515,11 +516,11 @@ export class Npu {
     if (refused) throw new NpuError(refused);
     const games = lane === 'background' && serving.some((a) => a.kind === 'gpu') ? await currentGames(cfg.accelerators) : null;
     // The work's own order, where its NPU's generation has one (config.json's workOrder): by whose servers are up, when it
-    // goes by that (AMD's pictures: the Radeon, unless only FastFlowLM is up).
+    // goes by that (its runningFirst: AMD's pictures until kit 2.135.1; they go to the Radeon whoever's is up now).
     const running = await this.serversUp(serving, work, cfg.workOrder);
     // Unless as many of the work wait as its batchAt: then the order is kept whoever's server is up, and a batch starts the
-    // first device's and waits in its line (AMD's: 4 pictures go to the Radeon, the owner's rule), not shared out to a free
-    // NPU by the pick. The caller's own batch counts, when it says.
+    // first device's and waits in its line (AMD's pictures until kit 2.135.1: 4 went to the Radeon), not shared out to a
+    // free NPU by the pick. The caller's own batch counts, when it says.
     const batchAt = cfg.workOrder?.[work]?.batchAt;
     const waiting = batchAt && running ? Math.max(opts.batch ?? 1, waitingFor(work, serving.map((a) => turnFor(a, work, cfg.accelerators)))) : undefined;
     // Each candidate's turn for this work: its own, or another device's its server runs on (an endpoint's `turn`).

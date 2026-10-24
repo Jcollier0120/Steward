@@ -2975,9 +2975,7 @@
       "gpu",
       "npu",
       "cpu"
-     ],
-     "runningFirst": true,
-     "batchAt": 4
+     ]
     },
     "embed": {
      "devices": [
@@ -2998,7 +2996,7 @@
    }
   },
   {
-   "case": "workOrder: runningFirst, only the NPU's server up: the NPU is first, and so the only candidate",
+   "case": "workOrder: only the NPU's server up: the Radeon alone all the same, its server started (kit 2.135.1)",
    "need": {
     "work": "vision",
     "tokens": 500,
@@ -3051,9 +3049,7 @@
       "gpu",
       "npu",
       "cpu"
-     ],
-     "runningFirst": true,
-     "batchAt": 4
+     ]
     },
     "embed": {
      "devices": [
@@ -3068,13 +3064,13 @@
    },
    "expect": {
     "list": [
-     "npu"
+     "gpu-amd-radeon-860m-graphics"
     ],
     "skipped": []
    }
   },
   {
-   "case": "workOrder: runningFirst, both servers up: the Radeon alone, waited for when busy",
+   "case": "workOrder: both servers up: the Radeon alone, waited for when busy",
    "need": {
     "work": "vision",
     "tokens": 500,
@@ -3127,9 +3123,7 @@
       "gpu",
       "npu",
       "cpu"
-     ],
-     "runningFirst": true,
-     "batchAt": 4
+     ]
     },
     "embed": {
      "devices": [
@@ -3150,7 +3144,7 @@
    }
   },
   {
-   "case": "workOrder: runningFirst, only the Radeon's server up: the Radeon first",
+   "case": "workOrder: only the Radeon's server up: the Radeon alone",
    "need": {
     "work": "vision",
     "tokens": 500,
@@ -3203,9 +3197,7 @@
       "gpu",
       "npu",
       "cpu"
-     ],
-     "runningFirst": true,
-     "batchAt": 4
+     ]
     },
     "embed": {
      "devices": [
@@ -3279,9 +3271,7 @@
       "gpu",
       "npu",
       "cpu"
-     ],
-     "runningFirst": true,
-     "batchAt": 4
+     ]
     },
     "embed": {
      "devices": [
@@ -3290,6 +3280,81 @@
      ]
     }
    },
+   "expect": {
+    "list": [
+     "gpu-amd-radeon-860m-graphics"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "workOrder: 4 pictures waiting with only the NPU up: the Radeon alone, as for one",
+   "need": {
+    "work": "vision",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ]
+   },
+   "workOrder": {
+    "chat": {
+     "devices": [
+      "npu",
+      "gpu",
+      "cpu"
+     ]
+    },
+    "vision": {
+     "devices": [
+      "gpu",
+      "npu",
+      "cpu"
+     ]
+    },
+    "embed": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
+    }
+   },
+   "running": {
+    "npu": true,
+    "gpu-amd-radeon-860m-graphics": false
+   },
+   "waiting": 4,
    "expect": {
     "list": [
      "gpu-amd-radeon-860m-graphics"
@@ -3351,9 +3416,7 @@
       "gpu",
       "npu",
       "cpu"
-     ],
-     "runningFirst": true,
-     "batchAt": 4
+     ]
     },
     "embed": {
      "devices": [
@@ -3374,7 +3437,313 @@
    }
   },
   {
+   "case": "workOrder: chat with the NPU failed lately: the Radeon alone, the next in chat's order (kit 2.135.1)",
+   "need": {
+    "work": "chat",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ]
+   },
+   "workOrder": {
+    "chat": {
+     "devices": [
+      "npu",
+      "gpu",
+      "cpu"
+     ]
+    },
+    "vision": {
+     "devices": [
+      "gpu",
+      "npu",
+      "cpu"
+     ]
+    },
+    "embed": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
+    }
+   },
+   "running": {
+    "npu": true,
+    "gpu-amd-radeon-860m-graphics": true
+   },
+   "failures": {
+    "npu": {
+     "since": "2026-09-21T14:11:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    }
+   },
+   "expect": {
+    "list": [
+     "gpu-amd-radeon-860m-graphics"
+    ],
+    "skipped": [
+     {
+      "id": "npu",
+      "why": "failed",
+      "detail": "the NPU failed (refused); it is tried again in 8 min"
+     }
+    ]
+   }
+  },
+  {
    "case": "workOrder: the Radeon failed lately, so a picture goes to the NPU",
+   "need": {
+    "work": "vision",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ]
+   },
+   "workOrder": {
+    "chat": {
+     "devices": [
+      "npu",
+      "gpu",
+      "cpu"
+     ]
+    },
+    "vision": {
+     "devices": [
+      "gpu",
+      "npu",
+      "cpu"
+     ]
+    },
+    "embed": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
+    }
+   },
+   "running": {
+    "npu": false,
+    "gpu-amd-radeon-860m-graphics": false
+   },
+   "failures": {
+    "gpu-amd-radeon-860m-graphics": {
+     "since": "2026-09-21T14:11:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    }
+   },
+   "expect": {
+    "list": [
+     "npu"
+    ],
+    "skipped": [
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "why": "failed",
+      "detail": "the graphics card failed (refused); it is tried again in 8 min"
+     }
+    ]
+   }
+  },
+  {
+   "case": "workOrder: the agent resting the Radeon after a long line: the NPU alone",
+   "need": {
+    "work": "vision",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ]
+   },
+   "workOrder": {
+    "chat": {
+     "devices": [
+      "npu",
+      "gpu",
+      "cpu"
+     ]
+    },
+    "vision": {
+     "devices": [
+      "gpu",
+      "npu",
+      "cpu"
+     ]
+    },
+    "embed": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
+    }
+   },
+   "running": {
+    "npu": true,
+    "gpu-amd-radeon-860m-graphics": true
+   },
+   "deferredMs": {
+    "gpu-amd-radeon-860m-graphics": 60000,
+    "npu": 0
+   },
+   "expect": {
+    "list": [
+     "npu"
+    ],
+    "skipped": [
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "why": "deferred",
+      "detail": "work on the graphics card resumes in 1 min"
+     }
+    ]
+   }
+  },
+  {
+   "case": "no workOrder: a picture goes to the NPU first, as before",
+   "need": {
+    "work": "vision",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "npu"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "runningFirst, only the NPU's server up: the NPU is first, and so the only candidate",
    "need": {
     "work": "vision",
     "tokens": 500,
@@ -3439,31 +3808,18 @@
     }
    },
    "running": {
-    "npu": false,
+    "npu": true,
     "gpu-amd-radeon-860m-graphics": false
-   },
-   "failures": {
-    "gpu-amd-radeon-860m-graphics": {
-     "since": "2026-09-21T14:11:20.000Z",
-     "reason": "refused",
-     "by": "x"
-    }
    },
    "expect": {
     "list": [
      "npu"
     ],
-    "skipped": [
-     {
-      "id": "gpu-amd-radeon-860m-graphics",
-      "why": "failed",
-      "detail": "the graphics card failed (refused); it is tried again in 8 min"
-     }
-    ]
+    "skipped": []
    }
   },
   {
-   "case": "no workOrder: a picture goes to the NPU first, as before",
+   "case": "runningFirst, both servers up: the Radeon alone",
    "need": {
     "work": "vision",
     "tokens": 500,
@@ -3503,15 +3859,43 @@
      }
     ]
    },
+   "workOrder": {
+    "chat": {
+     "devices": [
+      "npu",
+      "gpu",
+      "cpu"
+     ]
+    },
+    "vision": {
+     "devices": [
+      "gpu",
+      "npu",
+      "cpu"
+     ],
+     "runningFirst": true,
+     "batchAt": 4
+    },
+    "embed": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
+    }
+   },
+   "running": {
+    "npu": true,
+    "gpu-amd-radeon-860m-graphics": true
+   },
    "expect": {
     "list": [
-     "npu"
+     "gpu-amd-radeon-860m-graphics"
     ],
     "skipped": []
    }
   },
   {
-   "case": "workOrder: batchAt, 3 pictures waiting and only the NPU's server up: the NPU, as for one",
+   "case": "batchAt, 3 pictures waiting and only the NPU's server up: the NPU, as for one",
    "need": {
     "work": "vision",
     "tokens": 500,
@@ -3588,7 +3972,7 @@
    }
   },
   {
-   "case": "workOrder: batchAt, 4 pictures waiting and only the NPU's server up: the Radeon alone, its server started, the batch in its line",
+   "case": "batchAt, 4 pictures waiting and only the NPU's server up: the Radeon alone, its server started, the batch in its line",
    "need": {
     "work": "vision",
     "tokens": 500,
@@ -3665,84 +4049,7 @@
    }
   },
   {
-   "case": "workOrder: batchAt, 4 pictures waiting with both servers up: the Radeon alone, none shared out to the NPU",
-   "need": {
-    "work": "vision",
-    "tokens": 500,
-    "lane": "background"
-   },
-   "config": {
-    "accelerators": [
-     {
-      "id": "npu",
-      "maxContextTokens": 4096,
-      "chat": {
-       "baseUrl": "http://x:18184",
-       "model": "qwen3.5:2b"
-      },
-      "vision": {
-       "model": "qwen3.5:2b"
-      },
-      "quirks": [
-       "sides-of-32"
-      ]
-     },
-     {
-      "id": "gpu-amd-radeon-860m-graphics",
-      "memoryGb": 0.5,
-      "maxContextTokens": 8192,
-      "chat": {
-       "baseUrl": "http://x:18191",
-       "model": "qwen3-vl-2b-instruct"
-      },
-      "vision": {
-       "model": "qwen3-vl-2b-instruct"
-      },
-      "embed": {
-       "baseUrl": "http://x:18192",
-       "model": "qwen3-embedding-0.6b"
-      }
-     }
-    ]
-   },
-   "workOrder": {
-    "chat": {
-     "devices": [
-      "npu",
-      "gpu",
-      "cpu"
-     ]
-    },
-    "vision": {
-     "devices": [
-      "gpu",
-      "npu",
-      "cpu"
-     ],
-     "runningFirst": true,
-     "batchAt": 4
-    },
-    "embed": {
-     "devices": [
-      "gpu",
-      "cpu"
-     ]
-    }
-   },
-   "running": {
-    "npu": true,
-    "gpu-amd-radeon-860m-graphics": true
-   },
-   "waiting": 4,
-   "expect": {
-    "list": [
-     "gpu-amd-radeon-860m-graphics"
-    ],
-    "skipped": []
-   }
-  },
-  {
-   "case": "workOrder: batchAt, 4 pictures waiting and the Radeon failed lately: the NPU alone, the next that can take it",
+   "case": "batchAt, 4 pictures waiting and the Radeon failed lately: the NPU alone, the next that can take it",
    "need": {
     "work": "vision",
     "tokens": 500,
@@ -3832,171 +4139,7 @@
    }
   },
   {
-   "case": "workOrder: batchAt, 4 pictures waiting and the agent resting the Radeon after a long line: the NPU alone",
-   "need": {
-    "work": "vision",
-    "tokens": 500,
-    "lane": "background"
-   },
-   "config": {
-    "accelerators": [
-     {
-      "id": "npu",
-      "maxContextTokens": 4096,
-      "chat": {
-       "baseUrl": "http://x:18184",
-       "model": "qwen3.5:2b"
-      },
-      "vision": {
-       "model": "qwen3.5:2b"
-      },
-      "quirks": [
-       "sides-of-32"
-      ]
-     },
-     {
-      "id": "gpu-amd-radeon-860m-graphics",
-      "memoryGb": 0.5,
-      "maxContextTokens": 8192,
-      "chat": {
-       "baseUrl": "http://x:18191",
-       "model": "qwen3-vl-2b-instruct"
-      },
-      "vision": {
-       "model": "qwen3-vl-2b-instruct"
-      },
-      "embed": {
-       "baseUrl": "http://x:18192",
-       "model": "qwen3-embedding-0.6b"
-      }
-     }
-    ]
-   },
-   "workOrder": {
-    "chat": {
-     "devices": [
-      "npu",
-      "gpu",
-      "cpu"
-     ]
-    },
-    "vision": {
-     "devices": [
-      "gpu",
-      "npu",
-      "cpu"
-     ],
-     "runningFirst": true,
-     "batchAt": 4
-    },
-    "embed": {
-     "devices": [
-      "gpu",
-      "cpu"
-     ]
-    }
-   },
-   "running": {
-    "npu": true,
-    "gpu-amd-radeon-860m-graphics": true
-   },
-   "waiting": 4,
-   "deferredMs": {
-    "gpu-amd-radeon-860m-graphics": 60000,
-    "npu": 0
-   },
-   "expect": {
-    "list": [
-     "npu"
-    ],
-    "skipped": [
-     {
-      "id": "gpu-amd-radeon-860m-graphics",
-      "why": "deferred",
-      "detail": "work on the graphics card resumes in 1 min"
-     }
-    ]
-   }
-  },
-  {
-   "case": "workOrder: batchAt, 1 picture waiting with both servers up: the Radeon, by runningFirst",
-   "need": {
-    "work": "vision",
-    "tokens": 500,
-    "lane": "background"
-   },
-   "config": {
-    "accelerators": [
-     {
-      "id": "npu",
-      "maxContextTokens": 4096,
-      "chat": {
-       "baseUrl": "http://x:18184",
-       "model": "qwen3.5:2b"
-      },
-      "vision": {
-       "model": "qwen3.5:2b"
-      },
-      "quirks": [
-       "sides-of-32"
-      ]
-     },
-     {
-      "id": "gpu-amd-radeon-860m-graphics",
-      "memoryGb": 0.5,
-      "maxContextTokens": 8192,
-      "chat": {
-       "baseUrl": "http://x:18191",
-       "model": "qwen3-vl-2b-instruct"
-      },
-      "vision": {
-       "model": "qwen3-vl-2b-instruct"
-      },
-      "embed": {
-       "baseUrl": "http://x:18192",
-       "model": "qwen3-embedding-0.6b"
-      }
-     }
-    ]
-   },
-   "workOrder": {
-    "chat": {
-     "devices": [
-      "npu",
-      "gpu",
-      "cpu"
-     ]
-    },
-    "vision": {
-     "devices": [
-      "gpu",
-      "npu",
-      "cpu"
-     ],
-     "runningFirst": true,
-     "batchAt": 4
-    },
-    "embed": {
-     "devices": [
-      "gpu",
-      "cpu"
-     ]
-    }
-   },
-   "running": {
-    "npu": true,
-    "gpu-amd-radeon-860m-graphics": true
-   },
-   "waiting": 1,
-   "expect": {
-    "list": [
-     "gpu-amd-radeon-860m-graphics"
-    ],
-    "skipped": []
-   }
-  },
-  {
-   "case": "workOrder: a work with no batchAt goes by its order however many wait: chat on the NPU",
+   "case": "a work with no batchAt goes by its order however many wait: chat on the NPU",
    "need": {
     "work": "chat",
     "tokens": 500,
@@ -4049,9 +4192,7 @@
       "gpu",
       "npu",
       "cpu"
-     ],
-     "runningFirst": true,
-     "batchAt": 4
+     ]
     },
     "embed": {
      "devices": [

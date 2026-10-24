@@ -243,9 +243,10 @@ export interface NpuGeneration {
    * Where each work runs best on PCs of this generation, by its measured energy (kit 2.111.0): the kinds of device, first
    * preferred, and the figures behind them (`basis`, the device named beside each figure). A work it leaves out goes to
    * the NPU first (the auto order). Setup writes it into config.json as `workOrder` (workOrderFor), which requests follow
-   * (the core's candidates), and its fallback when the NPU can't be set up follows it too (fallbackDevices). AMD's Ryzen
-   * AI 300 sends pictures to the Radeon, and to the NPU only when FastFlowLM is up and the Radeon's server isn't
-   * (`runningFirst`), until 4 or more wait (`batchAt`): those start the Radeon's (the owner's rule, 2026-10-23).
+   * (the core's candidates), and its fallback when the NPU can't be set up follows it too (fallbackDevices); the keeper's
+   * look brings it to this kit's on PCs already set up (npu-refresh.ts' orderNow, kit 2.135.1). AMD's Ryzen AI 300 sends
+   * every picture to the Radeon, whoever's server is up (the owner's ruling, 2026-10-24); until kit 2.135.1 a picture went
+   * to the NPU while only FastFlowLM was up (`runningFirst`), unless 4 or more waited (`batchAt`).
    */
   order?: Partial<Record<OrderedWork, NpuWorkOrder>>;
   /**
@@ -679,8 +680,8 @@ export function generationOf(route: NpuRoute, id: string | null | undefined): Np
 export const NPU_FIRST: readonly ('npu' | 'gpu' | 'cpu')[] = Object.freeze(['npu', 'gpu', 'cpu']);
 
 /**
- * config.json's `workOrder` for PCs of this generation (kit 2.111.0): its `order`, each work's devices and runningFirst,
- * without the figures; null when it records none, and every work goes to the NPU first.
+ * config.json's `workOrder` for PCs of this generation (kit 2.111.0): its `order`, each work's devices, runningFirst and
+ * batchAt, without the figures; null when it records none, and every work goes to the NPU first.
  */
 export function workOrderFor(route: NpuRoute, generation: string | null | undefined): WorkOrder | null {
   const order = generationOf(route, generation)?.order;
