@@ -36,10 +36,12 @@
  * there. One still given must be origin's, until it's taken out.
  *
  * npm run release fills src\kit\ first (tools\kit.ts), at the version kit.json pins. The zip holds what
- * the agent runs from, at its top level: src\ (no tests) with src\kit\ in it, art\, package.json,
- * README.md and release.json, which names the kit; and kit.json and tools\kit.ts, so the copy can fill
- * its kit again (and the Steward, installed, has the tools\kit.ts it hands out). So an installed agent
- * needs neither the Steward nor GitHub.
+ * the agent runs from, at its top level: src\ (no tests) with src\kit\ in it, art\, package.json, LICENSE and
+ * release.json, which names the kit; and kit.json and tools\kit.ts, so the copy can fill its kit again (and the
+ * Steward, installed, has the tools\kit.ts it hands out). So an installed agent needs neither the Steward nor GitHub.
+ * No document goes (kit 2.134.0): not a .md anywhere in it (the kit's specs and READMEs in src\kit\ included), which
+ * are for the repository, but a license or notice file. THIRD-PARTY-NOTICES.txt goes beside them, made from what the
+ * zip carries of others' (notices.ts): a release that carries something with no notice for it isn't built.
  *
  * Its notes are the agent's CHANGELOG.md entry for the version (notes.ts, spec/RELEASE-NOTES.md): what's new, what
  * changed, and what to do before updating. A version with no entry is published with its commits instead, and the
@@ -71,6 +73,7 @@ import { loadEsbuild, minifyRelease } from './minify.ts';
 import { buildNative, CERTUM_TIMESTAMP, nativeOf, nativeSources, runBuild, stageNative, type Arch, type Native, type NativeBuilt } from './native.ts';
 import { releaseNotes, type Notes } from './notes.ts';
 import { SIGNED_BY } from './prebuilt.ts';
+import { isLicenseFile, NOTICES, writeNotices } from './notices.ts';
 import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
 import { findSignTool, readySigner, signaturesWrong, signFiles, unsignedOf, verifySigned, type Signer } from './sign.ts';
 import { keepSigned, keptSigned, signedKey, signedStoreOf, sourcesAt, takeSigned } from './signed-native.ts';
@@ -196,11 +199,14 @@ export const sumsText = (files: { name: string; hash: string }[]) => files.map((
 
 const isTest = (f: string) => /\.(test|spec)\.[cm]?[jt]s$/.test(f);
 
+/** A document, for the repository and never in a release (kit 2.134.0): a .md, but a license or notice file. */
+export const isDoc = (f: string) => /\.md$/i.test(f) && !isLicenseFile(path.posix.basename(f));
+
 /** Picks the release's files from a repo's (paths relative to its root, either slash). */
 export function pickReleaseFiles(files: string[]): string[] {
   return files
     .map((f) => f.replace(/\\/g, '/'))
-    .filter((f) => (RELEASE_FILES.includes(f) || RELEASE_FOLDERS.some((d) => f.startsWith(`${d}/`))) && !isTest(f))
+    .filter((f) => (RELEASE_FILES.includes(f) || RELEASE_FOLDERS.some((d) => f.startsWith(`${d}/`))) && !isTest(f) && !isDoc(f))
     .sort();
 }
 
@@ -412,6 +418,12 @@ async function build(readable = false, publishing = false): Promise<Built> {
     const page = pageEsbuild ? await releasePage(stage, root, pageEsbuild, readable) : null;
     const minified = esbuild ? await minifyRelease(stage, esbuild) : null;
     const nativeCount = native && nativeBuilt ? stageNative(root, stage, native, nativeBuilt) : 0;
+    // The notices of what it carries of others' (notices.ts): it isn't built while something has none.
+    const noticed = writeNotices(stage, {
+      name: APP.name,
+      packages: page?.packages ?? [],
+      native: native && nativeBuilt ? { out: native.out, notices: native.notices, staged: native.notices.map((f) => `${native.out}/notices/${path.posix.basename(f.replace(/\\/g, '/'))}`) } : null,
+    });
     // Last before the zip: nothing may change a script once it's signed.
     const scripts: ScriptsSigned | null = scriptSigning
       ? signStagedScripts(stage, {
@@ -444,11 +456,12 @@ async function build(readable = false, publishing = false): Promise<Built> {
     const hash = sha256(zip);
     const listed = [{ name, hash }, ...(announced ? [{ name: ANNOUNCEMENT, hash: sha256(announcement) }] : [])];
     writeFileSync(sums, sumsText(listed));
-    console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 1 + nativeCount} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
+    console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 2 + nativeCount} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
     console.log(`  sha256 ${hash} (${path.relative(root, sums)})`);
     if (minified) console.log(`  built with esbuild ${esbuild!.version}: ${minified.ts} TypeScript and ${minified.js} JavaScript files, ${Math.ceil(minified.before / 1024)} KB of code to ${Math.ceil(minified.after / 1024)} KB`);
     else console.log('  readable: not built, so it can be looked into here; it is never published');
     if (page) console.log(`  its page, drawn in the browser: ${PAGE_BUNDLE}, ${page.kb} KB with React`);
+    console.log(`  ${NOTICES}: ${noticed.length ? noticed.join(', ') : "nothing of others'"}`);
     for (const a of nativeBuilt?.arch ?? [])
       console.log(
         `  native files for ${a.arch}: ${native!.out}/${a.arch}, ${a.files.length} files, ${Math.ceil(a.bytes / 1024)} KB${!release.native?.signed ? ', not signed (only a published release is)' : a.reused ? `, signed for ${a.reused} (${a.signed} here, the rest by their makers), from the same native sources` : `, ${a.signed} signed here (the rest by their makers)`}`,

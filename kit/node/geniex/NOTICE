@@ -1,0 +1,13 @@
+geniex_plugin.dll here, and 0.9.1/geniex_plugin.dll, are modified builds of GenieX's llama.cpp plugin, GenieX
+Copyright (c) 2024-2026, Qualcomm Technologies, Inc. and/or its subsidiaries, licensed under the BSD 3-Clause License
+(LICENSE, beside this file).
+
+They are built from qualcomm/GenieX at tag v0.8.0 (geniex_plugin.dll) and at tag v0.9.1 (0.9.1/geniex_plugin.dll) with
+the changes in geniex-castellan-memory.patch and 0.9.1/geniex-castellan-memory.patch, made by Castellan in October
+2026, which change only sdk/plugins/llama_cpp: the model file is mapped rather than read into memory, the vision
+encoder reserves less, loads with the first picture and is freed again after a quiet spell, and (0.9.1's build) the
+processor's threads sleep while a model on the NPU or graphics works. Each change is on unless its variable is set to 0
+in GenieX's environment.
+
+They are not Qualcomm's release, and Qualcomm has not reviewed or endorsed them. They link against the llama.cpp and
+GenieX libraries that GenieX installs on the PC, which are not carried here.
