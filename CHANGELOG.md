@@ -2,9 +2,9 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.214
+## 0.36.218
 
-**It hands out the kit 2.128.0: every staff member's release carries the notices for what others made in it, and no longer carries the developers' documents.**
+**It hands out the kit 2.132.0: every staff member's release carries the notices for what others made in it, and no longer carries the developers' documents.**
 
 ### What's new
 
@@ -13,6 +13,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - **Staff releases are a little smaller.** The developers' pages and READMEs no longer come with them; nothing on your PC read them.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.215
+
+**It hands out the kit 2.129.0: text in another alphabet (Russian, Greek, Chinese, Arabic…) is read again by Windows' own text recognition, where Windows has that language's OCR installed. Our own model reads the Latin alphabet alone, and every Latin line keeps its read.**
+
+### What changed
+
+- **On a PC whose Windows has an OCR language of another alphabet**, a page our model read as Latin look-alikes is read again by Windows' own OCR in that language. Windows' lines in that alphabet replace the model's, and every other line stays the model's.
+- **On any other PC**, nothing changes.
 
 ### Before you update
 

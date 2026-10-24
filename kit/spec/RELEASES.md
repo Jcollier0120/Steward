@@ -13,8 +13,8 @@ The agents' source stays in their private repositories. What a PC installs is a 
 - Plain `.js` files under `src\` are minified where they are, with no module format, so a page's classic script keeps its global names and a module keeps its imports. `.d.ts` files go. CSS (Manor reads themes.css as text), PowerShell, JSON, SVG and the rest are as they were.
 - Names are kept (`keepNames`), so stack traces in the logs, and an error's or a class's name, read as they did.
 - The **README stays out** of the zip: it's for the repository. LICENSE, `kit.json` and `tools/kit.ts` (the kit's own, public) go in, as before.
-- **No document goes** (kit 2.128.0, `isDoc`): not a `.md` anywhere in the zip, the kit's own pages in `src\kit\spec\` and the READMEs beside its vendored builds included. They're for whoever works on the agent, and nothing reads them at run time (the spec part's `.json` files still go). A license or notice file written as `.md` (`LICENSE.md`) still goes.
-- **`THIRD-PARTY-NOTICES.txt`** goes at the zip's top level (kit 2.128.0), below.
+- **No document goes** (kit 2.132.0, `isDoc`): not a `.md` anywhere in the zip, the kit's own pages in `src\kit\spec\` and the READMEs beside its vendored builds included. They're for whoever works on the agent, and nothing reads them at run time (the spec part's `.json` files still go). A license or notice file written as `.md` (`LICENSE.md`) still goes.
+- **`THIRD-PARTY-NOTICES.txt`** goes at the zip's top level (kit 2.132.0), below.
 
 ## Notices: `node/notices.ts`
 
@@ -82,7 +82,7 @@ Some agents need a program that isn't Node, such as Envoy's media host (`envoy-m
   - Its folder holds the native sources, so a change there makes a release dirty.
 - **`out`:** the folder it builds into. It must be git-ignored; the release refuses one that isn't, so a build never makes the tree look changed.
 - **`arch`:** which processors to build (default `["arm64", "x64"]`).
-- **`notices`:** files in the repository that go with the native files, into `<out>\notices\`. Use it for the licenses of the runtimes they carry (ONNX Runtime's MIT license, .NET's). Since kit 2.128.0 they're also copied into `THIRD-PARTY-NOTICES.txt`, and a release whose native files have none isn't built (Notices, above).
+- **`notices`:** files in the repository that go with the native files, into `<out>\notices\`. Use it for the licenses of the runtimes they carry (ONNX Runtime's MIT license, .NET's). Since kit 2.132.0 they're also copied into `THIRD-PARTY-NOTICES.txt`, and a release whose native files have none isn't built (Notices, above).
 - **`inputs`** (kit 2.92.0): files or folders outside the build script's folder that the build reads, such as a vendored runtime or a shared project. With the script's folder they are the **native sources**: a change to them makes a release dirty, and builds and signs its native files afresh (below). List every one: a change to a file the build reads that isn't listed would ship the files signed before it.
 - **`thumbprint`:** the code-signing certificate's SHA-1 thumbprint, in `Cert:\CurrentUser\My`.
   - **`timestamp`** is its RFC 3161 server; the default is Certum's, `http://time.certum.pl`.
