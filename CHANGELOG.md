@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## Unreleased
+
+**On an Intel Core Ultra with the NPU 3720, the staff read text in pictures with the manor's own model on the NPU too: 1,212 of the check's 1,253 lines exactly, where Windows OCR read 736.**
+
+### What changed
+
+- **Intel's NPU 3720 reads with the model.** That's the Core Ultra Series 1, and the 200U and 200H. Clerk, Scribe, Reeve and Warrener read text in screenshots and scanned pages with it, as on a Snapdragon. It reads better than Windows OCR in every kind of text the check has, and uses less processor time a picture.
+  - It does spend more energy: 0.86 J a picture against Windows OCR's 0.47 J, about 0.1 Wh more for a thousand pictures. The owner chose it for how much better it reads.
+  - Other Intel NPUs, and AMD's, read with Windows OCR until they're measured.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On an Intel NPU 3720 whose local AI is set up, the reader fetches 199 MB once, in the background, and Windows OCR reads until it's there. A PC whose local AI isn't set up yet reads with Windows OCR until it is.
+
 ## 0.36.200
 
 **It hands out the kit 2.114.0: on a Snapdragon, the staff read text in pictures with the manor's own model on the NPU, and read 1,211 of the check's 1,253 lines exactly, where Windows OCR read 733.**
