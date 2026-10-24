@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.221
+
+**It hands out the kit 2.133.0: your staff's pages open only from Castellan, so no other program or Windows account on the PC can read them or press their buttons.**
+
+### What changed
+
+- **Your staff's pages need Castellan's sign-in.** Until now any program on the PC, or anyone signed in to another Windows account on it, could read every staff member's page and take what it needed to press its buttons. Now a page answers only Castellan, the staff themselves, and a browser Castellan opened it in.
+  - Open a staff member from Castellan as usual: its page opens signed in, and stays signed in, bookmarks too.
+  - A bookmark opened while Castellan isn't running shows a page saying so, with a button that opens it from Castellan.
+  - A page already open in your browser reloads itself, signed in.
+- **It turns on by itself once every staff member on your account has updated.** The staff update one at a time, and one that hasn't yet would be turned away by the others. So until the last of them has this update, the pages answer as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. If one of your staff hasn't taken this update (its updates are paused, say), the pages stay open as before until it does.
+
 ## 0.36.219
 
 **It hands out the kit 2.132.1: the small program that runs our own text-reading model comes signed again, so a PC doesn't build its own copy.**
