@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.132.1
+
+**The text reader's helper is prebuilt and signed again: `kit/node/prebuilt/ocr-npu-8d1348367dd3.exe`, for `ocr-npu.cs` as it is since 2.127.0.**
+
+### What changed
+
+- **prebuilt/:** `ocr-npu-8d1348367dd3.exe`, compiled and signed by `tools/sign-helpers.ts` (Certum, SHA-256, timestamped). 2.127.0 changed `ocr-npu.cs` and removed the old `ocr-npu-3fa4156fe5a3.exe`, so since then each PC compiled the helper itself, unsigned. Smart App Control may block a helper compiled on the PC, as it did in kit 2.91.0's first test.
+- The other five helpers are unchanged.
+
+### Before you update
+
+- Nothing to do. An agent that pins this kit uses the signed helper (`signedHelper`), even on a PC where it compiled its own before.
+
 ## 2.129.0
 
 **Text in an alphabet other than Latin (Cyrillic, Greek, Chinese, Arabic…) is read again by Windows' own OCR, where Windows has an OCR language of that alphabet for the account. Windows' lines replace the model's only where they hold that alphabet; text in the Latin alphabet keeps the model's read. This was the owner's call.**
