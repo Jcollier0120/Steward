@@ -369,9 +369,14 @@ Each gets the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent
 
 **The owner's rule for every route (2026-10-24):** accuracy is never given up for less power. The reader must read with a high degree of accuracy, and spend as little power as it can while doing so. So:
 
-- a route can be its PC's default only if it reads no worse than Windows OCR in any group, and no worse than the model on the processor;
+- a route can be its PC's default only if it reads no worse than Windows OCR in any group, and no worse than the model on the processor (with the one exception below);
 - a route that reads clearly better wins over a cheaper one that reads worse, without asking the owner again, as Intel's NPU does over Windows OCR at 1.85 times its energy a picture;
 - the least energy decides only between routes that read as well, as an NPU does over the processor.
+
+**The one exception (the owner's call, 2026-10-24): model 2's dropped space on the NPU.**
+- **What differs.** With model 2, Intel's NPU 3720 and the Snapdragon X2's NPU each read one line fewer than the processor: 1,223 of the check's 1,253 lines against 1,224. On both, the NPU drops the space in "Scan_0042 (2) - Copy.jpg", on a held-out screen at 14 px. Every other line reads the same.
+- **The NPU stays the default on both**, since one space in 1,253 lines isn't worth the processor's energy. On Intel's 225U, a picture on the processor cost 6,991 mJ against the NPU's 859 in model 1's run, at normal priority.
+- **Anything more goes back to the owner:** a wider gap, another NPU, or a later model.
 
 ### Where the model is published
 
