@@ -7,11 +7,11 @@
 //               [--batches n,n,..] [--bench]
 //
 // The models folder has det.onnx (the detector: [1,3,h,w] -> [1,1,h,w]), rec.onnx (the recognizer: [n,3,48,w] ->
-// [n,w/8,classes]) and charset.txt (the recognizer's characters, class 1 onwards; 0 is CTC's blank). On the NPU every
-// shape is fixed: the detector reads tiles of Tile pixels, the recognizer lines Buckets wide, so many at a time
-// (--batches, one for each width), each compiled once into the cache as an EP-context model. The processor reads the
-// same tiles and widths, so both give the same answer. --bench prints each graph's time a run, and exits. The cache is
-// the working folder, and has a folder for each pair of models as compiled.
+// [n,w/s,classes], a step every s columns, 8 or 4) and charset.txt (the recognizer's characters, class 1 onwards; 0 is
+// CTC's blank). On the NPU every shape is fixed: the detector reads tiles of Tile pixels, the recognizer lines Buckets
+// wide, so many at a time (--batches, one for each width), each compiled once into the cache as an EP-context model.
+// The processor reads the same tiles and widths, so both give the same answer. --bench prints each graph's time a run,
+// and exits. The cache is the working folder, and has a folder for each pair of models as compiled.
 //
 // It says hello once, on one line of JSON: {"hello":1,"on":"npu"|"cpu","ep":"qnn"|...,"why":...,"loadMs":n,"compiled":n,...}
 // (compiled: the graphs it compiled rather than loaded; Qualcomm's compiler holds 2 GB until the program ends).
@@ -807,14 +807,15 @@ namespace KitOcrNpu
                     float[] logits = recFor(W).Run(x, new long[] { n, 3, Height, W }, out os);
                     RecTime.Stop();
                     int steps = (int)os[1], classes = (int)os[2];
-                    for (int i = 0; i < count; i++) Decode(logits, i * steps * classes, steps, classes, group[at + i]);
+                    for (int i = 0; i < count; i++) Decode(logits, i * steps * classes, steps, classes, W, group[at + i]);
                 }
             }
         }
 
-        void Decode(float[] logits, int offset, int steps, int classes, Job j)
+        void Decode(float[] logits, int offset, int steps, int classes, int width, Job j)
         {
-            double perStep = 8.0 * j.CropWidth / j.Line.Width;
+            // A step is the graph's width over its steps (8 or 4 of the line's columns), in the picture's own pixels.
+            double perStep = (double)width / steps * j.CropWidth / j.Line.Width;
             StringBuilder sb = new StringBuilder();
             int prev = 0, first = -1, last = -1;
             for (int t = 0; t < steps; t++)

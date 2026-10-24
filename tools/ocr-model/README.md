@@ -27,10 +27,15 @@ the last 4,000 held back:
 ```
 head -n 200000 data/all.jsonl > data/train.jsonl
 tail -n 4000 data/all.jsonl > data/val.jsonl
+python -I -X utf8 strings.py <repository> 6000 data/extra.jsonl --seed 3 --kinds roman
 python -I -X utf8 draw.py <repository> data/val.jsonl data/val --seed 2 --workers 6
 python -I -X utf8 draw.py <repository> data/train.jsonl data/train --seed 1 --workers 6
+python -I -X utf8 draw.py <repository> data/extra.jsonl data/extra --seed 3 --workers 6
 node <repository>/tools/ocr-model/fixtures.ts fx
 ```
+
+`data/extra` is Roman numerals among words ("Part II", "Level III"): most sans faces draw a capital I as their l, so
+the model must learn from the words around them which it is, and the repository's text has too few.
 
 `draw.py` draws each line as GDI and GDI+ draw it (ClearType, grey, grid-fitted and black-and-white, through
 `render-lines.ps1`, in the fonts that have its every character, as `fonts.ps1` finds them) or as Edge draws it at 100%
@@ -39,11 +44,15 @@ to 250%. The check's held-out fonts and their near twins are never used. Drawing
 
 ```
 python -I -X utf8 train.py models data/train data/val fx runs/r2 --steps 24000 --lr 5e-4 --every 2000 --workers 3
-python -I -X utf8 export.py models runs/r2/best.pt out/r2
+python -I -X utf8 train.py models data/train,data/extra data/val fx runs/r3 --from runs/r2/best.pt --stride 4 --steps 10000 --lr 3e-4 --every 2000 --workers 3
+python -I -X utf8 export.py models runs/r3/best.pt out/r3
 ```
 
 `train.py` fine-tunes the recognizer (`recnet.py`: PP-OCRv6 tiny's, with a head over our characters), scoring the
-held-back lines and the check's pictures every `--every` steps; about five hours on a Snapdragon X2's processor.
+held-back lines and the check's pictures every `--every` steps. The first run is at the published model's stride (a
+step every 8 columns), the second at 4 (`recnet.halve_stride`: the same weights, twice the steps), which a run of
+narrow characters needs: at 8, "...", "ll" or a space at 11 px come out one short. Each keeps to 8 cores (5 threads,
+3 workers); the two take about eight hours on a Snapdragon X2's processor.
 `export.py` writes what the reader takes: `det.onnx`, `rec.onnx` and `charset.txt`, each checked against the model it
 came from, with `LICENSE.txt` (Apache-2.0, PaddleOCR's) and `NOTICE.txt` (what the files are and what was changed).
 

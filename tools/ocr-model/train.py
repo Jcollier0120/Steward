@@ -1,9 +1,12 @@
 """Fine-tunes the recognizer on the drawn lines (draw.py), checking it on held-back drawn lines and on the check's
 pictures (fixtures.ts) as it goes.
 
-    python train.py <models> <train dir> <val dir> <fixtures dir> <out dir> [--steps N] [--lr X] [--from ckpt.pt]
+    python train.py <models> <train dir>[,<train dir>...] <val dir> <fixtures dir> <out dir> [--steps N] [--lr X]
+        [--from ckpt.pt] [--stride 8|4] [--threads N] [--workers N]
 
-<models> has v6-tiny-rec and v6-tiny-det (fetch.py). Each crop is cut from its drawing with random room around the ink,
+<models> has v6-tiny-rec and v6-tiny-det (fetch.py). --stride 4 gives the recognizer a step every 4 columns
+(recnet.halve_stride); a checkpoint at 8 starts one at 4, as their weights are the same. Its threads and workers
+(5 and 3) keep it to 8 of a PC's cores. Each crop is cut from its drawing with random room around the ink,
 as the detector's boxes leave it (0 to 0.6 of the ink's height each side), sometimes blurred, compressed or faded, then
 made 48 pixels high as the reader makes it, and padded with grey to the width the reader's graph for it takes (BUCKETS),
 as the reader pads it: the model's squeeze-and-excite blocks average over the padding too, so it must be taught with
@@ -60,9 +63,10 @@ def needed_steps(ids):
 
 
 class Lines(torch.utils.data.Dataset):
-    def __init__(self, root: Path, train: bool):
-        self.root, self.train = Path(root), train
-        self.items = [json.loads(l) for l in (self.root / 'labels.jsonl').read_text(encoding='utf-8').splitlines() if l]
+    def __init__(self, roots, train: bool, stride: int):
+        self.roots, self.train, self.stride = [Path(r) for r in roots], train, stride
+        self.items = [dict(json.loads(l), root=k) for k, root in enumerate(self.roots)
+                      for l in (root / 'labels.jsonl').read_text(encoding='utf-8').splitlines() if l]
         self.rnd = random.Random()
 
     def __len__(self):
@@ -76,7 +80,7 @@ class Lines(torch.utils.data.Dataset):
     def __getitem__(self, i):
         it = self.items[i]
         r = self.rnd if self.train else random.Random(i)
-        im = Image.open(self.root / 'crops' / it['f']).convert('RGB')
+        im = Image.open(self.roots[it['root']] / 'crops' / it['f']).convert('RGB')
         x0, y0, x1, y1 = it['ink']
         h = y1 - y0
         if self.train:
@@ -103,10 +107,10 @@ class Lines(torch.utils.data.Dataset):
         bgr = np.asarray(im)[:, :, ::-1].copy()
         x = to_input(bgr)
         ids = [INDEX[c] for c in it['text']]
-        T = x.shape[2] // 8
+        T = x.shape[2] // self.stride
         if needed_steps(ids) > T:
             # Too narrow for its characters at this width: widened to fit, rather than taught an answer it can't give.
-            W = int(math.ceil(needed_steps(ids) * 1.15)) * 8
+            W = int(math.ceil(needed_steps(ids) * 1.15 * self.stride / 8)) * 8
             im2 = Image.fromarray(bgr).resize((W, HEIGHT), Image.BILINEAR)
             x = (np.asarray(im2, np.float32) / 127.5 - 1.0).transpose(2, 0, 1)
         return x, ids, i
@@ -248,18 +252,19 @@ class FixtureCrops:
 
 
 def main():
-    models, train_dir, val_dir, fx, out = (Path(a).resolve() for a in sys.argv[1:6])
+    models, val_dir, fx, out = (Path(a).resolve() for a in (sys.argv[1], *sys.argv[3:6]))
+    train_dirs = [Path(a).resolve() for a in sys.argv[2].split(',')]
     arg = lambda k, d: type(d)(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d
     steps, lr, budget, every = arg('--steps', 20000), arg('--lr', 5e-4), arg('--budget', 12000), arg('--every', 1000)
-    start = arg('--from', '')
+    start, stride = arg('--from', ''), arg('--stride', 8)
     out.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(0)
-    torch.set_num_threads(arg('--threads', 15))
-    net = from_onnx(models / 'v6-tiny-rec')
+    torch.set_num_threads(arg('--threads', 5))
+    net = from_onnx(models / 'v6-tiny-rec', stride=stride)
     if start:
         net.load_state_dict(torch.load(start, map_location='cpu')['model'])
     net.train()
-    train, val = Lines(train_dir, True), Lines(val_dir, False)
+    train, val = Lines(train_dirs, True, stride), Lines([val_dir], False, stride)
     fixtures = FixtureCrops(fx, models)
     loader = torch.utils.data.DataLoader(train, batch_sampler=Batches(train, budget, 1), collate_fn=collate,
                                          num_workers=arg('--workers', 3), worker_init_fn=worker_init,
@@ -280,8 +285,8 @@ def main():
         (out / 'misses.json').write_text(json.dumps(misses, ensure_ascii=False, indent=0), encoding='utf-8')
         return v['exact']
 
-    best = evaluate(0) if not start else -1
-    torch.save(dict(model=net.state_dict(), step=0), out / 'best.pt')
+    best = evaluate(0)
+    torch.save(dict(model=net.state_dict(), step=0, stride=stride), out / 'best.pt')
     step, seen, t0, run_loss = 0, 0, time.time(), None
     while step < steps:
         for xs, targets, lengths, _ in loader:
@@ -301,10 +306,10 @@ def main():
                 print(f'step {step} loss {run_loss:.4f} lr {sched.get_last_lr()[0]:.2e} {seen / (time.time() - t0):.0f} lines/s', flush=True)
             if step % every == 0 or step == steps:
                 score = evaluate(step)
-                torch.save(dict(model=net.state_dict(), step=step), out / 'last.pt')
+                torch.save(dict(model=net.state_dict(), step=step, stride=stride), out / 'last.pt')
                 if score > best:
                     best = score
-                    torch.save(dict(model=net.state_dict(), step=step), out / 'best.pt')
+                    torch.save(dict(model=net.state_dict(), step=step, stride=stride), out / 'best.pt')
             if step >= steps:
                 break
 

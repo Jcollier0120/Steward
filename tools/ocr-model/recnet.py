@@ -2,7 +2,8 @@
 tiny's 6,906-way, or another candidate's), with a head of our own over CHARSET whose rows start as the old head's rows
 for those characters.
 
-Outputs logits [N, W/8, len(CHARSET) + 1], class 0 the CTC blank, class k the character CHARSET[k - 1].
+Outputs logits [N, W/stride, len(CHARSET) + 1], class 0 the CTC blank, class k the character CHARSET[k - 1]. The
+published model's stride is 8; at 4 (halve_stride) it has two steps where it had one, with the same weights.
 """
 from pathlib import Path
 
@@ -65,9 +66,29 @@ def load_graph(path: Path) -> onnx.ModelProto:
     return SymbolicShapeInference.infer_shapes(m, auto_merge=True)
 
 
-def from_onnx(model_dir: Path, charset: str = CHARSET) -> RecNet:
+def halve_stride(m: onnx.ModelProto) -> onnx.ModelProto:
+    """The graph with a step every 4 columns rather than 8: its last pooling (3 by 2 over a map 3 high) pools the height
+    alone, and the convolution after it that runs along the line is dilated by 2, so it still spans the same columns.
+    At 8 a step is about half a character wide: a run of narrow ones ("...", "ll", "--", a space at 11 px) has fewer
+    steps than CTC needs (one each, and a blank between two the same), and comes out one short."""
+    nodes = list(m.graph.node)
+    i = next(k for k, n in enumerate(nodes) if n.op_type == 'AveragePool')
+    attr = lambda n, name: next(a for a in n.attribute if a.name == name)
+    pool = nodes[i]
+    attr(pool, 'kernel_shape').ints[1] = 1
+    attr(pool, 'strides').ints[1] = 1
+    conv = next(n for n in nodes[i:] if n.op_type == 'Conv' and attr(n, 'kernel_shape').ints[1] > 1)
+    kw = attr(conv, 'kernel_shape').ints[1]
+    attr(conv, 'dilations').ints[1] = 2
+    pads = attr(conv, 'pads').ints
+    pads[1] = pads[3] = kw - 1
+    return m
+
+
+def from_onnx(model_dir: Path, charset: str = CHARSET, stride: int = 8) -> RecNet:
     model_dir = Path(model_dir)
-    gm = convert(load_graph(model_dir / 'inference.onnx'))
+    graph = load_graph(model_dir / 'inference.onnx')
+    gm = convert(halve_stride(graph) if stride == 4 else graph)
     g = gm.graph
     # The head: Add(MatMul(feat, W), b) before the last softmax (a larger model has softmaxes in its attention too).
     softmax = [n for n in g.nodes if n.op == 'call_module' and 'Softmax' in str(n.target)][-1]

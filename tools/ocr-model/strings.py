@@ -90,6 +90,7 @@ UNITS = ['KB', 'MB', 'GB', 'TB', 'ms', 's', 'min', 'hr', 'px', 'pt', '%', 'fps',
          'dpi', '°C', '°F', 'km', 'mi', 'kg', 'lb', 'mm', 'cm']
 SYMBOLS = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'
 TYPO = '€£¥¢©®™°±×÷µ§¶•…–—‘’“”«»¿¡→←↑↓✓·'
+ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIV', 'XV', 'XX']
 ACCENTS = {'a': 'àáâãäå', 'e': 'èéêë', 'i': 'ìíîï', 'o': 'òóôõöø', 'u': 'ùúûü', 'c': 'ç', 'n': 'ñ', 'y': 'ýÿ',
            'A': 'ÀÁÂÃÄÅ', 'E': 'ÈÉÊË', 'I': 'ÌÍÎÏ', 'O': 'ÒÓÔÕÖØ', 'U': 'ÙÚÛÜ', 'C': 'Ç', 'N': 'Ñ', 'Y': 'Ý'}
 
@@ -296,6 +297,26 @@ class Gen:
             out.append(''.join(r.choice(p) if r.random() < 0.75 else r.choice(CHARSET[1:95]) for _ in range(r.randint(1, 10))))
         return ' '.join(out)
 
+    def roman(self):
+        # Roman numerals among words: most sans faces draw a capital I as their l, so only the words around them tell.
+        r = self.r
+        n = r.choices(ROMAN, [4, 10, 8, 5, 4, 3, 3, 2, 2, 3, 1, 1, 1, 1, 1])[0]
+        k = r.randint(0, 6)
+        if k == 0:
+            return f'{self.ws(1, 4)} {n}'
+        if k == 1:
+            return f'{self.w(True)} {n}: {self.ws(1, 5, False)}'
+        if k == 2:
+            return f'{n}. {self.ws(1, 6)}'
+        if k == 3:
+            return f'{self.name()} {n}'
+        if k == 4:
+            return (f'{r.choice(["Part", "Chapter", "Volume", "Level", "Season", "Tier", "Phase", "Act", "Book", "Stage"])} {n}'
+                    f'{r.choice(["", " - " + self.ws(1, 4), ": " + self.ws(1, 4)])}')
+        if k == 5:
+            return f'{self.ws(1, 3)} {n}'.upper()
+        return f'{self.ws(1, 3)} {n} {self.ws(1, 3, False)}'
+
     def pick_prose(self):
         s = self.r.choice(self.prose)
         return s
@@ -308,7 +329,7 @@ KINDS = [('prose', 20), ('code', 14), ('ui', 16), ('path', 8), ('url', 6), ('num
          ('accented', 4), ('caps', 4), ('typography', 5)]
 
 
-def generate(repo: Path, count: int, seed: int):
+def generate(repo: Path, count: int, seed: int, kinds=KINDS):
     rnd = random.Random(seed)
     prose, code, words = repo_text(repo, rnd)
     g = Gen(rnd, prose, code, words)
@@ -316,8 +337,8 @@ def generate(repo: Path, count: int, seed: int):
     for s in check_strings(repo):
         banned |= grams(s)
     make = {'prose': g.pick_prose, 'code': g.pick_code, 'ui': g.ui, 'path': g.path, 'url': g.url, 'numbers': g.numbers,
-            'soup': g.soup, 'accented': g.accented, 'caps': g.caps, 'typography': g.typography}
-    names, weights = zip(*KINDS)
+            'soup': g.soup, 'accented': g.accented, 'caps': g.caps, 'typography': g.typography, 'roman': g.roman}
+    names, weights = zip(*kinds)
     seen = set()
     out = []
     while len(out) < count:
@@ -335,6 +356,7 @@ def generate(repo: Path, count: int, seed: int):
 if __name__ == '__main__':
     repo, count, dest = Path(sys.argv[1]), int(sys.argv[2]), Path(sys.argv[3])
     seed = int(sys.argv[sys.argv.index('--seed') + 1]) if '--seed' in sys.argv else 1
-    lines = generate(repo, count, seed)
+    kinds = [(k, 1) for k in sys.argv[sys.argv.index('--kinds') + 1].split(',')] if '--kinds' in sys.argv else KINDS
+    lines = generate(repo, count, seed, kinds)
     dest.write_text(''.join(json.dumps(l, ensure_ascii=False) + '\n' for l in lines), encoding='utf-8')
     print(len(lines), 'lines')
