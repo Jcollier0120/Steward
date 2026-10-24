@@ -52,7 +52,8 @@ python -I -X utf8 export.py models runs/r3/best.pt out/r3
 held-back lines and the check's pictures every `--every` steps. The first run is at the published model's stride (a
 step every 8 columns), the second at 4 (`recnet.halve_stride`: the same weights, twice the steps), which a run of
 narrow characters needs: at 8, "...", "ll" or a space at 11 px come out one short. Each keeps to 8 cores (5 threads,
-3 workers); the two take about eight hours on a Snapdragon X2's processor.
+3 workers); on a Snapdragon X2's processor the first takes about five hours and the second three and a half. A run that
+stops goes on from its last check with the same command and `--resume <out dir>/last.pt`.
 `export.py` writes what the reader takes: `det.onnx`, `rec.onnx` and `charset.txt`, each checked against the model it
 came from, with `LICENSE.txt` (Apache-2.0, PaddleOCR's) and `NOTICE.txt` (what the files are and what was changed).
 

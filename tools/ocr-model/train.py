@@ -2,12 +2,13 @@
 pictures (fixtures.ts) as it goes.
 
     python train.py <models> <train dir>[,<train dir>...] <val dir> <fixtures dir> <out dir> [--steps N] [--lr X]
-        [--from ckpt.pt] [--stride 8|4] [--threads N] [--workers N]
+        [--from ckpt.pt] [--resume ckpt.pt] [--stride 8|4] [--threads N] [--workers N]
 
 <models> has v6-tiny-rec and v6-tiny-det (fetch.py). --stride 4 gives the recognizer a step every 4 columns
-(recnet.halve_stride); a checkpoint at 8 starts one at 4, as their weights are the same. Its threads and workers
-(5 and 3) keep it to 8 of a PC's cores. Each crop is cut from its drawing with random room around the ink,
-as the detector's boxes leave it (0 to 0.6 of the ink's height each side), sometimes blurred, compressed or faded, then
+(recnet.halve_stride); a checkpoint at 8 starts one at 4, as their weights are the same. --resume goes on with a run
+from its last.pt, at the step and rate it had reached (its optimizer starts again, so the rate warms up again). Its
+threads and workers (5 and 3) keep it to 8 of a PC's cores. Each crop is cut from its drawing with random room around
+the ink, as the detector's boxes leave it (0 to 0.6 of the ink's height each side), sometimes blurred, compressed or faded, then
 made 48 pixels high as the reader makes it, and padded with grey to the width the reader's graph for it takes (BUCKETS),
 as the reader pads it: the model's squeeze-and-excite blocks average over the padding too, so it must be taught with
 the padding it will read with. Writes <out>\\last.pt, <out>\\best.pt (by exact lines on the val set) and
@@ -256,23 +257,28 @@ def main():
     train_dirs = [Path(a).resolve() for a in sys.argv[2].split(',')]
     arg = lambda k, d: type(d)(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d
     steps, lr, budget, every = arg('--steps', 20000), arg('--lr', 5e-4), arg('--budget', 12000), arg('--every', 1000)
-    start, stride = arg('--from', ''), arg('--stride', 8)
+    start, stride, resume = arg('--from', ''), arg('--stride', 8), arg('--resume', '')
     out.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(0)
     torch.set_num_threads(arg('--threads', 5))
     net = from_onnx(models / 'v6-tiny-rec', stride=stride)
     if start:
         net.load_state_dict(torch.load(start, map_location='cpu')['model'])
+    first = 0
+    if resume:
+        saved = torch.load(resume, map_location='cpu')
+        net.load_state_dict(saved['model'])
+        first = saved['step']
     net.train()
     train, val = Lines(train_dirs, True, stride), Lines([val_dir], False, stride)
     fixtures = FixtureCrops(fx, models)
-    loader = torch.utils.data.DataLoader(train, batch_sampler=Batches(train, budget, 1), collate_fn=collate,
+    loader = torch.utils.data.DataLoader(train, batch_sampler=Batches(train, budget, 1 + first), collate_fn=collate,
                                          num_workers=arg('--workers', 3), worker_init_fn=worker_init,
                                          persistent_workers=True, prefetch_factor=4)
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
     warm = 300
-    sched = torch.optim.lr_scheduler.LambdaLR(
-        opt, lambda s: min(1.0, (s + 1) / warm) * 0.5 * (1 + math.cos(math.pi * min(1.0, s / steps))))
+    cosine = lambda s: 0.5 * (1 + math.cos(math.pi * min(1.0, s / steps)))
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / warm) * cosine(s + first))
     log = (out / 'log.jsonl').open('a', encoding='utf-8')
 
     def evaluate(step):
@@ -285,9 +291,12 @@ def main():
         (out / 'misses.json').write_text(json.dumps(misses, ensure_ascii=False, indent=0), encoding='utf-8')
         return v['exact']
 
-    best = evaluate(0)
-    torch.save(dict(model=net.state_dict(), step=0, stride=stride), out / 'best.pt')
-    step, seen, t0, run_loss = 0, 0, time.time(), None
+    if resume:
+        best = max(json.loads(l)['val']['exact'] for l in (out / 'log.jsonl').read_text(encoding='utf-8').splitlines() if l)
+    else:
+        best = evaluate(0)
+        torch.save(dict(model=net.state_dict(), step=0, stride=stride), out / 'best.pt')
+    step, seen, t0, run_loss = first, 0, time.time(), None
     while step < steps:
         for xs, targets, lengths, _ in loader:
             logits = net(xs)
