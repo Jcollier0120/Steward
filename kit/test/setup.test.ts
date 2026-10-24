@@ -1324,6 +1324,10 @@ const rerankHf = async (repo: string) =>
 const writesDownloads = { log: () => {}, download: async (d: { dest: string }) => (mkdirSync(path.dirname(d.dest), { recursive: true }), writeFileSync(d.dest, 'x')), unpack: () => {}, listDevices: async () => ADRENO_BENCH };
 /** GenieX's Q4_0 of Qwen3-VL-2B, as the Snapdragon's route pins it. */
 const GENIEX_Q4_0 = (await import('./fixture/src/kit/npu-vendors.ts')).NPU_CATALOG.routes.qualcomm.offNpu!.models['unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0'].files.find((f) => f.role === 'model')!;
+/** The laptop with a 16 GB PC's memory (Windows shows 15.6 GB). */
+const SMALL_X2 = LAPTOP.replace('ram|51127103488', 'ram|17179869184');
+/** A 16 GB first-generation Snapdragon X Elite (Hexagon v73, Adreno X1-85). */
+const SMALL_X = SMALL_X2.replace(/X2 Elite Extreme - X2E94100/g, 'X Elite - X1E78100').replace('Adreno(TM) X2-90', 'Adreno(TM) X1-85');
 
 test('an npu an earlier kit wrote by default is still the default: its GenieX model then was Qwen3-4B', () => {
   const def = genieXConfig(LOCAL);
@@ -1377,14 +1381,58 @@ test("the NPU reranks on a Snapdragon X2: its embedding server's llama.cpp start
   assert.equal(failed.raw.accelerators.find((a: any) => a.id === 'npu').rerank, undefined);
   assert.deepEqual(npuMissing(plan, readAccelerators(failed.raw).accelerators), ['rerank']);
 
-  // Under 20 GB, the NPU's memory is chat's and the embeddings': the reranker goes where it went before.
-  const small = await planSetup({ detection: parseDetection(LAPTOP.replace('ram|51127103488', 'ram|17179869184')), ids: [], kinds: ['rerank'], raw, releases: RELEASES, hfFiles: rerankHf, home });
-  assert.equal(small.npuRerank, undefined);
-  assert.deepEqual(small.targets.map((t) => t.kinds), [['rerank']]);
+  // Under 20 GB an X2 holds it beside chat and embeddings too (kit 2.135.4: measured there on a 16 GB PC's memory).
+  const small = await planSetup({ detection: parseDetection(SMALL_X2), ids: [], kinds: ['rerank'], raw, releases: RELEASES, hfFiles: rerankHf, home });
+  assert.equal(small.npuRerank?.port, 18185);
+  assert.deepEqual(small.targets, [], 'neither the card nor the processor');
+  // A first-generation X under 20 GB wasn't measured: the reranker goes where it went before.
+  const smallX = await planSetup({ detection: parseDetection(SMALL_X), ids: [], kinds: ['rerank'], raw, releases: RELEASES, hfFiles: rerankHf, home });
+  assert.equal(smallX.npuRerank, undefined);
+  assert.deepEqual(smallX.targets.map((t) => [t.id, t.kinds]), [['gpu-qualcomm-r-adreno-tm-x1-85-gpu', ['rerank']]]);
+  // The same first-generation X with 20 GB or more: the NPU's, as on an X2.
+  const bigX = await planSetup({ detection: parseDetection(SMALL_X.replace('ram|17179869184', 'ram|34359738368')), ids: [], kinds: ['rerank'], raw, releases: RELEASES, hfFiles: rerankHf, home });
+  assert.equal(bigX.npuRerank?.port, 18185);
   // An NPU with no llama.cpp embedding server of its own (install's GenieX alone): the card, as before.
   const genieOnly = await planSetup({ detection: parseDetection(LAPTOP), ids: [], kinds: ['rerank'], raw: { accelerators: [{ id: 'npu', chat: npu.chat }, raw.accelerators[1]] }, releases: RELEASES, hfFiles: rerankHf, home });
   assert.equal(genieOnly.npuRerank, undefined);
   assert.deepEqual(genieOnly.targets.map((t) => [t.id, t.kinds]), [[SNAPDRAGON_CARD, ['rerank']]]);
+});
+
+test('a 16 GB X2 set up before, its reranker on the Adreno: kept there until the reranker is asked for again, then the NPU reranks first, the card after, and the keeper stops it with the embedding server', async () => {
+  const { ownEmbedServer, serversToReap } = await import('./fixture/src/kit/keeper.ts');
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'npu-rerank-small-'));
+  const exe = '%USERPROFILE%\\.reeve\\servers\\llama.cpp\\b11645-hexagon\\llama-server.exe';
+  const env = { ADSP_LIBRARY_PATH: 'C:\\g\\lib' };
+  const embed = { baseUrl: 'http://127.0.0.1:18182', model: 'qwen3-embedding-0.6b-gguf', startCommand: [exe, '--host', '127.0.0.1', '--port', '18182', '--device', 'HTP0', '-ngl', '99', '-m', 'C:\\m\\e.gguf', '--embeddings'], env };
+  const npu = { id: 'npu', chat: { baseUrl: 'http://127.0.0.1:18181', model: 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0', startCommand: ['C:\\g\\geniex.exe', 'serve'] }, embed, mine: 1 };
+  // What a kit before 2.135.4 wrote on a PC under 20 GB: the reranker on the card, beside its embeddings.
+  const cardRerank = { baseUrl: 'http://127.0.0.1:18194', model: 'qwen3-reranker-0.6b', startCommand: ['C:\\l\\llama-server.exe', '--port', '18194', '-m', 'C:\\m\\r.gguf', '--reranking'] };
+  const card = { id: SNAPDRAGON_CARD, kind: 'gpu', slots: 1, maxContextTokens: 8192, quirks: [], embed: { baseUrl: 'http://127.0.0.1:18191', model: 'qwen3-embedding-0.6b-gguf', startCommand: ['C:\\l\\llama-server.exe', '--port', '18191', '--embeddings'] }, rerank: cardRerank };
+  const raw = { accelerators: [npu, card] };
+
+  // Set up again without the reranker asked for (Set up local AI's usual kinds): nothing moves.
+  const usual = await planSetup({ detection: parseDetection(SMALL_X2), ids: [], kinds: ['chat', 'vision', 'embed'], raw, releases: RELEASES, hfFiles: rerankHf, home });
+  assert.equal(usual.npuRerank, undefined, 'the NPU gets no reranker it was not asked for');
+
+  // Asked for again (Reeve's sharper search, `--serve rerank`): the NPU's, as on a bigger PC.
+  const plan = await planSetup({ detection: parseDetection(SMALL_X2), ids: [], kinds: ['rerank'], raw, releases: RELEASES, hfFiles: rerankHf, home });
+  assert.equal(plan.npuRerank?.port, 18185);
+  assert.deepEqual(plan.targets, [], 'the card is not set up again');
+  const r = await runSetup(plan, raw, { ...writesDownloads, testRerank: async () => [] });
+  assert.deepEqual([r.problems, r.rerank], [[], undefined]);
+  const accs = readAccelerators(r.raw).accelerators;
+  assert.equal(accs.find((a) => a.id === 'npu')?.rerank?.baseUrl, 'http://127.0.0.1:18185');
+  assert.deepEqual(accs.find((a) => a.id === SNAPDRAGON_CARD)?.rerank, cardRerank, "the card's is left as it was");
+  assert.deepEqual(autoOrder(accs.filter((a) => a.rerank)).map((a) => a.id), ['npu', SNAPDRAGON_CARD], 'the NPU reranks first, the card only after it');
+  assert.deepEqual(validateAccelerators(r.raw), []);
+
+  // It doesn't give way to chat: only the embedding server does. The keeper stops it when idle as it stops the
+  // embedding server, at the small PC's minutes.
+  assert.equal(ownEmbedServer(accs.find((a) => a.id === 'npu') as any)?.base, 'http://127.0.0.1:18182');
+  const idle = (ramGb: number) => Object.fromEntries(serversToReap(r.raw, { withNpu: true, ramBytes: ramGb * 1024 ** 3 }).map((s) => [s.base, s.idleMs]));
+  const small = idle(16);
+  assert.ok(small['http://127.0.0.1:18185']! > 0 && small['http://127.0.0.1:18185'] === small['http://127.0.0.1:18182'], JSON.stringify(small));
+  assert.ok(small['http://127.0.0.1:18185']! < idle(48)['http://127.0.0.1:18185']!, "a small PC's minutes, shorter than a big one's");
 });
 
 test("one copy of Qwen3-VL-2B on a Snapdragon: the card and the processor read GenieX's Q4_0 where it is at its pinned size, with setup's projector; no Q4_K_M downloaded", async () => {

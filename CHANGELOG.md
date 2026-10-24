@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.228
+
+**It hands out the kit 2.135.4: a 16 GB Snapdragon X2 reranks Reeve's search results on its NPU, beside chat and embeddings.**
+
+### What changed
+
+- On a Snapdragon X2 PC with 16 GB of memory, Reeve's sharper search (its reranker) now runs on the NPU, as it does on bigger PCs. Until now it ran on the graphics card or the processor there, where it took more of the PC's memory and was slower: about 0.86 s for ten files on the NPU, against 1.6 s on the graphics card and 2.3 s on the processor.
+  - It was measured on a Snapdragon X2 held to a 16 GB PC's memory: nothing failed, chat and pictures were as quick, and about 5 GB of memory stayed free with chat, embeddings and the reranker all loaded.
+  - It stops after 5 minutes unused, as the embedding model does, and starts again when a search needs it.
+- Nothing changes on a first-generation Snapdragon X, or on Intel or AMD PCs.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A PC set up before keeps its reranker where it is until Reeve's sharper search is set up again.
+
 ## 0.36.227
 
 **It hands out the kit 2.135.3: on AMD PCs, pictures are read on the graphics card even when "Use the graphics card for models when there's an NPU" is off.**

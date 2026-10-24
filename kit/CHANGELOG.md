@@ -2,6 +2,33 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.135.4
+
+**A 16 GB Snapdragon X2 reranks on its NPU, beside chat and embeddings, as a bigger PC does. Measured there with a 16 GB PC's memory: nothing failed, chat wasn't slowed, and the NPU held 4.7 GB against its 6.2 GB share.**
+
+### What changed
+
+- **Setup's rule for the NPU's reranker:** a PC under 20 GB (`smallPc`) now gets it on a generation its route's `rerankServer.smallPc` names. Through kit 2.135.3 no small PC did, and the reranker went to the graphics card or the processor.
+  - npu-vendors.json names `snapdragon-x2` alone, with what was measured as its `basis`. The new `rerankFits(route, generation, ramBytes)` in npu-vendors.ts decides it, and setup.ts calls it where it checked `smallPc` before.
+  - The first-generation Snapdragon X keeps the rule as it was. It wasn't measured, its pictures are read on the Adreno, and its fallback Qwen3-VL-4B with both llama-servers would put the NPU over its share.
+  - Intel's and AMD's routes have no NPU reranker, so nothing changes for them.
+  - The reranker doesn't give way to chat as the embedding server does. Giving way would add 0.1 to 0.3 s to the chat that stops it and about 1.1 s to the next rerank, to free memory the measured levels didn't need. The keeper stops it when idle as it stops the embedding server, at the small PC's 5 minutes.
+- **What was measured** (the X2 Elite Extreme, 2026-10-24, a ballast leaving 9.7 GB available, and another leaving 15.6 GB in all, each level twice):
+  - The NPU held 4,660 MB with all three loaded: GenieX 2,454 MB, each llama-server 1,103 MB. That is 1.5 GB under the 40% share of a 16 GB PC and 3.1 GB under the 7.8 GB Windows lets one device hold.
+  - With 9.7 GB available at rest, 4.9 to 5.1 GB stayed available with all three loaded.
+  - Nothing failed, and the System log showed no DSP restart. `testNpuRerank` passed, and Reeve's 24 queries reranked as on 2026-10-23.
+  - Ten files reranked in 858 to 865 ms (median). Chat, pictures, embeddings and GenieX's quality items were the same with the reranker loaded as without.
+- **A PC set up before** keeps its reranker where it is, since Set up local AI doesn't ask for one. Once setup runs with the reranker asked for, the NPU's is added and answers first, with the card's kept behind it.
+- **Tests:**
+  - A 16 GB X2 gets the NPU's reranker; a 16 GB first-generation X goes to its card; a 32 GB one gets the NPU's.
+  - The update path: a 16 GB X2 set up before with its reranker on the Adreno. Set up again without the reranker asked for, nothing moves. Asked for, the NPU reranks first, the card's entry is kept as it was, and the keeper stops the reranker with the embedding server at the small PC's minutes.
+  - The catalog: `smallPc` names only generations the route supports, with its figures, and `rerankFits` follows it at 16 and 32 GB.
+- **Docs:** NPU-VENDORS.md (Reranking on the Hexagon, and a new The reranker on a 16 GB X2, with the power modes GenieX 0.9.3 and llama.cpp b11645 expose) and ACCELERATORS.md (`rerank`, the keeper).
+
+### Before you update
+
+- Nothing: it updates itself as usual. Reeve's sharper search, set up again on a 16 GB X2, moves its reranker to the NPU.
+
 ## 2.135.3
 
 **On AMD's Ryzen AI 300, pictures go to the Radeon even with "Use the graphics card for models when there's an NPU" off, Manor's default. The card's picture server starts when a picture comes and stops once unused. Chat stays on the NPU.**
