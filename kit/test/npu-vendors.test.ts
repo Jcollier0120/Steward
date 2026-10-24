@@ -1746,6 +1746,73 @@ test("setup as a command on an NPU of a generation setup doesn't know: kept, and
 // An agent's own io may extend NpuIo with members of its own. Kit 2.68.0's first draft named the clock `now`, and the
 // Smith's trial, whose io has `now: () => Date`, stopped compiling: this keeps the kit off that name.
 type KitNpuIo = import('./fixture/src/kit/setup.ts').NpuIo;
+test("setup started inside a packaged app (the Claude desktop app) runs outside it, on every maker's NPU; where it can't, what would go in AppData is refused, and the rest runs here", async () => {
+  const { OutsideUnavailable } = await import('./fixture/src/kit/outside.ts');
+  const { writesAppData } = await import('./fixture/src/kit/setup.ts');
+  const tools = path.join(home, 'cmd-outside');
+  const file = path.join(home, 'cmd-outside-config.json');
+  const base = { ids: [] as string[], releases: async () => RELEASES, hfFiles: hf, configFile: file, home: tools, env: ENV, yes: true, gpuWithNpu: true, npuNoteFile: path.join(home, 'cmd-outside-note.json'), npuReportFile: null, blockedFile: null, signaturesFile: null };
+  const routes = { qualcomm: parseDetection(`${NPU.x2}\n${ARM}`), intel: parseDetection(`${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`), amd: parseDetection(`${NPU.strix}\n${X64('AMD Ryzen AI 9 HX 370 w/ Radeon 890M')}`) };
+  const claude = async () => ({ pid: 1200, parent: 900, exe: 'C:\\Program Files\\WindowsApps\\Claude_1.1.0.0_x64__pzs8sxrjxfjjc\\app\\Claude.exe' });
+  const unavailable = async (): Promise<never> => {
+    throw new OutsideUnavailable("Task Scheduler wouldn't take the task (ERROR: Access is denied.)");
+  };
+
+  // What each plan writes in AppData: GenieX itself (the kit's build of its plugin is the keeper's to put in, at 0.9.3:
+  // npu-patch.ts, which runs outside as this does); nothing of Intel's or AMD's, whose servers unpack in the tools home,
+  // unless the tools home is in AppData.
+  const planOf = (detection: any, at = tools) => planSetup({ detection, ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: at, env: ENV, exists: disk() });
+  const x2 = writesAppData(await planOf(routes.qualcomm), ENV);
+  assert.equal(x2.length, 1, x2.join('\n'));
+  assert.match(x2[0], /^GenieX [\d.]+.*\(C:\\Users\\me\\AppData\\Local\\GenieX CLI\)$/);
+  assert.deepEqual(writesAppData(await planOf(routes.intel), ENV), []);
+  assert.deepEqual(writesAppData(await planOf(routes.amd), ENV), []);
+  const inAppDataTools = writesAppData(await planOf(routes.intel, 'C:\\Users\\me\\AppData\\Local\\tools'), ENV);
+  assert.ok(inAppDataTools.some((w) => /^OpenVINO Model Server .*\(C:\\Users\\me\\AppData\\Local\\tools\\servers\\ovms-[\d.]+\)$/.test(w)), inAppDataTools.join('\n'));
+
+  // Inside the app, on each maker's NPU: the plan said and asked here, the rest outside, its lines and result as they come.
+  for (const [vendor, detection] of Object.entries(routes)) {
+    writeFileSync(file, '{}');
+    const jobs: any[] = [];
+    const log: string[] = [];
+    const r = await setupCommand({ ...base, detection, log: (l: string) => log.push(l), packaged: claude, outside: async (job: any) => (jobs.push(job), { code: 0, entries: [{ id: 'npu', kind: 'npu' }] }) });
+    assert.equal(r.code, 0, vendor);
+    assert.deepEqual(r.entries, [{ id: 'npu', kind: 'npu' }], vendor);
+    assert.deepEqual(jobs, [{ kind: 'setup', options: { ids: [], yes: true, configFile: file, home: tools, gpuWithNpu: true, npuNoteFile: base.npuNoteFile, npuReportFile: null, blockedFile: null, signaturesFile: null } }], vendor);
+    assert.ok(log.some((l) => /^Looking up what this PC needs/.test(l)), vendor);
+    assert.ok(log.some((l) => /^This runs inside a packaged app \(the Claude desktop app is one\), where Windows keeps what's written to AppData to that app alone, out of the staff's sight\. So setup runs from Task Scheduler instead/.test(l)), vendor);
+    assert.equal(readFileSync(file, 'utf8'), '{}', `${vendor}: config.json is the run outside's to write`);
+  }
+
+  // Outside the app, the run itself: said and asked already, never sent outside again.
+  const asked: string[] = [];
+  assert.equal((await setupCommand({ ...base, detection: routes.qualcomm, asked: true, dryRun: true, log: (l: string) => asked.push(l), packaged: async () => assert.fail('a run outside never looks for a package') })).code, 0);
+  assert.deepEqual(asked, ['Dry run: nothing downloaded, config.json unchanged.']);
+
+  // Task Scheduler refusing on a Snapdragon: GenieX would be the app's alone, so nothing is set up.
+  writeFileSync(file, '{}');
+  const refused: string[] = [];
+  assert.equal((await setupCommand({ ...base, detection: routes.qualcomm, log: (l: string) => refused.push(l), packaged: claude, outside: unavailable })).code, 1);
+  assert.match(refused.find((l) => l.startsWith('problem:'))!, /^problem: setup couldn't run outside the app \(Task Scheduler wouldn't take the task \(ERROR: Access is denied\.\)\), and inside it these would be the app's alone: GenieX .*\\GenieX CLI\)\. So nothing is set up\. Set up local AI from Manor's page, or run setup from a terminal outside the app\.$/);
+  assert.equal(readFileSync(file, 'utf8'), '{}');
+  // A run outside that fails part-way is setup failing: not run again here.
+  const stopped: string[] = [];
+  assert.equal((await setupCommand({ ...base, detection: routes.intel, log: (l: string) => stopped.push(l), packaged: claude, outside: async () => Promise.reject(new Error('it stopped without finishing (its log: C:\\x\\log.txt)')) })).code, 1);
+  assert.ok(stopped.includes('problem: setup outside the app stopped: it stopped without finishing (its log: C:\\x\\log.txt)'), stopped.join('\n'));
+  assert.equal(readFileSync(file, 'utf8'), '{}');
+
+  // Refused on Intel's and AMD's: nothing they set up is AppData, so setup runs here, as before.
+  for (const vendor of ['intel', 'amd'] as const) {
+    writeFileSync(file, '{}');
+    const io = fakeNpuIo({ measured: { warmMs: 3_000, tokensPerSecond: 8 } });
+    const log: string[] = [];
+    const r = await setupCommand({ ...base, detection: routes[vendor], log: (l: string) => log.push(l), packaged: claude, outside: unavailable, io: { ...io.io, exists: (p: string) => disk()(p) || io.io.exists(p), listDevices: async () => '' } });
+    assert.ok(log.includes("note: setup couldn't run outside the app (Task Scheduler wouldn't take the task (ERROR: Access is denied.)). Nothing it sets up goes in AppData, so it runs here."), `${vendor}: ${log.join('\n')}`);
+    assert.equal(r.code, 0, `${vendor}: ${log.join('\n')}`);
+    assert.ok(JSON.parse(readFileSync(file, 'utf8')).accelerators.some((a: any) => a.kind === 'npu'), vendor);
+  }
+});
+
 interface AgentIo extends KitNpuIo {
   now: () => Date;
 }

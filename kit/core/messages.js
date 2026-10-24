@@ -146,6 +146,8 @@ export const say = Object.freeze({
   manorStopped: () => 'the manor is stopped: no model server starts until you start the manor again in its Settings',
   /** @param {string} command @param {string} why */
   couldNotStart: (command, why) => `couldn't start "${command}": ${why}`,
+  /** @param {string} program @param {string} file */
+  notInstalled: (program, file) => `"${program}" isn't installed where the staff look for it (${file}). They set it up again by themselves; to do it now, open Castellan and choose Set up local AI`,
   /** @param {string} program @param {string} baseUrl @param {number} seconds */
   didNotAnswer: (program, baseUrl, seconds) => `started "${program}" but ${baseUrl} didn't answer within ${seconds} s`,
   /** @param {string} program @param {number | null} code @param {string} baseUrl */

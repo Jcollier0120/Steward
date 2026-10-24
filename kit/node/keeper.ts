@@ -16,7 +16,8 @@ import { powershell, psQuote } from './ps.ts';
 import { keyInside, pathKey, samePath } from './real-path.ts';
 import { removeRetiredModels } from './retired.ts';
 import { RULES } from './rules.ts';
-import { kitVersion, refreshCardVision, refreshSmallModel, testNpuEmbed, testNpuEntry } from './setup.ts';
+import { repairMissing } from './server-repair.ts';
+import { kitVersion, refreshCardVision, refreshSmallModel, setupCommand, testNpuEmbed, testNpuEntry } from './setup.ts';
 
 /**
  * Keeping the model servers (spec/ACCELERATORS.md, "Keeping the servers"): whoever keeps them (the Smith; Reeve
@@ -1051,10 +1052,26 @@ export function startSmallModelRefresh(o: { logFile?: string } = {}): void {
 }
 
 /**
+ * A server whose program is gone from where config.json starts it, set up again (server-repair.ts, kit 2.113.5): in the
+ * background, at most one setup at a time, and not while the NPU's refresh tests its servers (the next look tries).
+ * What it did goes in the keeper's log, setup's own lines too.
+ */
+let repairing: Promise<void> | null = null;
+export function startRepairs(o: { logFile?: string; config?: () => Record<string, any> } = {}): void {
+  if (repairing || npuRefresh) return;
+  const logFile = o.logFile ?? reaperLog();
+  const log = (line: string) => logLine(logFile, line);
+  repairing = repairMissing({ raw: o.config, log, setup: (x) => setupCommand({ ...x, log: (line) => log(`setup: ${line}`) }) })
+    .then(() => {})
+    .catch((e: any) => log(`the servers' programs couldn't be looked at: ${e?.message ?? e}`))
+    .finally(() => (repairing = null));
+}
+
+/**
  * One look: each server, then the orphans. config.json and Manor's switch are read afresh, so a change applies at the
  * next look. With the PC's own reaper (pcReaper's), it first brings hardware.json, the cards' vision commands, the
  * NPU's command and the cards' Qwen3-VL-2B file up to date (and removes the model files the NPU no longer runs, once nothing
- * names them), whether or not it's handed config.json: the Smith hands the one it read for its round, and
+ * names them), and sets up again a server whose program is missing (startRepairs), whether or not it's handed config.json: the Smith hands the one it read for its round, and
  * until kit 2.78.8 that kept all three from ever running under it (Reeve leaves the looks to the Smith). A test's
  * reaper asks no PC.
  */
@@ -1062,6 +1079,7 @@ export async function keeperLook(reaper: Reaper, o: { config?: () => Record<stri
   if (asksPc(reaper)) {
     await refreshHardware().catch(() => false);
     refreshCards();
+    startRepairs({ config: o.config });
     startNpuRefresh();
     startSmallModelRefresh();
   }

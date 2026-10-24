@@ -388,6 +388,49 @@ test("switched off (config.json's npuPatch: false): GenieX's own back in the NPU
   assert.ok(!never.did.includes('turn'));
 });
 
+test("inside a packaged app (the Claude desktop app), GenieX's plugin in AppData is moved by runs outside it, in and back; refused there, it says so and GenieX keeps its own", async () => {
+  const { putPatchIn, putStockBack } = await import('./fixture/src/kit/npu-patch.ts');
+  const { OutsideUnavailable } = await import('./fixture/src/kit/outside.ts');
+  const pc = fakePc();
+  // GenieX's folder in this PC's %LOCALAPPDATA%, as it is on an X2.
+  const env = { LOCALAPPDATA: path.dirname(path.dirname(pc.folder)) };
+  const jobs: string[] = [];
+  const outside = async (job: any) => {
+    jobs.push(`${job.kind} ${path.basename(job.target)}`);
+    if (job.kind === 'patch-in') await putPatchIn(job.target, job.from, job.want, job.isStock, V.sha256File);
+    else putStockBack(job.target);
+    return null;
+  };
+  const inside = { ...pc.deps, env, packaged: async () => ({ pid: 1200 }), outside };
+  assert.deepEqual(await patchNpu(inside), { did: 'patched' });
+  assert.deepEqual(jobs, ['patch-in geniex_plugin.dll']);
+  assert.equal(pc.plugin(), BUILD);
+  assert.equal(pc.stock(), STOCK);
+  pc.config({ npuPatch: false });
+  assert.deepEqual(await patchNpu(inside), { did: 'off' });
+  assert.deepEqual(jobs, ['patch-in geniex_plugin.dll', 'stock-back geniex_plugin.dll']);
+  assert.equal(pc.plugin(), STOCK);
+  assert.equal(pc.stock(), null);
+
+  // Outside a package, or a GenieX outside AppData: moved here, as before.
+  for (const [packaged, inLocal] of [[null, true], [{ pid: 1200 }, false]] as const) {
+    const fresh = fakePc();
+    jobs.length = 0;
+    const local = inLocal ? path.dirname(path.dirname(fresh.folder)) : path.join(home, 'elsewhere');
+    assert.deepEqual(await patchNpu({ ...fresh.deps, env: { LOCALAPPDATA: local }, packaged: async () => packaged, outside }), { did: 'patched' });
+    assert.deepEqual(jobs, []);
+    assert.equal(fresh.plugin(), BUILD);
+  }
+
+  // Task Scheduler refusing: nothing put in the package, GenieX's own kept, and the log says why.
+  const refused = fakePc();
+  const r = await patchNpu({ ...refused.deps, env: { LOCALAPPDATA: path.dirname(path.dirname(refused.folder)) }, packaged: async () => ({ pid: 1200 }), outside: async () => Promise.reject(new OutsideUnavailable("Task Scheduler wouldn't take the task (ERROR: Access is denied.)")) });
+  assert.equal(r.did, 'failed');
+  assert.equal(refused.plugin(), STOCK);
+  assert.deepEqual(refused.leftovers(), []);
+  assert.match(refused.log.join('\n'), /geniex_plugin\.dll couldn't be put in: Task Scheduler wouldn't take the task \(ERROR: Access is denied\.\)/);
+});
+
 test("a later kit that no longer patches this PC puts GenieX's own back; an older kit never takes a newer one's look back", async () => {
   const pc = fakePc();
   assert.equal((await patchNpu(pc.deps)).did, 'patched');
