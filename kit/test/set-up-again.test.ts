@@ -428,3 +428,159 @@ test("the NPU's tests in a staged setup take the NPU's turn, its old servers sto
   assert.deepEqual(used.did, []);
   assert.equal(u.busy(), true);
 });
+
+// A card its work order puts first for work it doesn't serve yet (kit 2.135.2): an AMD Ryzen AI PC whose Radeon was set
+// up before kit 2.111.0, for embeddings only, gains its pictures the same way, gently, the old entry serving meanwhile.
+const { NPU_CATALOG, workOrderFor } = await import('./fixture/src/kit/npu-vendors.ts');
+const { sizing } = await import('./fixture/src/kit/setup.ts');
+const STRIX = 'npu2|32.0.203.376|2026-06-01|Advanced Micro Devices, Inc.|PCI\\VEN_1022&DEV_17F0&SUBSYS_88EE103C&REV_10\\4&2EA2F1A3&0&0141|NPU Compute Accelerator Device';
+const AMD_PC = parseDetection(`adapter|0|4098|536870912|17179869184|0x00000000_0x0000b2b2|0|AMD Radeon(TM) 890M Graphics
+${STRIX}
+cpu|12|24|AMD Ryzen AI 9 HX 370 w/ Radeon 890M
+ram|34359738368
+`);
+const RADEON_ID = AMD_PC.cards[0].id;
+const RADEON_LIST = '  Vulkan0: AMD Radeon(TM) 890M Graphics (16384 MiB, 15000 MiB free)\n';
+const AMD_ORDER = workOrderFor(NPU_CATALOG.routes.amd, 'xdna2')!;
+/** AMD's NPU as FastFlowLM serves it: chat, and pictures on chat's server. */
+const FLM = { id: 'npu', kind: 'npu', chat: { baseUrl: 'http://127.0.0.1:52625', model: 'qwen3.5:2b', startCommand: ['C:\\Program Files\\flm\\flm.exe', 'serve', 'qwen3.5:2b'] }, vision: { model: 'qwen3.5:2b' } };
+
+/** A card's entry as this kit's setup writes it, for `kinds`, in a tools home of its own. */
+async function cardFor(det: ReturnType<typeof parseDetection>, id: string, kinds: ('chat' | 'vision' | 'embed')[], list: string) {
+  const tools = path.join(home, `tools-${++n}`);
+  const plan = await planSetup({ detection: det, ids: [id], kinds, raw: {}, releases: [pinnedRelease()], hfFiles: pinnedHfFiles, home: tools });
+  const r = await runSetup(plan, {}, { ...ioOf(), listDevices: async () => list });
+  const e = r.entries.find((x) => x.id === id)! as Record<string, any>;
+  assert.ok(e, `${id} set up`);
+  return { tools, entry: JSON.parse(JSON.stringify(e)) as Record<string, any> };
+}
+
+/** The Radeon's entry as an older kit's pin left it: the same servers on llama.cpp b11669. */
+function onOlderVulkan(e: Record<string, any>): Record<string, any> {
+  const old = structuredClone(e);
+  for (const k of ['chat', 'vision', 'embed']) if (old[k]?.startCommand?.length) old[k].startCommand[0] = old[k].startCommand[0].replace(/\\llama\.cpp-b\d+-vulkan-x64\\/, '\\b11669-vulkan-x64\\');
+  assert.notDeepEqual(old, e);
+  return old;
+}
+
+const amdConfig = (radeon: Record<string, any>, more: Record<string, any> = {}) => ({ ...configOf(FLM, radeon), workOrder: AMD_ORDER, ...more });
+
+test("an AMD Radeon set up before kit 2.111.0, for embeddings only, is behind its work order: it gains pictures, said so; its build and models otherwise this kit's", async () => {
+  assert.deepEqual(AMD_ORDER.vision?.devices, ['gpu', 'npu', 'cpu'], "AMD xdna2's pictures: the Radeon first");
+  const { tools, entry } = await cardFor(AMD_PC, RADEON_ID, ['embed'], RADEON_LIST);
+  assert.deepEqual(['chat', 'vision', 'embed'].filter((k) => entry[k]), ['embed']);
+  const behind = (raw: Record<string, any>, gpuWithNpu?: boolean) => A.behindPins({ raw, detection: AMD_PC, kit: KIT, tools, ...(gpuWithNpu === undefined ? {} : { gpuWithNpu }) });
+
+  const [b, ...rest] = await behind(amdConfig(entry), true);
+  assert.deepEqual(rest, []);
+  assert.equal(b.id, RADEON_ID);
+  assert.equal(b.kind, 'gpu');
+  assert.deepEqual(b.kinds, ['vision', 'embed'], 'set up again for its pictures and the embeddings it serves');
+  assert.equal(b.why[0], "vision added: this PC's work order puts the graphics card first for it");
+  assert.equal(b.why.length, 2, b.why.join('; '));
+  assert.match(b.why[1], /\.gguf in place of none$/, 'its picture model and projector, beside its embedding model');
+  const vision = await cardFor(AMD_PC, RADEON_ID, ['vision', 'embed'], RADEON_LIST);
+  for (const f of A.modelFiles(vision.entry)) assert.ok(b.key.includes(path.basename(f)), `${b.key} names ${path.basename(f)}`);
+  assert.equal(b.key, (await behind(amdConfig(entry)))[0].key, "Manor's switch on when it isn't said");
+
+  // On an older build too: one look, one set-up, both said.
+  const [both] = await behind(amdConfig(onOlderVulkan(entry)), true);
+  assert.deepEqual(both.kinds, ['vision', 'embed']);
+  assert.equal(both.why[0], "vision added: this PC's work order puts the graphics card first for it");
+  assert.match(both.why[1], /^llama\.cpp-b\d+-vulkan-x64 in place of b11669-vulkan-x64$/);
+});
+
+test("the person's choices stand: Manor's switch off, their own acceleratorOrder, a card turned off or a model file of theirs add nothing; a card that serves the work already, or a PC with no order (Intel's, a Snapdragon's), is as it was", async () => {
+  const { tools, entry } = await cardFor(AMD_PC, RADEON_ID, ['embed'], RADEON_LIST);
+  const behind = (raw: Record<string, any>, gpuWithNpu = true) => A.behindPins({ raw, detection: AMD_PC, kit: KIT, tools, gpuWithNpu });
+  // Manor's "Use the graphics card for models when there's an NPU" off: the card is kept out of the NPU's work, pictures included.
+  assert.deepEqual(await behind(amdConfig(entry), false), []);
+  // With it off, a card on an older build is set up again for what it serves, nothing added.
+  const [old] = await behind(amdConfig(onOlderVulkan(entry)), false);
+  assert.deepEqual(old.kinds, ['embed']);
+  assert.ok(!old.why.some((w) => w.includes('added')), old.why.join('; '));
+  // An order of their own: the core reads no work order, so nothing is added.
+  assert.deepEqual(await behind(amdConfig(entry, { acceleratorOrder: [RADEON_ID, 'npu'] })), []);
+  assert.deepEqual(await behind(amdConfig({ ...entry, enabled: false })), []);
+  const theirs = structuredClone(entry);
+  const m = theirs.embed.startCommand.indexOf('-m');
+  theirs.embed.startCommand[m + 1] = 'D:\\mine\\my-embeddings.gguf';
+  assert.deepEqual(await behind(amdConfig(theirs)), []);
+  // A Radeon set up with pictures already isn't behind.
+  const seen = await cardFor(AMD_PC, RADEON_ID, ['vision', 'embed'], RADEON_LIST);
+  assert.deepEqual(await A.behindPins({ raw: amdConfig(seen.entry), detection: AMD_PC, kit: KIT, tools: seen.tools, gpuWithNpu: true }), []);
+  // Intel's and Snapdragon's routes have no order, so their config.json has none: nothing added there.
+  for (const [vendor, generation] of [['intel', 'lunar-lake'], ['intel', 'panther-lake'], ['qualcomm', 'snapdragon-x'], ['qualcomm', 'snapdragon-x2'], ['amd', 'xdna']] as const) {
+    assert.equal(workOrderFor(NPU_CATALOG.routes[vendor], generation), null, `${vendor} ${generation}`);
+  }
+  assert.deepEqual(await behind(configOf(FLM, entry)), []);
+});
+
+test('a card the work would not fit on beside the rest (setup leaves pictures off it) gains nothing: a plan that would not give it the work leaves it as it is', async () => {
+  const small = parseDetection(`adapter|0|4318|4294967296|17179869184|0x00000000_0x0000c1c1|0|NVIDIA GeForce RTX 2050
+${STRIX}
+cpu|12|24|AMD Ryzen AI 9 HX 370 w/ Radeon 890M
+ram|34359738368
+`);
+  const id = small.cards[0].id;
+  assert.deepEqual(sizing({ kind: 'gpu', memoryGb: small.cards[0].memoryGb, kinds: ['vision', 'embed'] }).left, ['vision'], 'pictures left off a 4 GB card beside its embeddings');
+  const { tools, entry } = await cardFor(small, id, ['embed'], '  CUDA0: NVIDIA GeForce RTX 2050 (4096 MiB, 3800 MiB free)\n');
+  const raw = { ...configOf(FLM, entry), workOrder: AMD_ORDER };
+  assert.deepEqual(await A.behindPins({ raw, detection: small, kit: KIT, tools, gpuWithNpu: true }), []);
+  // Behind its pins otherwise: set up again for what it serves, nothing added.
+  const [old] = await A.behindPins({ raw: { ...raw, accelerators: [FLM, onOlderBuild(entry)] }, detection: small, kit: KIT, tools, gpuWithNpu: true });
+  assert.deepEqual(old.kinds, ['embed']);
+});
+
+test("the update: the keeper's look asks setup for the Radeon's pictures and embeddings, staged; in its turn the new servers answer, pictures on a server of their own, and it's no longer behind; with Manor's switch off it isn't asked", async () => {
+  const { tools, entry } = await cardFor(AMD_PC, RADEON_ID, ['embed'], RADEON_LIST);
+  const dir = path.join(home, `pc-${++n}`);
+  mkdirSync(dir, { recursive: true });
+  const configFile = path.join(dir, 'config.json');
+  writeFileSync(configFile, JSON.stringify(amdConfig(entry), null, 2));
+  const asked: any[] = [];
+  const log: string[] = [];
+  const pc = stagePc();
+  const setupLog: string[] = [];
+  const deps: Parameters<typeof A.setUpAgain>[0] = {
+    kit: KIT,
+    configFile,
+    tools,
+    now: () => Date.parse('2026-10-24T12:00:00Z'),
+    detect: async () => AMD_PC,
+    idle: () => true,
+    stopped: () => false,
+    npuRefresh: () => null,
+    gpuWithNpu: () => false,
+    // setup.ts' setupCommand, staged, as the keeper's look runs it.
+    setup: async (x) => {
+      asked.push(x);
+      return setupCommand({ ...x, detection: AMD_PC, releases: async () => [pinnedRelease()], hfFiles: pinnedHfFiles, home: tools, gpuWithNpu: true, npuReportFile: null, blockedFile: null, signaturesFile: null, log: (l) => setupLog.push(l), io: { ...ioOf(), listDevices: async () => RADEON_LIST, ...pc.io }, stage: pc.deps });
+    },
+    log: (l) => log.push(l),
+  };
+  // Manor's switch off: not behind, nothing asked.
+  assert.deepEqual(await A.setUpAgain(deps), { did: 'none' });
+  assert.equal(asked.length, 0);
+
+  deps.gpuWithNpu = () => true;
+  const r = await A.setUpAgain(deps);
+  assert.deepEqual(r, { did: 'set-up', id: RADEON_ID, code: 0 }, setupLog.join('\n'));
+  assert.deepEqual(asked.map((x) => [x.ids, x.kinds, x.staged]), [[[RADEON_ID], ['vision', 'embed'], true]]);
+  assert.match(log[0], new RegExp(`^setting ${RADEON_ID} up again with this kit's pins, in the background \\(vision added: this PC's work order puts the graphics card first for it; `));
+  const after = JSON.parse(readFileSync(configFile, 'utf8'));
+  const card = after.accelerators.find((a: any) => a.id === RADEON_ID);
+  assert.ok(card.vision?.baseUrl && card.vision.startCommand?.length, 'pictures on a server of its own');
+  assert.equal(card.chat, undefined, 'no chat added: the NPU chats');
+  assert.deepEqual(card.embed, entry.embed, 'its embeddings as they were');
+  assert.deepEqual(after.accelerators.find((a: any) => a.id === 'npu'), FLM, "the NPU's entry untouched");
+  assert.deepEqual(after.workOrder, AMD_ORDER);
+  // Tested in the card's turn, its old servers stopped first.
+  const turn = pc.did.indexOf(`turn ${RADEON_ID}`);
+  assert.ok(turn >= 0, pc.did.join(', '));
+  assert.ok(pc.did.slice(turn).some((d) => d.startsWith('test chat llama.cpp-b')), `its pictures' server asked a question: ${pc.did.join(', ')}`);
+  assert.ok(pc.did.slice(turn).some((d) => d.startsWith('test embed llama.cpp-b')), pc.did.join(', '));
+  // The next look: nothing behind.
+  assert.deepEqual(await A.setUpAgain(deps), { did: 'none' });
+  assert.equal(asked.length, 1);
+});

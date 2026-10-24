@@ -2,14 +2,15 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import path from 'node:path';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, type AcceleratorKind, configuredAccelerators, type Endpoint, ENDPOINT_KINDS, type EndpointKind, isSharedTools, readConfigFile, serverLogsDir, serves, toolsHome } from './accelerator-config.ts';
 import { expandEnv } from './accelerators.ts';
+import * as core from './core/index.js';
 import type { Detection } from './detect.ts';
-import { manorStopped } from './manor.ts';
+import { gpuWithNpu, manorStopped } from './manor.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { servers, stillAnswering, whatAnswers } from './npu-refresh.ts';
 import { type Pace, pace } from './pace.ts';
 import { inside } from './real-path.ts';
 import { bytesOf, configStrings, RETIRED_GRACE_MS, removeAside } from './retired.ts';
-import { download, type HfFile, installSignedBuild, type NpuRefreshRecord, pinnedHfFiles, pinnedRelease, planSetup, readNpuRefresh, type Release, type SetupIo, specFor, testNpuEmbed, testNpuEntry, testNpuRerank } from './setup.ts';
+import { download, type HfFile, installSignedBuild, type NpuRefreshRecord, pinnedHfFiles, pinnedRelease, planSetup, readNpuRefresh, type Release, type SetupIo, sizing, specFor, testNpuEmbed, testNpuEntry, testNpuRerank } from './setup.ts';
 
 /**
  * An accelerator set up again by the keeper when the kit's pins move on (kit 2.115.0). Setup writes an entry once, so a
@@ -24,6 +25,11 @@ import { download, type HfFile, installSignedBuild, type NpuRefreshRecord, pinne
  *   plan made from the pins alone, nothing asked of the network). An entry of the person's own (another program, a model
  *   file of theirs) is theirs, and never set up again. The NPU's, where the keeper's look at it found this kit's command
  *   needs a download (npu-refresh.ts' `needs-setup`): its server's version, its models, its embedding server.
+ * - **What its work order adds** (kit 2.135.2). A graphics card the PC's work order puts first for a work it doesn't
+ *   serve yet (today AMD xdna2's pictures on the Radeon: a card set up before kit 2.111.0 serves only embeddings) is
+ *   behind too, and gains that work the same way, when a plan from the pins gives the card it (orderAdds). The person's
+ *   choices stand: a card they turned off, an acceleratorOrder of their own, and Manor's gpuWithNpu off (the card kept
+ *   out of the NPU's work) add nothing.
  * - **Gently.** One accelerator a look, once nobody has used it for AGAIN_QUIET_MS, never while the manor is stopped, in
  *   the background (the Smith's own pace). At the manor's gentle pace, downloads go at GENTLE_BYTES_PER_SECOND at most
  *   (pacedFetch); a model the NPU's own server pulls (GenieX's, FastFlowLM's) comes at that server's pace. Setup runs as
@@ -101,7 +107,7 @@ function writeAgain(file: string, r: AgainRecord): void {
 export interface Behind {
   id: string;
   kind: AcceleratorKind;
-  /** What it serves: it's set up again for these. */
+  /** What it serves, and what its work order adds: it's set up again for these. */
   kinds: EndpointKind[];
   /** What the pins make it, with the kit: a try Windows blocked isn't made again until this changes. */
   key: string;
@@ -122,9 +128,31 @@ export function modelFiles(e: Record<string, any>, env: Record<string, string | 
 const lower = (p: string) => p.toLowerCase();
 
 /**
+ * The work config.json's `workOrder` puts a graphics card first for that no card serves yet, by the card that gains it:
+ * the first enabled card in the core's order (the one its requests would go to). The order as the core reads it, so none
+ * with an acceleratorOrder of the person's own; none for a work Manor's gpuWithNpu (off) keeps the card out of, as the
+ * NPU serves it (the core's cardWorkBesideNpu, the one rule requests follow).
+ */
+export function orderAdds(raw: Record<string, any>, accs: Accelerator[], withNpu: boolean): Map<string, EndpointKind[]> {
+  const out = new Map<string, EndpointKind[]>();
+  const order = Array.isArray(raw?.acceleratorOrder) ? undefined : core.readWorkOrder(raw?.workOrder);
+  const cards = accs.filter((a) => a.kind === 'gpu' && a.enabled !== false);
+  if (!order || !cards.length) return out;
+  const npu = core.npuServes(accs);
+  for (const w of core.WORKS) {
+    if (order[w]?.devices[0] !== 'gpu' || cards.some((c) => serves(c, w))) continue;
+    if (!withNpu && !core.cardWorkBesideNpu([w], npu).length) continue;
+    out.set(cards[0].id, [...(out.get(cards[0].id) ?? []), w]);
+  }
+  return out;
+}
+
+/**
  * The accelerators in config.json behind the kit's pins (see above): a card's or the processor's whose program or model
  * files aren't the ones a plan from the pins gives them, for all it serves (a plan that would leave some of it out, or
- * can't be made, leaves the entry as it is); the NPU's when the keeper's look at it, this kit's, left it for setup.
+ * can't be made, leaves the entry as it is), or a card its work order adds work to (orderAdds) that such a plan gives
+ * it; the NPU's when the keeper's look at it, this kit's, left it for setup. `gpuWithNpu` is Manor's switch (on, when
+ * left out).
  */
 export async function behindPins(o: {
   raw: Record<string, any>;
@@ -136,12 +164,15 @@ export async function behindPins(o: {
   npuRefresh?: NpuRefreshRecord | null;
   releases?: Release[];
   hfFiles?: (repo: string) => Promise<HfFile[] | null>;
+  gpuWithNpu?: boolean;
 }): Promise<Behind[]> {
   const env = o.env ?? process.env;
   const builds = path.join(o.tools, 'servers', 'llama.cpp');
   const modelsDir = path.join(o.tools, 'models');
   const out: Behind[] = [];
-  for (const a of configuredAccelerators(o.raw)) {
+  const accs = configuredAccelerators(o.raw);
+  const adds = orderAdds(o.raw, accs, o.gpuWithNpu ?? true);
+  for (const a of accs) {
     const kinds = ENDPOINT_KINDS.filter((k) => serves(a, k));
     if (a.enabled === false || !kinds.length) continue;
     if (a.kind === 'npu') {
@@ -150,9 +181,22 @@ export async function behindPins(o: {
     }
     const programs = servers(a).map((s) => expandEnv(s.program, env));
     if (!programs.length || !programs.every((p) => inside(p, builds))) continue;
-    const plan = await planSetup({ detection: o.detection, ids: [a.id], kinds, ...(a.kind === 'cpu' ? { cpuKinds: kinds } : {}), raw: o.raw, releases: o.releases ?? [pinnedRelease()], hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.tools, env: o.env, exists: o.exists, skipNpu: true });
-    const t = plan.targets.find((x) => x.id === a.id);
-    if (!t?.folder || t.problem || kinds.some((k) => !t.kinds.includes(k))) continue;
+    const planFor = (ks: EndpointKind[]) =>
+      planSetup({ detection: o.detection, ids: [a.id], kinds: ks, ...(a.kind === 'cpu' ? { cpuKinds: ks } : {}), raw: o.raw, releases: o.releases ?? [pinnedRelease()], hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.tools, env: o.env, exists: o.exists, skipNpu: true });
+    const adding = adds.get(a.id) ?? [];
+    let ask = ENDPOINT_KINDS.filter((k) => kinds.includes(k) || adding.includes(k));
+    let plan = await planFor(ask);
+    let t = plan.targets.find((x) => x.id === a.id);
+    // Work it adds that the plan can't give the card, or wouldn't by itself (setup leaves pictures off a card they don't
+    // fit on beside the rest, unless asked for by name): left out, and the card planned for the rest.
+    const left = t ? (sizing({ kind: t.kind, memoryGb: t.memoryGb, ramGb: o.detection.ramBytes / 1024 ** 3, kinds: ask }).left ?? []) : [];
+    const gains = adding.filter((k) => t?.kinds.includes(k) && !left.includes(k));
+    if (gains.length < adding.length) {
+      ask = ENDPOINT_KINDS.filter((k) => kinds.includes(k) || gains.includes(k));
+      plan = await planFor(ask);
+      t = plan.targets.find((x) => x.id === a.id);
+    }
+    if (!t?.folder || t.problem || ask.some((k) => !t!.kinds.includes(k))) continue;
     const program = path.join(t.folder, 'llama-server.exe');
     const want: string[] = [];
     for (const k of t.kinds) {
@@ -168,14 +212,15 @@ export async function behindPins(o: {
     const sameProgram = programs.every((p) => lower(p) === lower(program));
     const added = want.filter((w) => !files.some((f) => lower(f) === lower(w)));
     const gone = files.filter((f) => !want.some((w) => lower(w) === lower(f)));
-    if (sameProgram && !added.length && !gone.length) continue;
+    if (sameProgram && !added.length && !gone.length && !gains.length) continue;
     const was = [...new Set(programs.map((p) => path.basename(path.dirname(p))))];
     out.push({
       id: a.id,
       kind: a.kind,
-      kinds,
+      kinds: ask,
       key: `${o.kit} ${path.basename(t.folder)} ${want.map((w) => path.basename(w)).sort().join(' ')}`,
       why: [
+        ...(gains.length ? [`${gains.join(' and ')} added: this PC's work order puts the graphics card first for it`] : []),
         ...(sameProgram ? [] : [`${path.basename(t.folder)} in place of ${was.join(', ')}`]),
         ...(added.length || gone.length ? [`${added.map((f) => path.basename(f)).join(', ') || 'fewer models'} in place of ${gone.map((f) => path.basename(f)).join(', ') || 'none'}`] : []),
       ],
@@ -447,6 +492,8 @@ export interface AgainDeps {
   idle: (a: Pick<Accelerator, 'id' | 'kind' | 'slots'>) => boolean;
   /** Manor's stop (manor.ts' manorStopped): nothing is set up while the manor is stopped. */
   stopped?: () => unknown;
+  /** Manor's "Use the graphics card for models when there's an NPU" (manor.ts' gpuWithNpu(), read at each look). */
+  gpuWithNpu?: () => boolean;
   /** setup.ts' setupCommand, staged. */
   setup: (o: { ids: string[]; kinds?: EndpointKind[]; cpuKinds?: EndpointKind[]; yes: true; staged: true; configFile?: string }) => Promise<{ code: number; busy?: boolean; blocked?: boolean }>;
   log: (line: string) => void;
@@ -503,7 +550,8 @@ export async function setUpAgain(d: AgainDeps): Promise<AgainOutcome> {
   const read = readConfigFile(configFile);
   if (read.error || !configuredAccelerators(read.raw).length) return { did: 'none' };
   const npuRefresh = d.npuRefresh ? d.npuRefresh() : readNpuRefresh(configFile);
-  const behind = await behindPins({ raw: read.raw, detection: await d.detect(), kit: d.kit, tools, env, exists: d.exists, npuRefresh, releases: d.releases, hfFiles: d.hfFiles });
+  const withNpu = (d.gpuWithNpu ?? (() => gpuWithNpu().on))();
+  const behind = await behindPins({ raw: read.raw, detection: await d.detect(), kit: d.kit, tools, env, exists: d.exists, npuRefresh, releases: d.releases, hfFiles: d.hfFiles, gpuWithNpu: withNpu });
   const had = readAgain(file);
   // Tries of what is no longer behind are forgotten.
   const record: AgainRecord = { tries: Object.fromEntries(Object.entries(had.tries).filter(([id]) => behind.some((b) => b.id === id))), replaced: had.replaced };
