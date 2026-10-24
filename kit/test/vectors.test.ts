@@ -242,12 +242,15 @@ for (const c of accel.candidates) {
       list: r.list.map((a) => a.id),
       skipped: r.skipped.map((s) => ({ id: s.acc.id, why: s.why, detail: s.detail })),
     });
-    assert.deepEqual(plain(core.candidates(RULES, accs, c.need, { failures: c.failures, games: c.games, deferredMs: c.deferredMs, nowMs: NOW })), c.expect);
+    assert.deepEqual(plain(core.candidates(RULES, accs, c.need, { failures: c.failures, games: c.games, deferredMs: c.deferredMs, nowMs: NOW, workOrder: c.workOrder, running: c.running, waiting: c.waiting })), c.expect);
     const viaNode = A.candidates(accs, c.need, {
       failure: c.failures ? (id) => c.failures[id] ?? null : undefined,
       games: c.games,
       deferredMs: c.deferredMs ? (id) => c.deferredMs[id] ?? 0 : undefined,
       now: NOW,
+      workOrder: c.workOrder,
+      running: c.running ? (id) => c.running[id] ?? false : undefined,
+      waiting: c.waiting,
     });
     assert.deepEqual(plain(viaNode), c.expect);
   });
