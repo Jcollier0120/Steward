@@ -240,7 +240,7 @@ The last two kinds can't be told apart by shape. Only the words around them tell
 
 - **The fetch.** What the model needs is fetched once for every agent on the PC, in the background, into the reader's shared folder (`%USERPROFILE%\.npu-agent\ocr`, `KIT_OCR_HOME`):
   - ONNX Runtime 1.27.0, from Microsoft's release;
-  - the NPU maker's plugin, from its own NuGet package (Qualcomm's QNN 2.6.0 on an Arm PC, Intel's OpenVINO 1.7.0 on an Intel NPU 3720);
+  - the NPU maker's plugin, from its own NuGet package (Qualcomm's QNN 2.6.0 on an Arm PC, Intel's OpenVINO 1.7.0 on an Intel NPU 3720), or for AMD's test, Windows ML 2.4.89, which asks Windows for AMD's plugin;
   - the model, from the release `ocr-model-v1` in the manor's public releases.
 
   Each is pinned by size and SHA-256 (`MODEL_FILES` and the rest), and only the files the reader uses are kept, with their notices. Until all of it is there, Windows OCR reads.
@@ -252,21 +252,28 @@ The last two kinds can't be told apart by shape. Only the words around them tell
   - the compiled graphs (EP context) kept in the cache.
 
   A program that compiled its graphs is started again at once, because Qualcomm's compiler holds about 2 GB until its program ends.
-- **The working folder.** The program runs in the cache folder, so whatever a runtime leaves in its working folder stays there, never in a person's folder: VitisAI's signature `.txt` files, when AMD's route comes.
+- **The working folder.** The program runs in the cache folder, so whatever a runtime leaves in its working folder stays there, never in a person's folder. VitisAI writes `original-info-signature.txt` and `original-model-signature.txt` there (checked on a Ryzen AI 7 350).
 - **The NPU queue** (`npu-queue.ts`). Reading on the NPU takes the NPU's turn as any model work does (`acceleratorTurn`), eight pages a turn (`TURN_PAGES`, about half a second), in the caller's lane. A background read waits its turn. When the NPU's line is too long (four waiting), or no turn comes within 10 minutes, a second program on the processor reads the rest instead of waiting (since kit 2.126.0, the owner's call, 2026-10-24; Windows OCR read it before). It's started beside the NPU's when it's first needed, holds the processor's sessions (a few hundred MB) while it runs, and ends itself after two minutes without a picture, as the NPU's does. If it can't start, Windows OCR reads.
 - **The self-check.** Before it reads anything, the program reads a picture it draws itself, on the NPU and on the processor. An NPU that reads it differently isn't used: the program reads on the processor instead (`ON_PROCESSOR`, since kit 2.124.0). A program that can't start at all leaves Windows OCR to read for the next six hours (`REFUSED_MS`).
 - **The settings:**
   - `KIT_OCR_ENGINE=windows` reads with Windows OCR alone;
   - `KIT_OCR_ENGINE=model` reads with the model wherever it can, the processor included;
   - unset, the model reads where it's worth it;
-  - `KIT_OCR_NPU=none` keeps the model off the NPU, and `KIT_OCR_NPU=openvino` tries Intel's plugin on any x64 PC (a test, where the NPU isn't a 3720);
+  - `KIT_OCR_NPU=none` keeps the model off the NPU, `KIT_OCR_NPU=openvino` tries Intel's plugin on any x64 PC (a test, where the NPU isn't a 3720), and `KIT_OCR_NPU=vitisai` AMD's (a test);
   - under `node:test`, Windows OCR reads unless `KIT_OCR_ENGINE` says otherwise, so no test fetches the model.
 
 ### On the processor
 
 With no NPU the model runs on, or an NPU that fails the self-check, the model could read on the processor instead. It reads as well there as on the NPU (1,212/1,253). But on the X2's processor a picture beyond the start costs 498 ms and 1,452 ms of processor (four threads), with a 463 MB peak. That is 20 times Windows OCR's processor time, far from gentle in the background. On an Intel Core Ultra 5 225U it's 326 ms and 972 ms of processor, 16 times Windows OCR's, and 7.0 J against Windows OCR's 0.47 J. So `ON_PROCESSOR` was false, and Windows OCR read where the NPU couldn't. Since kit 2.124.0 it's true: the owner chose how well it reads over what it costs, step by step, below.
 
-**An AMD PC reads on the processor (kit 2.121.0, the owner's call, 2026-10-24).** The owner's rule: never trade how well it reads for less power, and spend the least power among what reads well. So until AMD's NPU route is measured, an AMD PC (by Windows' `PROCESSOR_IDENTIFIER`, `AuthenticAMD`) reads with the model on its processor, where Windows OCR reads 736 of the check's lines to its 1,212. It fetches about 81 MB (ONNX Runtime and the model, no NPU plugin) and keeps 19 MB. Not measured on an AMD processor yet: the Intel figures above are the nearest.
+**An AMD PC reads on the processor (kit 2.121.0, the owner's call, 2026-10-24).** The owner's rule: never trade how well it reads for less power, and spend the least power among what reads well. So an AMD PC (by Windows' `PROCESSOR_IDENTIFIER`, `AuthenticAMD`, then) reads with the model on its processor, where Windows OCR reads 736 of the check's lines to its 1,212. It fetches about 81 MB (ONNX Runtime and the model, no NPU plugin) and keeps 19 MB. AMD's NPU, measured since, reads worse ([Intel and AMD](#intel-and-amd)), so the processor it stays. Measured on a Ryzen AI 7 350 on 2026-10-24 (kit 2.127.0), with the manor stopped: the check's three runs, and the energy as Intel's is measured below:
+
+| | Lines read exactly | A picture beyond the start | Its processor time | Its energy over rest |
+|---|---|---|---|---|
+| Windows OCR | 736/1,253 | 48 ms | 50 ms | 698 mJ |
+| The model on the processor | 1,212/1,253 | 268 ms | 776 ms | 4,875 mJ |
+
+No group reads worse with the model than with Windows OCR. A picture costs 7.0 times Windows OCR's energy and 16 times its processor time, much as on the Core Ultra 5 225U. A start costs 4.0 J, against Windows OCR's 6.1 J.
 
 **So does an Intel PC whose NPU isn't measured yet, or that has none (kit 2.122.0, the owner's call, 2026-10-24).** `GenuineIntel` joined `AuthenticAMD`, so Intel's NPUs other than `OPENVINO_GENERATIONS` (Lunar Lake's NPU 4000 and later, and the 200S and 200HX) read on the processor until their NPU route is measured, as do Intel PCs without an NPU. The figures above are a Core Ultra 5 225U's processor; an older processor takes longer.
 
@@ -294,9 +301,20 @@ Each gets the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent
   - **Sharing the NPU.** It reads as fast while OpenVINO Model Server holds the NPU for chat (a detector tile in 9.3 ms), and the chat still answers.
 
   Other Intel generations (Lunar Lake's NPU 4000 and later) read with the model on the processor until they're measured ([On the processor](#on-the-processor)).
-- **AMD:** VitisAI through Windows ML is still to be added, as Envoy reaches it (Envoy 0.1.35 runs Whisper's encoder there by default on Ryzen AI 300 and later, so the way is known). Until then, an AMD PC reads with the model on the processor ([On the processor](#on-the-processor)). It needs every shape fixed and the CPU fallback off. VitisAI runs an FP32 model as BF16, so the FP32 files are tried first, and an int8 QDQ copy if they read worse.
+- **AMD's NPU** (Ryzen AI 300 and later), through VitisAI, AMD's plugin that Windows ML installs, as Envoy reaches it: a test (`KIT_OCR_NPU=vitisai`). Every shape is fixed and the CPU fallback is off. VitisAI compiles each graph once, for minutes, into the reader's cache. The program compiles them in the background (`--prepare`), as many at once as the PC's cores and memory allow, below normal priority, while the processor reads. VitisAI runs the FP32 model as BF16. Measured on a Ryzen AI 7 350 on 2026-10-24 (plugin 1.8.75, Windows ML 2.4.89), with the manor stopped:
+  - **It reads worse, so the program's self-check refuses it**, and the processor reads. Line by line against the processor, over the check's pictures:
 
-Each becomes its PC's default if it reads no worse than Windows OCR in any group, at no more processor time a picture than Windows OCR. Where it also spends more energy a picture, as Intel's does, the owner decides.
+    | The recognizer's width | 128 | 256 | 384 | 512 | 768 | 1,024 |
+    |---|---|---|---|---|---|---|
+    | Lines read the same | 95% | 95% | 94% | 39% | 1% | 40% |
+
+    At the narrow widths it's BF16's rounding: a character in a noisy fragment. From 512 wide the graphs come out wrong; most of 768's lines read empty. The detector moves boxes too: with the recognizer on the processor, 255 of 952 lines read differently ("Termin al").
+  - **What it would cost**, for what an accurate copy might be worth: 2,077 mJ a picture over rest (698 mJ of it the NPU's), 3.0 times Windows OCR's and 0.43 times the processor's. A picture takes 418 ms, and 92 ms of the program's processor time. A start costs 28 J, loading seven graphs. Measured as Intel's energy is.
+  - **Its compiler** can't place a recognizer 1,280 wide or more ("DMA channel … cannot access full range of the shared buffer memory space"), so on AMD the widest is 1,024. On the processor, the check's lines read the same so. A batch of more than one line leaves nodes to the processor, which VitisAI refuses, so lines are read one at a time.
+  - **Compiling** takes minutes a graph, on about one core: 18 for the detector, 3.5 to 7.5 for each recognizer width. All seven at once take 28.5 minutes on about five cores, with a 5.5 GB peak. Compiled, they keep 33 MB.
+  - **What could change that:** an int8 QDQ copy, the precision VitisAI is built for, or a newer plugin. Either needs the check again.
+
+Each becomes its PC's default if it reads no worse than Windows OCR in any group, and since the owner's rule of 2026-10-24, no worse than the model on the processor: how well it reads comes first, then the least energy among what reads well. Where it spends more energy a picture than Windows OCR, as Intel's does, the owner decides.
 
 ### Where the model is published
 
