@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.208
+
+**It hands out the kit 2.122.0: on an Intel PC without an NPU we've measured, the staff read the text in pictures with our own model too.**
+
+### What changed
+
+- **More Intel PCs read text with our own model.** On an Intel Core Ultra with the NPU 3720, it already read on the NPU. Now every other Intel PC reads with it on the processor, until we've measured its NPU: the other Core Ultras, and PCs without an NPU. In our check Windows' own text recognition read 736 of 1,253 lines exactly, and ours 1,212. It uses more of the processor and more power for each picture than Windows' own did. The first time, it fetches about 81 MB in the background, and Windows' own reads until that's done.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.207
 
 **It hands out the kit 2.121.0: on an AMD PC the staff read the text in pictures with our own model, which reads far more of it right than Windows' own.**

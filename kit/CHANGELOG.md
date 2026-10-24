@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.122.0
+
+**An Intel PC whose NPU isn't measured yet, or that has none, reads text with our own model on the processor, as an AMD PC does since 2.121.0. The owner chose how well it reads over the power it costs.**
+
+### What changed
+
+- **ocr-npu.ts** `ON_PROCESSOR_MAKERS` is `['AuthenticAMD', 'GenuineIntel']`. On Intel, the NPU 3720 (`OPENVINO_GENERATIONS`) still reads with the model on the NPU. Every other Intel PC now reads with the model on the processor, where it read with Windows OCR: Lunar Lake's NPU 4000 and later, the 200S and 200HX, and PCs with no NPU. An Intel NPU 3720 that fails its self-check falls back to the processor too, no longer to Windows OCR.
+- **What it costs:** like an AMD PC, it fetches about 81 MB once for the whole PC, and keeps 19 MB. On a Core Ultra 5 225U's processor a picture costs 326 ms and 972 ms of processor time, against Windows OCR's 59 ms and 61 ms (spec/OCR.md, "On the processor").
+- **A Snapdragon is unchanged.**
+
+### Before you update
+
+- Nothing. `KIT_OCR_ENGINE=windows` still keeps Windows OCR.
+
 ## 2.121.0
 
 **An AMD PC's text reader reads with our own model, on the processor: Windows OCR read 736 of the check's 1,253 lines exactly, the model 1,212. It costs more processor time and power than Windows OCR, and the owner chose it for how much better it reads, until AMD's NPU route is measured.**
