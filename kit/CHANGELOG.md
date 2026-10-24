@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.112.1
+
+**On AMD's Ryzen AI 300 a picture waits in the Radeon's line, rather than going to a free NPU that spends more on it.**
+
+### What changed
+
+- **The order's first, alone** (`candidates`, the core, and its vectors): where the work's order puts one first, by its `runningFirst` or a batch (as many of the work waiting as its `batchAt`), the first in that order that can take the request is its only candidate, as the NPU first is. Busy, it's waited for. The next takes the request only when that one failed lately, is a game's, or is rested after a long line.
+- **Why**: until now the pick shared the request out to whichever candidate had a free slot or the shortest line. On AMD that sent most of a batch of 4 background pictures to the NPU, at 26.6 J each against the Radeon's 10.4 (found by the Reeve session, 2026-10-24). An agent's background pictures count those of its own already headed to a line, so from the second the Radeon looked busier than a free NPU. A picture sent while the Radeon read another went to the NPU the same way. Waiting for a busy Radeon costs a picture about 0.47 s for each one ahead of it.
+- **A background request behind `maxAhead` (4) in that one line is deferred** for a later round (`NpuBusy`), as on the NPU, rather than going to the next device.
+- **`isBatch(order, waiting)`** (the core, exported): whether as many of the work wait as its order's `batchAt`. `workOrdered` keeps the work's devices' order for a batch, whoever's server is up, by it, as before.
+- spec/ACCELERATORS.md (Choosing an accelerator, step 2), spec/NPU-VENDORS.md (Counting the pictures that wait).
+
+### Before you update
+
+- Nothing: take the kit as usual. Only AMD's XDNA 2 has a work order, and only its pictures have `runningFirst` and `batchAt`: its chat keeps the NPU first, and its embeddings the Radeon, then the processor. A `candidates` caller without `workOrder` gets the candidates it got before.
+- Reeve's own routing (`src/routing.ts`, which reads `workOrder` from Reeve 0.18.63) mirrors the pick, and takes the same change in its own repository, with `isBatch`.
+
 ## 2.111.0
 
 **AMD's NPU server is FastFlowLM 1.0.10. A generation can say which device each work spends least on, and on AMD's Ryzen AI 300 pictures go to the Radeon.**

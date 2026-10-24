@@ -276,8 +276,19 @@ export function workOrdered(list, order, running, waiting) {
     .map((a, i) => ({ a, i }))
     .sort((x, y) => rank(x.a) - rank(y.a) || x.i - y.i)
     .map((x) => x.a);
-  if (!order.runningFirst || !running || (order.batchAt !== undefined && (waiting ?? 0) >= order.batchAt)) return byKind;
+  if (!order.runningFirst || !running || isBatch(order, waiting)) return byKind;
   return [...byKind.filter((a) => running[a.id]), ...byKind.filter((a) => !running[a.id])];
+}
+
+/**
+ * Whether as many of the work wait as its order's batchAt: a batch, which keeps the order whoever's server is up
+ * (kit 2.112.1; Reeve's routing reads it too).
+ * @param {WorkOrderOf | undefined} order
+ * @param {number} [waiting]
+ * @returns {boolean}
+ */
+export function isBatch(order, waiting) {
+  return order?.batchAt !== undefined && (waiting ?? 0) >= order.batchAt;
 }
 
 /**
@@ -894,7 +905,11 @@ export function gameCards(rules, load, accs, opts) {
  * accelerators in that order first (workOrdered), with `running` saying whose servers are up for its runningFirst. The
  * NPU first then means first in that order: AMD's pictures go to the Radeon, and to the NPU only when its server is up
  * and the Radeon's isn't. With its batchAt, from that many of the work waiting (`waiting`, this request included) the
- * order is kept whoever's server is up: 4 pictures waiting start the Radeon's (the owner's rule).
+ * order is kept whoever's server is up: 4 pictures waiting start the Radeon's (the owner's rule). **It waits in one line**
+ * (kit 2.112.1): where the order puts one first, by its runningFirst or a batch, the first in it that can take the request
+ * is the only candidate, as the NPU first is. A busy Radeon is waited for, not passed over for a free NPU or processor
+ * that spends more on the work (AMD's pictures: 26.6 J each on the NPU against the Radeon's 10.4). The others take it only
+ * when that one can't: failed lately, a game's, or rested after a long line.
  * @param {Rules} rules
  * @param {Accelerator[]} accs
  * @param {Need} need
@@ -906,9 +921,10 @@ export function candidates(rules, accs, need, state = {}) {
   const list = [];
   /** @type {Skipped[]} */
   const skipped = [];
+  const order = state.workOrder?.[need.work];
   const fitting = workOrdered(
     accs.filter((acc) => serves(acc, need.work) && need.tokens <= capFor(acc, need.work)),
-    state.workOrder?.[need.work],
+    order,
     state.running,
     state.waiting,
   );
@@ -938,7 +954,9 @@ export function candidates(rules, accs, need, state = {}) {
     }
     list.push(acc);
   }
-  return { list, skipped, npuFirst };
+  // The work's order puts one first (its runningFirst, or a batch): the first that can take it, alone (above).
+  const first = !npuFirst && !!order && (!!order.runningFirst || isBatch(order, state.waiting));
+  return { list: first ? list.slice(0, 1) : list, skipped, npuFirst };
 }
 
 /**
