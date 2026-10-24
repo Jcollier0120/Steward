@@ -22,6 +22,27 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - An agent that GETs another staff member's page (`/api/*`, or `GET /` for its token) must send its token: `pageHeaders(url)` for an `agentUrl` address, `staffHeaders(id)` for a 127.0.0.1 one. So must an agent's CLI or MCP server that GETs its own page from another process. A later kit makes the GETs need it, and only once every staff member installed in the account runs that kit, so nothing breaks before then. A refused call answers 401: let it degrade quietly.
 
+## 2.117.0
+
+**The text reader reads with our own model on Intel's NPU 3720 too: on a Core Ultra 5 225U it reads 1,212 of the check's 1,253 lines exactly, where Windows OCR read 736.**
+
+### What changed
+
+- **ocr-npu.ts**: `packFor` gives Intel's plugin (`OPENVINO_PACK`, OpenVINO 1.7.0) on an x64 PC whose NPU is of a generation in `OPENVINO_GENERATIONS`: `meteor-lake`, the NPU 3720 of the Core Ultra Series 1 and the 200U and 200H.
+  - The generation comes from setup's report of the NPU (npu-report.json's `chip`, `npuChipOutsideTests`), so a PC reads with Windows OCR until its local AI is set up. Under node:test there is none.
+  - A third argument gives the chip for tests.
+  - `KIT_OCR_NPU=openvino` still tries the plugin on any x64 PC, and `none` keeps the model off the NPU.
+- **The figures**, measured with the manor stopped, a picture beyond the start:
+  - Windows OCR: 59 ms, 61 ms of processor, 465 mJ over rest.
+  - The model on the NPU: 171 ms, 55 ms of processor, 859 mJ.
+  - The model on the processor: 326 ms, 972 ms, 6,991 mJ.
+
+  It reads no worse than Windows OCR in any group, at less processor time a picture. It spends 1.85 times Windows OCR's energy a picture, and the owner chose it for how much better it reads. spec/OCR.md, "Intel and AMD", has the rest.
+
+### Before you update
+
+- Nothing for an agent. On an Intel NPU 3720 whose local AI is set up, the reader fetches 199 MB once, in the background: ONNX Runtime 77 MB, OpenVINO's plugin 118 MB and the model 4 MB. It keeps 131 MB, plus 48 MB of compiled graphs.
+
 ## 2.115.0
 
 **The keeper sets an accelerator up again by itself when a later kit pins another llama.cpp build, model or NPU server; and setup finds a packaged app through gaps in its process chain.**
