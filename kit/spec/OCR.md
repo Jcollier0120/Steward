@@ -325,6 +325,31 @@ So at a gentle pace a picture on the processor costs about half the energy it di
   - the gentle pace as an agent's own: its process paced by `paceProcess('gentle')`, so the reader inherits its below-normal priority and its job, capped at `gentleCap()`.
 - **Two sets of rounds.** The first two rows are one set of rounds. The last two are another, with normal priority again at 4,816 mJ. Rounds whose rest something else disturbed (11 to 24 W) were run again.
 
+**On Intel, efficiency mode costs far less (measured 2026-10-24).** On a Core Ultra 5 225U, model 2 on the processor:
+
+| | A picture | Its processor time | Its energy over rest |
+|---|---|---|---|
+| Normal priority | 317 ms | 924 ms | 6,859 mJ (6,842 to 7,087) |
+| Below normal alone, in no job | 315 ms | 917 ms | 6,839 mJ (6,587 to 7,061) |
+| In efficiency mode alone: normal priority, in no job | 1,410 ms | 4,209 ms | 1,136 mJ (355 to 1,682) |
+| A gentle pace without efficiency mode: below normal, in a job capped at two processors' worth | 438 ms | 893 ms | 6,892 mJ (6,778 to 6,926) |
+| A gentle pace now: and in efficiency mode (kit 2.135.0) | 2,011 ms | 3,986 ms | about 260 mJ (−217 to 707) |
+
+- **At a gentle pace, efficiency mode takes a picture from about 6.9 J to well under 1 J.** That's far more than the X2's half or AMD's 14%. So the kit keeps it on Intel.
+- **A picture takes 4.6 times as long** at the gentle pace (2.0 s against 0.44 s). Its processor time is 4.5 times as much, so the work runs on slow cores at a low clock. The 225U has two low-power cores outside its main cores. The figures suggest the work stays on cores like those while the rest of the processor idles, but that wasn't checked core by core.
+- **Without efficiency mode, priority and the job's cap change nothing:** normal, below normal and the gentle pace all cost 6.8 to 6.9 J. Unlike on AMD, the cap costs no energy here.
+- **Efficiency mode alone is cheaper too:** about 1.1 J against normal priority's 6.9 J, at 4.5 times the time (1.4 s against 0.32 s a picture). By the owner's rule of the least energy a job, even a few seconds slower, that's a question for the full pace too, where someone may be waiting. Nothing is changed for it here.
+- **The efficiency-mode figures are rough, and good enough to rank but not to quote closely.** The reader adds only a few tenths of a watt over a rest of about 5.7 W, so a wobble of 0.1 W in rest moves a picture's figure by about 0.2 J. One gentle round came out below rest.
+- **How it was measured:**
+  - model 2, the check's 32 GDI pictures read three times a run;
+  - three interleaved rounds of each pace, medians, the package's energy over the rest measured just before each run;
+  - every read of every round the same, all 96 pictures;
+  - the manor stopped.
+- **How each pace was set:** each ran in a node process of its own. Below normal was set as that process's priority, the gentle pace by `paceProcess('gentle')`, and efficiency mode by `paceStarted` on the reader.
+- **The display:**
+  - the harness meant to hold it on but didn't, and it went off for the third round's normal-priority and below-normal runs (rest 3.2 W). Those read about 3% higher.
+  - A later first round, with the display held on, agreed: 7,057, 6,924 and 1,295 mJ for normal priority, below normal and efficiency mode alone.
+
 **Measured and not taken (2026-10-24, model 2):**
 
 - **Fewer threads.** Two threads and one read the same lines for no less energy: 9.4 J and 8.3 J a picture against four threads' 7.7 J, and one thread's rounds ranged from 5.1 J to 9.4 J as Windows placed it. Where the work runs, and at what clock, matters more than how many threads run it.
