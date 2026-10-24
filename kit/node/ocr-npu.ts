@@ -166,10 +166,10 @@ export const VITISAI_PACK: NpuPack = {
 /**
  * The Intel NPU generations (npu-vendors.json's) whose reader reads with the model on the NPU by default, Intel's
  * plugin fetched for it (kit 2.117.0). Measured by ocr-check on an Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU
- * 3720 shows Meteor Lake's 7D1D), 2026-10-24: 1,212 of 1,253 lines exactly against Windows' OCR's 736, no group worse,
- * and 55 ms of processor a picture against 61. It spends more a picture than Windows' OCR (859 mJ against 465 mJ over
- * rest, the package's): the owner chose the model for how much better it reads. Other generations read with the model
- * on the processor until they're measured (ON_PROCESSOR).
+ * 3720 shows Meteor Lake's 7D1D), 2026-10-24, with model 1: 1,212 of 1,253 lines exactly against Windows' OCR's 736, no
+ * group worse, and 55 ms of processor a picture against 61. It spends more a picture than Windows' OCR (859 mJ against
+ * 465 mJ over rest, the package's), but the owner's rule puts how well it reads first. Other generations read with the
+ * model on the processor until they're measured (ON_PROCESSOR).
  */
 export const OPENVINO_GENERATIONS: readonly string[] = ['meteor-lake'];
 
@@ -180,7 +180,7 @@ export type NpuChip = Pick<NpuReport['chip'], 'vendor' | 'generation'>;
 export const npuChipOutsideTests = (): NpuChip | null => (process.env.NODE_TEST_CONTEXT ? null : (readNpuReport()?.chip ?? null));
 
 /** The model's version: its release in the manor's public releases is ocr-model-v<version>. */
-export const MODEL_VERSION = '1';
+export const MODEL_VERSION = '2';
 const MODEL_RELEASE = `https://github.com/Jcollier0120/Manor-releases/releases/download/ocr-model-v${MODEL_VERSION}`;
 
 /**
@@ -189,10 +189,10 @@ const MODEL_RELEASE = `https://github.com/Jcollier0120/Manor-releases/releases/d
  */
 export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt' | 'notices/LICENSE.txt' | 'notices/NOTICE.txt', Pinned>> = {
   'det.onnx': { url: `${MODEL_RELEASE}/det.onnx`, size: 1_744_568, sha256: 'caa7341cf77f0e379a1900874f2ec7bcea0b9ea90028cb075f8f29745ae3330c' },
-  'rec.onnx': { url: `${MODEL_RELEASE}/rec.onnx`, size: 2_273_569, sha256: '6dd1d6fa758178f84017c5fd23560318a1e66597dc66bc6c607ea309fa7299c2' },
+  'rec.onnx': { url: `${MODEL_RELEASE}/rec.onnx`, size: 2_273_569, sha256: 'a34d9770c3452e39a008c4a965cef56312448a66ced5ecba35695897bcd634fe' },
   'charset.txt': { url: `${MODEL_RELEASE}/charset.txt`, size: 298, sha256: 'ffe49ab5748c825e01a765d3325e945a252067842e839f44e80021385b459ee4' },
   'notices/LICENSE.txt': { url: `${MODEL_RELEASE}/LICENSE.txt`, size: 11_358, sha256: 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30' },
-  'notices/NOTICE.txt': { url: `${MODEL_RELEASE}/NOTICE.txt`, size: 1_244, sha256: '86b5e941f0d51b8a68aef400ec80650592d0040166b597a2201d6097cc484dab' },
+  'notices/NOTICE.txt': { url: `${MODEL_RELEASE}/NOTICE.txt`, size: 1_212, sha256: '1e5026805ff919b2c41cc08ba986b587eb7c89fa5e60be85578ea3a5b1869723' },
 };
 
 /**
@@ -200,7 +200,7 @@ export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt
  * the model (measured in kit 2.127.0), an Intel PC whose NPU isn't of OPENVINO_GENERATIONS or that has none, and a PC
  * whose NPU fails the program's check (kit 2.124.0; AMD's and Intel's since 2.121.0 and 2.122.0). Windows' OCR costs
  * less there, but the owner's rule, 2026-10-24, is never to trade how well it reads for less power. On a Core Ultra 5
- * 225U's processor, and on a Ryzen AI 7 350's, it reads the check's lines as on the NPU, 1,212 of 1,253 against
+ * 225U's processor, and on a Ryzen AI 7 350's, model 1 read the check's lines as on the NPU, 1,212 of 1,253 against
  * Windows' OCR's 736, at 16 times the processor time a picture; on a Snapdragon X2 Elite's, 20 times (spec/OCR.md, "On
  * the processor").
  */

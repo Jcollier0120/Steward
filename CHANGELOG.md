@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.223
+
+**It hands out the kit 2.134.1: our own text-reading model is better at small screen text. It reads 1,223 of the check's 1,253 lines exactly, against 1,211 before and Windows' own OCR's 733.**
+
+### What changed
+
+- **Reading text in pictures** (screenshots, scans and PDFs) uses model 2 of our own model. It gets more of small screen text right:
+  - spaces beside figures and signs ("Col 17", "Time & language");
+  - dots and dashes;
+  - a capital I, which it no longer reads as l.
+
+  Nothing reads worse than before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each PC fetches the new model (4 MB) once, in the background, and reads as before until it's in place.
+
 ## 0.36.222
 
 **It hands out the kit 2.134.0: every staff member's release carries the notices for what others made in it, and no longer carries the developers' documents.**

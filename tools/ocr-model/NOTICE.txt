@@ -1,4 +1,4 @@
-The text reader's model (ocr-model-v1)
+The text reader's model (ocr-model-v2)
 
 These files are PaddleOCR's PP-OCRv6 tiny models, by the PaddlePaddle Authors
 (https://github.com/PaddlePaddle/PaddleOCR), licensed under the Apache License,
@@ -14,7 +14,7 @@ Version 2.0 (LICENSE.txt), with changes by Castellan under the same license:
   over the characters in charset.txt; its last average pooling made over the
   height alone, written as a mean, and the convolution after it dilated, so it
   takes a step every 4 columns rather than 8; the whole fine-tuned on text
-  drawn as screens and documents draw it; the space's output raised by 1; and
+  drawn as screens and documents draw it; and
   its softmax removed.
 
 - charset.txt: the recognizer's characters, class 1 onwards.

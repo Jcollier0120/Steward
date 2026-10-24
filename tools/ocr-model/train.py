@@ -1,7 +1,7 @@
 """Fine-tunes the recognizer on the drawn lines (draw.py), checking it on held-back drawn lines and on the check's
 pictures (fixtures.ts) as it goes.
 
-    python train.py <models> <train dir>[,<train dir>...] <val dir> <fixtures dir> <out dir> [--steps N] [--lr X]
+    python train.py <models> <train dir>[,<train dir>...] <val dir>[,<val dir>...] <fixtures dir> <out dir> [--steps N] [--lr X]
         [--from ckpt.pt] [--resume ckpt.pt] [--stride 8|4] [--threads N] [--workers N]
 
 <models> has v6-tiny-rec and v6-tiny-det (fetch.py). --stride 4 gives the recognizer a step every 4 columns
@@ -253,7 +253,8 @@ class FixtureCrops:
 
 
 def main():
-    models, val_dir, fx, out = (Path(a).resolve() for a in (sys.argv[1], *sys.argv[3:6]))
+    models, fx, out = (Path(a).resolve() for a in (sys.argv[1], *sys.argv[4:6]))
+    val_dirs = [Path(a).resolve() for a in sys.argv[3].split(',')]
     train_dirs = [Path(a).resolve() for a in sys.argv[2].split(',')]
     arg = lambda k, d: type(d)(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d
     steps, lr, budget, every = arg('--steps', 20000), arg('--lr', 5e-4), arg('--budget', 12000), arg('--every', 1000)
@@ -270,7 +271,7 @@ def main():
         net.load_state_dict(saved['model'])
         first = saved['step']
     net.train()
-    train, val = Lines(train_dirs, True, stride), Lines([val_dir], False, stride)
+    train, val = Lines(train_dirs, True, stride), Lines(val_dirs, False, stride)
     fixtures = FixtureCrops(fx, models)
     loader = torch.utils.data.DataLoader(train, batch_sampler=Batches(train, budget, 1 + first), collate_fn=collate,
                                          num_workers=arg('--workers', 3), worker_init_fn=worker_init,

@@ -91,6 +91,9 @@ UNITS = ['KB', 'MB', 'GB', 'TB', 'ms', 's', 'min', 'hr', 'px', 'pt', '%', 'fps',
 SYMBOLS = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'
 TYPO = '€£¥¢©®™°±×÷µ§¶•…–—‘’“”«»¿¡→←↑↓✓·'
 ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIV', 'XV', 'XX']
+I_WORDS = ['I', 'II', 'III', 'IT', 'ID', 'IP', 'IPv6', 'IBAN', 'ISO', 'IDE', 'IMAP', 'IoT', 'Ill', 'All', 'Ally', 'If', 'In',
+           'Is', 'It', 'Its', 'Issue', 'Item', 'Index', 'Import', 'Install', 'Insert', 'Info', 'Ideas', 'Image', 'Inbox',
+           'Invoice', 'Iceland', 'Ireland', 'Italy', 'Intel', 'Iris', 'Ian', 'Ivy', 'Ilse', 'Idris', 'Ines', 'Isla']
 ACCENTS = {'a': 'àáâãäå', 'e': 'èéêë', 'i': 'ìíîï', 'o': 'òóôõöø', 'u': 'ùúûü', 'c': 'ç', 'n': 'ñ', 'y': 'ýÿ',
            'A': 'ÀÁÂÃÄÅ', 'E': 'ÈÉÊË', 'I': 'ÌÍÎÏ', 'O': 'ÒÓÔÕÖØ', 'U': 'ÙÚÛÜ', 'C': 'Ç', 'N': 'Ñ', 'Y': 'Ý'}
 
@@ -317,6 +320,62 @@ class Gen:
             return f'{self.ws(1, 3)} {n}'.upper()
         return f'{self.ws(1, 3)} {n} {self.ws(1, 3, False)}'
 
+    def il_word(self):
+        """A word of the repository's that starts with an i or an l, capitalised or not: I and l in their words."""
+        if not hasattr(self, 'il'):
+            self.il = [w for w in self.words if w[:1].lower() in 'il'] or ['index']
+        w = self.r.choice(self.il)
+        return w[:1].upper() + w[1:].lower() if self.r.random() < 0.6 else w.lower()
+
+    def spaced(self):
+        # Short tokens a space apart, as status bars, settings and lists show them: at 11 to 13 px a space between a
+        # word and a figure, a "&", a "-" or a "#" is 2 or 3 pixels, and the model must keep it.
+        r = self.r
+        mon = lambda: r.choice(MONTHS)[:3]
+        make = [
+            lambda: self.w(r.random() < 0.4),
+            lambda: str(r.choice([r.randint(0, 9), r.randint(10, 99), r.randint(100, 9999)])),
+            lambda: r.choice(['&', '-', '–', '—', '>', '->', '=>', '<-', '|', '•', '·', '/', '+', '=', ':', '~', '→', '...']),
+            lambda: f'#{r.choice(["", "", "A-", "PR-", "INC"])}{r.randint(1, 99999)}',
+            lambda: f'{r.choice(["Ln", "Col", "Page", "Row", "Step", "Item", "No.", "Vol.", "Ch.", "Rev", "Tab", "Part"])} {r.randint(1, 999)}',
+            lambda: f'{self.num()}{r.choice(["%", "px", "ms", "MB", "GB", "°C", "x", "k", "", " MB", " ms", " min", " hr"])}',
+            lambda: r.choice([self.time(), f'{r.randint(1, 28)} {mon()}', f'{mon()} {r.randint(1990, 2039)}', f'{r.randint(1, 28)} {mon()} {r.randint(1990, 2039)},']),
+            lambda: r.choice(['-', '--']) + (r.choice('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ') if r.random() < 0.6 else self.w()),
+            lambda: self.w(r.random() < 0.3) + r.choice([',', ':', '.', ';', '?', '!', ')', '"', "'"]),
+            lambda: r.choice([f'"{self.w()}"', f'({self.w()})', f"'{self.w()}.{r.choice(EXT)}'", f'[{self.w()}]', f'“{self.w()}”']),
+            lambda: f'{r.choice(["", "v"])}{r.randint(0, 20)}.{r.randint(0, 40)}.{r.randint(0, 99)}',
+            lambda: r.choice([r.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ'), f'{r.choice("ABCDEFGHQRXYZ")}{r.randint(1, 9)}', 'x64', 'v2', 'a', 'I']),
+        ]
+        weights = [24, 10, 9, 3, 4, 7, 5, 3, 9, 3, 3, 3]
+        return ' '.join(r.choices(make, weights)[0]() for _ in range(r.randint(2, 9)))
+
+    def marks(self):
+        # What a narrow mark or a look-alike decides: a dot, a backslash or a hyphen a pixel or two wide, quotes,
+        # zeros (old-style figures draw them as an o), and a capital I where only the words around it tell it from an l.
+        r = self.r
+        ext = lambda: r.choice(EXT)
+        zeros = lambda: r.choice([
+            ' '.join(''.join(r.choice('0000000123456789') for _ in range(4)) for _ in range(r.randint(2, 6))),
+            f'{r.randint(0, 23):02d}:{r.choice(["00", "05", "10", "30", "40", "50"])}', f'{r.randint(1, 9)},{r.randint(0, 999):03d},000',
+            f'0x{"".join(r.choice("0000ABCDEF123456789") for _ in range(r.choice([4, 8])))}', f'{r.randint(1, 9)}0{r.randint(0, 9)}0',
+            f'{r.choice(["0", "0.0", "0.05", "1.0", "10.0", "100", "2000", "0.00"])}', f'{r.randint(1990, 2039)}-0{r.randint(1, 9)}-0{r.randint(1, 9)}'])
+        capital_i = lambda: r.choice(I_WORDS) if r.random() < 0.5 else self.il_word()
+        piece = r.choices([
+            lambda: f'{self.w()}.{ext()}', lambda: f"'{self.w()}{r.choice(['-', '_', '.'])}{self.w()}.{ext()}'",
+            lambda: '\\'.join(self.w(r.random() < 0.5) for _ in range(r.randint(2, 5))),
+            lambda: r.choice(['e.g.', 'i.e.', 'a.m.', 'p.m.', 'etc.', 'No.', 'St.', 'vs.', 'Dr.', 'U.S.']),
+            lambda: f'{self.w()}.{self.w()}.{r.choice(TLD)}', lambda: f'{self.w()}-{self.w()}', lambda: f'{self.w()}-{r.randint(1, 999)}',
+            lambda: f'{r.randint(1, 999)}-{r.randint(1, 9999)}', lambda: r.choice(['-', '–', '—']),
+            lambda: f'{self.w()}{r.choice(["...", "…", "..", "."])}', lambda: f'"{self.ws(1, 3, False)}"', lambda: f'“{self.ws(1, 3, False)}”',
+            lambda: f"{self.w(r.random() < 0.3)}{r.choice(['’s', chr(39) + 's', 'n’t', chr(39) + 'll'])}",
+            lambda: f'{r.randint(0, 99)}.{r.randint(0, 9)}%', lambda: f'{r.randint(0, 100)}%', zeros, capital_i,
+            lambda: f'{self.w()}{r.choice([",", ";", ":"])}', lambda: f'{r.choice("([{")}{self.w()}{r.choice(")]}")}',
+        ], [6, 3, 4, 2, 2, 4, 2, 2, 2, 2, 2, 2, 2, 2, 2, 7, 8, 2, 2])[0]
+        out = []
+        for _ in range(r.randint(1, 6)):
+            out.append(piece() if r.random() < 0.55 else self.w(r.random() < 0.2))
+        return ' '.join(out)
+
     def pick_prose(self):
         s = self.r.choice(self.prose)
         return s
@@ -337,7 +396,8 @@ def generate(repo: Path, count: int, seed: int, kinds=KINDS):
     for s in check_strings(repo):
         banned |= grams(s)
     make = {'prose': g.pick_prose, 'code': g.pick_code, 'ui': g.ui, 'path': g.path, 'url': g.url, 'numbers': g.numbers,
-            'soup': g.soup, 'accented': g.accented, 'caps': g.caps, 'typography': g.typography, 'roman': g.roman}
+            'soup': g.soup, 'accented': g.accented, 'caps': g.caps, 'typography': g.typography, 'roman': g.roman,
+            'spaced': g.spaced, 'marks': g.marks}
     names, weights = zip(*kinds)
     seen = set()
     out = []
@@ -356,7 +416,9 @@ def generate(repo: Path, count: int, seed: int, kinds=KINDS):
 if __name__ == '__main__':
     repo, count, dest = Path(sys.argv[1]), int(sys.argv[2]), Path(sys.argv[3])
     seed = int(sys.argv[sys.argv.index('--seed') + 1]) if '--seed' in sys.argv else 1
-    kinds = [(k, 1) for k in sys.argv[sys.argv.index('--kinds') + 1].split(',')] if '--kinds' in sys.argv else KINDS
+    # --kinds spaced:3,marks:2 (a kind alone weighs 1)
+    kinds = [(k.split(':')[0], float(k.split(':')[1]) if ':' in k else 1) for k in sys.argv[sys.argv.index('--kinds') + 1].split(',')] \
+        if '--kinds' in sys.argv else KINDS
     lines = generate(repo, count, seed, kinds)
     dest.write_text(''.join(json.dumps(l, ensure_ascii=False) + '\n' for l in lines), encoding='utf-8')
     print(len(lines), 'lines')

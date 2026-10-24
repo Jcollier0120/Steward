@@ -1,7 +1,7 @@
 """Chooses how much to raise the space's logit (export.py --space-bias): reads the held-back lines with a checkpoint at
 each bias and prints how many come out exactly, and the check's pictures' lines for comparison.
 
-    python space_bias.py <models> <checkpoint.pt> <val dir> <fixtures dir>
+    python space_bias.py <models> <checkpoint.pt> <val dir>[,<val dir>...] <fixtures dir>
 
 The check draws small screen text with narrower spaces than the training lines have, and a space the model is unsure of
 loses to the letters either side: at 11 and 12 px most of what the fine-tuned model got wrong was a missing space. The
@@ -54,13 +54,14 @@ def logits_of(net, xs):
 
 
 def main():
-    models, ckpt, val_dir, fx = (Path(a) for a in sys.argv[1:5])
+    models, ckpt, fx = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[4])
+    val_dirs = [Path(a) for a in sys.argv[3].split(',')]
     torch.set_num_threads(6)
     saved = torch.load(ckpt, map_location='cpu')
     net = from_onnx(models / 'v6-tiny-rec', stride=saved.get('stride', 8))
     net.load_state_dict(saved['model'])
     net.eval()
-    val = train.Lines([val_dir], False, saved.get('stride', 8))
+    val = train.Lines(val_dirs, False, saved.get('stride', 8))
     items = [val[i] for i in range(len(val))]
     vlog = logits_of(net, [x for x, _, _ in items])
     crops = train.FixtureCrops(fx, models)

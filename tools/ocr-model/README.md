@@ -60,9 +60,41 @@ stops goes on from its last check with the same command and `--resume <out dir>/
 text with narrower spaces than the training lines have, and at 11 and 12 px most of what the model still got wrong was
 a missing space. For r3 the best was 1 (93.67% of the held-back lines exact, from 93.56%); lowering the blank as well
 gained no more than noise.
-`export.py` writes what the reader takes: `det.onnx`, `rec.onnx` (the space's bias built into its head) and
+`export.py` writes what the reader takes: `det.onnx`, `rec.onnx` (any space bias built into its head) and
 `charset.txt`, each checked against the model it came from, with `LICENSE.txt` (Apache-2.0, PaddleOCR's) and
 `NOTICE.txt` (what the files are and what was changed).
+
+Model 2 (r4) goes on from r3 with lines of the kinds model 1 still got wrong on the check's small screen text, drawn
+mostly at 11 to 13 px:
+
+```
+python -I -X utf8 strings.py <repository> 63000 data/r4all.jsonl --seed 31 --kinds spaced:35,marks:25,ui:10,numbers:8,prose:8,code:5,path:4,typography:2,roman:3
+head -n 60000 data/r4all.jsonl > data/r4.jsonl
+tail -n 3000 data/r4all.jsonl > data/val2.jsonl
+python -I -X utf8 draw.py <repository> data/val2.jsonl data/val2 --seed 33 --workers 4 <the mix>
+python -I -X utf8 draw.py <repository> data/r4.jsonl data/r4 --seed 32 --workers 4 <the mix>
+python -I -X utf8 train.py models data/train,data/extra,data/r4,data/r4 data/val,data/val2 fx runs/r4 --from runs/r3/best.pt --stride 4 --steps 8000 --lr 2e-4 --every 1000 --threads 5 --workers 3
+python -I -X utf8 space_bias.py models runs/r4/best.pt data/val,data/val2 fx
+python -I -X utf8 export.py models runs/r4/best.pt out/r4
+```
+
+where the mix is
+
+```
+--edge-share 0.2 --px 9:1,10:3,11:8,12:9,13:8,14:5,15:2,16:2,18:1,22:1,26:1,31:2 --css-px 11:3,12:4,13:4,14:3,16:2,18:1,24:1
+--hows gdiplus-cleartype:5,gdiplus-aa-grid:3,gdiplus-aa:1,gdi-cleartype:2,gdi-aa:0.5,gdi-mono:0.5
+--boost "Segoe UI:2,Consolas:2,Arial:2,Calibri:3,Verdana:3,Tahoma:3,Georgia:3,Times New Roman:2,Constantia:3,Corbel:3,Sitka Text:3,Sitka Small:3"
+```
+
+`spaced` is short words, figures and signs a space apart, as status bars and settings show them ("Col 17", "Time &
+language"); `marks` is file names, paths, abbreviations, dashes, quotes, percentages, groups of zeros, and words with a
+capital I. `--kinds` takes each kind's weight. Drop from `data/val2.jsonl` any line already in `data/train.jsonl`,
+`data/extra.jsonl` or `data/r4.jsonl` before drawing it. `--px`, `--css-px` and `--hows` replace `draw.py`'s weights
+for sizes and drawings, and `--boost` multiplies a font's. GDI+ with ClearType is how the check draws its screens, so
+model 1's misses came from too few such lines at those sizes, not from a different drawing. `data/r4` is given twice,
+so its lines come up twice as often as the first rounds'. Both rounds' held-back lines choose the step: for r4, 7,000
+of 8,000 (93.46% exact, from r3's 91.84% without its bias), and `space_bias.py` found 0 best, so it's exported with
+none. On a Snapdragon X2's processor, held to 8 cores, it took about three hours.
 
 ## Publishing
 
@@ -84,5 +116,6 @@ python -I -X utf8 score.py fx texts.json
 The figures that count are the kit's own check, with the model in place (`kit/spec/OCR.md`):
 
 ```
-node kit/node/ocr-check.ts --engine windows,model-npu,model-cpu --runs 3
+npm run kit
+node src/kit/ocr-check.ts --engine windows,model-npu,model-cpu --runs 3
 ```

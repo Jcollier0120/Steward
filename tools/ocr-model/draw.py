@@ -300,10 +300,24 @@ def draw_edge(lines, out: Path, fonts, rnd, workers):
     return rows
 
 
+def weights_arg(s: str, key=str):
+    """'11:4,12:5' as {11: 4.0, 12: 5.0}."""
+    return {key(k): float(v) for k, v in (p.rsplit(':', 1) for p in s.split(',') if p)}
+
+
 def main():
     repo, src, out = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(), Path(sys.argv[3]).resolve()
     arg = lambda k, d: type(d)(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d
     seed, share, workers = arg('--seed', 1), arg('--edge-share', 0.4), arg('--workers', 4)
+    # Other mixes than the usual (--px 11:4,12:5,13:4, --css-px, --hows gdiplus-cleartype:5,gdiplus-aa-grid:3, --boost
+    # 'Segoe UI:3,Georgia:4' to weigh fonts up), for lines drawn to teach one thing.
+    for name, table, key in (('--px', PX, int), ('--css-px', CSS_PX, int), ('--hows', HOWS, str)):
+        if arg(name, ''):
+            table.clear()
+            table.update(weights_arg(arg(name, ''), key))
+    for f, k in weights_arg(arg('--boost', '')).items():
+        if f in FONTS:
+            FONTS[f] *= k
     rnd = random.Random(seed)
     (out / 'crops').mkdir(parents=True, exist_ok=True)
     coverage = coverage_of(out)
