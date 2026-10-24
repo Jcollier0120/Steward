@@ -28,6 +28,7 @@ const { AHEAD_MS, forgetSigningAhead, releaseUnreleased, roundFailuresFile, SIGN
 const { AGAIN_MS, TRIAL_FAILED } = await import('../src/kit/sign.ts');
 const { nativeOf } = await import('../src/kit/native.ts');
 const { keepSigned, signedKey, signedStoreOf, sourcesAt } = await import('../src/kit/signed-native.ts');
+const { keepScript } = await import('../src/kit/signed-scripts.ts');
 const { run: realRun } = await import('../src/run.ts');
 type Native = import('../src/kit/native.ts').Native;
 type BuildRun = import('../src/pipeline.ts').BuildRun;
@@ -194,6 +195,83 @@ test("needsSigning: a release with kit 2.92.0 signs nothing once every processor
   assert.equal(await ask({ commit: elsewhere }), false, 'a change outside the native sources keeps them');
   const media = commit({ 'vendor/media.txt': 'v2\n' });
   assert.equal(await ask({ commit: media }), true, 'a change to an input builds and signs afresh');
+});
+
+// Steward 0.36.207: from kit 2.121.0 a published release signs its PowerShell scripts, with the owner's certificate on the
+// PC that releases Castellan; most take the signed copies kept from a release before (the kit's signed-scripts.ts).
+const BLOCK = '\r\n# SIG # Begin signature block\r\n# MIIAAAA\r\n# SIG # End signature block\r\n';
+const keepSignedScript = (store: string, file: string, text: string) => keepScript(store, file, Buffer.from(text), PRINT, Buffer.from(`${text}${BLOCK}`));
+
+test("signsWith: from kit 2.121.0, on the PC that releases Castellan, the owner's certificate for its scripts", () => {
+  const kitJson = (kit: string) => JSON.stringify({ kit, parts: ['node'] });
+  const publish = 'npm run release -- --publish';
+  assert.equal(signsWith({ kitJson: kitJson('2.121.0'), signTs: null, release: publish, castellan: true }), PRINT);
+  assert.equal(signsWith({ kitJson: kitJson('2.120.0'), signTs: null, release: publish, castellan: true }), null, 'a kit before signs no scripts');
+  assert.equal(signsWith({ kitJson: kitJson('2.121.0'), signTs: null, release: publish }), null, "anyone else's PC: nothing of the owner's");
+  assert.equal(signsWith({ kitJson: kitJson('2.121.0'), signTs: null, release: 'npm run release', castellan: true }), null, 'built here alone: not signed');
+  const other = 'A'.repeat(40);
+  assert.equal(signsWith({ kitJson: JSON.stringify({ kit: '2.121.0', native: { build: 'native/build.ps1', out: 'native/build', thumbprint: other } }), signTs: null, release: publish, castellan: true }), other, "kit.json's native certificate first");
+  const line = "Not published: its scripts can't be signed: the Windows SDK's signtool isn't installed.";
+  assert.equal(signingDown(`building…\r\n${line}\r\n`), line, 'a wait, in the kit\'s words');
+});
+
+test('needsSigning: from kit 2.121.0 a Castellan release signs nothing once every script it ships has a signed copy kept', async () => {
+  const { repo, commit } = nativeRepo('needs-scripts');
+  const first = commit({ '.gitignore': 'src/kit/\n', 'src/guard/install-guard.ps1': 'Write-Output 1\n', 'src/app.ts': 'export {};\n' });
+  const kitDir = path.join(repo, 'src', 'kit');
+  mkdirSync(kitDir, { recursive: true });
+  writeFileSync(path.join(kitDir, 'VERSION'), '2.121.0\n');
+  writeFileSync(path.join(kitDir, 'ps-worker.ps1'), 'worker\r\n');
+  const env = { KIT_SIGNED_SCRIPTS: path.join(tmp, 'scripts-store'), STEWARD_KITS: path.join(tmp, 'kits') };
+  const pin = (kit = '2.121.0') => JSON.stringify({ kit, parts: ['node'] });
+  const ask = (o: { commit?: string; kitJson?: string; castellan?: boolean } = {}) => needsSigning(realRun, { id: 'lamplighter', repo, commit: o.commit ?? first, kitJson: o.kitJson ?? pin(), castellan: o.castellan ?? true, checkout: repo, env });
+  assert.equal(await ask(), true, 'nothing kept yet');
+  // As the release's checkout has it (CRLF), where git has LF: the same script.
+  keepSignedScript(env.KIT_SIGNED_SCRIPTS, 'install-guard.ps1', 'Write-Output 1\r\n');
+  assert.equal(await ask(), true, "the kit's script isn't kept");
+  keepSignedScript(env.KIT_SIGNED_SCRIPTS, 'ps-worker.ps1', 'worker\r\n');
+  assert.equal(await ask(), false, 'every script kept: it signs nothing, so it never waits for SimplySign');
+  assert.equal(await ask({ kitJson: pin('2.120.0') }), true, 'a kit before 2.121.0 with no native files: as before (asked only when signsWith says it signs)');
+  assert.equal(await ask({ castellan: false }), true, 'likewise anywhere else');
+
+  // The checkout's src\kit at another kit: the kit as this PC keeps it, the parts pinned (dotnet isn't).
+  writeFileSync(path.join(kitDir, 'VERSION'), '2.120.0\n');
+  assert.equal(await ask(), true, "neither the checkout's kit nor a kept one is 2.121.0");
+  const kept = path.join(env.STEWARD_KITS, '2.121.0');
+  for (const [f, t] of Object.entries({ VERSION: '2.121.0\n', 'node/ps-worker.ps1': 'worker\n', 'dotnet/other.ps1': 'not pinned\n' })) {
+    mkdirSync(path.dirname(path.join(kept, f)), { recursive: true });
+    writeFileSync(path.join(kept, f), t);
+  }
+  assert.equal(await ask(), false, 'the kit as kept here');
+  const changed = commit({ 'src/guard/install-guard.ps1': 'Write-Output 2\n' });
+  assert.equal(await ask({ commit: changed }), true, 'a script changed: it signs it');
+});
+
+test("a Castellan release whose scripts are all kept doesn't wait while this PC can't sign; one with a script to sign does", async () => {
+  const e = signer('Scripts', { kit: '2.121.0', parts: ['node'] }, { '.gitignore': 'src/kit/\n', 'src/run.ps1': 'Write-Output "run"\n' });
+  const kitDir = path.join(e.checkout!, 'src', 'kit');
+  mkdirSync(kitDir, { recursive: true });
+  writeFileSync(path.join(kitDir, 'VERSION'), '2.121.0\n');
+  const store = path.join(tmp, 'scripts-store-release');
+  process.env.KIT_SIGNED_SCRIPTS = store;
+  try {
+    const r = releasing({ npm: ok('') });
+    const waits = await releaseOne(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-scripts-wait'), run: r.run, neutralDir: tmp }), e, { kit: null });
+    assert.equal(waits.outcome, 'skipped', waits.message);
+    assert.match(waits.message, /^v0\.2\.3 waits until this PC can sign: /);
+    assert.deepEqual(r.npm, [], 'its release command never ran');
+
+    keepSignedScript(store, 'run.ps1', 'Write-Output "run"\n');
+    forgetSigningLooks();
+    const r2 = releasing({ npm: ok('') });
+    const w = watched(r2.run);
+    const done = await releaseOne(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-scripts-kept'), run: w.run, neutralDir: tmp }), e, { kit: null });
+    assert.equal(done.outcome, 'done', done.message);
+    assert.equal(r2.npm.length, 1, 'its release ran');
+    assert.deepEqual(w.looked, [], "no look at signing: SimplySign Desktop isn't needed");
+  } finally {
+    delete process.env.KIT_SIGNED_SCRIPTS;
+  }
 });
 
 test("a release whose signed native files are kept from the same sources doesn't wait while this PC can't sign: it signs nothing", async () => {

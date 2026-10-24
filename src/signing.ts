@@ -1,10 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { compareVersions } from './kitfiles.ts';
 import { CERTUM_TIMESTAMP, nativeOf, nativeSources, type Native } from './kit/native.ts';
 import { AGAIN_MS, findSignTool, KEY_GONE, signArgs, signProblem, TRIAL_FAILED, TRIAL_TRIES } from './kit/sign.ts';
+import { SIGNED_BY } from './kit/prebuilt.ts';
 import { keptSigned, signedKey, signedStoreOf, sourcesAt } from './kit/signed-native.ts';
+import { isScript, keptScriptFile, scriptKey, scriptsStoreOf } from './kit/signed-scripts.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { Runner } from './run.ts';
 import { checksLogOf } from './stages/bump.ts';
@@ -43,6 +45,11 @@ import { checksLogOf } from './stages/bump.ts';
  * released by itself (a build of its own, pipeline.ts's `signed`) once a round's look can sign again. A release whose kit
  * takes its signed native files from a release before (KEEPS_SIGNED_KIT, the kit's signed-native.ts) is looked at only
  * when it will sign (needsSigning): most then don't wait for SimplySign at all.
+ *
+ * And from kit 2.121.0 a published release signs its PowerShell scripts (0.36.207, the kit's signed-scripts.ts): on the
+ * PC that releases Castellan with the owner's certificate when kit.json names none. Each signed script is kept by its
+ * text for every agent, so a release waits for the key only when it ships a script with no signed copy kept
+ * (scriptsUnkept); its releases don't take the signing lane, since most sign nothing.
  */
 
 /** A release waiting for the code-signing key, as signing-waits.json keeps it for the alarm. */
@@ -101,16 +108,22 @@ export function noteSigningAhead(a: SigningAhead | null): void {
 
 const THUMBPRINT = /^[0-9a-f]{40}$/i;
 
+/** The kit from which a published release signs its PowerShell scripts (the kit's signed-scripts.ts). */
+export const SIGNS_SCRIPTS_KIT = '2.121.0';
+
 /**
  * The certificate a release at a commit signs with (its SHA-1 thumbprint), or null when it signs nothing the Steward can
- * see: kit.json's `native.thumbprint` (kit 2.62.0) when its release command publishes, else a tools/sign.ts that names
- * one (`THUMBPRINT = '…'`, Manor's, whose setup is always signed).
+ * see: kit.json's `native.thumbprint` (kit 2.62.0) when its release command publishes; else, on the PC that releases
+ * Castellan (`castellan`: a releases repository), the owner's for a kit that signs its scripts (SIGNS_SCRIPTS_KIT, Steward
+ * 0.36.207); else a tools/sign.ts that names one (`THUMBPRINT = '…'`, Manor's, whose setup is always signed).
  */
-export function signsWith(o: { kitJson: string | null; signTs: string | null; release: string }): string | null {
+export function signsWith(o: { kitJson: string | null; signTs: string | null; release: string; castellan?: boolean }): string | null {
   try {
-    const native = JSON.parse((o.kitJson ?? '').replace(/^﻿/, ''))?.native;
-    const t = native?.thumbprint;
-    if (typeof t === 'string' && THUMBPRINT.test(t) && /(^|\s)--publish(\s|$)/.test(o.release)) return t.toUpperCase();
+    const pin = JSON.parse((o.kitJson ?? '').replace(/^﻿/, ''));
+    const t = pin?.native?.thumbprint;
+    const publishes = /(^|\s)--publish(\s|$)/.test(o.release);
+    if (typeof t === 'string' && THUMBPRINT.test(t) && publishes) return t.toUpperCase();
+    if (o.castellan && publishes && typeof pin?.kit === 'string' && compareVersions(pin.kit, SIGNS_SCRIPTS_KIT) >= 0) return SIGNED_BY;
   } catch {
     // No kit.json, or one that isn't JSON: the kit's release says so itself.
   }
@@ -140,6 +153,7 @@ export function signingDown(output: string): string | null {
     HUNG,
     new RegExp(TRIAL_FAILED, 'i'),
     /Not published: its native files can't be signed/i,
+    /Not published: its scripts can't be signed/i,
   ];
   for (const re of said) {
     const line = lines.findLast((l) => re.test(l));
@@ -247,27 +261,90 @@ export const KEEPS_SIGNED_KIT = '2.92.0';
  * isn't held while this PC can't sign): yes for one that signs every time (Manor's setup, its tools/sign.ts; an agent
  * whose kit is older than KEEPS_SIGNED_KIT); for an agent's native files, unless a release before kept their signed
  * files for every processor from the native sources `commit` has (the kit's signedKey, in the agent's checkout data
- * folder: signedStoreOf). Anything the Steward can't read is "yes". Never throws.
+ * folder: signedStoreOf); and from SIGNS_SCRIPTS_KIT for its scripts, unless every one has a signed copy kept
+ * (scriptsUnkept: its own at `commit`, and its kit's). Anything the Steward can't read is "yes".
+ * Never throws.
  */
-export async function needsSigning(run: Runner, o: { id: string; repo: string; commit: string; kitJson: string | null; env?: NodeJS.ProcessEnv; home?: string }): Promise<boolean> {
+export async function needsSigning(run: Runner, o: { id: string; repo: string; commit: string; kitJson: string | null; castellan?: boolean; checkout?: string; env?: NodeJS.ProcessEnv; home?: string }): Promise<boolean> {
   let native: Native | null = null;
   let kit: unknown;
+  let parts: string[] | undefined;
   try {
     const pin = JSON.parse((o.kitJson ?? '').replace(/^﻿/, ''));
     kit = pin?.kit;
+    parts = Array.isArray(pin?.parts) ? pin.parts.filter((p: unknown): p is string => typeof p === 'string') : undefined;
     const n = nativeOf(pin);
     native = n && !('error' in n) ? n : null;
   } catch {
     return true;
   }
-  if (!native?.thumbprint || typeof kit !== 'string' || compareVersions(kit, KEEPS_SIGNED_KIT) < 0) return true;
-  const objects: Record<string, string | null> = {};
-  for (const p of nativeSources(native)) {
-    const r = await run('git', ['rev-parse', `${o.commit}:${p}`], { cwd: o.repo, timeoutMs: 60_000 }).catch(() => null);
-    objects[p] = r && r.code === 0 ? r.out.trim() : null;
+  if (typeof kit !== 'string') return true;
+  // Its scripts too, from SIGNS_SCRIPTS_KIT: with the native certificate, else the owner's where Castellan is released.
+  const scripts = compareVersions(kit, SIGNS_SCRIPTS_KIT) >= 0 ? (native?.thumbprint ?? (o.castellan ? SIGNED_BY : null)) : null;
+  if (native?.thumbprint) {
+    if (compareVersions(kit, KEEPS_SIGNED_KIT) < 0) return true;
+    const objects: Record<string, string | null> = {};
+    for (const p of nativeSources(native)) {
+      const r = await run('git', ['rev-parse', `${o.commit}:${p}`], { cwd: o.repo, timeoutMs: 60_000 }).catch(() => null);
+      objects[p] = r && r.code === 0 ? r.out.trim() : null;
+    }
+    const sources = sourcesAt(native, (p) => objects[p] ?? null);
+    if (!sources) return true;
+    const store = signedStoreOf(o.id, o.env, o.home);
+    if (native.arch.some((a) => !keptSigned(store, signedKey(native, a, sources)))) return true;
+  } else if (!scripts) return true;
+  return scripts ? scriptsUnkept(run, { repo: o.repo, commit: o.commit, kit, parts, thumbprint: scripts, checkout: o.checkout, env: o.env, home: o.home }) : false;
+}
+
+/**
+ * Whether a release at `commit` ships a script with no signed copy kept (the kit's signed-scripts.ts, by scriptKey): its
+ * own, as git has them at the commit (src\ and art\), and its kit's (kitScriptsOf). Anything the Steward can't read is
+ * "yes".
+ */
+async function scriptsUnkept(run: Runner, o: { repo: string; commit: string; kit: string; parts?: string[]; thumbprint: string; checkout?: string; env?: NodeJS.ProcessEnv; home?: string }): Promise<boolean> {
+  const store = scriptsStoreOf(o.env, o.home);
+  const kept = (file: string, text: Buffer | string) => existsSync(keptScriptFile(store, scriptKey(text, o.thumbprint), file));
+  const listed = await run('git', ['ls-tree', '-r', '-z', '--name-only', o.commit, '--', 'src', 'art'], { cwd: o.repo, timeoutMs: 60_000 }).catch(() => null);
+  if (!listed || listed.code !== 0) return true;
+  for (const f of listed.out.split('\0').filter(isScript)) {
+    const r = await run('git', ['show', `${o.commit}:${f}`], { cwd: o.repo, timeoutMs: 60_000 }).catch(() => null);
+    if (!r || r.code !== 0 || !kept(f, r.out)) return true;
   }
-  const sources = sourcesAt(native, (p) => objects[p] ?? null);
-  if (!sources) return true;
-  const store = signedStoreOf(o.id, o.env, o.home);
-  return native.arch.some((a) => !keptSigned(store, signedKey(native, a, sources)));
+  const kits = kitScriptsOf(o.kit, o.parts, o);
+  if (!kits) return true;
+  try {
+    return kits.some((f) => !kept(f, readFileSync(f)));
+  } catch {
+    return true;
+  }
+}
+
+/** The parts a kit part needs, as tools/kit.ts fills them. */
+const KIT_NEEDS: Record<string, string[]> = { node: ['core'], core: ['spec'], dotnet: ['core'], react: ['node', 'web'] };
+
+/**
+ * The scripts a release's kit brings (full paths): its checkout's src\kit\ when that is the kit pinned; else that kit as
+ * this PC keeps it (STEWARD_KITS, else %USERPROFILE%\.steward\kits\<version>, where a release's tools/kit.ts fills from),
+ * the parts pinned and those they need. Null when neither is there.
+ */
+function kitScriptsOf(kit: string, parts: string[] | undefined, o: { checkout?: string; env?: NodeJS.ProcessEnv; home?: string }): string[] | null {
+  const list = (dir: string) => (readdirSync(dir, { recursive: true, encoding: 'utf8' }) as string[]).filter(isScript).map((f) => path.join(dir, f));
+  const version = (dir: string) => {
+    try {
+      return readFileSync(path.join(dir, 'VERSION'), 'utf8').trim();
+    } catch {
+      return null;
+    }
+  };
+  try {
+    const own = o.checkout ? path.join(o.checkout, 'src', 'kit') : null;
+    if (own && version(own) === kit) return list(own);
+    const tree = path.join((o.env ?? process.env).STEWARD_KITS || path.join(o.home ?? os.homedir(), '.steward', 'kits'), kit);
+    if (version(tree) !== kit) return null;
+    const all = [...(parts ?? ['node', 'web', 'spec'])];
+    for (let i = 0; i < all.length; i++) for (const need of KIT_NEEDS[all[i]] ?? []) if (!all.includes(need)) all.push(need);
+    return all.filter((p) => existsSync(path.join(tree, p))).flatMap((p) => list(path.join(tree, p)));
+  } catch {
+    return null;
+  }
 }

@@ -20,6 +20,7 @@ import { kitTrialAtMain } from './trial.ts';
 import { stewardEmployee } from './selfmerge.ts';
 import { mainGate } from './mainbuild.ts';
 import { clearPending, missedExchequer, notePending } from './exchequer.ts';
+import { signingDown } from '../signing.ts';
 
 /**
  * The Steward's own releases, in a round. The Steward's repository isn't an employee's, so this is kept apart from
@@ -163,6 +164,10 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
         // Before, it stood as failed until the next round saw the tag on GitHub and let it go, and no Manor was offered it.
         const missed = step.what === 'steward' ? missedExchequer(`${r.out}\n${r.err}`) : null;
         if (missed && (await hostFor(ctx).viewRelease(ctx.settings.stewardRepo, step.tag, 'tagName')).code === 0) return onGitHubOnly(ctx, step, missed);
+        // Its scripts couldn't be signed (kit 2.121.0: SimplySign Desktop not connected): nothing failed, and a round that
+        // can sign releases it.
+        const down = signingDown(`${r.out}\n${r.err}`);
+        if (down) return selfResult('skipped', `${step.tag} waits until this PC can sign: ${down}`, { version: step.version, commit: at, again: true });
         return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released${networkNote(`${r.out}\n${r.err}`)}`, { version: step.version, commit: at });
       }
       exchequer ||= exchequerNote(`${r.out}\n${r.err}`);

@@ -51,6 +51,12 @@
  * release builds it for each processor, carries both builds in the zip at the paths the checkout has them, and, when it
  * is published, signs the programs and libraries that aren't signed already (sign.ts), or takes the ones a release
  * before signed from the same native sources (signed-native.ts, kit 2.92.0); install keeps this PC's.
+ *
+ * A published release signs its PowerShell scripts too (.ps1, .psm1, .psd1: signed-scripts.ts, kit 2.121.0), with
+ * kit.json's native certificate, else on the PC that releases Castellan the owner's: the ones a release before signed are
+ * taken from the store every agent shares, and the rest are signed, so the key is needed only for a script that changed.
+ * The zip must carry each one exactly as it was signed. Anyone else's agent, with no certificate, ships them unsigned,
+ * and says so.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -62,11 +68,13 @@ import { APP } from '../app.ts';
 import type { Release } from './install.ts';
 import { isUrgent, letOut, NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, saleOf, type ExchequerOutcome } from './exchequer.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
-import { buildNative, nativeOf, nativeSources, runBuild, stageNative, type Arch, type Native, type NativeBuilt } from './native.ts';
+import { buildNative, CERTUM_TIMESTAMP, nativeOf, nativeSources, runBuild, stageNative, type Arch, type Native, type NativeBuilt } from './native.ts';
 import { releaseNotes, type Notes } from './notes.ts';
+import { SIGNED_BY } from './prebuilt.ts';
 import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
-import { findSignTool, readySigner, signFiles, unsignedOf, verifySigned, type Signer } from './sign.ts';
+import { findSignTool, readySigner, signaturesWrong, signFiles, unsignedOf, verifySigned, type Signer } from './sign.ts';
 import { keepSigned, keptSigned, signedKey, signedStoreOf, sourcesAt, takeSigned } from './signed-native.ts';
+import { changedSinceSigning, isScript, keptScript, scriptsStoreOf, signStagedScripts, type ScriptsSigned } from './signed-scripts.ts';
 
 /** Where a Steward from before 0.19.0 published Castellan's releases, before it had a setting for it. */
 const LEGACY_RELEASES_REPO = 'Jcollier0120/Manor-releases';
@@ -239,6 +247,8 @@ interface Built {
   /** manor-agent.json beside the zip, when the checkout announces the agent. */
   announcement: string | null;
   notes: Notes;
+  /** Its PowerShell scripts: how many, and whether they're signed (only a published release's are). */
+  scripts: { count: number; signed: boolean };
 }
 
 /** The notes' last section: how to install a hire's release by hand (Castellan installs and updates it by itself). */
@@ -311,6 +321,34 @@ export function signingFor(native: Native, o: { dirty: boolean; version: string;
   };
 }
 
+/**
+ * The certificate a published release signs its PowerShell scripts with (kit 2.121.0): kit.json's native one, else, on
+ * the PC that releases Castellan (a releases repository: releasesRepo), the owner's (prebuilt.ts' SIGNED_BY); null for
+ * anyone else's agent, which has given none.
+ */
+export const scriptsThumbprint = (native: Native | null, releases: string | null): string | null => native?.thumbprint ?? (releases ? SIGNED_BY : null);
+
+/**
+ * How a published release signs its scripts (signed-scripts.ts): `scripts` are the checkout's, as the release will stage
+ * them. When one has no signed copy kept, the signer (readySigner) is asked for at once, before anything is built, and
+ * one that can't be had throws "Not published: its scripts can't be signed: ...", the words the Steward waits on (its
+ * signing.ts); else only if a kept copy turns out not to check out.
+ */
+export function scriptSigningFor(scripts: { file: string; bytes: Buffer }[], o: { thumbprint: string; timestamp?: string; store?: string; ready?: typeof readySigner }) {
+  const store = o.store ?? scriptsStoreOf();
+  const timestamp = o.timestamp ?? CERTUM_TIMESTAMP;
+  let ready: Signer | null = null;
+  const signer = (): Signer => {
+    if (ready) return ready;
+    const s = (o.ready ?? readySigner)(o.thumbprint, timestamp);
+    if ('problem' in s) throw new Error(`Not published: its scripts can't be signed: ${s.problem}.`);
+    return (ready = s);
+  };
+  const unkept = scripts.filter((s) => !keptScript(store, s.file, s.bytes, o.thumbprint));
+  if (unkept.length) signer();
+  return { thumbprint: o.thumbprint, store, signer, unkept: unkept.map((s) => s.file) };
+}
+
 /** Stages the release in a temporary folder, builds it (unless `readable`), zips it, and writes its SHA256SUMS.txt (manor-agent.json's line too, when there is one). */
 async function build(readable = false, publishing = false): Promise<Built> {
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -328,6 +366,11 @@ async function build(readable = false, publishing = false): Promise<Built> {
   const sources = native ? [...nativeSources(native), ...native.notices] : [];
   const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, ANNOUNCEMENT, ...sources) !== '';
   const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString(), kit: kit.kit, form: readable ? 'readable' : 'minified' };
+  // Its scripts, signed when it's published (signed-scripts.ts): whether this PC can sign is known before anything is
+  // built, and asked only when a script has no signed copy kept.
+  const scriptFiles = pickReleaseFiles(repoFiles(root)).filter(isScript);
+  const scriptCert = publishing ? scriptsThumbprint(native, releasesRepo()) : null;
+  const scriptSigning = scriptCert ? scriptSigningFor(scriptFiles.map((file) => ({ file, bytes: readFileSync(path.join(root, file)) })), { thumbprint: scriptCert, timestamp: native?.timestamp }) : null;
   // Whether the Exchequer sells it, as its list says when it's published (kit 2.110.0). The license check doesn't read it
   // (kit 2.113.0: every agent but Manor and Heiward needs a license, sold or not). When the Exchequer can't say,
   // release.json says nothing.
@@ -369,6 +412,17 @@ async function build(readable = false, publishing = false): Promise<Built> {
     const page = pageEsbuild ? await releasePage(stage, root, pageEsbuild, readable) : null;
     const minified = esbuild ? await minifyRelease(stage, esbuild) : null;
     const nativeCount = native && nativeBuilt ? stageNative(root, stage, native, nativeBuilt) : 0;
+    // Last before the zip: nothing may change a script once it's signed.
+    const scripts: ScriptsSigned | null = scriptSigning
+      ? signStagedScripts(stage, {
+          thumbprint: scriptSigning.thumbprint,
+          store: scriptSigning.store,
+          sign: (list) => signFiles(scriptSigning.signer(), list, (l) => console.log(l), { what: 'the scripts' }),
+          wrong: (list) => signaturesWrong(list, scriptSigning.thumbprint),
+          invalid: unsignedOf,
+          log: (l) => console.log(l),
+        })
+      : null;
 
     const outDir = path.join(root, 'artifacts', APP.id);
     mkdirSync(outDir, { recursive: true });
@@ -378,6 +432,11 @@ async function build(readable = false, publishing = false): Promise<Built> {
     const name = zipName(APP.name, release.version);
     const zip = path.join(outDir, name);
     execFileSync(TAR, ['-a', '-c', '-f', zip, '-C', stage, ...readdirSync(stage).sort()], { windowsHide: true, stdio: ['ignore', 'ignore', 'inherit'] });
+    const changed = scripts ? changedSinceSigning(zip, scripts.hashes, TAR) : [];
+    if (changed.length) {
+      rmSync(zip, { force: true });
+      throw new Error(`Not published: the zip doesn't carry its scripts as they were signed: ${changed.join('; ')}.`);
+    }
     const announcement = path.join(outDir, ANNOUNCEMENT);
     rmSync(announcement, { force: true });
     if (announced) cpSync(announced.file, announcement);
@@ -394,12 +453,16 @@ async function build(readable = false, publishing = false): Promise<Built> {
       console.log(
         `  native files for ${a.arch}: ${native!.out}/${a.arch}, ${a.files.length} files, ${Math.ceil(a.bytes / 1024)} KB${!release.native?.signed ? ', not signed (only a published release is)' : a.reused ? `, signed for ${a.reused} (${a.signed} here, the rest by their makers), from the same native sources` : `, ${a.signed} signed here (the rest by their makers)`}`,
       );
+    if (scripts) {
+      const how = [scripts.signed.length && `${scripts.signed.length} signed here`, scripts.reused.length && `${scripts.reused.length} as a release before signed them`, scripts.theirs.length && `${scripts.theirs.length} by their makers`].filter(Boolean).join(', ');
+      if (scriptFiles.length || how) console.log(`  scripts: ${Object.keys(scripts.hashes).length}, signed (${how || 'none'})${scripts.rewritten.length ? `; their SHA-256 in ${scripts.rewritten.join(', ')} now the signed ones'` : ''}`);
+    } else if (scriptFiles.length) console.log(`  scripts: ${scriptFiles.length}, not signed (${publishing ? "kit.json's \"native\" gives no \"thumbprint\", and this PC doesn't release Castellan" : 'only a published release is'})`);
     if (announced) console.log(`  ${ANNOUNCEMENT}, announcing ${APP.name} to every Manor: sha256 ${listed[1].hash}`);
     const notes = releaseNotes({ root, name: APP.name, version: pkg.version, commit, kit: kit.kit, install: INSTALL_NOTE });
     console.log(`  notes: ${notes.from === 'changelog' ? `CHANGELOG.md's entry for ${pkg.version}` : 'the commits since the release before'}`);
     for (const w of notes.warnings) console.warn(`  warning: ${w}`);
     if (isUrgent(notes.notes)) console.log('  urgent: its entry is marked "**Urgent fix:", so once published it goes out to customers at once');
-    return { release, zip, sums, announcement: announced ? announcement : null, notes };
+    return { release, zip, sums, announcement: announced ? announcement : null, notes, scripts: { count: scripts ? Object.keys(scripts.hashes).length : scriptFiles.length, signed: !!scripts } };
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
@@ -450,6 +513,10 @@ async function publish(b: Built, urgent = false): Promise<number> {
   }
   if (release.native && !release.native.signed) {
     console.error("Not published: its native files aren't signed.");
+    return 1;
+  }
+  if (b.scripts.count && !b.scripts.signed && releasesRepo()) {
+    console.error("Not published: its scripts aren't signed, and Castellan's are never published unsigned.");
     return 1;
   }
   if (git('rev-list', '--count', 'HEAD', '--not', '--remotes=origin') !== '0') {

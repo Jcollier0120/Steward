@@ -21,6 +21,8 @@ import { CERTUM_TIMESTAMP } from './native.ts';
  * trial left them to the real signing, Envoy 0.1.25 built for minutes, and then failed three times signing. Now the
  * trial is a real signature, timestamped as a release's are, that must succeed before anything is built; signtool's
  * words for a key it can't reach include the CSP's; and anything else it says is tried once more, then said as it is.
+ *
+ * A release's PowerShell scripts are signed the same way (signed-scripts.ts, kit 2.121.0).
  */
 
 /** The longest one signtool run may take: a cloud key's sign-in, waiting where no one sees it, would hang a release. */
@@ -159,7 +161,7 @@ export function unsignedOf(files: string[]): string[] {
     const list = path.join(dir, 'files.txt');
     writeFileSync(list, files.join('\n'), 'utf8');
     const r = powershell(`Get-Content -LiteralPath ${quotedPs(list)} -Encoding UTF8 | ForEach-Object { if ((Get-AuthenticodeSignature -LiteralPath $_).Status -ne 'Valid') { $_ } }`, 5 * 60_000);
-    if (r.status !== 0) throw new Error(`couldn't read the native files' signatures: ${(r.stderr || r.error?.message || '').trim()}`);
+    if (r.status !== 0) throw new Error(`couldn't read the files' signatures: ${(r.stderr || r.error?.message || '').trim()}`);
     const out = new Set(`${r.stdout ?? ''}`.split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
     return files.filter((f) => out.has(f));
   } finally {
@@ -173,32 +175,33 @@ export function unsignedOf(files: string[]): string[] {
  * signature first: the key's session may have ended while the release built, and its sign-in would hold a batch for
  * SIGN_MS where the trial gives up in TRIAL_MS. A key that can't be reached (signProblem) isn't tried again.
  */
-export function signFiles(s: Signer, files: string[], log: (line: string) => void = () => {}, o: { run?: SignRun; pause?: (ms: number) => void } = {}): void {
+export function signFiles(s: Signer, files: string[], log: (line: string) => void = () => {}, o: { run?: SignRun; pause?: (ms: number) => void; what?: string } = {}): void {
+  const what = o.what ?? 'the native files';
   const sign = o.run ?? run;
   const pause = o.pause ?? pauseFor;
   const lost = files.length ? trialProblem(s.signtool, s.thumbprint, { run: sign, timestamp: s.timestamp, pause }) : null;
-  if (lost) throw new Error(`couldn't sign the native files: ${lost}`);
+  if (lost) throw new Error(`couldn't sign ${what}: ${lost}`);
   for (let i = 0; i < files.length; i += BATCH) {
     const batch = files.slice(i, i + BATCH);
     for (let attempt = 1; ; attempt++) {
       const r = sign(s.signtool, signArgs(batch, s.thumbprint, s.timestamp), SIGN_MS);
       if (r.ok) break;
       const problem = signProblem(r.text, s.thumbprint);
-      if (problem) throw new Error(`couldn't sign the native files: ${problem}`);
-      if (r.timedOut || attempt >= TRIES) throw new Error(`couldn't sign the native files: ${lastLines(r.text, 5)}`);
+      if (problem) throw new Error(`couldn't sign ${what}: ${problem}`);
+      if (r.timedOut || attempt >= TRIES) throw new Error(`couldn't sign ${what}: ${lastLines(r.text, 5)}`);
       log(`  signing failed (try ${attempt} of ${TRIES}), trying again in ${AGAIN_MS / 1000} s: ${lastLines(r.text)}`);
       pause(AGAIN_MS);
     }
   }
   const wrong = signaturesWrong(files, s.thumbprint);
-  if (wrong) throw new Error(`the native files' signatures don't check out (each should be Valid, ${s.thumbprint}'s, timestamped): ${wrong}`);
+  if (wrong) throw new Error(`${what}' signatures don't check out (each should be Valid, ${s.thumbprint}'s, timestamped): ${wrong}`);
 }
 
 /**
  * Of these files, the ones whose signature isn't Valid, the certificate's and timestamped, a line each ("<file>|<status>"),
  * or '' when every one is; what PowerShell said when it couldn't look.
  */
-function signaturesWrong(files: string[], thumbprint: string): string {
+export function signaturesWrong(files: string[], thumbprint: string): string {
   if (!files.length) return '';
   const dir = mkdtempSync(path.join(tmpdir(), 'kit-sign-'));
   try {
