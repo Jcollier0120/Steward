@@ -2,6 +2,36 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.114.0
+
+**The text reader reads with our own model on the NPU: on a Snapdragon it reads 1,211 of the check's 1,253 lines exactly, where Windows OCR read 733.**
+
+### What's new
+
+- **ocr-npu.ts**: the reader's own model, PP-OCRv6 tiny with its recognizer fine-tuned on screen and document text (Apache-2.0, the release `ocr-model-v1` in the manor's public releases). spec/OCR.md, "Our own model", has the choice, the figures, and what's left.
+  - `modelReader` gives the model's reader for this PC, or null when Windows OCR reads instead. Null means Windows OCR is set, the model isn't fetched yet (the fetch then starts in the background), no NPU the model runs on, or an NPU that failed the self-check (refused for 6 hours, `REFUSED_MS`).
+  - `fetchReader` fetches ONNX Runtime 1.27.0, the NPU maker's plugin (Qualcomm's QNN 2.6.0 on Arm; Intel's OpenVINO 1.7.0 as a test) and the model. Each is pinned by size and SHA-256 (`ORT_ZIPS`, `QNN_PACK`, `OPENVINO_PACK`, `MODEL_FILES`), and goes into the reader's shared folder (`ocrHome`: %USERPROFILE%\.npu-agent\ocr, or `KIT_OCR_HOME`). About 226 MB on a Snapdragon.
+  - Reading on the NPU takes the NPU's turn (`acceleratorTurn`), `TURN_PAGES` (8) pages a turn, in the caller's lane. When the NPU's line is too long, or no turn comes in time, Windows OCR reads the rest.
+  - `KIT_OCR_ENGINE` (`windows`, `model`, unset for where it's worth it) and `KIT_OCR_NPU` (`none`, `openvino`). Under node:test the reader is Windows OCR unless `KIT_OCR_ENGINE` says otherwise.
+  - `ON_PROCESSOR` is false: on the processor the model reads as well, but at 20 times Windows OCR's processor time, so Windows OCR reads where the NPU can't.
+- **ocr-npu.cs**, shipped signed as `prebuilt/ocr-npu-3fa4156fe5a3.exe`: the program that reads.
+  - It runs ONNX Runtime through its C API, loads the model once and stays until two minutes idle.
+  - On Qualcomm's NPU it uses static shapes (640×640 detector tiles, recognizer widths 128 to 2,048), fp16 with no CPU fallback, power-saver mode and one thread, and compiled graphs kept in its cache folder. That folder is also its working folder, where VitisAI's signature files will land.
+  - Before reading, it reads a picture it draws itself, on the NPU and on the processor, and won't use an NPU that reads it differently.
+- **ocr-check.ts**: the engines `model-npu` and `model-cpu`, beside `windows`, each with its processor time and peak memory.
+- **prebuilt.ts**: a helper can name the assemblies it's compiled against (`refs`) and take `ARM64_MANIFEST`, so Windows on Arm runs it as Arm. Both are hashed into its name; the helpers that have neither keep theirs.
+- **ocr.ps1**: `render` renders a PDF's pages for the model to read, with no OCR language needed.
+
+### What changed
+
+- **`ocrFiles` and `ocrImages`** read with the model where it can, and with Windows OCR the rest. `OcrResult.engine` is `'model-npu'`, `'model-cpu'` or `'windows'`. The API is as it was.
+- **`tooWide`** (signatures.ts) reads a drive alone ("D:") as the drive's root wherever the process runs. Resolved, it was the folder the process was in on that drive.
+- **spec/OCR.md**: "Our own model" replaces "Next".
+
+### Before you update
+
+- Nothing: take the kit as usual. On a Snapdragon, the first read after an agent takes it starts the 226 MB fetch in the background. Windows OCR reads until the fetch is done, and the first start then compiles the NPU's graphs (about 17 s). Every agent on the PC shares the one folder, so it's fetched once.
+
 ## 2.113.5
 
 **Setup runs outside a packaged app (the Claude desktop app is one), and a server whose program is gone is set up again by the keeper.**

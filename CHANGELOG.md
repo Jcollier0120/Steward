@@ -2,6 +2,26 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.200
+
+**It hands out the kit 2.114.0: on a Snapdragon, the staff read text in pictures with the manor's own model on the NPU, and read 1,211 of the check's 1,253 lines exactly, where Windows OCR read 733.**
+
+### What's new
+
+- **The staff's text reader has a model of its own.** Clerk, Scribe, Reeve and Warrener all read text in screenshots and scanned pages with the kit's one reader. On a Snapdragon it now reads with a small model on the NPU: PP-OCRv6 tiny, fine-tuned on screen and document text. It is far better on small screen text and code than Windows OCR, and never worse in any kind of text the check has.
+  - It takes the NPU's turn like the staff's other NPU work. Background reading leaves chat as fast as it was.
+  - Before it reads, it checks itself on a picture it draws. If the NPU reads that differently, Windows OCR reads instead.
+- **Where there's no NPU it can use**, Windows OCR reads, as before. On the processor the model reads as well, but costs 20 times Windows OCR's processor time.
+
+### What changed
+
+- **The model is published** as `ocr-model-v1` in the manor's public releases (Apache-2.0). Each file is pinned by size and SHA-256.
+- **The reader's figures**, and what it still gets wrong, are in the kit's spec (spec/OCR.md, "Our own model").
+
+### Before you update
+
+- Nothing: it updates itself as usual. On a Snapdragon, the first time a member of staff reads a picture, the reader fetches 226 MB in the background (ONNX Runtime, Qualcomm's NPU plugin and the model), once for every agent on the PC. Windows OCR reads until the fetch is done. Then the first start takes about 17 seconds while the NPU's graphs are compiled.
+
 ## 0.36.199
 
 **It hands out the kit 2.113.5: setting up local AI from the Claude desktop app no longer hides the NPU's server from the staff, and a server whose program is missing is set up again by itself.**

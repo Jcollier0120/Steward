@@ -91,6 +91,8 @@ export function serverPrograms(raw: Record<string, any>, env: Record<string, str
  * a whole. A server installed there (none of the kit's is) is read for its program alone.
  */
 export function tooWide(folder: string, env: Record<string, string | undefined> = process.env): boolean {
+  // A drive alone ("D:") is its root: resolving it would give the folder this process is in on that drive.
+  if (/^[a-z]:[\\/]*$/i.test(folder.trim())) return true;
   const f = path.win32.resolve(folder).replace(/\\+$/, '').toLowerCase();
   if (/^[a-z]:$/.test(f)) return true;
   const wide = [env.SystemRoot, env.ProgramFiles, env['ProgramFiles(x86)'], env.USERPROFILE, env.LOCALAPPDATA, env.APPDATA, env.ProgramData]

@@ -13,6 +13,9 @@
 # - orient false reads a photo as stored, ignoring its EXIF orientation.
 # - pages (PDFs): the pages to read, 0-based; null for the first pdfMaxPages. A PDF's pages are rendered to PNGs in
 #   tmpDir, read, and deleted. `thumb` is where to save a small render of page 1 for the page's thumbnail.
+# - render (kit 2.114.0): PDFs' pages are only rendered, for the model to read (ocr-npu.ts): each is kept in tmpDir and
+#   answered as {"page","png","frame"} in "rendered" instead of "read" (frame: the width it was rendered for, at pdfScale;
+#   Windows may render it wider, at the display's scale). No OCR language is needed for it.
 # Every answer is ASCII: anything else goes as \uXXXX, so no console code page can change it (437 made a bullet a bell,
 # which broke the line, kit 2.102.0).
 Remove-TypeData System.Array -ErrorAction SilentlyContinue
@@ -42,8 +45,11 @@ function Out-Answer($o) {
 }
 
 $list = Get-Content -LiteralPath $ListFile -Raw -Encoding UTF8 | ConvertFrom-Json
-$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
-if (-not $engine) { throw 'no OCR language installed (Settings > Time & language > Language)' }
+$render = [bool]$list.render
+if (-not $render) {
+  $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+  if (-not $engine) { throw 'no OCR language installed (Settings > Time & language > Language)' }
+}
 $maxDim = [double][Windows.Media.Ocr.OcrEngine]::MaxImageDimension
 $boxes = [bool]$list.boxes
 $orient = $list.orient -ne $false
@@ -118,16 +124,20 @@ function Read-Pdf($job) {
         # Page sizes are in 1/96 inch, so pdfScale 2 renders at 192 dpi.
         $frame = [Math]::Min($maxDim, $page.Size.Width * [double]$list.pdfScale)
         Save-PdfPage $page $png $frame
-        try { $r = Read-Image $png 1 } finally { Remove-Item -LiteralPath $png -Force -ErrorAction SilentlyContinue }
-        # Windows renders at the display's scale too (twice as wide at 200%): the page's size and boxes are given
-        # at pdfScale, as the text layer's are, whatever the display.
-        $f = if ($r.width -gt 0) { [Math]::Round($frame) / $r.width } else { 1 }
-        if ([Math]::Abs($f - 1) -gt 0.001) {
-          $r.width = [int][Math]::Round($r.width * $f); $r.height = [int][Math]::Round($r.height * $f)
-          if ($boxes) { foreach ($l in $r.lines) { foreach ($wd in @($l.words)) { $wd.x = [Math]::Round($wd.x * $f, 1); $wd.y = [Math]::Round($wd.y * $f, 1); $wd.w = [Math]::Round($wd.w * $f, 1); $wd.h = [Math]::Round($wd.h * $f, 1) } } }
+        if ($render) {
+          [ordered]@{ page = $p; png = $png; frame = [Math]::Round($frame) }
+        } else {
+          try { $r = Read-Image $png 1 } finally { Remove-Item -LiteralPath $png -Force -ErrorAction SilentlyContinue }
+          # Windows renders at the display's scale too (twice as wide at 200%): the page's size and boxes are given
+          # at pdfScale, as the text layer's are, whatever the display.
+          $f = if ($r.width -gt 0) { [Math]::Round($frame) / $r.width } else { 1 }
+          if ([Math]::Abs($f - 1) -gt 0.001) {
+            $r.width = [int][Math]::Round($r.width * $f); $r.height = [int][Math]::Round($r.height * $f)
+            if ($boxes) { foreach ($l in $r.lines) { foreach ($wd in @($l.words)) { $wd.x = [Math]::Round($wd.x * $f, 1); $wd.y = [Math]::Round($wd.y * $f, 1); $wd.w = [Math]::Round($wd.w * $f, 1); $wd.h = [Math]::Round($wd.h * $f, 1) } } }
+          }
+          $r.page = $p
+          $r
         }
-        $r.page = $p
-        $r
       } finally { $page.Dispose() }
     })
   return @{ read = $read; pageCount = $count }
@@ -142,7 +152,12 @@ foreach ($job in $list.jobs) {
     }
     if ($job.kind -eq 'pdf') {
       $r = Read-Pdf $job
-      Out-Answer ([ordered]@{ i = $job.i; ok = $true; ms = $sw.ElapsedMilliseconds; pageCount = $r.pageCount; read = @($r.read) })
+      $key = if ($render) { 'rendered' } else { 'read' }
+      $a = [ordered]@{ i = $job.i; ok = $true; ms = $sw.ElapsedMilliseconds; pageCount = $r.pageCount }
+      $a[$key] = @($r.read)
+      Out-Answer $a
+    } elseif ($render) {
+      Out-Answer ([ordered]@{ i = $job.i; ok = $false; error = 'only PDFs are rendered' })
     } else {
       $r = Read-Image $job.path $list.scale
       $r.page = 0

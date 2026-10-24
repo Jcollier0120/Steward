@@ -8,3 +8,5 @@ docs/UI-INVENTORY*
 # The kit's signed helpers too (kit/node/prebuilt.ts).
 !kit/node/prebuilt/*.exe
 !kit/node/prebuilt/*.dll
+# The OCR model recipe's Python caches (tools/ocr-model).
+__pycache__/

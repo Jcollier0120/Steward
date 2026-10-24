@@ -1,15 +1,18 @@
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { Lane } from './npu-queue.ts';
+import { modelReader, type ModelReader, type PageAnswer, type PageAsk } from './ocr-npu.ts';
 import { needsOcr, PDF_TEXT_MAX_BYTES, readPdfText, type PdfTextPage } from './pdf-text.ts';
 import { powershell, psQuote } from './ps.ts';
 
 /**
  * The staff's one text reader (kit 2.102.0, spec/OCR.md): the text in pictures (screenshots, scans, photos of pages)
  * and in PDFs, for the Clerk, the Scribe, Reeve and the Warrener.
- * - Pictures, and PDF pages that have no text of their own (scans), are read by the engine: Windows' built-in OCR
- *   (Windows.Media.Ocr, on the processor) through ocr.ps1, for now. The engine sits behind this API: the staff never
- *   name it.
+ * - Pictures, and PDF pages that have no text of their own (scans), are read by the engine. From kit 2.114.0 that is
+ *   the kit's own model, on the NPU where it can (ocr-npu.ts), PDF pages rendered for it by ocr.ps1; Windows' built-in
+ *   OCR (Windows.Media.Ocr, on the processor, through ocr.ps1) reads where the model can't, and whatever it didn't
+ *   read. The engine sits behind this API: the staff never name it, and each result says which one read it.
  * - A PDF that carries its text is read from its text layer (pdf-text.ts): exact, and nothing is rendered.
  * Many files go to one PowerShell script (in the kit's PowerShell worker, ps.ts): starting one costs about a second.
  */
@@ -61,7 +64,7 @@ export interface OcrResult {
   cloudOnly?: boolean;
   /** A PDF's text from its own text layer (`text`), the engine (`ocr`), or some pages each (`mixed`). */
   source?: 'text' | 'ocr' | 'mixed';
-  /** The engine that read what was OCRed ('windows': Windows.Media.Ocr). */
+  /** The engine that read what was OCRed: 'model-npu' or 'model-cpu' (the kit's model, ocr-npu.ts), or 'windows' (Windows.Media.Ocr). */
   engine?: string;
   /** With `boxes`: each page read, its lines with their words' boxes. */
   layout?: OcrPage[];
@@ -85,9 +88,18 @@ export interface OcrOptions {
   pdfText?: boolean;
   /** Turn photos the way their EXIF says (the default); false reads them as stored. */
   orient?: boolean;
+  /**
+   * 'interactive' when a person waits on the result: the model's reads on the NPU go ahead of background work. The
+   * process's lane when left out (npu-queue.ts' currentLane: background, unless the agent says otherwise).
+   */
+  lane?: Lane;
+  /** For tests: the model's reader (ocr-npu.ts' modelReader), or null for Windows' OCR alone. */
+  modelReader?: () => Promise<ModelReader | null>;
+  /** Told what's worth a line in the agent's log: the model fetched, or why it isn't used. */
+  log?: (line: string) => void;
 }
 
-/** The engine's name in results: Windows' own OCR, for now (PR 2 of spec/OCR.md brings the NPU's). */
+/** Windows' own OCR's name in results. */
 export const OCR_ENGINE = 'windows';
 
 /** The script without its comment lines: it travels as -EncodedCommand, which has a length limit. It reads `$ListFile`. */
@@ -208,26 +220,16 @@ async function readBatch(batch: OcrJob[], dir: string, opts: OcrOptions & { pdfM
   const sent = batch
     .map((j, i) => ({ j, i, plan: plans.get(i) }))
     .filter(({ j, i, plan }) => !results[i] && (!plan || plan.ocr.length || (j.kind === 'pdf' && j.thumb)));
-  let answers = new Map<number, any>();
+  const answers = new Map<number, any>();
   if (sent.length) {
-    const listFile = path.join(dir, 'list.json');
-    writeFileSync(
-      listFile,
-      JSON.stringify({
-        scale: opts.scale ?? 1,
-        boxes,
-        orient: opts.orient !== false,
-        pdfMaxPages: opts.pdfMaxPages,
-        pdfScale,
-        // WinRT's folders want a full path.
-        tmpDir: path.resolve(dir),
-        // WinRT's GetFileFromPathAsync wants backslashes.
-        jobs: sent.map(({ j, i, plan }) => ({ i, path: path.resolve(j.path), kind: j.kind, thumb: j.thumb ? path.resolve(j.thumb) : null, pages: plan ? plan.ocr : null })),
-      }),
-    );
-    const weight = sent.reduce((n, { j, plan }) => n + (j.kind === 'pdf' ? (plan ? Math.max(1, plan.ocr.length) : opts.pdfMaxPages) : 1), 0);
-    // A script that fails as a whole (no OCR language, PowerShell gone) rejects, as before: the batch stays unread.
-    answers = parseAnswers(await powershell(`$ListFile = ${psQuote(listFile)}\n${OCR_SCRIPT}`, { timeoutMs: 30_000 + weight * 15_000 }));
+    // The model first, where it reads (ocr-npu.ts); Windows' OCR reads whatever it didn't.
+    const model = await (opts.modelReader ?? (() => modelReader({ log: opts.log })))();
+    if (model) for (const [i, a] of await readWithModel(model, sent, dir, { ...opts, pdfScale, boxes })) answers.set(i, a);
+    const left = sent.filter((s) => !answers.has(s.i));
+    if (left.length) {
+      // A script that fails as a whole (no OCR language, PowerShell gone) rejects, as before: the batch stays unread.
+      for (const [i, a] of await runScript(left, dir, { ...opts, pdfScale, boxes })) answers.set(i, { ...a, engine: OCR_ENGINE });
+    }
   }
 
   return batch.map((j, i): OcrResult => {
@@ -246,7 +248,8 @@ async function readBatch(batch: OcrJob[], dir: string, opts: OcrOptions & { pdfM
       return { path: j.path, ok: false, text: '', ms: Number(r.ms ?? 0), pages: 0, pageCount: 0, error: String(r.error ?? 'unreadable'), cloudOnly: r.cloudOnly ? true : undefined };
     }
     const read: any[] = Array.isArray(r.read) ? r.read : [];
-    if (plan) return fromPlan(j.path, plan, read, boxes, Number(r.ms ?? 0));
+    const engine = String(r.engine ?? OCR_ENGINE);
+    if (plan) return fromPlan(j.path, plan, read, boxes, Number(r.ms ?? 0), engine);
     const pages = read.map((p) => ({ p, page: enginePage(j.path, p, boxes) }));
     return {
       path: j.path,
@@ -256,14 +259,96 @@ async function readBatch(batch: OcrJob[], dir: string, opts: OcrOptions & { pdfM
       pages: j.kind === 'pdf' ? pages.length : 1,
       pageCount: Number(r.pageCount ?? 0),
       source: 'ocr',
-      engine: OCR_ENGINE,
+      engine,
       layout: boxes ? pages.map((x) => x.page) : undefined,
     };
   });
 }
 
+type Sent = { j: OcrJob; i: number; plan?: PdfPlan };
+type BatchOptions = OcrOptions & { pdfMaxPages: number; pdfScale: number; boxes: boolean };
+
+/** ocr.ps1 over these jobs: Windows' OCR (or, with `render`, only their PDFs' pages rendered), its answers by job index. */
+async function runScript(sent: Sent[], dir: string, opts: BatchOptions, render = false): Promise<Map<number, any>> {
+  const listFile = path.join(dir, render ? 'render.json' : 'list.json');
+  writeFileSync(
+    listFile,
+    JSON.stringify({
+      scale: opts.scale ?? 1,
+      boxes: opts.boxes,
+      orient: opts.orient !== false,
+      pdfMaxPages: opts.pdfMaxPages,
+      pdfScale: opts.pdfScale,
+      render,
+      // WinRT's folders want a full path.
+      tmpDir: path.resolve(dir),
+      // WinRT's GetFileFromPathAsync wants backslashes.
+      jobs: sent.map(({ j, i, plan }) => ({ i, path: path.resolve(j.path), kind: j.kind, thumb: j.thumb ? path.resolve(j.thumb) : null, pages: plan ? plan.ocr : null })),
+    }),
+  );
+  const weight = sent.reduce((n, { j, plan }) => n + (j.kind === 'pdf' ? (plan ? Math.max(1, plan.ocr.length) : opts.pdfMaxPages) : 1), 0);
+  return parseAnswers(await powershell(`$ListFile = ${psQuote(listFile)}\n${OCR_SCRIPT}`, { timeoutMs: 30_000 + weight * 15_000 }));
+}
+
+/** A page as the model's reader answered it, as ocr.ps1 gives one: its text, size and lines, the boxes `f` times as big. */
+function modelPage(a: PageAnswer, page: number, f = 1): any {
+  const r = (v: number) => Math.round(v * f * 10) / 10;
+  const lines = (a.lines ?? []).map((l) => ({ text: l.text, words: l.words.map((w) => ({ t: w.t, x: r(w.x), y: r(w.y), w: r(w.w), h: r(w.h) })) }));
+  return { page, text: lines.map((l) => l.text).join('\n'), width: Math.round(Number(a.width ?? 0) * f), height: Math.round(Number(a.height ?? 0) * f), lines };
+}
+
+/**
+ * The jobs the model reads, as ocr.ps1's answers by job index: pictures as they are (an online-only one isn't opened),
+ * PDFs' pages once ocr.ps1 has rendered them. A job it doesn't read whole (a picture it can't open, the NPU's line too
+ * long) has no answer here, and Windows' OCR reads it.
+ */
+async function readWithModel(model: ModelReader, sent: Sent[], dir: string, opts: BatchOptions): Promise<Map<number, any>> {
+  const out = new Map<number, any>();
+  const images = sent.filter((s) => s.j.kind === 'image');
+  const cloud = images.length ? await cloudOnly(images.map((s) => s.j.path)) : [];
+  images.forEach((s, k) => {
+    if (cloud[k] === true) out.set(s.i, { i: s.i, ok: false, error: 'online-only (not on this PC)', cloudOnly: true });
+  });
+  const pdfs = sent.filter((s) => s.j.kind === 'pdf');
+  const renders = pdfs.length ? await runScript(pdfs, dir, opts, true).catch(() => new Map<number, any>()) : new Map<number, any>();
+  // A PDF ocr.ps1 couldn't open, or online-only: Windows' OCR would say the same.
+  for (const s of pdfs) if (renders.get(s.i)?.ok === false) out.set(s.i, renders.get(s.i));
+
+  const asks: { s: Sent; page: number; frame?: number; ask: PageAsk }[] = [];
+  const scale = typeof opts.scale === 'number' ? opts.scale : 1;
+  for (const s of images) if (cloud[images.indexOf(s)] !== true) asks.push({ s, page: 0, ask: { file: s.j.path, scale, orient: opts.orient !== false } });
+  for (const s of pdfs) {
+    const r = renders.get(s.i);
+    if (r?.ok) for (const p of Array.isArray(r.rendered) ? r.rendered : []) asks.push({ s, page: Number(p.page), frame: Number(p.frame), ask: { file: String(p.png), scale: 1, orient: false } });
+  }
+  const got = asks.length ? await model.read(asks.map((a) => a.ask), { lane: opts.lane }) : [];
+
+  const byJob = new Map<number, { read: any[]; ms: number; engine: string; failed: boolean }>();
+  asks.forEach((a, k) => {
+    const job = byJob.get(a.s.i) ?? { read: [], ms: 0, engine: model.engine, failed: false };
+    byJob.set(a.s.i, job);
+    const g = got[k];
+    if (!g || g.error) {
+      job.failed = true;
+      return;
+    }
+    job.engine = g.engine;
+    job.ms += Number(g.ms ?? 0);
+    // A PDF's page, as rendered wider at the display's scale: its size and boxes given at pdfScale, as the text layer's.
+    job.read.push(modelPage(g, a.page, a.frame && g.width ? a.frame / g.width : 1));
+  });
+  for (const s of sent) {
+    if (out.has(s.i)) continue;
+    const job = byJob.get(s.i);
+    const r = renders.get(s.i);
+    if (s.j.kind === 'image' && job && !job.failed) out.set(s.i, { i: s.i, ok: true, ms: job.ms, pageCount: 1, read: job.read, engine: job.engine });
+    if (s.j.kind === 'pdf' && r?.ok && !job?.failed) out.set(s.i, { i: s.i, ok: true, ms: Number(r.ms ?? 0) + (job?.ms ?? 0), pageCount: Number(r.pageCount ?? 0), read: job?.read ?? [], engine: job?.engine ?? model.engine });
+  }
+  return out;
+}
+
 /** A PDF's result from its text pages and the pages the engine read, in page order. */
-function fromPlan(file: string, plan: PdfPlan, read: any[], boxes: boolean, ocrMs = 0): OcrResult {
+function fromPlan(file: string, plan: PdfPlan, read: any[], boxes: boolean, ocrMs = 0, engine = OCR_ENGINE): OcrResult {
   const byPage = new Map<number, { text: string; page: OcrPage }>();
   for (const [n, p] of plan.text) byPage.set(n, { text: p.text, page: textPage(file, p) });
   for (const p of read) {
@@ -280,7 +365,7 @@ function fromPlan(file: string, plan: PdfPlan, read: any[], boxes: boolean, ocrM
     pages: order.length,
     pageCount: plan.pageCount,
     source: ocred === 0 ? 'text' : ocred === order.length ? 'ocr' : 'mixed',
-    engine: ocred ? OCR_ENGINE : undefined,
+    engine: ocred ? engine : undefined,
     layout: boxes ? order.map((n) => byPage.get(n)!.page) : undefined,
   };
 }
