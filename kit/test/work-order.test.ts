@@ -126,14 +126,23 @@ test("whose servers are up is asked of the servers themselves: one that refuses 
   }
 });
 
-test("Manor's switch off keeps the Radeon out of the NPU's pictures, whatever the order", async () => {
+// The owner's ruling of 2026-10-24 (kit 2.135.3): "on AMD, pictures go to the Radeon on demand even with the
+// graphics-card switch off; chat stays off the card". Until then the switch off kept every picture on the NPU.
+test("Manor's switch off: pictures still go to the Radeon the order puts first, on its chat server kept for them; chat never goes to the card; with no order, the NPU's as before", async () => {
   fresh();
   const npu = await fakeServer();
   const radeon = await fakeServer();
   try {
-    const model = new Npu(config(npu.baseUrl, radeon.baseUrl), { gpuWithNpu: () => false, embedGivesWay: none, serversUp: async () => (id: string) => id === RADEON });
-    assert.equal((await model.vision(image, 'What is it?', ask)).accelerator.id, 'npu');
-    assert.equal(radeon.asked(), 0);
+    const off = (workOrder?: unknown) => new Npu(config(npu.baseUrl, radeon.baseUrl, workOrder), { gpuWithNpu: () => false, embedGivesWay: none, serversUp: async () => (id: string) => id === RADEON });
+    assert.equal((await off().vision(image, 'What is it?', ask)).accelerator.id, RADEON);
+    assert.equal(npu.asked(), 0);
+    const asked = radeon.asked();
+    assert.ok(asked > 0);
+    assert.equal((await off().chat([{ role: 'user', content: 'Hi' }], ask)).accelerator.id, 'npu', 'chat stays on the NPU');
+    assert.equal(radeon.asked(), asked, 'the card never asked to chat');
+    assert.deepEqual(off().accelerators.map((a) => [a.id, A.serves(a, 'chat'), A.serves(a, 'vision')]), [['npu', true, true], [RADEON, false, true]]);
+    assert.equal((await off(null).vision(image, 'What is it?', ask)).accelerator.id, 'npu', 'no order: the NPU, as before');
+    assert.equal(radeon.asked(), asked);
   } finally {
     await npu.close();
     await radeon.close();
@@ -212,7 +221,8 @@ test("AMD's order as setup writes it now: every picture to the Radeon, whoever's
     assert.deepEqual(await send(on([]), 1), [RADEON], 'neither up: the Radeon');
     assert.deepEqual(await send(on(['npu', RADEON]), 3), [RADEON, RADEON, RADEON], 'sent at once: each waits for the busy Radeon');
     assert.equal(npu.asked(), 0);
-    assert.deepEqual(await send(on(['npu'], false), 1), ['npu'], "Manor's switch off: the NPU");
+    assert.deepEqual(await send(on(['npu'], false), 1), [RADEON], "Manor's switch off: the Radeon too, on demand (kit 2.135.3)");
+    assert.equal(npu.asked(), 0);
     A.markFailed(RADEON, 'vision: refused', 'test');
     assert.deepEqual(await send(on(['npu', RADEON]), 2), ['npu', 'npu'], 'the Radeon failed lately: the NPU, the next in the order');
   } finally {
