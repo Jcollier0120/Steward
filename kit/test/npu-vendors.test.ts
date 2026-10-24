@@ -312,11 +312,11 @@ test('every route in npu-vendors.json is whole: a pinned https download, an inst
   }
 });
 
-test("each work's order by generation (kit 2.111.0): AMD's Ryzen AI 300 sends pictures to the Radeon unless only FastFlowLM is up, and 4 waiting there anyway; the others the NPU first", () => {
+test("each work's order by generation (kit 2.111.0): AMD's Ryzen AI 300 sends every picture to the Radeon (kit 2.135.1, the owner's ruling); the others the NPU first", () => {
   const amd = V.NPU_CATALOG.routes.amd;
   assert.deepEqual(V.workOrderFor(amd, 'xdna2'), {
     chat: { devices: ['npu', 'gpu', 'cpu'] },
-    vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true, batchAt: 4 },
+    vision: { devices: ['gpu', 'npu', 'cpu'] },
     embed: { devices: ['gpu', 'cpu'] },
   });
   // Every other generation records none: the NPU first for every work, Intel's included.

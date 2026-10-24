@@ -7,8 +7,9 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // Each work's own order (kit 2.111.0): config.json's workOrder, which setup writes from the NPU's generation
-// (npu-vendors.json's `order`), puts a request's candidates in that work's order, and with runningFirst, whose servers
-// are up first. AMD's pictures go to the Radeon, and to the NPU only when FastFlowLM is up and the Radeon's server isn't.
+// (npu-vendors.json's `order`), puts a request's candidates in that work's order, the first that can take it alone. AMD's
+// pictures go to the Radeon, whoever's server is up (kit 2.135.1). An order's runningFirst and batchAt, which AMD's
+// pictures had until then (the NPU while only FastFlowLM was up, unless 4 waited), are tested with ORDER and BATCH_ORDER.
 // Fake model servers in this process throughout.
 const home = mkdtempSync(path.join(os.tmpdir(), 'work-order-'));
 const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.meta.url), 'utf8'));
@@ -24,7 +25,7 @@ const { Npu, resetNpuManners, waitingFor } = await import('./fixture/src/kit/npu
 const { queueDirFor } = await import('./fixture/src/kit/npu-queue.ts');
 const core = await import('./fixture/src/kit/core/index.js');
 const { acceleratorsDir } = await import('./fixture/src/kit/lock.ts');
-const { testImage } = await import('./fixture/src/kit/npu-vendors.ts');
+const { NPU_CATALOG, testImage, workOrderFor } = await import('./fixture/src/kit/npu-vendors.ts');
 
 const image = testImage(path.join(home, 'images'));
 const RADEON = 'gpu-amd-radeon-860m-graphics';
@@ -139,8 +140,8 @@ test("Manor's switch off keeps the Radeon out of the NPU's pictures, whatever th
   }
 });
 
-// The owner's rule (2026-10-23): single pictures stay on the NPU while FastFlowLM is up and the Radeon's server isn't, and
-// 4 or more waiting go to the Radeon (vision's batchAt), starting its server; once it's up, the pictures after follow.
+// The owner's rule of 2026-10-23, AMD's until kit 2.135.1: single pictures stayed on the NPU while FastFlowLM was up and the
+// Radeon's server wasn't, and 4 or more waiting went to the Radeon (vision's batchAt), starting its server.
 const BATCH_ORDER = { ...ORDER, vision: { ...ORDER.vision, batchAt: 4 } };
 
 test("the owner's batch rule: 3 pictures at once stay on the NPU, 4 go to the Radeon, and a 5th follows them there", async () => {
@@ -189,6 +190,31 @@ test("pictures wait in the Radeon's line: background ones sent at once all go th
     // The Radeon failed lately: the batch goes to the NPU, the next in the order, and waits in its line.
     A.markFailed(RADEON, 'vision: refused', 'test');
     assert.deepEqual(await send(on(['npu', RADEON]), 4), ['npu', 'npu', 'npu', 'npu']);
+  } finally {
+    await npu.close();
+    await radeon.close();
+  }
+});
+
+// The owner's ruling of 2026-10-24 (kit 2.135.1): every AMD picture goes to the Radeon, which reads small numbers more
+// reliably (8 of 8 against 6 of 8) for less (10.4 J against 26.6 J warm), the NPU only when the Radeon can't.
+test("AMD's order as setup writes it now: every picture to the Radeon, whoever's server is up, waited for when busy; the NPU only when the Radeon can't", async () => {
+  fresh();
+  const npu = await fakeServer();
+  const radeon = await fakeServer();
+  try {
+    const amd = workOrderFor(NPU_CATALOG.routes.amd, 'xdna2');
+    const bg = { maxTokens: 8, lane: 'background' as const };
+    const on = (ids: string[], gpuWithNpu = true) => new Npu(config(npu.baseUrl, radeon.baseUrl, amd), { gpuWithNpu: () => gpuWithNpu, embedGivesWay: none, serversUp: async () => (id: string) => ids.includes(id) });
+    const send = async (model: InstanceType<typeof Npu>, n: number, lane: object = bg) => (await Promise.all(Array.from({ length: n }, () => model.vision(image, 'What is it?', { ...ask, ...lane })))).map((a) => a.accelerator.id);
+    assert.deepEqual(await send(on(['npu']), 1), [RADEON], 'a lone picture with only FastFlowLM up: the Radeon, its server started');
+    assert.deepEqual(await send(on(['npu']), 1, ask), [RADEON], 'a person waiting too');
+    assert.deepEqual(await send(on([]), 1), [RADEON], 'neither up: the Radeon');
+    assert.deepEqual(await send(on(['npu', RADEON]), 3), [RADEON, RADEON, RADEON], 'sent at once: each waits for the busy Radeon');
+    assert.equal(npu.asked(), 0);
+    assert.deepEqual(await send(on(['npu'], false), 1), ['npu'], "Manor's switch off: the NPU");
+    A.markFailed(RADEON, 'vision: refused', 'test');
+    assert.deepEqual(await send(on(['npu', RADEON]), 2), ['npu', 'npu'], 'the Radeon failed lately: the NPU, the next in the order');
   } finally {
     await npu.close();
     await radeon.close();
