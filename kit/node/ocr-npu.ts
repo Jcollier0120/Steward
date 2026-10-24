@@ -174,7 +174,7 @@ export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt
 /**
  * Whether the model reads on the processor where no NPU can: on an AMD PC until its NPU's route (VitisAI) is measured,
  * an Intel PC whose NPU isn't of OPENVINO_GENERATIONS or that has none, and a PC whose NPU fails the program's check
- * (kit 2.123.0; AMD's and Intel's since 2.121.0 and 2.122.0). Windows' OCR costs less there, but the owner's rule,
+ * (kit 2.124.0; AMD's and Intel's since 2.121.0 and 2.122.0). Windows' OCR costs less there, but the owner's rule,
  * 2026-10-24, is never to trade how well it reads for less power. On a Core Ultra 5 225U's processor it reads the
  * check's lines as on the NPU, 1,212 of 1,253 against Windows' OCR's 736, at 16 times the processor time a picture;
  * on a Snapdragon X2 Elite's, 20 times (spec/OCR.md, "On the processor").

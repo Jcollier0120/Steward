@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.123.0
+## 2.124.0
 
 **Wherever no NPU can read with our own model, it reads on the processor: an NPU that fails its self-check, a Snapdragon's included, no longer leaves the reading to Windows OCR. The owner chose how well it reads over the power it costs.**
 
@@ -15,6 +15,30 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing. No staff member uses `ON_PROCESSOR_MAKERS` or `onProcessor`.
+
+## 2.123.0
+
+**A published release signs its PowerShell scripts, as it signs its native files: Smart App Control runs a signed script as written, and an unsigned one in Constrained Language Mode.**
+
+### What's new
+
+- **release.ts** signs every `.ps1`, `.psm1` and `.psd1` a published release carries (spec/RELEASES.md, "Signed scripts"). It uses Authenticode, SHA-256 and an RFC 3161 timestamp, with the Windows SDK's x64 signtool.
+  - **Which certificate:** kit.json's `native.thumbprint`; else, on the PC that releases Castellan, the owner's (`prebuilt.ts`' `SIGNED_BY`). Anyone else's agent ships its scripts unsigned, and the build says so. A local build or `--install` signs nothing.
+  - **When it can't sign:** if a script needs signing, the signer check runs before anything is built. A PC that can't sign refuses with `Not published: its scripts can't be signed: ...`, which the Steward waits on.
+  - **What ships is what was signed:** scripts are signed last in the stage. After zipping, each one is unpacked and checked against what was signed, and any difference stops the release.
+  - **Hashes follow the scripts:** a staged `.json` listing a script's SHA-256 (a guard's `manifest.json`) gets the signed script's hash.
+  - **Signed by their makers:** a script that already carries a Valid signature stays as it is. One whose signature no longer checks out is signed afresh.
+- **signed-scripts.ts**: signed scripts are kept, by certificate and text, in one store for every agent on the PC (`KIT_SIGNED_SCRIPTS`, else `%USERPROFILE%\.steward\signed-scripts`). A release whose scripts are all kept takes those copies and needs no key. A kept copy is checked again first (Valid, the certificate's, timestamped), and one no release takes for 90 days goes.
+
+### What changed
+
+- **sign.ts**: `signFiles` takes `what` (the words its errors use; the native files' by default), and `signaturesWrong` is exported.
+
+### Before you update
+
+- **Don't change a script after the release signs it.** Nothing in the kit does: an install and the kit's fill copy files byte for byte. A script an agent writes or rewrites at run time isn't signed, and runs in Constrained Language Mode where Smart App Control is on.
+- **An agent with a guard** (the Lamplighter, the Watchman): its `manifest.json` now lists the signed scripts' SHA-256. A PC whose guard has the unsigned scripts sees them as behind the release, and the agent's page offers to update the guard once.
+- **An agent whose release isn't the kit's `release.ts`** signs nothing from this: it needs its own signing.
 
 ## 2.122.0
 
