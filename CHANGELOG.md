@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.207
+
+**It hands out the kit 2.121.0: on an AMD PC the staff read the text in pictures with our own model, which reads far more of it right than Windows' own.**
+
+### What changed
+
+- **AMD PCs read text with our own model.** The Clerk, the Scribe, the Warrener and Reeve read the words in pictures and scans with our own text-reading model on an AMD PC, on its processor, until it runs on AMD's NPU. In our check, Windows' own text recognition read 736 of 1,253 lines exactly, and ours 1,212. It uses more of the processor and more power for each picture than Windows' own did. The first time, it fetches about 81 MB in the background, and Windows' own reads until that's done.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.204
 
 **It hands out the kit 2.118.0: the staff's calls to Castellan carry Castellan's sign-in, one step before the staff's pages open only from Castellan. This release brings 0.36.201 and 0.36.203 too, never released on their own.**
