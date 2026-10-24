@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.113.0
+
+**Every agent but Manor and Heiward needs a license for its PC. No staff member works for free: sold or not, held back, internal, or one the Exchequer doesn't list, each waits on a PC without one.**
+
+### What changed
+
+- **Who checks** (`license-check.ts`): every agent but Manor and Heiward (`checksLicense(id)`). Before, only a sold agent checked, so an agent ran on a PC with no license when Manor's exchequer.json was missing or couldn't be read, when the Exchequer's list left it out or gave it a tier but Household or Workshop, when Manor's staff.json held it back or marked it internal (the Wright, the Bailiff, the Crier), or when its release.json said `"sold": false`. None of that decides anything now.
+- **`ownSale` and `soldHere` are gone**, and `readLicenseFor` and `checkLicense` take no `sold`. `LicenseReading.sold` is `checked`. release.json's `sold` is still stamped as a release is published, and nothing reads it.
+- **An error of the check's own holds the agent** (state `unreadable`, with the error in `problem`), as a license it can't read does. Before, it let the agent run.
+- What holds an agent, and what its page, pill and ping say, are as in 2.110.0: no license for this PC, one that can't be read or verified, another PC's, or an ended trial. A paid, lapsed (the Freehold license) or pending license runs, as does a running trial.
+
+### What an agent must do
+
+- Nothing: release it on this kit. An agent that passed `sold` to `checkLicense` or `readLicenseFor` drops it.
+
+### Before you update
+
+- **On a PC that holds no license, every agent released on this kit waits, Manor and Heiward aside.** That includes the internal staff (the Wright, the Bailiff, the Crier) and any held back from sale, on developers' and test PCs too: give each PC a license (a complimentary one does).
+- **What a held agent shows, and how it runs again.** Its page says "This PC holds no license for it: signing in brings it back" (after a trial, "The trial ended: a license brings it back"), its pill says No license (or Trial ended), its rounds and Run now wait, and its ping says it isn't running. Its settings and data are kept. Sign in on that PC in Manor's Settings > License, with the email the license was bought with, or enter a key: the agent sees the new licence.json at its next look (licence.json changing is read at once), with nothing to reinstall.
+
 ## 2.112.1
 
 **On AMD's Ryzen AI 300 a picture waits in the Radeon's line, rather than going to a free NPU that spends more on it.**

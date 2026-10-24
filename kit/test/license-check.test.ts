@@ -6,10 +6,10 @@ import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
 import { until } from './until.ts';
 
-// The license, checked by the agent itself (node/license-check.ts, kit 2.45.0 and 2.110.0): an agent the Exchequer sells
-// (its release.json says so, else Manor's exchequer.json) reads the license Manor holds (licence.json), verified offline
-// and held against this PC's id, and holds its rounds once a trial's runsUntil has passed, or when this PC holds no
-// license for it (none, one it can't read or verify, another PC's). Paid, lapsed and pending licenses run.
+// The license, checked by the agent itself (node/license-check.ts, kit 2.45.0, 2.110.0 and 2.113.0): every agent but
+// Manor and Heiward reads the license Manor holds (licence.json), verified offline and held against this PC's id, and
+// holds its rounds once a trial's runsUntil has passed, or when this PC holds no license for it (none, one it can't
+// read or verify, another PC's). Paid, lapsed and pending licenses run.
 const root = mkdtempSync(path.join(os.tmpdir(), 'fixture-license-'));
 const manor = path.join(root, 'manor');
 mkdirSync(path.join(manor, 'app'), { recursive: true });
@@ -170,7 +170,7 @@ test('a bad signature: no license for this PC, so it holds, and says why', () =>
   assert.equal(check.licenseHeld(), 'This PC holds no license for it: signing in brings it back');
 });
 
-test('no licence.json: a sold agent holds, says why, and its page says signing in brings it back', async () => {
+test('no licence.json: the agent holds, says why, and its page says signing in brings it back', async () => {
   rmSync(licenceFile, { recursive: true, force: true });
   const c = at();
   assert.deepEqual([c.checked, c.state, c.held, c.ended], [true, 'missing', true, false]);
@@ -243,24 +243,34 @@ test('the clock set back: the latest time seen, or the license\'s own iat, keeps
   assert.equal(check.licenseNow({ now: before }).ended, true);
 });
 
-test('free and internal agents never check: Manor, Heiward, an agent the Exchequer does not sell, one held back or internal', () => {
+test('only Manor and Heiward never check (kit 2.113.0): whatever the Exchequer lists or staff.json says, every other agent needs a license', () => {
   hold(license({ tier: 'trial', runsUntil: Date.now() - DAY }));
-  sells([...SOLD, { id: 'heiward', tier: 'household' }, { id: 'auditor', tier: 'workshop' }, { id: 'bailiff', tier: 'workshop' }], [
+  sells([...SOLD, { id: 'heiward', tier: 'household' }, { id: 'auditor', tier: 'workshop' }, { id: 'bailiff', tier: 'workshop' }, { id: 'farrier', tier: 'free' }], [
     { id: 'auditor', heldBack: true },
     { id: 'bailiff', internal: true },
   ]);
-  for (const id of ['manor', 'heiward', 'wright', 'auditor', 'bailiff']) {
+  for (const id of ['manor', 'heiward']) {
     const c = at(id);
-    assert.deepEqual([id, c.checked, c.ended, c.state], [id, false, false, null]);
+    assert.deepEqual([id, c.checked, c.held, c.ended, c.state], [id, false, false, false, null]);
     assert.deepEqual(check.licensePing(c), {}, 'its ping is as before');
+    assert.equal(check.checksLicense(id), false);
   }
-  assert.equal(at('fixture').ended, true, 'while the sold one is held');
-  // No exchequer.json (Manor hasn't heard from the Exchequer) and a release that doesn't say: it doesn't check.
+  // Sold, held back, internal, listed as free, or not listed at all (the Wright, the Crier): each holds alike.
+  for (const id of ['fixture', 'reeve', 'auditor', 'bailiff', 'farrier', 'wright', 'crier']) {
+    const c = at(id);
+    assert.deepEqual([id, c.checked, c.held, c.ended, c.state], [id, true, true, true, 'trial-ended']);
+    assert.equal(check.checksLicense(id), true);
+  }
+  // No exchequer.json (Manor hasn't heard from the Exchequer): it still checks, and with no license it holds.
+  rmSync(licenceFile, { force: true });
   sells(null);
-  assert.equal(at('fixture').checked, false);
-  // One listed as free isn't sold either.
-  sells([{ id: 'fixture', tier: 'free' }]);
-  assert.equal(at('fixture').checked, false);
+  for (const id of ['fixture', 'wright']) assert.deepEqual([id, at(id).checked, at(id).held, at(id).state], [id, true, true, 'missing']);
+  // An exchequer.json that can't be read is no reason to run either.
+  writeFileSync(path.join(manor, 'exchequer.json'), '{ not json');
+  assert.deepEqual([at('fixture').checked, at('fixture').held], [true, true]);
+  // And with a license for this PC, every one of them runs.
+  hold(license({ tier: 'household' }));
+  for (const id of ['fixture', 'reeve', 'auditor', 'bailiff', 'farrier', 'wright', 'crier']) assert.deepEqual([id, at(id).held, at(id).state], [id, false, 'paid']);
 });
 
 test('under node --test, an agent checks only when MANOR_LICENSE_CHECK says so: no agent\'s tests read this PC\'s license', () => {
@@ -324,31 +334,16 @@ test("an Everyone install: the PC's id is in the shared license folder, and the 
   rmSync(shared, { recursive: true, force: true });
 });
 
-test("its release says whether it's sold (release.json's sold, kit 2.110.0), whatever Manor's files say", () => {
+test("a release saying it isn't sold (release.json's \"sold\": false) is no reason to run (kit 2.113.0): nothing reads it", () => {
   rmSync(licenceFile, { force: true });
-  // Sold: it checks with no exchequer.json, and with staff.json holding it back.
   sells(null, [{ id: 'fixture', heldBack: true }]);
-  const c = check.checkLicense({ id: 'fixture', home: manor, sold: true, guid: null });
-  assert.deepEqual([c.checked, c.state, c.held], [true, 'missing', true]);
-  // Not sold: it never checks, though the Exchequer's list says it is.
-  sells(SOLD);
-  assert.equal(check.checkLicense({ id: 'fixture', home: manor, sold: false, guid: null }).checked, false);
-  // Saying nothing: Manor's files decide, as before.
-  assert.equal(check.checkLicense({ id: 'fixture', home: manor, sold: null, guid: null }).checked, true);
-  // Manor and Heiward never check, whatever their release says.
-  assert.equal(check.checkLicense({ id: 'heiward', home: manor, sold: true, guid: null }).checked, false);
-
-  // ownSale reads it from the copy's release.json.
-  const copy = mkdtempSync(path.join(os.tmpdir(), 'fixture-release-'));
-  try {
-    assert.equal(check.ownSale(copy), null, 'no release.json (a checkout)');
-    writeFileSync(path.join(copy, 'release.json'), JSON.stringify({ id: 'fixture', version: '1.0.0', sold: true }));
-    assert.equal(check.ownSale(copy), true);
-    writeFileSync(path.join(copy, 'release.json'), '﻿' + JSON.stringify({ id: 'fixture', version: '1.0.0', sold: false }));
-    assert.equal(check.ownSale(copy), false);
-    writeFileSync(path.join(copy, 'release.json'), JSON.stringify({ id: 'fixture', version: '1.0.0' }));
-    assert.equal(check.ownSale(copy), null, 'a release from before');
-  } finally {
-    rmSync(copy, { recursive: true, force: true });
-  }
+  // Kit 2.110.0 read release.json's `sold` (ownSale) and let a copy saying false run; the check takes no such say now.
+  assert.equal('ownSale' in check, false);
+  assert.equal('soldHere' in check, false);
+  const told = { id: 'fixture', home: manor, guid: null, sold: false } as Parameters<typeof check.checkLicense>[0];
+  assert.deepEqual([check.checkLicense(told).checked, check.checkLicense(told).held], [true, true]);
+  const c = check.licenseNow();
+  assert.deepEqual([c.checked, c.held, c.state], [true, true, 'missing']);
+  // Heiward never checks, whatever anything says.
+  assert.equal(check.checkLicense({ ...told, id: 'heiward' }).checked, false);
 });

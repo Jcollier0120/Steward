@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.194
+
+**It hands out the kit 2.113.0: on a PC without your license, only Heiward runs. No staff member works for free.**
+
+### What changed
+
+- **Every employee but Heiward waits on a PC without your license**, sold or not: the ones held back from sale, the internal ones (the Wright, the Bailiff, the Crier) and any the Exchequer doesn't list, as well as the Household and Workshop staff. Before, an employee the Exchequer didn't list as sold, or one whose release said it wasn't sold, kept running there, and so did every employee when Manor's record of the Exchequer's list was missing.
+- **A license that lapsed still runs what it has** (the Freehold license), as does one waiting for its first payment, and a running trial.
+
+### Before you update
+
+- **Check that every PC running Castellan's staff holds a license**, developers' and test PCs included: a complimentary license does. Manor's Settings > License on each PC says what it holds. Nothing changes on a PC that holds one.
+- **A waiting employee says so, and signing in brings it back.** Its page says "This PC holds no license for it: signing in brings it back" (after a trial, that the trial ended), its pill says No license (or Trial ended), and its rounds and Run now wait. Sign in on that PC in Manor's Settings > License, with the email you bought Castellan with (or enter a key): the staff go back on duty, with nothing to reinstall and their settings and data as they were.
+
 ## 0.36.193
 
 **It hands out the kit 2.112.1: on an AMD Ryzen AI PC, a picture can now wait a moment for the graphics card instead of running on the NPU.**
