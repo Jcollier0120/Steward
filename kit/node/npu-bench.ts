@@ -397,8 +397,11 @@ export interface BenchReport {
      * Embeddings (kit 2.99.0), on their own server once the chat server has stopped: its first vector after a start, a
      * query's time, and a request of the suite's texts (embedTexts): its time, its tokens, and the tokens a second.
      * Absent from reports before it; null where the run had no embedding server (FastFlowLM's NPU route has none).
+     * `device` (kit 2.113.1) is where its server ran, where the run knows: OpenVINO's --target_device, which on the NPU
+     * 3720 is the graphics (its generation's embedArgs), or the run's own device off the NPU (llama.cpp's, beside the
+     * model). Null where the route doesn't say; absent from reports before it.
      */
-    embed?: { server: string; model: string; loadMs: number | null; queryMs: Measure; requestMs: Measure; texts: number; tokens: number | null; tokensPerSecond: number | null; dims: number | null } | null;
+    embed?: { server: string; device?: string | null; model: string; loadMs: number | null; queryMs: Measure; requestMs: Measure; texts: number; tokens: number | null; tokensPerSecond: number | null; dims: number | null } | null;
     energy: {
       restMilliwatts: number;
       loadMilliwatts: number;
@@ -1570,7 +1573,9 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
             const query = await tryEmbed(() => se.query);
             const request = await tryEmbed(texts);
             const perSecond = request.tokens && request.m.median ? Math.round(request.tokens / (request.m.median / 1000)) : null;
-            report.results.embed = { server: off ? off.server : `${route.embedServer?.server ?? route.server} ${route.embedServer?.version ?? route.version}`, model: ee.model, loadMs, queryMs: query.m, requestMs: request.m, texts: se.texts, tokens: request.tokens, tokensPerSecond: perSecond, dims: first.dims || null };
+            const at = ee.startCommand.indexOf('--target_device');
+            const eDevice = off ? device : at >= 0 ? ee.startCommand[at + 1].toUpperCase() : null;
+            report.results.embed = { server: off ? off.server : `${route.embedServer?.server ?? route.server} ${route.embedServer?.version ?? route.version}`, device: eDevice, model: ee.model, loadMs, queryMs: query.m, requestMs: request.m, texts: se.texts, tokens: request.tokens, tokensPerSecond: perSecond, dims: first.dims || null };
             log(`embeddings: ${ee.model}'s first vector ${(loadMs / 1000).toFixed(1)} s after a start; a query ${query.m.median} ms; ${se.texts} texts ${request.m.median} ms (${request.tokens ?? '?'} tokens, ${perSecond ?? '?'} a second)`);
             const energy = report.results.energy;
             if (meter && meter.kind !== 'battery' && energy) {
@@ -1633,7 +1638,8 @@ export interface DeviceSummary {
   jobTimeS: number | null;
   quality: number | null;
   vision: number | null;
-  embed: { queryMs: number | null; requestMs: number | null; tokensPerSecond: number | null } | null;
+  /** `device`: where the embedding server ran (the reports' embed.device), null where none says. */
+  embed: { device: string | null; queryMs: number | null; requestMs: number | null; tokensPerSecond: number | null } | null;
   energy: {
     /** What keeping the model loaded costs the whole PC, against no model: at rest, and over a day. */
     keepLoadedMilliwatts: number | null;
@@ -1643,7 +1649,10 @@ export interface DeviceSummary {
     embedKeepLoadedWhPerDay: number | null;
     /** The triage minutes' energy a token over rest (the figure every report since kit 2.62.0 has). */
     millijoulesPerToken: number | null;
-    /** Each batch: one job's energy over rest (the whole PC's, and each part's), a token's, and the whole PC's for the batch and its time. */
+    /**
+     * Each batch: one job's energy over rest (the whole PC's, and each part's), a token's (none for pictures,
+     * whose tokens servers count unalike), and the whole PC's for the batch and its time.
+     */
     batches: Record<string, { count: number | null; millijoulesEach: number | null; millijoulesPerToken: number | null; wholeMillijoules: number | null; seconds: number | null; eachByPart: Record<string, number | null> }>;
   } | null;
 }
@@ -1691,7 +1700,7 @@ export function benchSummary(reports: BenchReport[]): BenchSummary {
       jobTimeS: med(rs.map((r) => r.results.jobTimeS), 2),
       quality: med(rs.map((r) => (r.quality.score === null ? null : r.quality.passed))),
       vision: med(rs.map((r) => r.vision?.passed)),
-      embed: embeds.length ? { queryMs: med(embeds.map((x) => x.queryMs.median)), requestMs: med(embeds.map((x) => x.requestMs.median)), tokensPerSecond: med(embeds.map((x) => x.tokensPerSecond)) } : null,
+      embed: embeds.length ? { device: embeds.find((x) => x.device)?.device ?? null, queryMs: med(embeds.map((x) => x.queryMs.median)), requestMs: med(embeds.map((x) => x.requestMs.median)), tokensPerSecond: med(embeds.map((x) => x.tokensPerSecond)) } : null,
       energy: es.length
         ? {
             keepLoadedMilliwatts: keep,
@@ -1703,12 +1712,15 @@ export function benchSummary(reports: BenchReport[]): BenchSummary {
               batchIds.map((id) => {
                 const bs = es.map((e) => ({ b: e.batches?.[id], whole: e.meter?.whole })).filter((x): x is { b: EnergyBatch; whole: string | undefined } => !!x.b);
                 const parts = [...new Set(bs.flatMap((x) => Object.keys(x.b.extraMillijoules)))];
+                // A picture's tokens aren't counted alike: OpenVINO Model Server counts one as 8 prompt tokens whatever its
+                // size on the graphics and the processor (2026.4.1), and as its own tokens on the NPU (64 for the suite's
+                // 224 px square), the picture the same. So pictures compare a picture each, not a token (NPU-BENCHMARK.md).
                 return [
                   id,
                   {
                     count: med(bs.map((x) => x.b.count)),
                     millijoulesEach: med(bs.map((x) => x.b.millijoulesEach)),
-                    millijoulesPerToken: med(bs.map((x) => x.b.millijoulesPerToken), 3),
+                    millijoulesPerToken: id === 'pictures' ? null : med(bs.map((x) => x.b.millijoulesPerToken), 3),
                     wholeMillijoules: med(bs.map((x) => (x.whole ? x.b.millijoules[x.whole] : null))),
                     seconds: med(bs.map((x) => x.b.seconds), 2),
                     eachByPart: Object.fromEntries(parts.map((p) => [p, med(bs.map((x) => (p in x.b.extraMillijoules ? x.b.extraMillijoules[p] / x.b.count : null)))])),
@@ -1747,6 +1759,8 @@ export function summarySay(s: BenchSummary): string[] {
   rows.push(['job time', (d) => n(d.jobTimeS, ' s')]);
   rows.push(['quality (of 24)', (d) => n(d.quality)]);
   rows.push(['pictures (of 4)', (d) => n(d.vision)]);
+  // Where a column's embedder ran on another device than its model (the NPU 3720's on the graphics), its embedding rows are that device's.
+  if (ds.some((x) => (s.devices[x].embed?.device ?? x) !== x)) rows.push(['the embedder ran on', (d) => d.embed?.device ?? '—']);
   rows.push(['embedding a query', (d) => n(d.embed?.queryMs ?? null, ' ms')]);
   rows.push(['embedding texts', (d) => n(d.embed?.tokensPerSecond ?? null, ' tokens/s')]);
   if (ds.some((x) => s.devices[x].energy)) {
@@ -1757,7 +1771,7 @@ export function summarySay(s: BenchSummary): string[] {
     rows.push(['triage minutes, a token over rest', (d) => n(d.energy?.millijoulesPerToken ?? null, ' mJ')]);
     for (const id of [...new Set(ds.flatMap((x) => Object.keys(s.devices[x].energy?.batches ?? {})))]) {
       rows.push([`${id}: each over rest`, (d) => j(d.energy?.batches[id]?.millijoulesEach ?? null)]);
-      rows.push([`${id}: a token over rest`, (d) => n(d.energy?.batches[id]?.millijoulesPerToken ?? null, ' mJ')]);
+      if (id !== 'pictures') rows.push([`${id}: a token over rest`, (d) => n(d.energy?.batches[id]?.millijoulesPerToken ?? null, ' mJ')]);
       rows.push([`${id}: the whole PC, the batch`, (d) => {
         const b = d.energy?.batches[id];
         return b?.wholeMillijoules == null ? '—' : `${j(b.wholeMillijoules)} in ${n(b.seconds, ' s')}`;
