@@ -221,6 +221,24 @@ function readyPlace(arch: 'arm64' | 'x64', pack: any): string {
   return where;
 }
 
+test('a rename Windows refuses for a moment is tried again; any other error is thrown at once', () => {
+  const refused = (code: string) => Object.assign(new Error(code), { code });
+  let tries = 0;
+  const slept: number[] = [];
+  const flaky = () => {
+    if (++tries < 3) throw refused('EPERM');
+  };
+  m.renameSoon('a', 'b', { rename: flaky, sleep: (ms) => void slept.push(ms) });
+  assert.equal(tries, 3);
+  assert.deepEqual(slept, [100, 100]);
+  tries = 0;
+  assert.throws(() => m.renameSoon('a', 'b', { rename: () => { tries++; throw refused('ENOENT'); }, sleep: () => {} }), /ENOENT/);
+  assert.equal(tries, 1);
+  tries = 0;
+  assert.throws(() => m.renameSoon('a', 'b', { rename: () => { tries++; throw refused('EBUSY'); }, sleep: () => {} }), /EBUSY/);
+  assert.equal(tries, 50, 'five seconds of tries, then the error');
+});
+
 test("not fetched yet: Windows' OCR reads while the fetch starts; told so, nothing fetched at all", async () => {
   const fetches: string[] = [];
   const fetch = (p: any) => void fetches.push(p.home);
@@ -280,6 +298,38 @@ test("on the NPU: started again once it has compiled, its turn taken, pages answ
   assert.match(got[1]?.error ?? '', /stopped/);
   assert.equal(got[2], null, 'not read: Windows reads it');
   assert.equal(existsSync(process.env.NPU_AGENT_NPU_LOCK!), false, 'the NPU given back');
+});
+
+test("the NPU's line too long: a program of its own on the processor reads instead (ON_PROCESSOR), from the start or for the rest", async () => {
+  if (!m.ON_PROCESSOR) return;
+  const { NpuBusy } = await import('./fixture/src/kit/npu.ts');
+  const where = readyPlace('arm64', m.QNN_PACK);
+  const started: string[][] = [];
+  const start = (args: string[], cwd: string) => (started.push(args), startFake(args, cwd));
+  let busy = false;
+  const turn = (async (_acc: unknown, fn: () => Promise<unknown>) => {
+    if (busy) throw new NpuBusy("the NPU's line is too long");
+    return fn();
+  }) as any;
+  const files = ['a.png', 'b.png'].map((f) => ({ file: path.join(home, f), scale: 1, orient: true }));
+  const onCpu = () => started.filter((a) => a[a.indexOf('--on') + 1] === 'cpu');
+
+  const r = await m.modelReader({ env: {}, arch: 'arm64', home: where, start, turn });
+  assert.equal(r?.engine, 'model-npu');
+  busy = true;
+  assert.deepEqual((await r!.read(files, { lane: 'background' })).map((g: any) => g?.engine), ['model-cpu', 'model-cpu']);
+  assert.equal((await r!.read(files, { lane: 'background' }))[0]?.engine, 'model-cpu');
+  assert.equal(onCpu().length, 1, 'one program on the processor, kept while it reads');
+  assert.ok(!onCpu()[0].includes('--qnn'));
+  busy = false;
+  assert.equal((await r!.read(files, { lane: 'background' }))[0]?.engine, 'model-npu', 'the NPU again once its line is short');
+
+  m.resetModelReader();
+  started.length = 0;
+  busy = true;
+  const r2 = await m.modelReader({ env: {}, arch: 'arm64', home: where, start, turn });
+  assert.equal(r2?.engine, 'model-cpu', 'busy from the start: the processor reads');
+  assert.deepEqual(started.map((a) => a[a.indexOf('--on') + 1]), ['cpu'], "the NPU's program not started without its turn");
 });
 
 test("an NPU that fails the program's check isn't used, and isn't tried again for a while", async () => {

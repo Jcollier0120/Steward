@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.126.0
+## 2.127.0
 
 **AMD's NPU, through VitisAI, can read with our own model as a test (`KIT_OCR_NPU=vitisai`). Measured on a Ryzen AI 7 350, it reads worse, so the program's self-check refuses it, and an AMD PC reads on the processor as since 2.121.0.**
 
@@ -30,6 +30,20 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing. AMD's NPU is a test; nothing changes on any PC by default.
+
+## 2.126.0
+
+**When the NPU's line is too long for a background batch, a second copy of the text reader reads it with our own model on the processor. Windows OCR used to read it. The owner chose how well it reads over the power it costs.**
+
+### What changed
+
+- **ocr-npu.ts:** a batch the NPU's turn gives up on (`NpuBusy`: the line too long, no turn within 10 minutes, or the NPU resting) is now read by a second program started with `--on cpu`. It reads the rest of the batch, or all of it if the NPU's program had no turn to start. The second program is started beside the NPU's when it's first needed. It holds the processor's sessions while it runs and ends itself after two minutes idle, as the NPU's does. If it can't start, Windows OCR reads, as before.
+- **The reader's fetch tries a rename again** (`renameSoon`) every 100 ms for up to five seconds when Windows refuses it for a moment (EPERM, EACCES or EBUSY), as with a folder just unpacked whose DLLs an antivirus is still scanning. It used to fail the fetch, and Windows OCR read until the next try.
+- **`ReaderOptions.turn`:** a stand-in for the NPU's turn, for tests.
+
+### Before you update
+
+- Nothing.
 
 ## 2.124.0
 

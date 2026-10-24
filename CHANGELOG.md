@@ -2,14 +2,26 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.212
+## 0.36.213
 
-**It hands out the kit 2.126.0: AMD's NPU was tried for reading the text in pictures, and reads it worse, so an AMD PC keeps reading it with our own model on the processor.**
+**It hands out the kit 2.127.0: AMD's NPU was tried for reading the text in pictures, and reads it worse, so an AMD PC keeps reading it with our own model on the processor.**
 
 ### What changed
 
 - **Nothing anyone sees by default.** An AMD PC reads the text in pictures on its processor, as since 0.36.207.
 - **AMD's NPU can be tried, as a test** (`KIT_OCR_NPU=vitisai`). The first time, it prepares the model for the NPU in the background, for about half an hour, while the processor reads. Then the reader's own test finds that the NPU reads worse, and the processor goes on reading.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.212
+
+**It hands out the kit 2.126.0: when the NPU is too busy for the staff's background text reading, our own model reads it on the processor rather than Windows' own.**
+
+### What changed
+
+- **Background text reading no longer drops to Windows' own when the NPU is busy.** When the NPU has a long line of other work, the Clerk, the Scribe and the Warrener read the text in pictures with our own model on the processor instead. Before, Windows' own text recognition read them. It uses more of the processor and more power for those pictures, and reads far more of the text right.
 
 ### Before you update
 
