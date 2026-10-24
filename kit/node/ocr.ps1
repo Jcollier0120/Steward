@@ -16,6 +16,8 @@
 # - render (kit 2.114.0): PDFs' pages are only rendered, for the model to read (ocr-npu.ts): each is kept in tmpDir and
 #   answered as {"page","png","frame"} in "rendered" instead of "read" (frame: the width it was rendered for, at pdfScale;
 #   Windows may render it wider, at the display's scale). No OCR language is needed for it.
+# - language (kit 2.129.0): read in this OCR language (a tag, "ru-RU"), not the account's first; a picture job's own
+#   scale and orient, when it has them, override the list's (ocr.ts reads again so what the model couldn't).
 # Every answer is ASCII: anything else goes as \uXXXX, so no console code page can change it (437 made a bullet a bell,
 # which broke the line, kit 2.102.0).
 Remove-TypeData System.Array -ErrorAction SilentlyContinue
@@ -46,7 +48,11 @@ function Out-Answer($o) {
 
 $list = Get-Content -LiteralPath $ListFile -Raw -Encoding UTF8 | ConvertFrom-Json
 $render = [bool]$list.render
-if (-not $render) {
+if (-not $render -and $list.language) {
+  $null = [Windows.Globalization.Language, Windows.Globalization, ContentType = WindowsRuntime]
+  $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windows.Globalization.Language $list.language))
+  if (-not $engine) { throw "no OCR language $($list.language) installed" }
+} elseif (-not $render) {
   $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
   if (-not $engine) { throw 'no OCR language installed (Settings > Time & language > Language)' }
 }
@@ -159,7 +165,8 @@ foreach ($job in $list.jobs) {
     } elseif ($render) {
       Out-Answer ([ordered]@{ i = $job.i; ok = $false; error = 'only PDFs are rendered' })
     } else {
-      $r = Read-Image $job.path $list.scale
+      $orient = if ($null -ne $job.orient) { [bool]$job.orient } else { $list.orient -ne $false }
+      $r = Read-Image $job.path $(if ($null -ne $job.scale) { $job.scale } else { $list.scale })
       $r.page = 0
       Out-Answer ([ordered]@{ i = $job.i; ok = $true; ms = $sw.ElapsedMilliseconds; pageCount = 1; read = @($r) })
     }

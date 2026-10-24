@@ -390,7 +390,8 @@ export async function checkEngine(engine: string, fixtures: Fixture[], o: { scal
   const reader = on ? () => modelReader({ env, log: (l) => console.log(`  ${l}`) }) : async () => null;
   for (const f of fixtures.filter((x) => x.kind === 'pdf')) {
     const t0 = Date.now();
-    const [r] = await ocrFiles([{ path: f.file, kind: 'pdf' }], { tmpRoot: o.dir, scale: o.scale, lane: 'interactive', modelReader: reader });
+    // No reading again in another alphabet (ocr-reread.ts): each engine is measured alone.
+    const [r] = await ocrFiles([{ path: f.file, kind: 'pdf' }], { tmpRoot: o.dir, scale: o.scale, lane: 'interactive', modelReader: reader, otherAlphabets: async () => [] });
     if (on && r.engine && r.engine !== engine) throw new Error(`${path.basename(f.file)} was read by ${r.engine}, not ${engine}`);
     rows.push({ f, s: scoreText(f.lines, r.ok ? r.text : ''), ms: Date.now() - t0, ok: r.ok, error: r.error, text: r.text });
   }

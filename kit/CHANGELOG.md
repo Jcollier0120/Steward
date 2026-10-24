@@ -2,6 +2,208 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.129.0
+
+**Text in an alphabet other than Latin (Cyrillic, Greek, Chinese, Arabic…) is read again by Windows' own OCR, where Windows has an OCR language of that alphabet for the account. Windows' lines replace the model's only where they hold that alphabet; text in the Latin alphabet keeps the model's read. This was the owner's call.**
+
+### What's new
+
+- **ocr-reread.ts:**
+  - `looksUnread`: the model's read of a page looks like another alphabet. That's a line with two odd words, or with half its words odd (case changing inside a word, or signs among its letters), or a page mostly in capitals.
+  - `otherAlphabet`: a line of Windows' read holds another alphabet. At least two of its letters, and 15% of them, are neither Latin nor drawn like Latin.
+  - `keepBetter`: the page's lines, with the better read kept line by line.
+  - `otherAlphabetLanguages`: Windows' OCR languages whose script isn't Latin, asked once an hour.
+- **ocr.ts** reads such pages again with Windows OCR in each such language (`readInLanguage`), at the scale and orientation the model read them, and keeps the better read line by line.
+  - `OcrResult.engine` is `'model-npu+windows'` or `'model-cpu+windows'` when some lines are Windows', and `ms` counts both reads.
+  - A line in the agent's log reports each read again.
+  - `OcrOptions.otherAlphabets` and `readAgain` are for tests.
+- **ocr.ps1** takes `language`, a tag such as `ru-RU`: it reads in that OCR language rather than the account's first. A picture job may also carry its own `scale` and `orient`.
+
+### What changed
+
+- **ocr-check.ts** measures each engine alone, without reading again.
+- **A PC whose Windows has only Latin-alphabet OCR languages** reads as before.
+
+### Before you update
+
+- Nothing to do. An agent that looks at `engine` should read a `+windows` ending as the model's read, with some lines from Windows OCR.
+
+## 2.127.0
+
+**AMD's NPU, through VitisAI, can read with our own model as a test (`KIT_OCR_NPU=vitisai`). Measured on a Ryzen AI 7 350, it reads worse, so the program's self-check refuses it, and an AMD PC reads on the processor as since 2.121.0.**
+
+### What's new
+
+- **ocr-npu.ts** `KIT_OCR_NPU=vitisai` takes `VITISAI_PACK`: Windows ML 2.4.89 from Microsoft's NuGet package (52 MB fetched, 1 MB kept), which asks Windows for AMD's VitisAI plugin. Nothing of AMD's is fetched.
+- **ocr-npu.cs** `--vitisai <folder>` reads on AMD's NPU. Every shape is fixed and the CPU fallback is off.
+  - **Its graphs** are compiled into the reader's cache, keyed by the model, the NPU's driver and the plugin. The plugin is reached through a junction in the cache, since its compiler can't open itself from under WindowsApps.
+  - **`--prepare`** compiles them, each in a program of its own, as many at once as the cores and memory allow, below normal priority. `--export` copies them out for a release, and `--graphs` takes graphs compiled ahead.
+  - **`--compiled-only`** reads on the processor rather than compile; its hello says `"prepare":true`.
+- **ocr-npu.ts** `prepareReader` runs `--prepare` (up to 90 minutes, `PREPARE_MS`), under a lock beside the NPU's, so one agent on a PC compiles. `modelReader` compiles in the background while the processor reads, and starts on the NPU from the next batch once they're compiled. After a failed compile the NPU isn't tried for six hours; while another agent compiles, it looks again in ten minutes.
+- **`AMD_GRAPHS`** pins graphs compiled ahead, for a release: null, while AMD's NPU reads worse.
+
+### What changed
+
+- **AMD's recognizer stops at 1,024 wide** (`AmdWidths`): its compiler can't place 1,280 or wider. A longer line is narrowed; on the processor, the check's lines read the same so.
+- **A failed compile** leaves no folder behind, its paths too long for .NET deleted through Win32. One that ends without a word counts as a failed try.
+- **ocr-npu.cs's signed copy** (`prebuilt/ocr-npu-3fa4156fe5a3.exe`) is removed, as its source changed: each PC compiles the program itself, as the kit does for an unsigned helper, until it's signed again (`tools/sign-helpers.ts`).
+
+### Measured (spec/OCR.md, "On the processor" and "Intel and AMD")
+
+- **AMD's NPU** (plugin 1.8.75, FP32 run as BF16) reads the same as the processor for 94 to 95% of lines 128 to 384 wide, 39% at 512, 1% at 768 and 40% at 1,024. Its detector changes 255 of 952 lines.
+- **The model on a Ryzen AI 7 350's processor** reads 1,212 of 1,253 lines, against Windows OCR's 736. A picture takes 268 ms and 776 ms of processor, and 4,875 mJ against Windows OCR's 698 mJ.
+
+### Before you update
+
+- Nothing. AMD's NPU is a test; nothing changes on any PC by default.
+
+## 2.126.0
+
+**When the NPU's line is too long for a background batch, a second copy of the text reader reads it with our own model on the processor. Windows OCR used to read it. The owner chose how well it reads over the power it costs.**
+
+### What changed
+
+- **ocr-npu.ts:** a batch the NPU's turn gives up on (`NpuBusy`: the line too long, no turn within 10 minutes, or the NPU resting) is now read by a second program started with `--on cpu`. It reads the rest of the batch, or all of it if the NPU's program had no turn to start. The second program is started beside the NPU's when it's first needed. It holds the processor's sessions while it runs and ends itself after two minutes idle, as the NPU's does. If it can't start, Windows OCR reads, as before.
+- **The reader's fetch tries a rename again** (`renameSoon`) every 100 ms for up to five seconds when Windows refuses it for a moment (EPERM, EACCES or EBUSY), as with a folder just unpacked whose DLLs an antivirus is still scanning. It used to fail the fetch, and Windows OCR read until the next try.
+- **`ReaderOptions.turn`:** a stand-in for the NPU's turn, for tests.
+
+### Before you update
+
+- Nothing.
+
+## 2.124.0
+
+**Wherever no NPU can read with our own model, it reads on the processor: an NPU that fails its self-check, a Snapdragon's included, no longer leaves the reading to Windows OCR. The owner chose how well it reads over the power it costs.**
+
+### What changed
+
+- **ocr-npu.ts** `ON_PROCESSOR` is true. A Snapdragon or an Intel NPU 3720 whose NPU reads the program's own picture differently now reads with the model on the processor. Before, Windows OCR read. AMD and Intel PCs read on the processor as in 2.121.0 and 2.122.0.
+- **`ON_PROCESSOR_MAKERS` and `onProcessor(env)` (2.121.0) are gone**: with every maker on the processor, `ON_PROCESSOR` says it.
+- **Windows OCR still reads** until the model has been fetched, when `KIT_OCR_ENGINE=windows` says so, and for a background batch the NPU's line is too long for.
+
+### Before you update
+
+- Nothing. No staff member uses `ON_PROCESSOR_MAKERS` or `onProcessor`.
+
+## 2.123.0
+
+**A published release signs its PowerShell scripts, as it signs its native files: Smart App Control runs a signed script as written, and an unsigned one in Constrained Language Mode.**
+
+### What's new
+
+- **release.ts** signs every `.ps1`, `.psm1` and `.psd1` a published release carries (spec/RELEASES.md, "Signed scripts"). It uses Authenticode, SHA-256 and an RFC 3161 timestamp, with the Windows SDK's x64 signtool.
+  - **Which certificate:** kit.json's `native.thumbprint`; else, on the PC that releases Castellan, the owner's (`prebuilt.ts`' `SIGNED_BY`). Anyone else's agent ships its scripts unsigned, and the build says so. A local build or `--install` signs nothing.
+  - **When it can't sign:** if a script needs signing, the signer check runs before anything is built. A PC that can't sign refuses with `Not published: its scripts can't be signed: ...`, which the Steward waits on.
+  - **What ships is what was signed:** scripts are signed last in the stage. After zipping, each one is unpacked and checked against what was signed, and any difference stops the release.
+  - **Hashes follow the scripts:** a staged `.json` listing a script's SHA-256 (a guard's `manifest.json`) gets the signed script's hash.
+  - **Signed by their makers:** a script that already carries a Valid signature stays as it is. One whose signature no longer checks out is signed afresh.
+- **signed-scripts.ts**: signed scripts are kept, by certificate and text, in one store for every agent on the PC (`KIT_SIGNED_SCRIPTS`, else `%USERPROFILE%\.steward\signed-scripts`). A release whose scripts are all kept takes those copies and needs no key. A kept copy is checked again first (Valid, the certificate's, timestamped), and one no release takes for 90 days goes.
+
+### What changed
+
+- **sign.ts**: `signFiles` takes `what` (the words its errors use; the native files' by default), and `signaturesWrong` is exported.
+
+### Before you update
+
+- **Don't change a script after the release signs it.** Nothing in the kit does: an install and the kit's fill copy files byte for byte. A script an agent writes or rewrites at run time isn't signed, and runs in Constrained Language Mode where Smart App Control is on.
+- **An agent with a guard** (the Lamplighter, the Watchman): its `manifest.json` now lists the signed scripts' SHA-256. A PC whose guard has the unsigned scripts sees them as behind the release, and the agent's page offers to update the guard once.
+- **An agent whose release isn't the kit's `release.ts`** signs nothing from this: it needs its own signing.
+
+## 2.122.0
+
+**An Intel PC whose NPU isn't measured yet, or that has none, reads text with our own model on the processor, as an AMD PC does since 2.121.0. The owner chose how well it reads over the power it costs.**
+
+### What changed
+
+- **ocr-npu.ts** `ON_PROCESSOR_MAKERS` is `['AuthenticAMD', 'GenuineIntel']`. On Intel, the NPU 3720 (`OPENVINO_GENERATIONS`) still reads with the model on the NPU. Every other Intel PC now reads with the model on the processor, where it read with Windows OCR: Lunar Lake's NPU 4000 and later, the 200S and 200HX, and PCs with no NPU. An Intel NPU 3720 that fails its self-check falls back to the processor too, no longer to Windows OCR.
+- **What it costs:** like an AMD PC, it fetches about 81 MB once for the whole PC, and keeps 19 MB. On a Core Ultra 5 225U's processor a picture costs 326 ms and 972 ms of processor time, against Windows OCR's 59 ms and 61 ms (spec/OCR.md, "On the processor").
+- **A Snapdragon is unchanged.**
+
+### Before you update
+
+- Nothing. `KIT_OCR_ENGINE=windows` still keeps Windows OCR.
+
+## 2.121.0
+
+**An AMD PC's text reader reads with our own model, on the processor: Windows OCR read 736 of the check's 1,253 lines exactly, the model 1,212. It costs more processor time and power than Windows OCR, and the owner chose it for how much better it reads, until AMD's NPU route is measured.**
+
+### What's new
+
+- **ocr-npu.ts** `ON_PROCESSOR_MAKERS` (`['AuthenticAMD']`) and `onProcessor(env)`: whether the model reads on the processor where no NPU can, by Windows' `PROCESSOR_IDENTIFIER`. `ON_PROCESSOR` stays false for every other PC.
+
+### What changed
+
+- **On an AMD PC, `modelReader` reads with the model on the processor**, where it read with Windows OCR. The reader fetches about 81 MB once for every agent on the PC (ONNX Runtime and the model, no NPU plugin) and keeps 19 MB. Until it's there, Windows OCR reads, as before. Measured on an Intel Core Ultra 5 225U's processor, a picture costs 326 ms and 972 ms of processor time, against Windows OCR's 59 ms and 61 ms (spec/OCR.md, "On the processor").
+- **Intel PCs are unchanged:** the NPU 3720 reads with the model, and other generations with Windows OCR.
+
+### Before you update
+
+- Nothing. `KIT_OCR_ENGINE=windows` still keeps Windows OCR.
+
+## 2.118.0
+
+**The kit's calls to Castellan carry its token, and a page's token is found by its address: the callers' step before page sign-in goes on (kit 2.96.0's plan). This release brings 2.115.0 and 2.117.0 too, never released on their own.**
+
+### What's new
+
+- **page-access.ts**:
+  - `pageToken(url)` and `pageHeaders(url)`: the token for a local page by its address, `http://<id>.localhost:<port>/…` as `agentUrl` and Manor's link give it, from that page's server.json. It goes only to the port server.json names, so a checkout's page 10000 above is never sent the installed copy's token. Manor's address gets Manor's token, which its page takes as `x-token`.
+  - `serverFile(dir)`: a page's port and token from the server.json in its data folder.
+- **manor.ts** `manorHeaders(link)`: Manor's token (`x-manor-token`), from server.json in its folder, only for the port its settings name.
+
+### What changed
+
+- **The kit's calls to Castellan carry its token**: `passOnOtherPcs` (`GET /api/peers/result`) and `manorIcon` (`/favicon.svg`). A Castellan from before its sign-in writes no server.json, and they go without it, as before.
+- **askRepair** takes the page's token from the server.json its address names (`pageToken`) before it reads `GET /` for it, which a strict page never gives.
+
+### Before you update
+
+- An agent that GETs another staff member's page (`/api/*`, or `GET /` for its token) must send its token: `pageHeaders(url)` for an `agentUrl` address, `staffHeaders(id)` for a 127.0.0.1 one. So must an agent's CLI or MCP server that GETs its own page from another process. A later kit makes the GETs need it, and only once every staff member installed in the account runs that kit, so nothing breaks before then. A refused call answers 401: let it degrade quietly.
+
+## 2.117.0
+
+**The text reader reads with our own model on Intel's NPU 3720 too: on a Core Ultra 5 225U it reads 1,212 of the check's 1,253 lines exactly, where Windows OCR read 736.**
+
+### What changed
+
+- **ocr-npu.ts**: `packFor` gives Intel's plugin (`OPENVINO_PACK`, OpenVINO 1.7.0) on an x64 PC whose NPU is of a generation in `OPENVINO_GENERATIONS`: `meteor-lake`, the NPU 3720 of the Core Ultra Series 1 and the 200U and 200H.
+  - The generation comes from setup's report of the NPU (npu-report.json's `chip`, `npuChipOutsideTests`), so a PC reads with Windows OCR until its local AI is set up. Under node:test there is none.
+  - A third argument gives the chip for tests.
+  - `KIT_OCR_NPU=openvino` still tries the plugin on any x64 PC, and `none` keeps the model off the NPU.
+- **The figures**, measured with the manor stopped, a picture beyond the start:
+  - Windows OCR: 59 ms, 61 ms of processor, 465 mJ over rest.
+  - The model on the NPU: 171 ms, 55 ms of processor, 859 mJ.
+  - The model on the processor: 326 ms, 972 ms, 6,991 mJ.
+
+  It reads no worse than Windows OCR in any group, at less processor time a picture. It spends 1.85 times Windows OCR's energy a picture, and the owner chose it for how much better it reads. spec/OCR.md, "Intel and AMD", has the rest.
+
+### Before you update
+
+- Nothing for an agent. On an Intel NPU 3720 whose local AI is set up, the reader fetches 199 MB once, in the background: ONNX Runtime 77 MB, OpenVINO's plugin 118 MB and the model 4 MB. It keeps 131 MB, plus 48 MB of compiled graphs.
+
+## 2.115.0
+
+**The keeper sets an accelerator up again by itself when a later kit pins another llama.cpp build, model or NPU server; and setup finds a packaged app through gaps in its process chain.**
+
+### What's new
+
+- **set-up-again.ts**: the keeper's look sets up again, in the background, a card, the processor or the NPU whose entry is behind the kit's pins (spec/NPU-VENDORS.md, "Set up again when the kit's pins move on").
+  - `behindPins` finds them from a plan made from the pins alone. A card's or the processor's entry on the kit's llama.cpp and models folders is behind when its build or model files aren't the pins'. The NPU's is behind when the NPU refresh left it `needs-setup` for this kit. An entry of the person's own is left alone.
+  - `setUpAgain` sets up one a look, once it has been unused for 2 minutes, never while the manor is stopped, through `setupCommand`'s new `staged` option. A failure is tried again after 6 hours, one found in use after 10 minutes; what Smart App Control blocked waits for a later kit. Its tries are kept in `set-up-again.json` beside config.json.
+  - A `staged` setup puts the new build, models and NPU server beside the old, which keeps serving. Then, in the accelerator's turn, it stops the old servers and tests the new ones (chat, pictures, embeddings, reranking). It writes only an entry that answered and serves all the old one did, and never moves the NPU's work to a card. GenieX, installed in one place, is swapped in the NPU's turn with its old folder kept aside, and put back if the new entry isn't written. At the manor's gentle pace, downloads go at 4 MB a second at most (`pacedFetch`).
+  - `removeReplaced` removes the old build folders and model files 3 days after nothing names them: config.json, or a running server's command line.
+- **outside.ts** `redirectedTo`: whether this process's writes to %LOCALAPPDATA% land in a package's folder. `packagedApp` asks it when the walk up the parents finds no packaged app, as when a parent has already exited.
+- **setup.ts**: `SetupOptions.cpuKinds` (exactly what the processor serves) and `staged`. `NpuIo.testEmbed` is given the model's dimensions.
+
+### What changed
+
+- **A GenieX older than its generation's pin is replaced by the pin** (npu-vendors.ts' `plannedAt`). Setup installs the pin over it, and the NPU refresh leaves it `needs-setup`, which the keeper now sets up by itself. Until now a Snapdragon X2 set up with GenieX 0.8.0 or 0.9.1 kept it. A later one than the pin (the Smith's Use it) still runs as it is.
+- **The keeper's look** (`startRepairs`) runs `setUpAgain` at most every 10 minutes, after a missing server's repair, then `removeReplaced`. The NPU's refresh waits while the NPU is being set up again.
+
+### Before you update
+
+- Nothing for an agent to do: the keeper runs it. On a PC behind the pins, a look soon after the update downloads what the new pins need, in the background.
+
 ## 2.114.0
 
 **The text reader reads with our own model on the NPU: on a Snapdragon it reads 1,211 of the check's 1,253 lines exactly, where Windows OCR read 733.**

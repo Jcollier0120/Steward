@@ -16,7 +16,7 @@ process.env.NPU_AGENT_NPU_LOCK = path.join(tmp, 'locks', 'npu');
 process.env.MANOR_HOME = path.join(tmp, 'no-manor');
 process.env.STEWARD_HOME = path.join(tmp, 'no-steward');
 
-const { HOUSE_SVG, agentUrl, developerOptions, forgetGithubOwner, forgetManorIcon, githubOwner, githubRepo, mayNotify, notifyAllowed, notifyFrom, notifyPrefs, gpuWithNpu, manorIcon, manorLink, manorOwn, manorProjects, manorSettingsUrl, manorStaffUrl, originRepo, projectsFrom, safeSvg } = await import('./fixture/src/kit/manor.ts');
+const { HOUSE_SVG, agentUrl, developerOptions, forgetGithubOwner, forgetManorIcon, githubOwner, githubRepo, mayNotify, notifyAllowed, notifyFrom, notifyPrefs, gpuWithNpu, manorHeaders, manorIcon, manorLink, manorOwn, manorProjects, manorSettingsUrl, manorStaffUrl, originRepo, projectsFrom, safeSvg } = await import('./fixture/src/kit/manor.ts');
 const { developerOptionsNote, page } = await import('./fixture/src/kit/page.ts');
 
 /** A Manor folder: settings.json, and an app folder (with its own art) when installed. */
@@ -164,12 +164,25 @@ test('in place of the agent\'s own switch: developer features show while develop
 
 test("Manor's icon: as its page serves it, else its app's own, else a house; never one that runs", async () => {
   const live = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><title>spotter</title></svg>';
-  const server = http.createServer((req, res) => (req.url === '/favicon.svg' ? res.writeHead(200, { 'content-type': 'image/svg+xml' }).end(live) : res.writeHead(404).end()));
+  const tokens: unknown[] = [];
+  const server = http.createServer((req, res) => {
+    tokens.push(req.headers['x-manor-token']);
+    if (req.url === '/favicon.svg') res.writeHead(200, { 'content-type': 'image/svg+xml' }).end(live);
+    else res.writeHead(404).end();
+  });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   const port = (server.address() as AddressInfo).port;
   try {
     forgetManorIcon();
-    assert.equal(await manorIcon(manorAt('up', { port }, { art: '<svg><title>own</title></svg>' })), live, 'the icon its page shows');
+    const up = manorAt('up', { port }, { art: '<svg><title>own</title></svg>' });
+    writeFileSync(path.join(up, 'server.json'), JSON.stringify({ app: 'manor', port, token: 'manor_token_0123456789' }));
+    assert.equal(await manorIcon(up), live, 'the icon its page shows');
+    assert.deepEqual(tokens, ['manor_token_0123456789'], "asked with Manor's token, from its server.json (kit 2.118.0)");
+    assert.deepEqual(manorHeaders({ port }, up), { 'x-manor-token': 'manor_token_0123456789' });
+    assert.deepEqual(manorHeaders({ port: port + 1 }, up), {}, 'never to another port than the one its server.json names');
+    assert.deepEqual(manorHeaders({ port }, manorAt('older', { port })), {}, 'a Manor from before its sign-in: no server.json, no header');
+    writeFileSync(path.join(up, 'server.json'), JSON.stringify({ port, token: 'x\r\nHost: evil' }));
+    assert.deepEqual(manorHeaders({ port }, up), {}, 'only a token');
   } finally {
     await new Promise((r) => server.close(r));
   }

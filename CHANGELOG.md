@@ -2,6 +2,145 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.215
+
+**It hands out the kit 2.129.0: text in another alphabet (Russian, Greek, Chinese, Arabic…) is read again by Windows' own text recognition, where Windows has that language's OCR installed. Our own model reads the Latin alphabet alone, and every Latin line keeps its read.**
+
+### What changed
+
+- **On a PC whose Windows has an OCR language of another alphabet**, a page our model read as Latin look-alikes is read again by Windows' own OCR in that language. Windows' lines in that alphabet replace the model's, and every other line stays the model's.
+- **On any other PC**, nothing changes.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.213
+
+**It hands out the kit 2.127.0: AMD's NPU was tried for reading the text in pictures, and reads it worse, so an AMD PC keeps reading it with our own model on the processor.**
+
+### What changed
+
+- **Nothing anyone sees by default.** An AMD PC reads the text in pictures on its processor, as since 0.36.207.
+- **AMD's NPU can be tried, as a test** (`KIT_OCR_NPU=vitisai`). The first time, it prepares the model for the NPU in the background, for about half an hour, while the processor reads. Then the reader's own test finds that the NPU reads worse, and the processor goes on reading.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.212
+
+**It hands out the kit 2.126.0: when the NPU is too busy for the staff's background text reading, our own model reads it on the processor rather than Windows' own.**
+
+### What changed
+
+- **Background text reading no longer drops to Windows' own when the NPU is busy.** When the NPU has a long line of other work, the Clerk, the Scribe and the Warrener read the text in pictures with our own model on the processor instead. Before, Windows' own text recognition read them. It uses more of the processor and more power for those pictures, and reads far more of the text right.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.210
+
+**It hands out the kit 2.124.0: wherever a PC's NPU can't read with our own model, the staff read the text in pictures with it on the processor, a Snapdragon's included.**
+
+### What changed
+
+- **If a PC's NPU fails the text reader's own test, our model still reads, on the processor.** Before, Windows' own text recognition took over. This takes more of the processor and more power for each picture, and reads far more of the text right.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.209
+
+**It hands out the kit 2.123.0: the staff's PowerShell scripts are signed when they're released, so a PC with Smart App Control on runs them as written.**
+
+### What's new
+
+- **The staff's scripts are signed.** Every PowerShell script a staff member's release carries is signed with Castellan's code-signing certificate and timestamped, as their programs already are. Smart App Control holds back what an unsigned script may do; a signed one runs in full.
+
+### What changed
+
+- **A release waits for the signing key only when it has a script to sign.** Each signed script is kept on the PC that releases Castellan, and the releases after it take the kept copy, so most releases need no key at all. One that has a new or changed script waits while SimplySign Desktop isn't connected, as a release with programs to sign already does, and goes on by itself once it is.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.208
+
+**It hands out the kit 2.122.0: on an Intel PC without an NPU we've measured, the staff read the text in pictures with our own model too.**
+
+### What changed
+
+- **More Intel PCs read text with our own model.** On an Intel Core Ultra with the NPU 3720, it already read on the NPU. Now every other Intel PC reads with it on the processor, until we've measured its NPU: the other Core Ultras, and PCs without an NPU. In our check Windows' own text recognition read 736 of 1,253 lines exactly, and ours 1,212. It uses more of the processor and more power for each picture than Windows' own did. The first time, it fetches about 81 MB in the background, and Windows' own reads until that's done.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.207
+
+**It hands out the kit 2.121.0: on an AMD PC the staff read the text in pictures with our own model, which reads far more of it right than Windows' own.**
+
+### What changed
+
+- **AMD PCs read text with our own model.** The Clerk, the Scribe, the Warrener and Reeve read the words in pictures and scans with our own text-reading model on an AMD PC, on its processor, until it runs on AMD's NPU. In our check, Windows' own text recognition read 736 of 1,253 lines exactly, and ours 1,212. It uses more of the processor and more power for each picture than Windows' own did. The first time, it fetches about 81 MB in the background, and Windows' own reads until that's done.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.204
+
+**It hands out the kit 2.118.0: the staff's calls to Castellan carry Castellan's sign-in, one step before the staff's pages open only from Castellan. This release brings 0.36.201 and 0.36.203 too, never released on their own.**
+
+### What changed
+
+- **The staff sign their calls to Castellan in.** When a staff member asks Castellan whether another PC already passed the same checks, or fetches Castellan's icon for its title bar, it now sends Castellan's sign-in, read from your own Castellan folder, which no other Windows account can read. Castellan can then keep its page closed to other programs and accounts on the PC.
+- **The Steward sends a page's sign-in only to that page.** When it reads a staff member's page or Castellan's, the sign-in goes only to the address and port that page was started on, never to a developer's copy running beside it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.203
+
+**It hands out the kit 2.117.0: on an Intel Core Ultra with the NPU 3720, the staff read text in pictures with the manor's own model on the NPU too: 1,212 of the check's 1,253 lines exactly, where Windows OCR read 736.**
+
+### What changed
+
+- **Intel's NPU 3720 reads with the model.** That's the Core Ultra Series 1, and the 200U and 200H. Clerk, Scribe, Reeve and Warrener read text in screenshots and scanned pages with it, as on a Snapdragon. It reads better than Windows OCR in every kind of text the check has, and uses less processor time a picture.
+  - It does spend more energy: 0.86 J a picture against Windows OCR's 0.47 J, about 0.1 Wh more for a thousand pictures. The owner chose it for how much better it reads.
+  - Other Intel NPUs, and AMD's, read with Windows OCR until they're measured.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On an Intel NPU 3720 whose local AI is set up, the reader fetches 199 MB once, in the background, and Windows OCR reads until it's there. A PC whose local AI isn't set up yet reads with Windows OCR until it is.
+
+## 0.36.201
+
+**It hands out the kit 2.115.0: when an update brings a newer llama.cpp, model or NPU server, your graphics card, processor and NPU move to it by themselves, in the background.**
+
+### What's new
+
+- **Local AI keeps up with updates by itself.** Until now, a newer llama.cpp build, model or NPU server in an update reached a PC only when someone pressed Set up local AI again. Now, when an update pins one (such as AMD's FastFlowLM, or GenieX 0.9.3 on a Snapdragon X2), the manor sets that accelerator up again in the background, with nothing for you to do.
+  - Downloads go gently, at 4 MB a second at most, and each file is checked against the size and fingerprint the kit pins.
+  - What you have keeps serving while the new one downloads. The switch waits for a moment when nobody is using that accelerator, and the new servers must answer their test first. If they don't, what you had stays, and it's tried again later.
+  - The old build and models are removed 3 days after the switch.
+  - If Windows' Smart App Control blocks the new server, the PC keeps what it has, says so once in the log, and doesn't try again until a later update.
+  - A program or model file of your own in the settings is left alone.
+
+### What changed
+
+- **A Snapdragon X2 still on GenieX 0.8.0 or 0.9.1** moves to GenieX 0.9.3, the version the kit pins.
+- **Setting up local AI from the Claude desktop app** now notices it runs inside the app even when a process between them has already closed, so what it sets up is never hidden from the staff.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Afterwards, a PC whose local AI is behind the new pins downloads what it needs in the background, which can take a while on a slow connection. Everything keeps working meanwhile.
+
 ## 0.36.200
 
 **It hands out the kit 2.114.0: on a Snapdragon, the staff read text in pictures with the manor's own model on the NPU, and read 1,211 of the check's 1,253 lines exactly, where Windows OCR read 733.**

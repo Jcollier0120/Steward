@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -51,7 +51,27 @@ test("an agent's own repairs: listed in its ping, answered, and an unknown or fa
   assert.equal((await repair(null)).ok, false);
 });
 
-test("the asker reads the page's token from its page, then posts with it; older kits and far pages are no answer", async () => {
+test("the asker takes the token from the server.json of the page its address names (kit 2.118.0), never reading its page", async () => {
+  const smith = path.join(tmp, 'smith-home');
+  mkdirSync(smith, { recursive: true });
+  writeFileSync(path.join(smith, 'server.json'), JSON.stringify({ pid: 1, port: 19100, token: 'smith_token_0123456789' }));
+  process.env.SMITH_HOME = smith;
+  try {
+    const seen: { url: string; token?: string }[] = [];
+    const fake = (async (url: URL | string, init?: RequestInit) => {
+      seen.push({ url: String(url), token: (init?.headers as Record<string, string> | undefined)?.['x-token'] });
+      return Response.json({ ok: true, did: 'started a round (round)' });
+    }) as typeof fetch;
+    assert.deepEqual(await askRepair('http://smith.localhost:19100', { kind: 'round' }, { fetch: fake }), { ok: true, did: 'started a round (round)' });
+    assert.deepEqual(seen, [{ url: 'http://smith.localhost:19100/api/repair', token: 'smith_token_0123456789' }], 'no GET /: a strict page gives its token to no one');
+  } finally {
+    delete process.env.SMITH_HOME;
+  }
+});
+
+test("the asker reads the page's token from its page, then posts with it; older kits and far pages are no answer", async (t) => {
+  process.env.SMITH_HOME = path.join(tmp, 'no-smith');
+  t.after(() => delete process.env.SMITH_HOME);
   const seen: { url: string; token?: string; body?: string }[] = [];
   const fake = (async (url: URL | string, init?: RequestInit) => {
     const u = String(url);
