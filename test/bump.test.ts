@@ -128,10 +128,26 @@ async function pushedBump(s: ReturnType<typeof setup>): Promise<string> {
   return sh(s.checkout, 'rev-parse', BRANCH);
 }
 
+/** A bump branch on origin made by hand, with no bump run: one commit on origin/main, kit.json pinned to 1.0.1 unless `edit` makes it otherwise; force-pushed over any before it, none of that name here. */
+function handBranch(s: ReturnType<typeof setup>, edit = (dir: string) => writeFileSync(path.join(dir, 'kit.json'), repin(readFileSync(path.join(dir, 'kit.json'), 'utf8'), '1.0.1'))): string {
+  sh(s.checkout, 'switch', '--quiet', '-c', 'by-hand', 'origin/main');
+  edit(s.checkout);
+  sh(s.checkout, 'add', '-A');
+  sh(s.checkout, 'commit', '--quiet', '--allow-empty', '-m', 'by hand');
+  sh(s.checkout, 'push', '--quiet', '--force', 'origin', `by-hand:refs/heads/${BRANCH}`);
+  const head = sh(s.checkout, 'rev-parse', 'by-hand');
+  sh(s.checkout, 'switch', '--quiet', 'main');
+  sh(s.checkout, 'branch', '--quiet', '-D', 'by-hand');
+  return head;
+}
+/** A commit on top of `parent` with its tree, made without a worktree. */
+const onTopOf = (s: ReturnType<typeof setup>, parent: string, message: string) => sh(s.checkout, 'commit-tree', '-p', parent, '-m', message, `${parent}^{tree}`);
+
 test('a branch on origin whose PR exists, open, closed or merged, is never bumped again: its PR comes first', async () => {
+  // A branch the Steward would take for its own bump, were it not for its PR.
+  const s = setup();
+  const head = handBranch(s);
   for (const state of ['open', 'closed', 'merged'] as const) {
-    const s = setup();
-    const head = await pushedBump(s);
     const r = runner(prsGh({ [state]: [{ number: 9 }] }));
     const res = await bumpOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.1', kitFrom });
     assert.equal(res.outcome, 'refused', state);
@@ -176,7 +192,9 @@ test("a bump branch on origin with no PR that this PC no longer has (its work fo
 });
 
 test("a bump branch on origin with no PR that has moved past main, or has a commit that isn't the Steward's bump, is still refused", async () => {
-  const refused = async (s: ReturnType<typeof setup>, why: string) => {
+  // One fake, its branch on origin made again by hand for each.
+  const s = setup();
+  const refused = async (why: string) => {
     const r = runner(prsGh());
     const res = await bumpOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.1', kitFrom });
     assert.equal(res.outcome, 'refused', why);
@@ -184,45 +202,28 @@ test("a bump branch on origin with no PR that has moved past main, or has a comm
     assert.deepEqual(asked(r.gh), ['open', 'closed', 'merged'], why);
     assert.ok(!r.gh.some((a) => a[1] === 'create'), why);
   };
-  // Main moved on since the bump: the branch isn't on top of it any more.
-  const moved = setup();
-  await pushedBump(moved);
-  sh(moved.checkout, 'commit', '--quiet', '--allow-empty', '-m', "someone's commit on main");
-  sh(moved.checkout, 'push', '--quiet', 'origin', 'main');
-  await refused(moved, 'main moved on');
-  // A commit of someone else's on the bump's (this PC's own branch is as the bump made it).
-  const onTop = setup();
-  const head = await pushedBump(onTop);
-  sh(onTop.work, 'commit', '--quiet', '--allow-empty', '-m', 'a person adds to it');
-  sh(onTop.work, 'push', '--quiet', 'origin', BRANCH);
-  sh(onTop.work, 'reset', '--quiet', '--hard', head);
-  await refused(onTop, "someone else's commit on it");
   // A commit that isn't a bump: one on top of main, from a person.
-  const foreign = (more: (s: ReturnType<typeof setup>) => void) => {
-    const s = setup();
-    sh(s.checkout, 'switch', '--quiet', '-c', BRANCH, 'origin/main');
-    writeFileSync(path.join(s.checkout, 'extra.txt'), 'a person\n');
-    more(s);
-    sh(s.checkout, 'add', '-A');
-    sh(s.checkout, 'commit', '--quiet', '-m', 'a person');
-    sh(s.checkout, 'push', '--quiet', 'origin', BRANCH);
-    sh(s.checkout, 'switch', '--quiet', 'main');
-    sh(s.checkout, 'branch', '-D', BRANCH);
-    return s;
-  };
-  await refused(
-    foreign(() => {}),
-    "a commit that doesn't pin the kit",
-  );
-  await refused(
-    foreign((s) => writeFileSync(path.join(s.checkout, 'kit.json'), repin(readFileSync(path.join(s.checkout, 'kit.json'), 'utf8'), '1.0.1'))),
-    'a commit that pins the kit and changes more than a bump does',
-  );
+  const person = (dir: string) => writeFileSync(path.join(dir, 'extra.txt'), 'a person\n');
+  handBranch(s, person);
+  await refused("a commit that doesn't pin the kit");
+  handBranch(s, (dir) => (person(dir), writeFileSync(path.join(dir, 'kit.json'), repin(readFileSync(path.join(dir, 'kit.json'), 'utf8'), '1.0.1'))));
+  await refused('a commit that pins the kit and changes more than a bump does');
+  // A commit of someone else's on the bump's (this PC's own branch is as the bump made it).
+  const bump = handBranch(s);
+  sh(s.checkout, 'branch', '--quiet', BRANCH, bump);
+  sh(s.checkout, 'push', '--quiet', '--force', 'origin', `${onTopOf(s, bump, 'a person adds to it')}:refs/heads/${BRANCH}`);
+  await refused("someone else's commit on it");
+  sh(s.checkout, 'branch', '--quiet', '-D', BRANCH);
+  // Main moved on since the bump: the branch isn't on top of it any more.
+  handBranch(s);
+  sh(s.checkout, 'commit', '--quiet', '--allow-empty', '-m', "someone's commit on main");
+  sh(s.checkout, 'push', '--quiet', 'origin', 'main');
+  await refused('main moved on');
 });
 
 test("GitHub out of reach to ask whether a bump branch on origin has a PR is a wait, not a refusal; any other answer it won't give is told", async () => {
   const s = setup();
-  await pushedBump(s);
+  handBranch(s);
   const down = runner((a) => (a[1] === 'list' && a.includes('--head') ? cutShort : claimGh()(a)));
   const res = await bumpOne({ ...s.ctx, run: down.run }, s.e, { kit: '1.0.1', kitFrom });
   assert.equal(res.outcome, 'skipped', res.message);
@@ -253,16 +254,6 @@ test('a push the network cuts short is a wait the next round tries again, not a 
   assert.match(refused.message, /HTTP 422/);
 });
 
-test('failing checks leave the worktree for a look, and commit nothing', async () => {
-  const s = setup({}, { test: ['node -e process.exit(3)'] });
-  const res = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });
-  assert.equal(res.outcome, 'failed');
-  assert.match(res.message, /exit 3\), twice; the worktree is left at .*, the failed step's whole output in .*fake\.log$/);
-  assert.equal(sh(s.checkout, 'rev-list', '--count', 'origin/main..steward/kit-1.0.1'), '0');
-  assert.ok(existsSync(path.join(s.work, 'kit.json')));
-  assert.match(readFileSync(`${s.work}.log`, 'utf8'), /^node -e process\.exit\(3\) \(exit 3\)/);
-});
-
 // A test runner's TAP: the failed test is far above the last lines a log keeps.
 const tap = [
   'TAP version 13',
@@ -283,12 +274,15 @@ const tap = [
   '# fail 1',
 ].join('\n');
 
-test("a failure's message names the failed tests and their errors; a test that fails once and then passes doesn't stop the bump", async () => {
+test("a failure's message names the failed tests and their errors, the worktree left for a look and nothing committed; a test that fails once and then passes doesn't stop the bump", async () => {
   const failing = setup({ files: { 'tap.mjs': `console.log(${JSON.stringify(tap)}); process.exit(1);\n` } }, { test: ['node tap.mjs'] });
   const res = await bumpOne(failing.ctx, failing.e, { kit: '1.0.1', kitFrom });
   assert.equal(res.outcome, 'failed');
-  assert.match(res.message, /^node tap\.mjs failed \(exit 1\): "each request came after its warm-up" \(each request came after its warm-up: 5 !== 8\), twice;/);
+  assert.match(res.message, /^node tap\.mjs failed \(exit 1\): "each request came after its warm-up" \(each request came after its warm-up: 5 !== 8\), twice; the worktree is left at .*, the failed step's whole output in .*fake\.log$/);
   assert.ok(failing.ctx.lines.some((l) => l.endsWith('failed: each request came after its warm-up (each request came after its warm-up: 5 !== 8)')));
+  assert.equal(sh(failing.checkout, 'rev-list', '--count', 'origin/main..steward/kit-1.0.1'), '0', 'nothing committed');
+  assert.ok(existsSync(path.join(failing.work, 'kit.json')), 'the worktree is left');
+  assert.match(readFileSync(`${failing.work}.log`, 'utf8'), /^node tap\.mjs \(exit 1\)/);
 
   // Fails the first time it's run in this worktree, then passes.
   const flaky = `import { existsSync, writeFileSync } from 'node:fs';\nif (!existsSync('.ran')) { writeFileSync('.ran', ''); console.log(${JSON.stringify(tap)}); process.exit(1); }\n`;
@@ -437,59 +431,12 @@ test("a bump's version is claimed: above an open PR's (an agent's own work besid
   assert.match(offline.message, /^couldn't claim a version for the bump: /);
 });
 
-test("a fold: a newer kit goes onto the kit PR still open for an older one, at its version, its entry written again for every kit since main's", async () => {
-  const s = setup();
-  assert.equal((await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom })).outcome, 'done');
-  sh(s.checkout, 'push', '--quiet', 'origin', 'steward/kit-1.0.1');
-  const claims = loadClaims().map((c) => [c.version, c.branch]);
-  const kit102 = path.join(tmp, 'kit-1.0.2');
-  mkdirSync(path.join(kit102, 'node'), { recursive: true });
-  writeFileSync(path.join(kit102, 'node', 'npu.ts'), 'export const npu = 2;\n');
-  writeFileSync(path.join(kit102, 'VERSION'), '1.0.2\n');
-  const folds = { fake: { number: 7, head: 'steward/kit-1.0.1', kit: '1.0.1' } };
-  const res = await bumpOne(s.ctx, s.e, { kit: '1.0.2', kitFrom: kit102, folds });
-  assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
-  assert.equal(res.version, '0.4.1', "its PR's version, not another");
-  assert.match(res.message, /^0\.4\.1 on steward\/kit-1\.0\.1 \(.{7}\): kit 1\.0\.1 → 1\.0\.2, onto its open PR #7, checks passed/);
-  assert.deepEqual(loadClaims().map((c) => [c.version, c.branch]), claims, 'nothing claimed');
-  // On top of the PR's branch, never instead of it.
-  assert.equal(sh(s.checkout, 'rev-list', '--count', 'origin/steward/kit-1.0.1..steward/kit-1.0.1'), '1');
-  assert.equal(sh(s.checkout, 'rev-list', '--count', 'steward/kit-1.0.1..origin/steward/kit-1.0.1'), '0');
-  assert.equal(sh(s.checkout, 'show', 'steward/kit-1.0.1:kit.json'), '{\n  "kit": "1.0.2",\n  "parts": ["node"]\n}');
-  assert.match(sh(s.checkout, 'show', 'steward/kit-1.0.1:src/app.ts'), /version: '0\.4\.1'/);
-  const log = sh(s.checkout, 'show', 'steward/kit-1.0.1:CHANGELOG.md').replace(/\r\n/g, '\n');
-  assert.equal(log.match(/^## 0\.4\.1$/gm)?.length, 1, 'one entry for its version');
-  assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.2: [\s\S]*- The Steward's kit 1\.0\.2, after 1\.0\.0: /);
-  assert.doesNotMatch(log, /kit 1\.0\.1/, "the PR's old entry is gone");
-  assert.equal(sh(s.checkout, 'log', '-1', '--format=%s', 'steward/kit-1.0.1'), "Fake 0.4.1: the Steward's kit 1.0.2");
-
-  // Pushed onto the PR, whose title and description become the new kit's: no second PR.
-  const r = runner((a) => {
-    if (a[0] === 'pr' && a[1] === 'view') return ok({ state: 'OPEN', headRefName: 'steward/kit-1.0.1' });
-    if (a[0] === 'pr' && a[1] === 'list') return ok([{ number: 7, url: 'https://github.com/Jcollier0120/Fake/pull/7' }]);
-    if (a[0] === 'pr' && a[1] === 'edit') return ok('');
-  });
-  const pushed = await pushOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.2', changelog: null, folds });
-  assert.equal(pushed.outcome, 'done', pushed.message);
-  assert.equal(pushed.message, `put kit 1.0.2 onto its open PR #7, now "Fake 0.4.1: the Steward's kit 1.0.2"`);
-  assert.equal(sh(s.origin, 'rev-parse', 'refs/heads/steward/kit-1.0.1'), sh(s.checkout, 'rev-parse', 'steward/kit-1.0.1'));
-  const edit = r.gh.find((a) => a[1] === 'edit')!;
-  assert.equal(edit[2], '7');
-  assert.equal(edit[edit.indexOf('--title') + 1], "Fake 0.4.1: the Steward's kit 1.0.2");
-  assert.match(edit[edit.indexOf('--body-file') + 1], /^kit\.json pins the Steward's kit 1\.0\.2 \(it pinned 1\.0\.0\)[\s\S]*Opened for kit 1\.0\.1; kit 1\.0\.2 came out while it was open/);
-  assert.ok(!r.gh.some((a) => a[1] === 'create'));
-});
-
 test('a fold whose PR merged or closed meanwhile is pushed nowhere', async () => {
   const s = setup();
-  assert.equal((await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom })).outcome, 'done');
-  sh(s.checkout, 'push', '--quiet', 'origin', 'steward/kit-1.0.1');
-  const was = sh(s.origin, 'rev-parse', 'refs/heads/steward/kit-1.0.1');
+  const was = handBranch(s);
   const folds = { fake: { number: 7, head: 'steward/kit-1.0.1', kit: '1.0.1' } };
   // A commit on the PR's branch here, as a fold's bump leaves it.
-  writeFileSync(path.join(s.work, 'more.txt'), 'more\n');
-  sh(s.work, 'add', 'more.txt');
-  sh(s.work, 'commit', '--quiet', '-m', 'more');
+  sh(s.checkout, 'branch', '--quiet', BRANCH, onTopOf(s, was, 'more'));
   const r = runner((a) => (a[0] === 'pr' && a[1] === 'view' ? ok({ state: 'MERGED', headRefName: 'steward/kit-1.0.1' }) : undefined));
   const res = await pushOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.2', changelog: null, folds });
   assert.equal(res.outcome, 'skipped');

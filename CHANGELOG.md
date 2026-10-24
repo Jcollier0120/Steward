@@ -16,6 +16,36 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - **Check that every PC running Castellan's staff holds a license**, developers' and test PCs included: a complimentary license does. Manor's Settings > License on each PC says what it holds. Nothing changes on a PC that holds one.
 - **A waiting employee says so, and signing in brings it back.** Its page says "This PC holds no license for it: signing in brings it back" (after a trial, that the trial ended), its pill says No license (or Trial ended), and its rounds and Run now wait. Sign in on that PC in Manor's Settings > License, with the email you bought Castellan with (or enter a key): the staff go back on duty, with nothing to reinstall and their settings and data as they were.
 
+## 0.36.193
+
+**It hands out the kit 2.112.1: on an AMD Ryzen AI PC, a picture can now wait a moment for the graphics card instead of running on the NPU.**
+
+### What changed
+
+- **A picture can now wait a moment for the Radeon instead of running on the NPU.** Since 0.36.191 pictures go to the Radeon graphics, where one costs 10 J against the NPU's 27 J. But while the Radeon read one picture, the next went to the NPU if it was free, so most of a batch of 4 sent at once ran on the NPU. Now a picture waits in the Radeon's line, about half a second for each picture ahead of it. The NPU reads it only when the Radeon can't: its server failed lately, a game has the card, or it's resting after a long line. As before, a single picture goes to the NPU when only the NPU's server is running.
+- **When 4 of a staff member's background pictures already wait in that line, the next waits for a later round**, as it would on the NPU, rather than going to the NPU.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Only pictures on an AMD Ryzen AI PC change; chat and search go where they went.
+
+## 0.36.191
+
+**It hands out the kit 2.111.0: on an AMD Ryzen AI PC, pictures go to the graphics card, where they cost the least energy, and the NPU's server is updated to FastFlowLM 1.0.10.**
+
+### What's new
+
+- **Each kind of work goes where it costs least.** On a Ryzen AI 7 350 the manor measured each kind of work on the NPU, the Radeon graphics and the processor. Chat stays on the NPU: a triage costs it 26 J, the Radeon 41 J and the processor 89 J. A picture costs the Radeon 10 J and the NPU 27 J, so pictures now go to the Radeon. The owner's rule: "Radeon unless only NPU up", and "keep single pictures on the NPU when it's running, but send batches of 4 or more waiting pictures to the Radeon." So when the NPU's server is already running and the Radeon's isn't, a single picture goes to the NPU, as starting the Radeon's server for it would cost more (66 J). When 4 or more pictures are waiting, from any of the staff, they go to the Radeon: from the fourth, its start has paid for itself. Search (embeddings) stays on the Radeon, at 13 mJ a word-piece against the processor's 44.
+
+### What changed
+
+- **FastFlowLM 1.0.10.** AMD's NPU server is updated. It's as fast and as frugal as 1.0.7, and its new licence is as free. The manor's notices credit it: "Powered by FastFlowLM". Where Windows' Smart App Control is on, Castellan's signed list of its files lets it run, as 1.0.7's did. The old version's folder is deleted three days after nothing uses it; the model stays.
+- **When the NPU can't run** (Windows' Smart App Control blocking its server, say), each kind of its work goes where it costs least next.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An AMD PC moves to FastFlowLM 1.0.10, and to the new order, the next time its local AI is set up (Set up local AI) after the manor has looked at its NPU. That downloads 30 MB; the model stays. Where Smart App Control is on, that setup asks once for an administrator, to add 1.0.10's list of files and take 1.0.7's away. While the Radeon's picture server runs, it holds 2.8 GB of memory beside the NPU's, until it rests after 5 minutes unused.
+
 ## 0.36.190
 
 **It hands out the kit 2.110.0: the staff you pay for run only on a PC that holds your license.**

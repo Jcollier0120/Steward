@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { type Block, blockedExit, blockedExitSay, blockedIn, blockedSay, cpuVariantLoaded, keepCpuVariant, localPath, type SacState, saysBlockedExit, smartAppControlOutsideTests, stoppingBlocks } from './app-control.ts';
 export { cpuVariantLoaded, keepCpuVariant } from './app-control.ts';
-import { blockedFile, type BlockedServerFile, chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberBlocked, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
+import { blockedFile, type BlockedServerFile, chatBody, ensureServer, expandEnv, fitPicture, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberBlocked, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody, type WorkOrder } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, type Endpoint, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, isSharedTools, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type CatalogsDone, catalogsSay, ensureCatalogs } from './catalogs.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
@@ -16,7 +16,7 @@ import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage } from './npu-vendors.ts';
+import { atVersion, calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, fallbackDevices, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage, workOrderFor } from './npu-vendors.ts';
 import { RETIRED_GRACE_MS } from './retired.ts';
 import { rememberSignatures, signaturesFile } from './signatures.ts';
 
@@ -777,6 +777,18 @@ export function withoutNpu(raw: Record<string, any>, localAppData: string): Reco
   if (isDefaultChatEndpoint(out.chatEndpoint, localAppData)) delete out.chatEndpoint;
   if (Array.isArray(out.accelerators)) out.accelerators = out.accelerators.filter((x: any) => x?.id !== 'npu');
   if (Array.isArray(out.acceleratorOrder)) out.acceleratorOrder = out.acceleratorOrder.filter((id: unknown) => id !== 'npu');
+  return out;
+}
+
+/**
+ * config.json with this PC's `workOrder` (kit 2.111.0): its NPU generation's order for each work (workOrderFor), or
+ * none when it records none. Nothing else changes, and nothing at all when it's the same.
+ */
+export function withWorkOrder(raw: Record<string, any>, order: WorkOrder | null): Record<string, any> {
+  if (JSON.stringify(raw.workOrder ?? null) === JSON.stringify(order)) return raw;
+  const out = { ...raw };
+  if (order) out.workOrder = order;
+  else delete out.workOrder;
   return out;
 }
 
@@ -2956,12 +2968,16 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   // What the NPU couldn't do after all goes to a card that left it to the NPU: set up again now, for the work the NPU
   // turned out not to serve (the NPU's entry as written decides, as for requests), beside what the card does already.
   const missing = npuMissing(plan, entries);
-  const cardsFor = (plan.leftToNpu ?? []).filter((l) => l.kinds.some((k) => missing.includes(k))).map((l) => l.id);
+  // Each goes where its generation's order sends it after the NPU (npu-vendors.json's `order`, kit 2.111.0): a graphics
+  // card, then the processor, unless the order puts the processor first. No generation does yet.
+  const cpuFirst = missing.filter((k) => k !== 'rerank' && fallbackDevices(plan.npu?.route, plan.npu?.support.generation, k)[0] === 'cpu');
+  const toCards = missing.filter((k) => !cpuFirst.includes(k));
+  const cardsFor = (plan.leftToNpu ?? []).filter((l) => l.kinds.some((k) => toCards.includes(k))).map((l) => l.id);
   // The NPU's pictures are its chat server's (Intel's Qwen3-VL-2B, kit 2.103.0): the card that takes its chat takes them too.
-  const taken = ENDPOINT_KINDS.filter((k) => missing.includes(k) || (k === 'vision' && missing.includes('chat') && plan.npu?.kinds.includes('vision')));
+  const taken = ENDPOINT_KINDS.filter((k) => toCards.includes(k) || (k === 'vision' && toCards.includes('chat') && plan.npu?.kinds.includes('vision')));
   // Windows blocked the card's build too (kit 2.104.0): the processor is tried next, as with no card.
   let cardBlocked = false;
-  if (missing.length && cardsFor.length) {
+  if (toCards.length && cardsFor.length) {
     const plan2 = await planSetup({ detection, ids: cardsFor, skipNpu: true, raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
     // An NPU entry kept from before (a 4B whose 2B failed) still chats: the card takes only what it plans.
     const takes = taken.filter((k) => plan2.targets.some((t) => t.kinds.includes(k)));
@@ -2980,11 +2996,13 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   }
   // With no card to take it, what the NPU couldn't do goes to the processor: set up now, beside what it had. Its
   // reranker always does: a card beside the NPU reranks only while Manor's gpuWithNpu is on. So does what a card
-  // Windows blocked couldn't take.
-  if (missing.length && (!cardsFor.length || cardBlocked) && (cardBlocked || !entries.some((e) => e.kind === 'gpu') || missing.every((k) => k === 'rerank')) && detection.cpu) {
+  // Windows blocked couldn't take, and what its order sends to the processor first.
+  const cardsCant = toCards.length > 0 && (!cardsFor.length || cardBlocked) && (cardBlocked || !entries.some((e) => e.kind === 'gpu') || toCards.every((k) => k === 'rerank'));
+  const toCpu = [...cpuFirst, ...(cardsCant ? toCards : [])];
+  if (toCpu.length && detection.cpu) {
     const had = readAccelerators(raw).accelerators.find((a) => a.id === 'cpu');
-    const cpuKinds = [...new Set([...ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had && serves(had, k)), ...missing])];
-    log(`The processor takes the NPU's ${missing.join(' and ')} instead: setting it up for ${cpuKinds.join(' and ')}.`);
+    const cpuKinds = [...new Set([...ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had && serves(had, k)), ...toCpu])];
+    log(`The processor takes the NPU's ${toCpu.join(' and ')} instead: setting it up for ${cpuKinds.join(' and ')}.`);
     const plan2 = await planSetup({ detection, ids: ['cpu'], skipNpu: true, cpuKinds, raw, releases, hfFiles: o.hfFiles ?? pinnedHfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists });
     for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
     const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the processor? [y/N] `) : false);
@@ -2995,7 +3013,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
       blocked.push(...(r2.blocked ?? []));
       raw = r2.raw;
       entries = [...entries.filter((e) => !r2.entries.some((x) => x.id === e.id)), ...r2.entries];
-    } else log(`Not downloading for the processor: the NPU's ${missing.join(' and ')} stay unserved until setup runs again.`);
+    } else log(`Not downloading for the processor: the NPU's ${toCpu.join(' and ')} stay unserved until setup runs again.`);
   }
   // Why the NPU, or its embeddings, isn't used, kept for the accelerators' report: cleared once it's set up whole on
   // values setup knows. An NPU kept on guessed values says so, beside the plan's own note (its embeddings left off).
@@ -3010,6 +3028,9 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   if (plain) log(`note: ${plain}`);
   keepNpuReport(o, detection, plan, r.npu, log);
   if (!entries.length && !plan.dropNpu) return { code: 1, plan };
+  // Each work's order on this PC, from its NPU's generation (kit 2.111.0): written whether or not the NPU could be set up,
+  // so requests and the fallback above agree; with none recorded, none (the NPU first).
+  raw = withWorkOrder(raw, detection.npu?.supported && detection.npu.vendor ? workOrderFor(NPU_CATALOG.routes[detection.npu.vendor], detection.npu.generation) : null);
   const saved = writeConfigFile(configFile, raw, o.validate ?? validateKeeperConfig);
   if (saved.problems.length) {
     log(`config.json not written: ${saved.problems.join('; ')}`);

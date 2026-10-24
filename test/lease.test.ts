@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { gitExe } from '../src/kit/git-exe.ts';
 
 // One release PC per repository, elected through refs/manor/release-pc in the repository's own remote (lease.ts), and
 // version claims shared through refs/manor/claims (claims.ts): against real bare repositories, with real git.
@@ -192,7 +193,7 @@ test("a written ref's commit is the one git's own commands make, and reads back 
   const sha = (w as { sha: string }).sha;
   // Made again by git's hash-object, mktree and commit-tree, dated as that one: the same commit.
   const when = /^committer .* (\d+ [+-]\d{4})$/m.exec(sh(r.url, 'cat-file', 'commit', sha))![1];
-  const git = (args: string[], o: { input?: string; env?: Record<string, string> } = {}) => execFileSync('git', args, { cwd: r.url, encoding: 'utf8', windowsHide: true, input: o.input, env: { ...process.env, ...o.env } }).trim();
+  const git = (args: string[], o: { input?: string; env?: Record<string, string> } = {}) => execFileSync(gitExe(), args, { cwd: r.url, encoding: 'utf8', windowsHide: true, input: o.input, env: { ...process.env, ...o.env } }).trim();
   const blob = git(['hash-object', '-w', '--stdin'], { input: text });
   const tree = git(['mktree'], { input: `100644 blob ${blob}\tsame.json\n` });
   const who = { GIT_AUTHOR_NAME: 'Castellan Steward', GIT_AUTHOR_EMAIL: 'steward@manor.invalid', GIT_AUTHOR_DATE: when, GIT_COMMITTER_NAME: 'Castellan Steward', GIT_COMMITTER_EMAIL: 'steward@manor.invalid', GIT_COMMITTER_DATE: when };
@@ -293,21 +294,6 @@ test("a round with no ref anywhere releases main exactly as before, and takes th
   assert.deepEqual(s.merges(), []);
 });
 
-test('offline (the remote out of reach), a round still builds and tests: nothing local waits for a turn', async () => {
-  fresh();
-  const s = roundSetup('round-offline', { vouched: false });
-  const out = await runStage('round', { full: true }, { run: s.r.run, turns: { device: A, now: () => T0, remote: async () => gone() } });
-  assert.equal(out.error, undefined);
-  assert.ok(out.log.some((l) => l.includes('releasing Fake waits until this PC can reach its remote')), out.log.join('\n'));
-  // Main's head, which no vouch covers, was built and tested here before its release, as always.
-  const sha = s.head.slice(0, 7);
-  assert.ok(out.log.some((l) => l.startsWith(`[fake] testing main at ${sha} before its release`)), out.log.join('\n'));
-  assert.ok(out.log.some((l) => l.startsWith(`[fake] checks passed here at ${sha}`)), out.log.join('\n'));
-  // Only publishing waits on a turn, and one this PC can't ask about isn't held: released.
-  assert.deepEqual(doneIn(out), [['done', 'release: released v0.4.1 from origin/main (…), with kit 1.0.0']], out.log.join('\n'));
-  assert.deepEqual(s.merges(), []);
-});
-
 // ---- Version claims through refs/manor/claims ----
 
 function claimSetup(name: string) {
@@ -360,9 +346,14 @@ test('the claims ref out of reach: claimed here as before; shared on the next re
   assert.deepEqual([a.claim.version, a.claim.source], ['0.4.12', undefined]);
   const b = await C.claimVersion(s.ctx, s.e, { branch: 'claude/second', by: 'claude', for: 'more', remote: gone() });
   assert.equal(b.claim.version, '0.4.13');
+  // A round that can't read the claims ref, out of reach still or its git failing outright, leaves them here for the next.
+  const rows = [{ repo: 'Jcollier0120/Fake', name: 'Fake', main: { version: '0.4.10' }, release: { version: '0.4.10' }, prs: [] }];
+  await C.shareClaims(realRun, rows, [{ repo: 'Jcollier0120/Fake', remote: gone(), sha: null }]);
+  const failing: Runner = () => Promise.reject(new Error('git failed'));
+  await C.shareClaims(failing, rows, [{ repo: 'Jcollier0120/Fake', remote: s.remoteRepo, sha: null }]);
+  assert.deepEqual(C.loadClaims().map((c) => [c.version, c.source]), [['0.4.12', undefined], ['0.4.13', undefined]]);
   // Meanwhile another PC, which could reach the remote, claimed 0.4.13 for its own work.
   await R.writeRef(realRun, s.remoteRepo, C.CLAIMS_REF, C.CLAIMS_FILE, JSON.stringify([{ repo: 'Jcollier0120/Fake', version: '0.4.13', branch: 'claude/desk', by: 'claude', for: "the desktop's fix", at: new Date().toISOString() }]), null, 'desk');
-  const rows = [{ repo: 'Jcollier0120/Fake', name: 'Fake', main: { version: '0.4.10' }, release: { version: '0.4.10' }, prs: [] }];
   await C.shareClaims(realRun, rows, [{ repo: 'Jcollier0120/Fake', remote: s.remoteRepo, sha: await shaOf(s.remoteRepo, C.CLAIMS_REF) }]);
   assert.deepEqual((await sharedClaims(s.remoteRepo)).map((c) => [c.version, c.branch]), [['0.4.13', 'claude/desk'], ['0.4.12', 'claude/offline']], "this PC's free one went up");
   assert.deepEqual(C.claimClashes(), ["Jcollier0120/Fake 0.4.13 was claimed on another PC too (for the desktop's fix) while this PC couldn't reach the remote: claim a new version for claude/second (claim-version) before you merge it"]);

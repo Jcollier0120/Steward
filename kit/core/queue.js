@@ -35,6 +35,7 @@
  * @property {number} since When it joined, in milliseconds.
  * @property {string} [who] Who it is, from the ticket's contents.
  * @property {string} [doing] What the request is for, from the ticket's contents, when it says.
+ * @property {string} [work] The request's kind (chat, vision, embed, rerank), from the ticket's contents, when it says.
  */
 
 const TICKET = /^([01])-(\d{17})-(\d+)-([0-9a-z]+)\.ticket$/;
@@ -66,19 +67,25 @@ export const DOING_MAX = 80;
 
 /**
  * A ticket's contents, which are only informational: `{"pid", "since", "lane", "who"}`, and `"doing"` when the
- * waiter says what the request is for ("search index: Heiward (17 of 673 files)"), at most DOING_MAX characters.
+ * waiter says what the request is for ("search index: Heiward (17 of 673 files)"), at most DOING_MAX characters, and
+ * `"work"` when it says its kind (kit 2.111.0: chat, vision, embed or rerank; anything else is left out).
  * @param {Lane} lane
  * @param {number} timeUs
  * @param {number} pid
  * @param {string} who
  * @param {string} [doing]
+ * @param {string} [work]
  * @returns {string}
  */
-export function ticketText(lane, timeUs, pid, who, doing) {
+export function ticketText(lane, timeUs, pid, who, doing, work) {
   const d = typeof doing === 'string' ? doing.trim() : '';
   const said = d.length > DOING_MAX ? `${d.slice(0, DOING_MAX - 1)}…` : d;
-  return JSON.stringify({ pid, since: Math.floor(timeUs / 1000), lane, who, ...(said ? { doing: said } : {}) });
+  const kind = typeof work === 'string' && TICKET_WORKS.includes(work) ? work : '';
+  return JSON.stringify({ pid, since: Math.floor(timeUs / 1000), lane, who, ...(said ? { doing: said } : {}), ...(kind ? { work: kind } : {}) });
 }
+
+/** The kinds of request a ticket's `work` may say. */
+const TICKET_WORKS = ['chat', 'vision', 'embed', 'rerank'];
 
 /**
  * A clock's next reading in microseconds, strictly increasing within a process: the wall clock's, or one
@@ -195,16 +202,17 @@ export function waitingOf(rules, entries, nowMs, alive) {
       const text = texts.get(t.name);
       const who = fieldOf(text, 'who');
       const doing = fieldOf(text, 'doing');
-      return { pid: t.pid, lane: t.lane === 0 ? 'interactive' : 'background', since: Math.floor(t.timeUs / 1000), ...(who === undefined ? {} : { who }), ...(doing === undefined ? {} : { doing }) };
+      const work = fieldOf(text, 'work');
+      return { pid: t.pid, lane: t.lane === 0 ? 'interactive' : 'background', since: Math.floor(t.timeUs / 1000), ...(who === undefined ? {} : { who }), ...(doing === undefined ? {} : { doing }), ...(work === undefined ? {} : { work }) };
     }),
   };
 }
 
 /**
  * One of a ticket's informational fields, when its contents have it as a string. A `doing` longer than
- * DOING_MAX (a writer that didn't cut it) is cut here.
+ * DOING_MAX (a writer that didn't cut it) is cut here, and a `work` that isn't a kind of request is none.
  * @param {string | undefined} text
- * @param {'who' | 'doing'} key
+ * @param {'who' | 'doing' | 'work'} key
  * @returns {string | undefined}
  */
 function fieldOf(text, key) {
@@ -212,6 +220,7 @@ function fieldOf(text, key) {
   try {
     const v = JSON.parse(text);
     const s = v && typeof v === 'object' && typeof v[key] === 'string' ? v[key] : undefined;
+    if (key === 'work') return s !== undefined && TICKET_WORKS.includes(s) ? s : undefined;
     return key === 'doing' && s !== undefined ? (s.trim() ? (s.length > DOING_MAX ? `${s.slice(0, DOING_MAX - 1)}…` : s) : undefined) : s;
   } catch {
     return undefined;

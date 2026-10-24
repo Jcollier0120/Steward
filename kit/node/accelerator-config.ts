@@ -46,8 +46,8 @@ export const ENDPOINT_KINDS: readonly EndpointKind[] = [...SERVE_KINDS, 'rerank'
 /**
  * Per server: `prefix-leak` (GenieX v0.7.0 leaks state between requests that share a prompt prefix,
  * so each request starts with a nonce), `image-path` (the server reads a local image path; otherwise
- * images go as data: URLs), `sides-of-32` (FastFlowLM 1.0.7 misreads a picture with a side of a whole
- * number of 32 px that it doesn't shrink, so such a side is made a pixel longer first: the kit's fitPicture).
+ * images go as data: URLs), `sides-of-32` (FastFlowLM 1.0.7 and 1.0.10 misread a picture with a side of a
+ * whole number of 32 px that they don't shrink, so such a side is made a pixel longer first: the kit's fitPicture).
  */
 export const QUIRKS = ['prefix-leak', 'image-path', 'sides-of-32'] as const;
 export type Quirk = (typeof QUIRKS)[number];
@@ -417,7 +417,7 @@ const isHttpUrl = (s: unknown) => {
   }
 };
 
-/** What's wrong with config.json's accelerators and acceleratorOrder, one line each; empty when nothing is. */
+/** What's wrong with config.json's accelerators, acceleratorOrder and workOrder, one line each; empty when nothing is. */
 export function validateAccelerators(raw: Record<string, any> | null | undefined): string[] {
   const problems: string[] = [];
   const r = raw && typeof raw === 'object' ? raw : {};
@@ -490,6 +490,19 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
       for (const id of order) if (!known.includes(id)) problems.push(`acceleratorOrder names ${id}, which isn't an accelerator`);
       if (new Set(order).size !== order.length) problems.push('acceleratorOrder names an accelerator twice');
     }
+  }
+  const wo = r.workOrder;
+  if (wo !== undefined) {
+    if (!wo || typeof wo !== 'object' || Array.isArray(wo)) problems.push('workOrder must be an object of chat, vision and embed, each its devices in order');
+    else
+      for (const [w, o] of Object.entries(wo as Record<string, any>)) {
+        const devices = o && typeof o === 'object' ? o.devices : undefined;
+        if (!(core.WORKS as readonly string[]).includes(w)) problems.push(`workOrder.${w}: only chat, vision and embed have an order`);
+        else if (!Array.isArray(devices) || !devices.length || devices.some((d: unknown) => d !== 'npu' && d !== 'gpu' && d !== 'cpu') || new Set(devices).size !== devices.length)
+          problems.push(`workOrder.${w}.devices must list npu, gpu and cpu, each at most once, first preferred`);
+        else if (o.runningFirst !== undefined && typeof o.runningFirst !== 'boolean') problems.push(`workOrder.${w}.runningFirst must be true or false`);
+        else if (o.batchAt !== undefined && !(Number.isInteger(o.batchAt) && o.batchAt >= 2)) problems.push(`workOrder.${w}.batchAt must be a whole number, 2 or more`);
+      }
   }
   return problems;
 }
@@ -584,7 +597,7 @@ function reeveHoldsTools(reeve: string): boolean {
  * The keys that are the accelerators' and move with them to their own config.json: the keeper's (KEEPER_KEYS), an
  * older config's single endpoint and its cap, and the request timeout every agent reads.
  */
-export const ACCELERATOR_KEYS = ['accelerators', 'acceleratorOrder', 'npuIdleStopMinutes', 'gpuIdleStopMinutes', 'chatEndpoint', 'visionModel', 'embedEndpoint', 'npuMaxContextTokens', 'requestTimeoutMs'] as const;
+export const ACCELERATOR_KEYS = ['accelerators', 'acceleratorOrder', 'workOrder', 'npuIdleStopMinutes', 'gpuIdleStopMinutes', 'chatEndpoint', 'visionModel', 'embedEndpoint', 'npuMaxContextTokens', 'requestTimeoutMs'] as const;
 
 /**
  * Moves the accelerators to their own config.json (kit 2.31.0), once: when it doesn't exist yet and Reeve's older
@@ -676,8 +689,11 @@ export interface KeeperSettings {
   gpuIdleStopMinutes: number;
 }
 
-/** The keys the keeper owns in config.json: its Settings page writes these and no others. */
-export const KEEPER_KEYS = ['accelerators', 'acceleratorOrder', 'npuIdleStopMinutes', 'gpuIdleStopMinutes'] as const;
+/**
+ * The keys the keeper owns in config.json: its Settings page writes these and no others. `workOrder` (kit 2.111.0) is
+ * setup's, from the NPU's generation (npu-vendors.ts' workOrderFor), and moves and is mirrored with the rest.
+ */
+export const KEEPER_KEYS = ['accelerators', 'acceleratorOrder', 'workOrder', 'npuIdleStopMinutes', 'gpuIdleStopMinutes'] as const;
 
 /** The keeper's numbers, with what each may be. */
 export const KEEPER_NUMBERS: Record<keyof KeeperSettings, { min: number; max: number; what: string }> = {

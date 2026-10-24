@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import type { Employee } from '../src/settings.ts';
+import { gitExe } from '../src/kit/git-exe.ts';
 
 // A .NET employee, as Heiward is: C#, its branch master, its version a .csproj's <VersionPrefix>, no package.json,
 // and its kit\ filled by a PowerShell script of its own. It goes through every stage (bump, push and its merge,
@@ -140,7 +141,7 @@ test('a .NET employee on master, through every stage: bump, push and its merge, 
   assert.match(bumped.message, /^1\.7\.1 on steward\/kit-1\.0\.1 \([0-9a-f]+\): kit 1\.0\.0 → 1\.0\.1, checks passed with the kit from /);
   assert.deepEqual(sh(f.checkout, 'diff', '--name-only', 'origin/master', branch).split('\n').sort(), ['CHANGELOG.md', 'HEI.Agent/HEI.Agent.csproj', 'kit.json']);
   assert.equal(sh(f.checkout, 'show', `${branch}:kit.json`), '{\n  "kit": "1.0.1",\n  "parts": ["spec"]\n}');
-  assert.equal(execFileSync('git', ['show', `${branch}:HEI.Agent/HEI.Agent.csproj`], { cwd: f.checkout, encoding: 'utf8' }), CSPROJ('1.7.1'), 'only the version changed, CRLF and all');
+  assert.equal(execFileSync(gitExe(), ['show', `${branch}:HEI.Agent/HEI.Agent.csproj`], { cwd: f.checkout, encoding: 'utf8' }), CSPROJ('1.7.1'), 'only the version changed, CRLF and all');
   assert.equal(sh(f.checkout, 'log', '-1', '--format=%s', branch), "Heiward 1.7.1: the Steward's kit 1.0.1");
   assert.match(sh(f.checkout, 'log', '-1', '--format=%b', branch), /the version is 1\.7\.1 in HEI\.Agent\/HEI\.Agent\.csproj, and CHANGELOG\.md has its entry\. Made by steward bump\./);
   const workTree = path.join(work, 'heiward');

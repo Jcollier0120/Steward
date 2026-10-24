@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, wri
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { gitExe } from '../src/kit/git-exe.ts';
 
 // The Steward's settings: no employees or repository of anyone's built in, and what the schema refuses. (test/agent.test.ts
 // runs the kit's own checks of the schema and its defaults, as in every agent.)
@@ -259,7 +260,7 @@ test("Manor's internal staff are released here: built and installed from the clo
 });
 
 // A real clone: main carries what the stages need, while the folder may be checked out on anything.
-const gitIn = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, stdio: 'ignore' });
+const gitIn = (cwd: string, ...args: string[]) => execFileSync(gitExe(), args, { cwd, stdio: 'ignore' });
 const cloneOf = (name: string, files: Record<string, string>) => {
   const dir = path.join(clones, name);
   for (const [rel, text] of Object.entries(files)) put(`${name}/${rel}`, text);
