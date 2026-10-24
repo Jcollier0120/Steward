@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.135.2
+
+**An AMD Ryzen AI 300 PC set up before kit 2.111.0 gets its pictures on the Radeon by itself: the keeper sets the card up again for them, gently, as it does when the pins move on.**
+
+### What changed
+
+- **set-up-again.ts:** a graphics card the PC's work order puts first for a work it doesn't serve yet is behind (`orderAdds`, read in `behindPins`).
+  - Today that is AMD XDNA 2's pictures. A Radeon set up before kit 2.111.0 serves only embeddings, so kit 2.135.1's order, which puts it first for pictures, changed nothing there until Set up local AI.
+  - It is planned, staged, tested and switched like any other card behind its pins: the same pace, quiet retries, and the old entry serving until the new servers answer in the card's turn. Its pictures get a server of their own; its embeddings stay as they were.
+  - Only the first enabled card in the core's order gains the work, and only when a plan from the pins gives it. Setup leaves pictures off a card they don't fit on beside the rest, so such a card gains nothing.
+  - The person's choices stand. A card they turned off, an `acceleratorOrder` of their own, and Manor's "Use the graphics card for models when there's an NPU" off add nothing. With that switch off, Manor's default, the card is kept out of the NPU's work, pictures included. A model file of their own keeps the entry theirs, as before.
+  - `AgainDeps` takes `gpuWithNpu`, read at each look (manor.ts' `gpuWithNpu()` when left out). `behindPins` takes it too, on when left out.
+- **Tests:** an old AMD config gains pictures on the Radeon, on this kit's build or an older one; the switch off, the person's own order, a card turned off and a model file of theirs add nothing; Intel's and Snapdragon's generations have no order; a 4 GB card gains nothing; and the update path, the keeper's look through a staged setup to the new entry.
+- **Docs:** NPU-VENDORS.md (Set up again when the kit's pins move on) and ACCELERATORS.md.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.135.1
 
 **On AMD's Ryzen AI 300, every picture goes to the Radeon, which reads small numbers more reliably than the NPU, and for less energy once its server is up. PCs already set up get the new order by themselves.**
