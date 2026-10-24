@@ -72,7 +72,7 @@ export declare const DOING_MAX = 80;
 /**
  * A ticket's contents, which are only informational: `{"pid", "since", "lane", "who"}`, and `"doing"` when the
  * waiter says what the request is for ("search index: Heiward (17 of 673 files)"), at most DOING_MAX characters, and
- * `"work"` when it says its kind (kit 2.109.0: chat, vision, embed or rerank; anything else is left out).
+ * `"work"` when it says its kind (kit 2.111.0: chat, vision, embed or rerank; anything else is left out).
  * @param {Lane} lane
  * @param {number} timeUs
  * @param {number} pid

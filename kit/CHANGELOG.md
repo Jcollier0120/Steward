@@ -2,13 +2,14 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.109.0
+## 2.111.0
 
 **AMD's NPU server is FastFlowLM 1.0.10. A generation can say which device each work spends least on, and on AMD's Ryzen AI 300 pictures go to the Radeon.**
 
 ### What changed
 
 - **FastFlowLM 1.0.10** is AMD's route's server (`npu-vendors.json`: its zip, 30,484,687 bytes, SHA-256 `a7063890d7b91037a07f381a396a0d7787ebdb69e1b03280971faf0a80f35b73`, 296 files). It does the same as 1.0.7 within noise: three interleaved runs of each on a Ryzen AI 7 350's NPU, means, triage 25.0 J against 26.2, a reply 24.6 against 29.4, a summary 47.4 against 51.7, reading 1,024 tokens 31.5 against 31.1, writing 22.9 tokens a second against 22.5 (spec/NPU-BENCHMARK.md). Its NPU check passed every step, and its timeouts stay.
+- **Its signed catalog is the route's** (`catalogs`): `node/catalogs/castellan-amd-fastflowlm-1.0.10.cat`, kit 2.108.0's (17,357 bytes, SHA-256 `5b989f4fc81fe06d0d3a8cb5d1a9a3c7e52f0eb9d45b54d7853fee71b2281a69`, listing 1.0.10's 36 unsigned program files), beside 1.0.7's. Where Smart App Control is on, setup installs it before 1.0.10 runs, asking once for an administrator, and removes 1.0.7's in the same prompt. `tools/sign-binaries.ts`' `FASTFLOWLM_ALSO` is empty: 1.0.10 is the route's own.
 - **Its licences**: the MIT License for its runtime, orchestration and CLI (`LICENSE_RUNTIME.txt`), and AMD's FastFlowLM NPU Binary License for its NPU kernels and engine libraries (`LICENSE_BINARY.txt`: any use, commercial included, redistributed only unmodified with that licence). Both are in its zip with `THIRD_PARTY_NOTICES.txt`. The route's `licence` says so, with the credit its README asks for: "Powered by [FastFlowLM](https://github.com/ROCm/FastFlowLM)".
 - **It still misreads a picture with a side of a whole number of 32 px**, so `sides-of-32` stays. llama.cpp's Qwen3-VL-2B on the Radeon 860M misread the same four sizes (spec/NPU-VENDORS.md); the kit doesn't nudge a card's pictures yet.
 - **1.0.7's folder is retired**: `{tools}\servers\fastflowlm-1.0.7` in the route's `retired`, removed three days after nothing names it (kit 2.101.0's rule). The models in `%USERPROFILE%\.flm\models` serve both, and stay.
@@ -27,6 +28,58 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - A staff member that sends several pictures at once may say how many (`AskOptions.batch`), so a folder's worth starts the Radeon's server on AMD at the first picture.
 - An AMD PC gets 1.0.10, and its order, the next time setup runs: the keeper's look finds 1.0.10 missing and leaves it for setup. A PC on any other NPU gets no `workOrder`.
 - Reeve's own routing (`src/routing.ts`) doesn't read `workOrder` yet. On AMD his embeddings go to the Radeon first by the auto order anyway.
+
+## 2.110.0
+
+**A sold agent doesn't run without a license for its PC. No license, one that can't be read or verified, or another PC's holds its rounds, as an ended trial does.**
+
+### What changed
+
+- **Closed when there's no license** (`license-check.ts`). A sold agent's rounds wait, and Run now with them, when licence.json is missing, can't be read, doesn't verify, or was made for another PC (states `missing`, `unreadable`, `bad-signature` and the new `another-pc`). Its page says "This PC holds no license for it: signing in brings it back" (`NO_LICENSE_TEXT`), and its pill says "No license". Its settings and data are kept, and a license lifts the hold at once. Before, anything the check couldn't judge ran. A paid, lapsed (the Freehold license) or pending license runs as before, as does a running trial.
+- **Its release says whether it's sold** (`release.json`'s `sold`; `ownSale`). `npm run release -- --publish` stamps it from the Exchequer's list (`saleOf`). A sold agent then checks whatever Manor's exchequer.json and staff.json say, so deleting one of Manor's files doesn't stop the check. A copy whose release doesn't say goes by Manor's files, as before: a release from before, a checkout, or one built while the Exchequer couldn't say.
+- **This PC's license** (`license.ts`: `deviceIdFor`, `machineGuid`, `readDeviceId`, `isThisPc`, `DEVICE_FILE`; `everyone.ts`: `sharedLicenseFolder`).
+  - A license's `sub` must be device.json's id, in Manor's folder or in an Everyone install's shared license folder, as Manor's readLicense has it.
+  - With no device.json, an id made from a PC (version 8) is made again from MachineGuid and the folder, so a licence.json copied from another PC on its own isn't this PC's.
+  - An id from before 2026-10-21 (random) with no device.json, or a PC whose MachineGuid can't be read, has nothing to check it by, and counts.
+  - reg.exe is run by its full path.
+- **The API**:
+  - `LicenseCheck.held` is new; `ended` is still the trial's end alone.
+  - `licenseHeld()` and `heldNote()` say either hold. `trialEnded()` and `trialEndedNote()` are their old names, and now say either too. `holdText(check)` gives a hold's words, and `holdPill(text)` its pill.
+  - `dutyStatus(duty, up, held)` takes the hold's words; true still means the trial's end.
+  - The ping's `license` has `held`.
+
+### What an agent must do
+
+- Nothing: release it on this kit. An agent whose Run now doesn't go through `every()` should check `licenseHeld()`, not `licenseNow().ended`.
+
+### Before you update
+
+- **On a PC that holds no license, the sold staff released on this kit wait.** That includes test PCs and developers' PCs: they need a license, and a complimentary one does. Manor already takes them off duty there (Manor#364); now the staff wait by themselves too.
+- **What a held agent shows, and how it runs again.** Its page says "This PC holds no license for it: signing in brings it back" (after a trial, that the trial has ended), its pill says No license (or Trial ended), and its rounds and Run now wait. Signing in on that PC brings it back: Manor's Settings > License, with the email the license was bought with, or a key. The agent sees the new licence.json at its next look, with nothing to reinstall and its settings and data as they were.
+
+## 2.108.0
+
+**Every program the staff's local models run is signed, by its maker or by Castellan, or listed in a catalog Castellan signs, so Windows' Smart App Control lets them run.**
+
+### What's new
+
+- **Castellan's signed builds** (`NpuSignedBuild`, a route's `signedBuilds`, a version each): GenieX without its installer, which Smart App Control blocks as it unpacks its own setup program. Setup downloads Qualcomm's own SDK zip of the version (its `files`, whose `lib` folder is the folder GenieX's installer fills, its QAIRT runtime signed by Qualcomm) and Castellan's zip of signed copies of GenieX's own unsigned files (`signed`), takes the folder from the first, lays the copies over it file by file and puts it where the installer puts GenieX (`installSignedBuild`, `NpuPlan.build`, in place of `download`). No installer runs and no administrator is asked. `copies` pins each signed file by its path, as Qualcomm ships it and signed; `sameFile` takes a signed copy as the file it was, so the X2's plugin patch (npu-patch.ts) goes in over a signed GenieX as over Qualcomm's, keeps the signed copy as `.stock`, and its `needs` are met by signed copies. A version without one installs as before.
+- `overlayFiles` makes the folder of each file it copies where it isn't there.
+- **Who signed each server's files** (`node/signatures.ts`): every .exe, .dll, .pyd and .node in the folder of each model server config.json starts, with the signature Windows finds on it (its maker's, Castellan's, a catalog's, or none) and its signer (`signatureInventory`, `inventorySay`). `node <agent>\src\kit\signatures.ts [--all] [--json]` prints this PC's. The NPU check shows it (`NpuCheckReport.signatures`, its log's Signatures line and each unsigned file), and setup keeps it in signatures.json beside blocked.json (`rememberSignatures`; `SetupOptions.signaturesFile`). A developer's view: nothing in it is a notice for the staff.
+- **Castellan's catalogs** (`node/catalogs.ts`, `node/catalog.cs`). A route's `catalogs` (`NpuSignedCatalog`: a server version, the file, its size and SHA-256, what it lists) are signed catalogs of its maker's unsigned files, carried in `node/catalogs/`. Setup installs the ones for the route's version in Windows' catalog database before anything of the server runs, and removes the route's older ones, through one administrator prompt, only where Smart App Control is on or in evaluation (`ensureCatalogs`, `NpuPlan.catalogs`, `NpuIo.catalogs`). The staff still download the server from its maker. `node <agent>\src\kit\catalogs.ts` lists the ones Windows holds; `remove` removes them; `test <file.cat> <folder>` checks that a catalog lets Windows load what Smart App Control blocks.
+- **The catalog helper**, `catalog` in prebuilt.ts' `HELPERS`: a console program that adds and removes catalogs and loads a file as Windows would to run it. It runs only from its signed copy: compiled on the PC, Smart App Control would block it too.
+- **One administrator prompt a run.** Setup asks for every catalog the run may need before anything of it runs (`catalogsOnce`): the NPU's server's and, beside a CUDA build of llama.cpp, NVIDIA's runtime's (`LLAMA_CATALOGS`, route `cuda`). It asks again only for a catalog it wasn't asked for, so a prompt turned down isn't put up again for the NPU's second models or for the card set up in its place. `NpuIo.catalogs` takes the routes whose older catalogs go (`routes: string[]`).
+
+### What changed
+
+- **The Snapdragon X2 pins GenieX 0.9.3** (its `serverPin`, 0.9.1 before), as the first X does since kit 2.101.0, so one GenieX and one signed build serve both. 0.9.3 is 0.9.1 with `/status` and a signed catalog for its Hexagon libraries: the same llama.cpp e467e5b, plugin source and b11645 embedding server, and the plugin patch's 0.9.3 entry (0.9.1's build over 0.9.3's own) was measured on an X2 running it. Setup puts 0.9.3 on a new X2; the NPU check and the benchmark run an X2 whose GenieX can't say its version as 0.9.3; the reports count an X2's speeds at 0.9.3.
+- **Signed, and pinned** (the signing sitting of 2026-10-23, `tools/sign-binaries.ts`): GenieX 0.9.3's signed build (`signedBuilds`: Qualcomm's SDK zip and Castellan's 16 signed copies, each pinned both ways), so a new Snapdragon X or X2 runs no installer; the Snapdragon NPU's embedding servers from Castellan's signed copies of llama.cpp b11645 and b11125 (`embedServer.download`, the releases repository's, in place of ggml-org's unsigned zips); FastFlowLM 1.0.7's catalog (`catalogs`, castellan-amd-fastflowlm-1.0.7.cat) and NVIDIA's CUDA runtime 12.4's (`LLAMA_CATALOGS`, castellan-cuda-cudart-12.4.cat), carried in `node/catalogs/`; and the catalog helper, signed (`node/prebuilt/catalog-635f89b2d399.exe`).
+- **FastFlowLM 1.0.10's catalog, carried but not used** (`node/catalogs/castellan-amd-fastflowlm-1.0.10.cat`, 17,357 bytes, SHA-256 5b989f4f…; it lists 1.0.10's 36 unsigned program files): made and signed in the same sitting, for the kit that moves AMD's route to FastFlowLM 1.0.10. In 2.108.0 the route stays on 1.0.7 and no route's `catalogs` names it, so setup never installs it.
+- `installSignedBuild` says which step failed (`{ step, why }`: a download, or putting it together), so setup's NPU step fails at `download` or `install` as with an installer; `NpuIo.installBuild` stands in for it.
+
+### Before you update
+
+- Nothing: take the kit as usual. A route without `catalogs` or `signedBuilds` sets up as before, and nothing asks for an administrator where Smart App Control is off. A GenieX already installed isn't changed: its installer's files stay as they are, and an X2 on GenieX 0.9.1 keeps running 0.9.1 with 0.9.1's build (the Smith offers it 0.9.3). An embedding server already set up is kept too: only a new one comes from the signed copy.
 
 ## 2.106.0
 

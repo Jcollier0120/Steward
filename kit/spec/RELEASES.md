@@ -14,6 +14,7 @@ The agents' source stays in their private repositories. What a PC installs is a 
 - Names are kept (`keepNames`), so stack traces in the logs, and an error's or a class's name, read as they did.
 - The **README stays out** of the zip: it's for the repository. LICENSE, `kit.json` and `tools/kit.ts` (the kit's own, public) go in, as before.
 - `release.json` says `"form": "minified"`. `npm run release -- --readable` builds without minifying, to look into on this PC (`"form": "readable"`); it is never published.
+- A published release's `release.json` says whether the Exchequer sells the agent, as its list says then (`"sold": true` or `false`, from `saleOf`; kit 2.110.0). A sold agent checks the license itself (license-check.ts) by it, so no file of Manor's decides that. When the Exchequer can't say, there's no `sold`, and the agent goes by Manor's exchequer.json.
 
 ## Public: `Jcollier0120/Manor-releases`
 

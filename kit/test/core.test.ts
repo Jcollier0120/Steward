@@ -113,7 +113,7 @@ test("a ticket's doing: said only when given, cut to DOING_MAX, read back for a 
   assert.deepEqual(w.waiting.map((x) => x.doing?.length ?? x.doing), ['search index: Porter (3 of 90 files)'.length, undefined, core.DOING_MAX]);
 });
 
-test("a ticket's work (kit 2.109.0): said only when it's a kind of request, read back for counting the pictures waiting", () => {
+test("a ticket's work (kit 2.111.0): said only when it's a kind of request, read back for counting the pictures waiting", () => {
   assert.deepEqual(JSON.parse(core.ticketText('background', 1_700_000_000_000_000, 42, 'reeve', undefined, 'vision')), { pid: 42, since: 1_700_000_000_000, lane: 'background', who: 'reeve', work: 'vision' });
   assert.equal(core.ticketText('background', 1, 42, 'reeve', undefined, 'pictures'), core.ticketText('background', 1, 42, 'reeve'), 'not a kind of request: none');
   const now = Date.now();

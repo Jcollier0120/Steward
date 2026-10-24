@@ -1,5 +1,5 @@
 {
- "about": "Shared test data for the accelerators (ACCELERATORS.md, beside this file): the ids, a card's name, reading Reeve's config, the order, the failure markers, the game check, the candidates for a request and the pick, as the kit's core answers them, with the timings of rules.json. Every implementation of these rules runs them: the kit's core directly, its node part, its dotnet part (the core in Jint). nowMs is the clock unless a case gives its own; a candidates case's workOrder and running, when it has them, go into the state as they are (kit 2.109.0); accelerators are given as a config's raw entries, read by parseAccelerators first; a config's hw, when it has one, is what the PC has (hardware.json), and none is null. Made by kit/test/accelerator-scenarios.ts; take this file from a kit release, unchanged.",
+ "about": "Shared test data for the accelerators (ACCELERATORS.md, beside this file): the ids, a card's name, reading Reeve's config, the order, the failure markers, the game check, the candidates for a request and the pick, as the kit's core answers them, with the timings of rules.json. Every implementation of these rules runs them: the kit's core directly, its node part, its dotnet part (the core in Jint). nowMs is the clock unless a case gives its own; a candidates case's workOrder and running, when it has them, go into the state as they are (kit 2.111.0); accelerators are given as a config's raw entries, read by parseAccelerators first; a config's hw, when it has one, is what the PC has (hardware.json), and none is null. Made by kit/test/accelerator-scenarios.ts; take this file from a kit release, unchanged.",
  "nowMs": 1790000000000,
  "ids": [
   {
@@ -1242,7 +1242,7 @@
    }
   },
   {
-   "case": "workOrder, each work's own order (kit 2.109.0): read with acceleratorOrder auto; a work written wrong, or one that isn't routed, left out",
+   "case": "workOrder, each work's own order (kit 2.111.0): read with acceleratorOrder auto; a work written wrong, or one that isn't routed, left out",
    "raw": {
     "accelerators": [
      {

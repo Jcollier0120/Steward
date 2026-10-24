@@ -2,9 +2,9 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.189
+## 0.36.191
 
-**It hands out the kit 2.109.0: on an AMD Ryzen AI PC, pictures go to the graphics card, where they cost the least energy, and the NPU's server is updated to FastFlowLM 1.0.10.**
+**It hands out the kit 2.111.0: on an AMD Ryzen AI PC, pictures go to the graphics card, where they cost the least energy, and the NPU's server is updated to FastFlowLM 1.0.10.**
 
 ### What's new
 
@@ -12,12 +12,40 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What changed
 
-- **FastFlowLM 1.0.10.** AMD's NPU server is updated. It's as fast and as frugal as 1.0.7, and its new licence is as free. The manor's notices credit it: "Powered by FastFlowLM". The old version's folder is deleted three days after nothing uses it; the model stays.
+- **FastFlowLM 1.0.10.** AMD's NPU server is updated. It's as fast and as frugal as 1.0.7, and its new licence is as free. The manor's notices credit it: "Powered by FastFlowLM". Where Windows' Smart App Control is on, Castellan's signed list of its files lets it run, as 1.0.7's did. The old version's folder is deleted three days after nothing uses it; the model stays.
 - **When the NPU can't run** (Windows' Smart App Control blocking its server, say), each kind of its work goes where it costs least next.
 
 ### Before you update
 
-- Nothing: it updates itself as usual. An AMD PC moves to FastFlowLM 1.0.10, and to the new order, the next time its local AI is set up (Set up local AI) after the manor has looked at its NPU. That downloads 30 MB; the model stays. While the Radeon's picture server runs, it holds 2.8 GB of memory beside the NPU's, until it rests after 5 minutes unused.
+- Nothing: it updates itself as usual. An AMD PC moves to FastFlowLM 1.0.10, and to the new order, the next time its local AI is set up (Set up local AI) after the manor has looked at its NPU. That downloads 30 MB; the model stays. Where Smart App Control is on, that setup asks once for an administrator, to add 1.0.10's list of files and take 1.0.7's away. While the Radeon's picture server runs, it holds 2.8 GB of memory beside the NPU's, until it rests after 5 minutes unused.
+
+## 0.36.190
+
+**It hands out the kit 2.110.0: the staff you pay for run only on a PC that holds your license.**
+
+### What changed
+
+- **The Household and Workshop staff wait on a PC without your license.** That means a PC with no license, one that can't be read, or one made for another PC. Their rounds wait, and their page says signing in brings them back. Their settings and data are kept. Before, a PC that had lost its license kept them running; now they run only where your license is, as after a trial ends.
+- **A license that lapsed still runs what it has** (the Freehold license), as does one waiting for its first payment.
+- **The Steward is staff the license covers too.** On a PC with no license, its rounds wait.
+
+### Before you update
+
+- **Check that every PC running Castellan's paid staff holds a license**, test PCs included: a complimentary license does. Manor's Settings > License on each PC says what it holds. Nothing changes on a PC that holds one.
+- **A waiting employee says so, and signing in brings it back.** Its page says "This PC holds no license for it: signing in brings it back", its pill says No license, and its rounds and Run now wait. Sign in on that PC in Manor's Settings > License, with the email you bought Castellan with (or enter a key): the staff go back on duty, with nothing to reinstall and their settings and data as they were.
+
+## 0.36.188
+
+**It hands out the kit 2.108.0: every program the staff's local models run is signed, so Windows' Smart App Control lets them run.**
+
+### What changed
+
+- **Every program the staff's local models run is signed, so Windows' Smart App Control lets them run.** Where a model server's maker signs nothing, Castellan does: the Snapdragon NPU's embedding server comes from Castellan's signed copy, as the graphics card's and the processor's llama.cpp already do. GenieX, the Snapdragon NPU's server, is put together without its installer: Qualcomm's own files, downloaded from Qualcomm, with Castellan's signed copies of GenieX's own. FastFlowLM (AMD's NPU) and NVIDIA's CUDA runtime are still downloaded from their makers, unchanged, and Castellan signs a list of their files. Where Smart App Control is on, setup adds that list to Windows, asking once for an administrator.
+- **A new Snapdragon X2 gets GenieX 0.9.3**, as the first Snapdragon X does, in place of 0.9.1: the same models, as quick, from the one signed GenieX.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Where Smart App Control is on, the next setup of an AMD NPU or of an NVIDIA card asks once for an administrator; a Snapdragon's asks for none. A GenieX already installed is kept as it is: a Snapdragon X2 on GenieX 0.9.1 keeps running it, and the Smith offers 0.9.3 there. Setup never changes Windows' Smart App Control setting.
 
 ## 0.36.186
 

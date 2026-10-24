@@ -6,9 +6,10 @@ import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
 import { until } from './until.ts';
 
-// The trial's end, checked by the agent itself (node/license-check.ts, kit 2.45.0): an agent the Exchequer sells reads
-// the license Manor holds (licence.json), verified offline, and holds its rounds only once a trial's runsUntil has
-// passed. Everything else (paid, lapsed, no license, one it can't read or verify) runs.
+// The license, checked by the agent itself (node/license-check.ts, kit 2.45.0 and 2.110.0): an agent the Exchequer sells
+// (its release.json says so, else Manor's exchequer.json) reads the license Manor holds (licence.json), verified offline
+// and held against this PC's id, and holds its rounds once a trial's runsUntil has passed, or when this PC holds no
+// license for it (none, one it can't read or verify, another PC's). Paid, lapsed and pending licenses run.
 const root = mkdtempSync(path.join(os.tmpdir(), 'fixture-license-'));
 const manor = path.join(root, 'manor');
 mkdirSync(path.join(manor, 'app'), { recursive: true });
@@ -76,11 +77,12 @@ const SOLD = [
 
 beforeEach(() => {
   sells(SOLD);
+  rmSync(path.join(manor, 'device.json'), { force: true });
   rmSync(path.join(root, 'data'), { recursive: true, force: true });
   check.forgetLicenseCheck();
 });
 
-const at = (id = 'fixture', now = Date.now(), latestSeen = 0) => check.checkLicense({ id, home: manor, now, latestSeen });
+const at = (id = 'fixture', now = Date.now(), latestSeen = 0) => check.checkLicense({ id, home: manor, now, latestSeen, guid: null });
 
 test('a trial still running: checked, and it runs', () => {
   hold(license({ tier: 'trial', runsUntil: Date.now() + 3 * DAY }));
@@ -114,7 +116,7 @@ test('a trial that has ended holds it: its rounds, Run now, its ping and its pag
   const s = dutyStatus({ onDuty: true, since: null }, true, true);
   assert.equal(s.running, false);
   assert.match(s.summary, /^The trial ended: a license brings it back\. .*settings and data are kept/);
-  assert.deepEqual(check.licensePing(check.licenseNow()), { license: { state: 'trial-ended', ended: true, runsUntil: c.runsUntil, problem: null } });
+  assert.deepEqual(check.licensePing(check.licenseNow()), { license: { state: 'trial-ended', held: true, ended: true, runsUntil: c.runsUntil, problem: null } });
 
   // Its page, string-built and React: the pill and the banner, in plain words, and no "Back on duty".
   const look = { busy: 'Working' } as Parameters<typeof pillOf>[0]['look'];
@@ -151,44 +153,73 @@ test('paid and lapsed: the Freehold license runs, forever', () => {
   }
 });
 
-test('a bad signature: it runs, and says why', () => {
+test('a bad signature: no license for this PC, so it holds, and says why', () => {
   const other = generateKeyPairSync('ed25519');
   hold(license({ tier: 'trial', runsUntil: Date.now() - DAY }), other.privateKey);
   let c = at();
-  assert.deepEqual([c.checked, c.state, c.ended], [true, 'bad-signature', false]);
-  assert.match(c.problem ?? '', /doesn't verify.*keeps running/);
+  assert.deepEqual([c.checked, c.state, c.held, c.ended], [true, 'bad-signature', true, false]);
+  assert.match(c.problem ?? '', /doesn't verify.*rounds wait until this PC holds one/);
 
   // A payload changed after signing doesn't verify either.
   const jws = signed(license({ tier: 'trial', runsUntil: Date.now() - DAY })).split('.');
   jws[1] = Buffer.from(JSON.stringify(license({ tier: 'trial', runsUntil: Date.now() - 2 * DAY }))).toString('base64url');
   writeFileSync(licenceFile, JSON.stringify({ token: 'x', licence: jws.join('.') }));
   c = at();
-  assert.deepEqual([c.state, c.ended], ['bad-signature', false]);
-  assert.equal(check.licenseNow().ended, false);
+  assert.deepEqual([c.state, c.held, c.ended], ['bad-signature', true, false]);
+  assert.equal(check.licenseNow().held, true);
+  assert.equal(check.licenseHeld(), 'This PC holds no license for it: signing in brings it back');
 });
 
-test('no licence.json: it runs, and says why', () => {
+test('no licence.json: a sold agent holds, says why, and its page says signing in brings it back', async () => {
   rmSync(licenceFile, { recursive: true, force: true });
   const c = at();
-  assert.deepEqual([c.checked, c.state, c.ended], [true, 'missing', false]);
-  assert.match(c.problem ?? '', /no license file.*keeps running/);
-  assert.equal(check.licenseNow().ended, false);
-  assert.equal(check.trialEnded(), null);
+  assert.deepEqual([c.checked, c.state, c.held, c.ended], [true, 'missing', true, false]);
+  assert.match(c.problem ?? '', /holds no license, so its rounds wait until this PC holds one/);
+  const now = check.licenseNow();
+  assert.deepEqual([now.held, now.ended], [true, false]);
+  assert.equal(check.licenseHeld(), 'This PC holds no license for it: signing in brings it back');
+  assert.equal(check.trialEnded(), check.licenseHeld(), "kit 2.45.0's name says the same");
+
+  // Its rounds wait, and Run now with them.
+  let ran = 0;
+  const job = every(60_000, async () => void ran++, { firstDelayMs: 0, name: 'unlicensed' });
+  try {
+    await until(() => readJson<any>(roundFile(), {}).rounds?.unlicensed, 10_000, 'the unlicensed round in round.json');
+    assert.deepEqual([ran, readJson<any>(roundFile(), {}).rounds.unlicensed.waiting], [0, 'This PC holds no license for it: signing in brings it back']);
+    assert.equal(job.runNow(), false);
+  } finally {
+    job.stop();
+  }
+
+  // What Manor reads, and its page.
+  const s = check.holdText(now);
+  const status = dutyStatus({ onDuty: true, since: null }, true, s);
+  assert.equal(status.running, false);
+  assert.match(status.summary, /^This PC holds no license for it: signing in brings it back. Its rounds wait/);
+  assert.equal(check.licensePing(now).license && (check.licensePing(now).license as { held: boolean }).held, true);
+  const look = { busy: 'Working' } as Parameters<typeof pillOf>[0]['look'];
+  assert.equal(pillOf({ look, duty: { onDuty: true, since: null }, ended: check.licenseHeld() }).text, 'No license');
+  const html = page({ token: 't', body: '<p>body</p>' });
+  assert.match(html, /This PC holds no license for it: signing in brings it back. Its settings and data are kept/);
+  assert.doesNotMatch(html, /Back on duty/);
+  const shell = pageShell({ onboarding: null });
+  assert.match(shell.trialEnded ?? '', /^This PC holds no license for it/);
+  assert.equal(shell.pill.text, 'No license');
 });
 
-test('an unreadable licence.json: it runs, and says why', () => {
+test('an unreadable licence.json: it holds, and says why', () => {
   writeFileSync(licenceFile, '{ not json');
   let c = at();
-  assert.deepEqual([c.state, c.ended], ['unreadable', false]);
-  assert.match(c.problem ?? '', /isn't JSON.*keeps running/);
+  assert.deepEqual([c.state, c.held, c.ended], ['unreadable', true, false]);
+  assert.match(c.problem ?? '', /isn't JSON.*rounds wait/);
   writeFileSync(licenceFile, JSON.stringify({ token: 'x' }));
-  assert.deepEqual([at().state, at().ended], ['unreadable', false]);
+  assert.deepEqual([at().state, at().held], ['unreadable', true]);
   // Not a file at all.
   rmSync(licenceFile, { force: true });
   mkdirSync(licenceFile);
   c = at();
-  assert.deepEqual([c.state, c.ended], ['unreadable', false]);
-  assert.equal(check.licenseNow().ended, false);
+  assert.deepEqual([c.state, c.held], ['unreadable', true]);
+  assert.equal(check.licenseNow().held, true);
   rmSync(licenceFile, { recursive: true, force: true });
 });
 
@@ -224,7 +255,7 @@ test('free and internal agents never check: Manor, Heiward, an agent the Exchequ
     assert.deepEqual(check.licensePing(c), {}, 'its ping is as before');
   }
   assert.equal(at('fixture').ended, true, 'while the sold one is held');
-  // No exchequer.json (Manor hasn't heard from the Exchequer): when in doubt, it doesn't check.
+  // No exchequer.json (Manor hasn't heard from the Exchequer) and a release that doesn't say: it doesn't check.
   sells(null);
   assert.equal(at('fixture').checked, false);
   // One listed as free isn't sold either.
@@ -248,4 +279,76 @@ test("the shared part reads licence.json as Manor's license.ts does", () => {
   rmSync(licenceFile, { force: true });
   assert.equal(lic.readHeld(manor), null);
   assert.deepEqual(lic.readHeldFile(manor), { missing: true });
+});
+
+test("another PC's license holds it: device.json's id, or one made again from MachineGuid when there's none", () => {
+  const device = path.join(manor, 'device.json');
+  const payload = license({ tier: 'household' });
+  hold(payload);
+  // device.json says this PC is another than the license's: as Manor's readLicense has it.
+  writeFileSync(device, JSON.stringify({ id: '11111111-1111-4111-8111-111111111111' }));
+  let c = at();
+  assert.deepEqual([c.state, c.held, c.ended], ['another-pc', true, false]);
+  assert.match(c.problem ?? '', /made for another PC, so its rounds wait until this PC holds one/);
+  writeFileSync(device, JSON.stringify({ id: payload.sub }));
+  assert.deepEqual([at().state, at().held], ['paid', false]);
+
+  // No device.json (licence.json copied alone): an id made from a PC is made again here, from MachineGuid and Manor's folder.
+  rmSync(device, { force: true });
+  const guid = '6f1d2c3b-4a59-4e1f-9b2a-0c1d2e3f4a5b';
+  const made = lic.deviceIdFor(guid, manor);
+  assert.match(made, /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  hold({ ...payload, sub: made });
+  const on = (g: string | null) => check.checkLicense({ id: 'fixture', home: manor, guid: g });
+  assert.deepEqual([on(guid).state, on(guid).held], ['paid', false], "this PC's own");
+  assert.deepEqual([on('0f0e0d0c-0b0a-4909-8807-060504030201').state, on('0f0e0d0c-0b0a-4909-8807-060504030201').held], ['another-pc', true], "another PC's");
+  assert.equal(lic.deviceIdFor(guid.toUpperCase(), manor.toUpperCase()), made, 'made the same whatever the case');
+  // Nothing to check it by: MachineGuid unread, or an id from before 2026-10-21 (random, version 4).
+  assert.equal(on(null).held, false);
+  hold(payload);
+  assert.equal(on('0f0e0d0c-0b0a-4909-8807-060504030201').held, false);
+});
+
+test("an Everyone install: the PC's id is in the shared license folder, and the license is its", () => {
+  const shared = path.join(root, 'shared');
+  mkdirSync(path.join(shared, 'license'), { recursive: true });
+  writeFileSync(path.join(shared, 'everyone.json'), '{}');
+  const env = { ...process.env, CASTELLAN_SHARED: shared };
+  const payload = license({ tier: 'workshop' });
+  hold(payload);
+  writeFileSync(path.join(shared, 'license', 'device.json'), JSON.stringify({ id: payload.sub }));
+  const c = check.checkLicense({ id: 'fixture', home: manor, env, guid: null });
+  assert.deepEqual([c.state, c.held], ['paid', false]);
+  writeFileSync(path.join(shared, 'license', 'device.json'), JSON.stringify({ id: '11111111-1111-4111-8111-111111111111' }));
+  assert.equal(check.checkLicense({ id: 'fixture', home: manor, env, guid: null }).state, 'another-pc');
+  rmSync(shared, { recursive: true, force: true });
+});
+
+test("its release says whether it's sold (release.json's sold, kit 2.110.0), whatever Manor's files say", () => {
+  rmSync(licenceFile, { force: true });
+  // Sold: it checks with no exchequer.json, and with staff.json holding it back.
+  sells(null, [{ id: 'fixture', heldBack: true }]);
+  const c = check.checkLicense({ id: 'fixture', home: manor, sold: true, guid: null });
+  assert.deepEqual([c.checked, c.state, c.held], [true, 'missing', true]);
+  // Not sold: it never checks, though the Exchequer's list says it is.
+  sells(SOLD);
+  assert.equal(check.checkLicense({ id: 'fixture', home: manor, sold: false, guid: null }).checked, false);
+  // Saying nothing: Manor's files decide, as before.
+  assert.equal(check.checkLicense({ id: 'fixture', home: manor, sold: null, guid: null }).checked, true);
+  // Manor and Heiward never check, whatever their release says.
+  assert.equal(check.checkLicense({ id: 'heiward', home: manor, sold: true, guid: null }).checked, false);
+
+  // ownSale reads it from the copy's release.json.
+  const copy = mkdtempSync(path.join(os.tmpdir(), 'fixture-release-'));
+  try {
+    assert.equal(check.ownSale(copy), null, 'no release.json (a checkout)');
+    writeFileSync(path.join(copy, 'release.json'), JSON.stringify({ id: 'fixture', version: '1.0.0', sold: true }));
+    assert.equal(check.ownSale(copy), true);
+    writeFileSync(path.join(copy, 'release.json'), '﻿' + JSON.stringify({ id: 'fixture', version: '1.0.0', sold: false }));
+    assert.equal(check.ownSale(copy), false);
+    writeFileSync(path.join(copy, 'release.json'), JSON.stringify({ id: 'fixture', version: '1.0.0' }));
+    assert.equal(check.ownSale(copy), null, 'a release from before');
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+  }
 });

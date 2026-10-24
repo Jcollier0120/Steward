@@ -156,7 +156,7 @@ const configs: { case: string; raw: unknown; hw?: core.Hardware }[] = [
     hw: { npu: false, cards: [], cpuName: 'AMD Ryzen 9 7950X 16-Core Processor' },
   },
   {
-    case: "workOrder, each work's own order (kit 2.109.0): read with acceleratorOrder auto; a work written wrong, or one that isn't routed, left out",
+    case: "workOrder, each work's own order (kit 2.111.0): read with acceleratorOrder auto; a work written wrong, or one that isn't routed, left out",
     raw: {
       accelerators: amdEntries,
       acceleratorOrder: 'auto',
@@ -269,7 +269,7 @@ const candidateCases: { case: string; need: core.Need; failures?: Record<string,
   { case: 'the last resort still keeps background work off a card a game is using', need: bg('chat', 500), failures: { 'gpu-a': failed(1), 'gpu-b': failed(2), npu: failed(3) }, games: gameOnB },
   { case: 'one working is enough: the failed stay skipped', need: bg('chat', 500), failures: { 'gpu-a': failed(1), 'gpu-b': failed(9.5) } },
   { case: 'nothing fits: no candidates and nothing skipped', need: bg('chat', 20_000) },
-  // Each work's own order (kit 2.109.0): AMD's, the Radeon first for pictures, unless only the NPU's server is up.
+  // Each work's own order (kit 2.111.0): AMD's, the Radeon first for pictures, unless only the NPU's server is up.
   { case: "workOrder: a picture goes to the Radeon first by vision's order, both servers down", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: false, 'gpu-amd-radeon-860m-graphics': false } },
   { case: "workOrder: runningFirst, only the NPU's server up: the NPU is first, and so the only candidate", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false } },
   { case: 'workOrder: runningFirst, both servers up: the Radeon first', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true } },
@@ -309,7 +309,7 @@ export function makeAcceleratorVectors() {
   const byId = (list: core.Accelerator[]) => list.map((a) => a.id);
   return {
     about:
-      "Shared test data for the accelerators (ACCELERATORS.md, beside this file): the ids, a card's name, reading Reeve's config, the order, the failure markers, the game check, the candidates for a request and the pick, as the kit's core answers them, with the timings of rules.json. Every implementation of these rules runs them: the kit's core directly, its node part, its dotnet part (the core in Jint). nowMs is the clock unless a case gives its own; a candidates case's workOrder and running, when it has them, go into the state as they are (kit 2.109.0); accelerators are given as a config's raw entries, read by parseAccelerators first; a config's hw, when it has one, is what the PC has (hardware.json), and none is null. Made by kit/test/accelerator-scenarios.ts; take this file from a kit release, unchanged.",
+      "Shared test data for the accelerators (ACCELERATORS.md, beside this file): the ids, a card's name, reading Reeve's config, the order, the failure markers, the game check, the candidates for a request and the pick, as the kit's core answers them, with the timings of rules.json. Every implementation of these rules runs them: the kit's core directly, its node part, its dotnet part (the core in Jint). nowMs is the clock unless a case gives its own; a candidates case's workOrder and running, when it has them, go into the state as they are (kit 2.111.0); accelerators are given as a config's raw entries, read by parseAccelerators first; a config's hw, when it has one, is what the PC has (hardware.json), and none is null. Made by kit/test/accelerator-scenarios.ts; take this file from a kit release, unchanged.",
     nowMs: NOW,
     ids: names.map((name) => ({ name, id: core.acceleratorId('gpu', name) })),
     isId: ids.map((id) => ({ id, valid: core.isId(id), kind: core.kindOfId(id) })),

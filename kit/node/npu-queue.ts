@@ -200,7 +200,7 @@ export interface TurnOptions {
   who?: string;
   /** What this request is for, shown beside who ("search index: Heiward (17 of 673 files)"): informational, at most 80 characters. */
   doing?: string;
-  /** The request's kind (chat, vision, embed, rerank), in its ticket: other processes count the pictures waiting by it (kit 2.109.0). */
+  /** The request's kind (chat, vision, embed, rerank), in its ticket: other processes count the pictures waiting by it (kit 2.111.0). */
   work?: string;
   /** Don't join when this many are already waiting: throws QueueFull at once. */
   maxAhead?: number;

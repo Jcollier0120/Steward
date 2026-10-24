@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// Each work's own order (kit 2.109.0): config.json's workOrder, which setup writes from the NPU's generation
+// Each work's own order (kit 2.111.0): config.json's workOrder, which setup writes from the NPU's generation
 // (npu-vendors.json's `order`), puts a request's candidates in that work's order, and with runningFirst, whose servers
 // are up first. AMD's pictures go to the Radeon, and to the NPU only when FastFlowLM is up and the Radeon's server isn't.
 // Fake model servers in this process throughout.

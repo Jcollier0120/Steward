@@ -9,6 +9,7 @@ import { exitedSay, loadFailure, logLength, longFetch, processMemory, refusedCon
 import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { npuReportFile, npuReportFromCheck, rememberNpuReport, reporterId } from './npu-report.ts';
 import { fillerPrompt, kitVersion, mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
+import { inventoryCount, inventorySay, serverPrograms, type SignatureInventory, signatureInventory } from './signatures.ts';
 
 export { processMemory, type RunningServer, startServer } from './npu-server.ts';
 
@@ -74,6 +75,8 @@ export interface NpuCheckReport {
    * verified, every step passing on its NPU flips it to verified with the timeouts measured. Null otherwise.
    */
   patch: Record<string, unknown> | null;
+  /** Every program file its servers run, with who signed it (signatures.ts, kit 2.108.0); absent when it wasn't read. */
+  signatures?: SignatureInventory | null;
   ok: boolean;
 }
 
@@ -136,6 +139,8 @@ export interface NpuCheckOptions {
     clearCache?: (dir: string) => void;
     /** The version of the route's server installed here (npu-vendors.ts' installedVersion by default). */
     serverVersion?: (route: NpuRoute) => Promise<string | null>;
+    /** Reads who signed the servers' program files (signatures.ts' signatureInventory; a test run reads none unless given). */
+    signatures?: (programs: { who: string[]; program: string }[]) => Promise<SignatureInventory>;
     now?: () => number;
   };
 }
@@ -452,6 +457,19 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
             : `${name} exited ${power.code}, which isn't the known failure: whether ${route.server} can set the NPU's power mode is unknown`,
       data: { ...power },
     });
+  }
+  // Who signed each program file its servers run (signatures.ts, kit 2.108.0), for a round of signing: noted, never failed.
+  const programs = entry ? serverPrograms({ accelerators: [entry] }, env) : [{ who: ['npu chat'], program: plan.exe }, ...(plan.embed ? [{ who: ['npu embed'], program: plan.embed.exe }] : [])];
+  const inventory = o.io?.signatures ?? (process.env.NODE_TEST_CONTEXT ? null : (p: typeof programs) => signatureInventory(p, { env, sac: d.smartAppControl ?? null }));
+  if (inventory) {
+    try {
+      report.signatures = await inventory(programs);
+      const { files, unsigned } = inventoryCount(report.signatures);
+      log(`Signatures: ${files} program files, ${unsigned ? `${unsigned} unsigned` : 'every one signed'}${unsigned ? ':' : ''}`);
+      if (unsigned) for (const l of inventorySay(report.signatures).slice(1)) log(`  ${l}`);
+    } catch (e: any) {
+      log(`Signatures: couldn't be read (${e?.message ?? e})`);
+    }
   }
   if (!entry) return finish(1);
 

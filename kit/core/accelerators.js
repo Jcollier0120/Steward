@@ -60,7 +60,7 @@ import { slotNames } from './queue.js';
 
 /**
  * @typedef {object} WorkOrderOf One kind of work's order on this PC, from its NPU's generation (setup writes it from
- * npu-vendors.json's `order`, kit 2.109.0).
+ * npu-vendors.json's `order`, kit 2.111.0).
  * @property {AcceleratorKind[]} devices The kinds of device, first preferred; any it leaves out follow, in the auto order.
  * @property {boolean} [runningFirst] A device whose server is running goes before one whose server isn't, the order kept
  * otherwise: on AMD's Ryzen AI 300, a picture goes to the Radeon unless only FastFlowLM is up.
@@ -890,7 +890,7 @@ export function gameCards(rules, load, accs, opts) {
  * Busy, resting after a long line, or loading its model, it is waited for, never passed over. An
  * acceleratorOrder that puts something else first is the person's choice, and kept.
  *
- * **The work's own order** (kit 2.109.0): the config's `workOrder` for the request's kind, when it has one, puts the
+ * **The work's own order** (kit 2.111.0): the config's `workOrder` for the request's kind, when it has one, puts the
  * accelerators in that order first (workOrdered), with `running` saying whose servers are up for its runningFirst. The
  * NPU first then means first in that order: AMD's pictures go to the Radeon, and to the NPU only when its server is up
  * and the Radeon's isn't. With its batchAt, from that many of the work waiting (`waiting`, this request included) the

@@ -690,7 +690,7 @@ export interface KeeperSettings {
 }
 
 /**
- * The keys the keeper owns in config.json: its Settings page writes these and no others. `workOrder` (kit 2.109.0) is
+ * The keys the keeper owns in config.json: its Settings page writes these and no others. `workOrder` (kit 2.111.0) is
  * setup's, from the NPU's generation (npu-vendors.ts' workOrderFor), and moves and is mirrored with the rest.
  */
 export const KEEPER_KEYS = ['accelerators', 'acceleratorOrder', 'workOrder', 'npuIdleStopMinutes', 'gpuIdleStopMinutes'] as const;

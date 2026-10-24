@@ -29,7 +29,7 @@ Every model Castellan runs today is a Qwen model, at 4-bit weights except Intel'
 | Qualcomm X | GenieX 0.9.3 (its pin, kit 2.101.0) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0), as on the X2; Qwen3-VL-4B-Instruct (W4A16) its fallback | 4-bit; also does vision, on the Hexagon's second session |
 | Qualcomm X2 | GenieX 0.9.x (its llama.cpp plugin; the X2 pins 0.9.1) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Hexagon's second session (on the Adreno under 0.8.0) |
 | Intel | OpenVINO Model Server 2026.4.1, with Castellan's build of OpenVINO GenAI | Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov (kit 2.103.0; Qwen3-4B-Instruct-2507 int4-cw before) | 8-bit symmetric, per channel; also does vision |
-| AMD | FastFlowLM 1.0.10 (kit 2.109.0; 1.0.7 before) | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
+| AMD | FastFlowLM 1.0.10 (kit 2.111.0; 1.0.7 before) | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
 
 They are not the same weights: each maker's NPU needs its own format, Qualcomm's are vision models, and AMD's is a smaller model that does both. So the chips board doesn't claim identical models. It compares what each chip delivers with its shipped model, names the model on every row, and shows a quality score beside the speed, so a faster chip whose model answers worse can't hide it.
 
@@ -357,7 +357,7 @@ The energy is the chip's (`rapl_package0_pkg`), not the whole PC's. AMD's counte
 - **Speed is close for writing** (22.5–26.4 tokens a second); FastFlowLM's first answer after a start (8.1 s) and its short answer (708 ms) are the slowest, and the NPU answers two more quality items than llama.cpp does with the model's GGUF.
 - Two rests caught other work: the graphics' second run's rest with no model (10.1 W, against 4.0–4.6) and the processor's second run's rest with its model loaded. Each made only that run's "keeping it loaded" wrong. The medians leave them out.
 
-**FastFlowLM 1.0.10 against 1.0.7** (kit 2.109.0, which pins 1.0.10). The same PC, NPU driver 32.0.20102.4480, the quick profile, three runs of each version interleaved (1.0.10, 1.0.7, and so on), the NPU alone, means (range), 2026-10-23:
+**FastFlowLM 1.0.10 against 1.0.7** (kit 2.111.0, which pins 1.0.10). The same PC, NPU driver 32.0.20102.4480, the quick profile, three runs of each version interleaved (1.0.10, 1.0.7, and so on), the NPU alone, means (range), 2026-10-23:
 
 | On the NPU | FastFlowLM 1.0.10 | FastFlowLM 1.0.7 |
 |---|---|---|

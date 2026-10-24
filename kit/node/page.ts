@@ -3,7 +3,7 @@ import { APP } from '../app.ts';
 import { shownDataDir } from './demo.ts';
 import { isDeveloper } from './developer.ts';
 import { duty, type Duty } from './duty.ts';
-import { trialEnded, trialEndedNote } from './license-check.ts';
+import { heldNote, holdPill, licenseHeld } from './license-check.ts';
 import { lookFor, sceneSvg, type Look } from './look.ts';
 import { manorLink, manorSettingsUrl, manorStaffUrl, type ManorLink } from './manor.ts';
 import { firstRoundNow, roundTimes, type RoundState } from './schedule.ts';
@@ -114,8 +114,8 @@ export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: num
   if (o.first === 'waiting') return { kind: 'busy', text: 'Settling in', title: 'Its first round waits its turn: agents new to the manor do their first rounds one at a time, so this PC is never swamped.' };
   if (o.first === 'running' && o.look.firstRound) return { kind: 'busy', text: 'Settling in', title: `Its first round: ${o.look.firstRound}. It takes longer than the rounds after it, which only catch up on what changed.` };
   if (o.busy) return { kind: 'busy', text: o.look.busy, title: "A round is under way. This page refreshes itself until it's done." };
-  // The trial has ended (license-check.ts): nothing runs until a license brings it back.
-  if (o.ended) return { kind: 'off', text: 'Trial ended', title: `${o.ended}. Its settings and data are kept.` };
+  // The trial has ended, or this PC holds no license (license-check.ts): nothing runs until a license brings it back.
+  if (o.ended) return { kind: 'off', text: holdPill(o.ended), title: `${o.ended}. Its settings and data are kept.` };
   // Its required settings not filled in yet (required.ts): nothing runs until they are.
   if (o.needs) return { kind: 'off', text: 'Needs settings', title: `Waiting for its settings before it can start: ${o.needs}.` };
   if (!o.duty.onDuty) return { kind: 'off', text: 'Off duty', title: `Off duty since ${ago(o.duty.since, o.now)}: its scheduled rounds are paused. Run now still works.` };
@@ -191,7 +191,7 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
 <body>
 <header class="titlebar${o.busy ? ' busy' : ''}" data-agent="${esc(APP.id)}">
   ${backToManor(manor)}
-  <a class="brand" href="#/"><img class="brand-mark" src="/favicon.svg" alt="" width="28" height="28"><div class="brand-text"><div class="name-line"><h1>${esc(APP.name)}</h1>${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, first: firstRoundNow(), ended: trialEnded() })}</div><p class="role" title="${esc(APP.role)}">${esc(APP.role)}</p></div></a>
+  <a class="brand" href="#/"><img class="brand-mark" src="/favicon.svg" alt="" width="28" height="28"><div class="brand-text"><div class="name-line"><h1>${esc(APP.name)}</h1>${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, first: firstRoundNow(), ended: licenseHeld() })}</div><p class="role" title="${esc(APP.role)}">${esc(APP.role)}</p></div></a>
   ${sceneSvg(look)}
   <div class="tools">
     <a class="tool-link" id="settings-link" href="#/settings" title="Settings" hidden>${GEAR}<span>Settings</span></a>
@@ -199,7 +199,7 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
     <span class="titlebar-action" id="titlebar-action"></span>
   </div>
 </header>
-${settling(look, firstRoundNow())}${trialEnded() ? trialEndedBanner() : offDuty(d)}<main class="view">
+${settling(look, firstRoundNow())}${licenseHeld() ? heldBanner() : offDuty(d)}<main class="view">
 ${o.body}
 ${workSection({ developer: dev })}
 </main>
@@ -513,9 +513,9 @@ function settling(look: Look, first: RoundState['firstRound']): string {
 ` : '';
 }
 
-/** The trial has ended (license-check.ts): said in plain words, in place of the off-duty banner, with no Back on duty. */
-function trialEndedBanner(): string {
-  return `<div class="banners"><div class="banner-note offduty trial-ended" role="status"><span>${esc(trialEndedNote())}</span></div></div>
+/** The trial has ended, or this PC holds no license (license-check.ts): said in plain words, in place of the off-duty banner, with no Back on duty. */
+function heldBanner(): string {
+  return `<div class="banners"><div class="banner-note offduty trial-ended" role="status"><span>${esc(heldNote())}</span></div></div>
 `;
 }
 

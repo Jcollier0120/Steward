@@ -128,7 +128,7 @@ export interface AskOptions {
   onWaking?: (w: Waking) => void;
   /**
    * How many requests of this kind the caller is sending together, this one included, when it knows: a folder of
-   * screenshots, say. They count with those already waiting toward the work's order's batchAt (kit 2.109.0): on AMD's
+   * screenshots, say. They count with those already waiting toward the work's order's batchAt (kit 2.111.0): on AMD's
    * Ryzen AI 300, 4 or more pictures go to the Radeon even while only FastFlowLM is up.
    */
   batch?: number;
@@ -278,7 +278,7 @@ function joinWaiting(work: Work): () => void {
 }
 
 /**
- * How many requests of `work` wait (kit 2.109.0): this process's that haven't started their turn (a request counts from
+ * How many requests of `work` wait (kit 2.111.0): this process's that haven't started their turn (a request counts from
  * when it's asked, so a batch sent at once counts itself whole), and other processes' tickets in these turns' lines that
  * say they're of it (a ticket's `work`; one that doesn't say counts as none). For the work's order's batchAt.
  */

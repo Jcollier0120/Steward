@@ -6,7 +6,7 @@ import { pipeline, type Readable } from 'node:stream';
 import { APP, HOST_NAME } from '../app.ts';
 import { isDeveloper } from './developer.ts';
 import { duty, setDuty } from './duty.ts';
-import { licenseNow, licensePing, startLicenseCheck } from './license-check.ts';
+import { holdText, licenseNow, licensePing, startLicenseCheck } from './license-check.ts';
 import { dutyStatus } from './service.ts';
 import { manorIcon, manorLink } from './manor.ts';
 import { namedLauncher, namedWanted } from './named.ts';
@@ -235,7 +235,7 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     '/api/ping': () => {
       const developer = isDeveloper();
       const license = licenseNow();
-      return { json: { app: APP.id, name: APP.name, version: APP.version, ...(developer ? { pid: process.pid } : {}), ...dutyStatus(duty(), true, license.ended), ...licensePing(license), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), developer, repairs: repairKinds(), ...opts.ping?.() } };
+      return { json: { app: APP.id, name: APP.name, version: APP.version, ...(developer ? { pid: process.pid } : {}), ...dutyStatus(duty(), true, holdText(license)), ...licensePing(license), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), developer, repairs: repairKinds(), ...opts.ping?.() } };
     },
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
     // Manor's icon, from this agent's own address, for the title bar's "Back to <manor>" (manor.ts).
