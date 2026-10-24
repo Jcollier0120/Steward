@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.193
+
+**It hands out the kit 2.112.1: on an AMD Ryzen AI PC, a picture can now wait a moment for the graphics card instead of running on the NPU.**
+
+### What changed
+
+- **A picture can now wait a moment for the Radeon instead of running on the NPU.** Since 0.36.191 pictures go to the Radeon graphics, where one costs 10 J against the NPU's 27 J. But while the Radeon read one picture, the next went to the NPU if it was free, so most of a batch of 4 sent at once ran on the NPU. Now a picture waits in the Radeon's line, about half a second for each picture ahead of it. The NPU reads it only when the Radeon can't: its server failed lately, a game has the card, or it's resting after a long line. As before, a single picture goes to the NPU when only the NPU's server is running.
+- **When 4 of a staff member's background pictures already wait in that line, the next waits for a later round**, as it would on the NPU, rather than going to the NPU.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Only pictures on an AMD Ryzen AI PC change; chat and search go where they went.
+
 ## 0.36.191
 
 **It hands out the kit 2.111.0: on an AMD Ryzen AI PC, pictures go to the graphics card, where they cost the least energy, and the NPU's server is updated to FastFlowLM 1.0.10.**

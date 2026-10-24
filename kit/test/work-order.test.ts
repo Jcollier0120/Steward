@@ -171,6 +171,30 @@ test("the owner's batch rule: 3 pictures at once stay on the NPU, 4 go to the Ra
   }
 });
 
+// The order's first waits in its line (kit 2.112.1). An agent's background pictures each count those of its own already
+// headed to a line, so before this the 2nd of a batch saw the Radeon busier than a free NPU and ran there at 26.6 J.
+test("pictures wait in the Radeon's line: background ones sent at once all go there, the NPU only when it can't", async () => {
+  fresh();
+  const npu = await fakeServer();
+  const radeon = await fakeServer();
+  try {
+    const bg = { maxTokens: 8, lane: 'background' as const };
+    const send = async (model: InstanceType<typeof Npu>, n: number) => (await Promise.all(Array.from({ length: n }, () => model.vision(image, 'What is it?', bg)))).map((a) => a.accelerator.id);
+    const on = (ids: string[]) => new Npu(config(npu.baseUrl, radeon.baseUrl, BATCH_ORDER), { gpuWithNpu: () => true, embedGivesWay: none, serversUp: async () => (id: string) => ids.includes(id) });
+    assert.deepEqual(await send(on(['npu']), 4), [RADEON, RADEON, RADEON, RADEON], "only FastFlowLM up: the batch starts the Radeon's server and waits there");
+    assert.deepEqual(await send(on(['npu', RADEON]), 4), [RADEON, RADEON, RADEON, RADEON], 'both up: none shared out to the NPU');
+    assert.deepEqual(await send(on(['npu', RADEON]), 2), [RADEON, RADEON], 'two, both up: the second waits for the busy Radeon');
+    assert.equal(npu.asked(), 0);
+    assert.deepEqual(await send(on(['npu']), 3), ['npu', 'npu', 'npu'], "3, only FastFlowLM up: the NPU's line, as before");
+    // The Radeon failed lately: the batch goes to the NPU, the next in the order, and waits in its line.
+    A.markFailed(RADEON, 'vision: refused', 'test');
+    assert.deepEqual(await send(on(['npu', RADEON]), 4), ['npu', 'npu', 'npu', 'npu']);
+  } finally {
+    await npu.close();
+    await radeon.close();
+  }
+});
+
 test("other agents' pictures in the NPU's line count toward the batch, by their tickets' work", async () => {
   fresh();
   const npu = await fakeServer();
