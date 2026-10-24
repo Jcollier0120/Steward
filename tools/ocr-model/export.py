@@ -1,13 +1,14 @@
 """The models as the kit's reader takes them (kit/node/ocr-npu.cs): det.onnx, rec.onnx and charset.txt, with the
 license and notice that go with them (LICENSE.txt, NOTICE.txt): what the ocr-model-v<version> release holds.
 
-    python export.py <models> <checkpoint.pt | -> <out dir>
+    python export.py <models> <checkpoint.pt | -> <out dir> [--space-bias X]
 
 - det.onnx: PP-OCRv6 tiny's detector as published, its input [1, 3, h, w] (the reader fixes h and w at its tile size).
 - rec.onnx: the fine-tuned recognizer (train.py's checkpoint; - for the published weights with our characters),
   [n, 3, 48, w] in (w a multiple of 8), logits [n, w / stride, classes] out (the checkpoint's stride, 8 or 4; no
   softmax: the reader takes the best class at each step), its one pooling written as the NPU runs it quickly
-  (pool_as_means).
+  (pool_as_means). --space-bias raises the space's logit by X (space_bias.py chooses it on the held-back lines), so
+  every reader of the model gets it.
 - charset.txt: the recognizer's characters, class 1 onwards.
 - LICENSE.txt (Apache-2.0, as PaddleOCR's models are) and NOTICE.txt (what they are and how they were changed).
 Each is checked against the model it came from on random input before it's written.
@@ -86,11 +87,13 @@ def export_det(models: Path, out: Path):
     print('det.onnx', (out / 'det.onnx').stat().st_size, 'bytes; max difference', float(np.abs(a - b).max()))
 
 
-def export_rec(models: Path, ckpt: str, out: Path):
+def export_rec(models: Path, ckpt: str, out: Path, space_bias: float = 0.0):
     saved = torch.load(ckpt, map_location='cpu') if ckpt != '-' else None
     net = from_onnx(models / 'v6-tiny-rec', stride=saved.get('stride', 8) if saved else 8)
     if saved:
         net.load_state_dict(saved['model'])
+    with torch.no_grad():
+        net.head.bias[CHARSET.index(' ') + 1] += space_bias
     net.eval()
     x = torch.randn(2, 3, 48, 320)
     path = out / 'rec.onnx'
@@ -115,9 +118,10 @@ def export_rec(models: Path, ckpt: str, out: Path):
 
 def main():
     models, ckpt, out = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+    space_bias = float(sys.argv[sys.argv.index('--space-bias') + 1]) if '--space-bias' in sys.argv else 0.0
     out.mkdir(parents=True, exist_ok=True)
     export_det(models, out)
-    export_rec(models, ckpt, out)
+    export_rec(models, ckpt, out, space_bias)
     (out / 'charset.txt').write_text(CHARSET, encoding='utf-8')
     for f in ('LICENSE.txt', 'NOTICE.txt'):
         (out / f).write_bytes((HERE / f).read_bytes().replace(b'\r\n', b'\n'))

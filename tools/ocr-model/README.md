@@ -45,7 +45,8 @@ to 250%. The check's held-out fonts and their near twins are never used. Drawing
 ```
 python -I -X utf8 train.py models data/train data/val fx runs/r2 --steps 24000 --lr 5e-4 --every 2000 --workers 3
 python -I -X utf8 train.py models data/train,data/extra data/val fx runs/r3 --from runs/r2/best.pt --stride 4 --steps 10000 --lr 3e-4 --every 2000 --workers 3
-python -I -X utf8 export.py models runs/r3/best.pt out/r3
+python -I -X utf8 space_bias.py models runs/r3/best.pt data/val fx
+python -I -X utf8 export.py models runs/r3/best.pt out/r3 --space-bias 1
 ```
 
 `train.py` fine-tunes the recognizer (`recnet.py`: PP-OCRv6 tiny's, with a head over our characters), scoring the
@@ -54,8 +55,13 @@ step every 8 columns), the second at 4 (`recnet.halve_stride`: the same weights,
 narrow characters needs: at 8, "...", "ll" or a space at 11 px come out one short. Each keeps to 8 cores (5 threads,
 3 workers); on a Snapdragon X2's processor the first takes about five hours and the second three and a half. A run that
 stops goes on from its last check with the same command and `--resume <out dir>/last.pt`.
-`export.py` writes what the reader takes: `det.onnx`, `rec.onnx` and `charset.txt`, each checked against the model it
-came from, with `LICENSE.txt` (Apache-2.0, PaddleOCR's) and `NOTICE.txt` (what the files are and what was changed).
+`space_bias.py` chooses how much to raise the space's logit, by the held-back lines alone: the check draws small screen
+text with narrower spaces than the training lines have, and at 11 and 12 px most of what the model still got wrong was
+a missing space. For r3 the best was 1 (93.67% of the held-back lines exact, from 93.56%); lowering the blank as well
+gained no more than noise.
+`export.py` writes what the reader takes: `det.onnx`, `rec.onnx` (the space's bias built into its head) and
+`charset.txt`, each checked against the model it came from, with `LICENSE.txt` (Apache-2.0, PaddleOCR's) and
+`NOTICE.txt` (what the files are and what was changed).
 
 ## Publishing
 

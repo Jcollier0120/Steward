@@ -143,11 +143,11 @@ const MODEL_RELEASE = `https://github.com/Jcollier0120/Manor-releases/releases/d
  * recognizer, its characters, and the license and notice that come with them (Apache-2.0, as PaddleOCR's models are).
  */
 export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt' | 'notices/LICENSE.txt' | 'notices/NOTICE.txt', Pinned>> = {
-  'det.onnx': { url: `${MODEL_RELEASE}/det.onnx`, size: 1_744_568, sha256: '0000000000000000000000000000000000000000000000000000000000000000' },
-  'rec.onnx': { url: `${MODEL_RELEASE}/rec.onnx`, size: 2_274_260, sha256: '0000000000000000000000000000000000000000000000000000000000000000' },
-  'charset.txt': { url: `${MODEL_RELEASE}/charset.txt`, size: 298, sha256: '0000000000000000000000000000000000000000000000000000000000000000' },
+  'det.onnx': { url: `${MODEL_RELEASE}/det.onnx`, size: 1_744_568, sha256: 'caa7341cf77f0e379a1900874f2ec7bcea0b9ea90028cb075f8f29745ae3330c' },
+  'rec.onnx': { url: `${MODEL_RELEASE}/rec.onnx`, size: 2_273_569, sha256: '6dd1d6fa758178f84017c5fd23560318a1e66597dc66bc6c607ea309fa7299c2' },
+  'charset.txt': { url: `${MODEL_RELEASE}/charset.txt`, size: 298, sha256: 'ffe49ab5748c825e01a765d3325e945a252067842e839f44e80021385b459ee4' },
   'notices/LICENSE.txt': { url: `${MODEL_RELEASE}/LICENSE.txt`, size: 11_358, sha256: 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30' },
-  'notices/NOTICE.txt': { url: `${MODEL_RELEASE}/NOTICE.txt`, size: 0, sha256: '0000000000000000000000000000000000000000000000000000000000000000' },
+  'notices/NOTICE.txt': { url: `${MODEL_RELEASE}/NOTICE.txt`, size: 1_244, sha256: '86b5e941f0d51b8a68aef400ec80650592d0040166b597a2201d6097cc484dab' },
 };
 
 /**

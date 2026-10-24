@@ -11,9 +11,11 @@ Version 2.0 (LICENSE.txt), with changes by Castellan under the same license:
 - rec.onnx: PP-OCRv6 tiny's text recognizer, from
   https://huggingface.co/PaddlePaddle/PP-OCRv6_tiny_rec_onnx (revision
   2612ab37152ae0a677521bae4e1e3d4fb4cf7c30). Changed: its head replaced by one
-  over the characters in charset.txt, the whole fine-tuned on text drawn as
-  screens and documents draw it, its softmax removed, and one average pooling
-  written as reshapes and means.
+  over the characters in charset.txt; its last average pooling made over the
+  height alone, written as a mean, and the convolution after it dilated, so it
+  takes a step every 4 columns rather than 8; the whole fine-tuned on text
+  drawn as screens and documents draw it; the space's output raised by 1; and
+  its softmax removed.
 
 - charset.txt: the recognizer's characters, class 1 onwards.
 
