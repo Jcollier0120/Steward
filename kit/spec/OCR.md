@@ -303,6 +303,15 @@ No group reads worse with the model than with Windows OCR. Model 2 reads the sam
 
 So at a gentle pace a picture on the processor costs about half the energy it did (3.2 J against 6.7 to 8.4 J, as Windows places it), and takes a quarter to two thirds longer. Its peak memory was 409 MB against 464 MB. Every one of the 42 pictures read exactly as before, and the check on the processor in efficiency mode read 1,224 of its 1,253 lines exactly, every group as before in characters, words and lines (three runs).
 
+**On AMD, efficiency mode costs more (measured 2026-10-24).** On a Ryzen AI 7 350 a picture in efficiency mode took 429 ms and 1,335 ms of processor, for 5,633 mJ over rest (5,579 to 5,709). At normal priority it took 251 ms and 738 ms, for 4,805 mJ (4,793 to 5,058). So efficiency mode spends about 17% more energy a picture there, for the same lines: all 96 reads of each round matched. How it was measured:
+- model 2, the check's 32 GDI pictures read three times a run;
+- three interleaved rounds of each, medians, the package's energy over rest;
+- the manor stopped and the display held on;
+- efficiency mode set as `paceStarted` sets it (EcoQoS and very low disk priority), at normal priority and outside the agent's job, as the X2's "In efficiency mode" row was;
+- a first round, whose rest the manor's restart disturbed (11 to 17.5 W), was run again.
+
+Whether the gentle pace should set it on AMD is open.
+
 **Measured and not taken (2026-10-24, model 2):**
 
 - **Fewer threads.** Two threads and one read the same lines for no less energy: 9.4 J and 8.3 J a picture against four threads' 7.7 J, and one thread's rounds ranged from 5.1 J to 9.4 J as Windows placed it. Where the work runs, and at what clock, matters more than how many threads run it.
@@ -377,7 +386,7 @@ Each gets the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent
     | int8 on the NPU, GELU in 16 hinges | 1,223/1,253 | 829 ms | 62 ms | 5,654 mJ | 51 J |
 
     Medians of three interleaved rounds, with the manor stopped and the display held on; the rounds' spread was within 5% except the 12 hinges' (4,481 to 5,125 mJ). Of a picture's energy the NPU's own share was 798, 1,659 and 2,016 mJ. The hinges cost NPU time: a detector tile takes 38 to 43 ms against 24 with the NPU's GELU, and a recognizer line 768 wide 13 to 16 ms against 6.
-  - **So the processor stays**, by the owner's rule: the copy that's cheaper reads worse, and the copies that read as well cost as much or more. A model without GELUs (retrained with ReLU or HardSwish) might cost about the first copy's 2.5 J a picture, if it read as well; that's for the owner to decide. Not tried further: 16-bit weights (the VitisAI partitioner crashes), AMD Quark's AdaRound (no change) and its bias correction (it fails on this graph).
+  - **So the processor stays**, by the owner's rule: the copy that's cheaper reads worse, and the copies that read as well cost as much or more. A model without GELUs (retrained with ReLU or HardSwish) might cost about the first copy's 2.5 J a picture, if it read as well; that's for the owner to decide. The processor's figures here are at normal priority. The gentle pace's efficiency mode, which halved the X2's processor cost, was measured here before anyone retrains: it costs more on this PC, 5.6 J a picture against 4.8 J ([On the processor](#on-the-processor)). So such a copy would still be about half the processor's energy. Not tried further: 16-bit weights (the VitisAI partitioner crashes), AMD Quark's AdaRound (no change) and its bias correction (it fails on this graph).
   - **VitisAI keeps an int8 compile on disk only with `enable_cache_file_io_in_mem=0`** in the session's options. Without it the compiled graph (an XIR `.xmodel`, 3.5 MB for one recognizer width) stays in memory, so every start compiles again (13.8 s for one width, against 0.3 s from disk), and the program, which looks for the compiled folder, reads on the processor. An int8 route would need it.
   - **What could change that:** a newer plugin whose GELU is finer, or a model without GELUs. Either needs the check again.
 
