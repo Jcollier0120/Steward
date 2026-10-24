@@ -2,9 +2,9 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## Unreleased
+## 0.36.198
 
-**The guide's figures for a picture on an Intel Core Ultra's graphics are now those of the card server setup gives today.**
+**It hands out the kit 2.113.4: the guide's figures for a picture on an Intel Core Ultra's graphics are now those of the card server setup gives today.**
 
 ### What changed
 
