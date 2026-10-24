@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
-import { TAG_RELEASE, type Employee } from '../settings.ts';
+import { releasesRepoEnv, TAG_RELEASE, type Employee } from '../settings.ts';
 import { checkoutOf, glanceOf, mapLimit, networkFailure, releasedOf, releaseDirOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseOne } from './release.ts';
 import { keptSigningDown, loadSigningAhead, loadSigningWaits, needsSigning, noteSigningAhead, noteSigningWaits, signingProblem, signsWith, type SigningAhead, type SigningWait } from '../signing.ts';
@@ -38,8 +38,11 @@ export const roundFailuresFile = () => dataFile('round-failed.json');
  */
 export const buildReleaseLimit = (parallel: number, cpus = os.availableParallelism()): number => Math.max(1, parallel, Math.min(6, Math.floor(cpus / 3)));
 
-/** The certificate a release signs what it builds with (signing.ts's signsWith), as its checkout's kit.json and tools/sign.ts say now; null: none. */
-export function signerHere(e: Employee): string | null {
+/**
+ * The certificate a release signs what it builds with (signing.ts's signsWith), as its checkout's kit.json and tools/sign.ts
+ * say now; null: none. `castellan`: this PC releases Castellan, where a kit that signs its scripts signs with the owner's.
+ */
+export function signerHere(e: Employee, castellan = false): string | null {
   if (e.release === TAG_RELEASE) return null;
   const dir = checkoutOf(e);
   const read = (f: string) => {
@@ -49,10 +52,14 @@ export function signerHere(e: Employee): string | null {
       return null;
     }
   };
-  return signsWith({ kitJson: read('kit.json'), signTs: read(path.join('tools', 'sign.ts')), release: e.release });
+  return signsWith({ kitJson: read('kit.json'), signTs: read(path.join('tools', 'sign.ts')), release: e.release, castellan });
 }
 
-/** Whether a release signs what it builds, as its checkout says now (signerHere). */
+/**
+ * Whether a release signs what it builds every time, as its checkout says now (signerHere): its native files or Manor's
+ * setup. Scripts aren't counted: most releases take their signed copies (the kit's signed-scripts.ts), so their releases
+ * needn't wait in the signing lane.
+ */
 export const signsHere = (e: Employee): boolean => !!signerHere(e);
 
 /** How long after a signing build began its releases wait for another: one that met the key gone again waits this long. */
@@ -71,6 +78,7 @@ export async function signedBetween(ctx: Ctx, employees: Employee[], builds: Bui
   if (!Object.keys(waits).length) return [];
   const changed: Record<string, Omit<SigningWait, 'since'> | null> = {};
   const byCert = new Map<string, Employee[]>();
+  const castellan = !!releasesRepoEnv(ctx.settings).MANOR_RELEASES_REPO;
   for (const [id, w] of Object.entries(waits)) {
     const e = ctx.settings.employees.find((x) => x.id === id);
     if (!e) {
@@ -90,7 +98,7 @@ export async function signedBetween(ctx: Ctx, employees: Employee[], builds: Bui
     }
     if (builds.some((b) => b.by === 'signing' && (b.employees ?? []).includes(id) && now.getTime() - Date.parse(b.started) < SIGNED_AGAIN_MS)) continue;
     // Its checkout signs nothing now: a build of its own releases it as any other.
-    const cert = signerHere(e) ?? '';
+    const cert = signerHere(e, castellan) ?? '';
     byCert.set(cert, [...(byCert.get(cert) ?? []), e]);
   }
   const ready: Employee[] = [];
@@ -148,8 +156,9 @@ export async function signingAhead(ctx: Ctx, employees: Employee[], next: Date |
   const build = next.toISOString();
   const waits = loadSigningWaits();
   const due: { e: Employee; version: string; cert: string; memo: string }[] = [];
+  const castellan = !!releasesRepoEnv(ctx.settings).MANOR_RELEASES_REPO;
   for (const e of employees) {
-    const cert = e.release && e.versionFiles.length ? signerHere(e) : null;
+    const cert = e.release && e.versionFiles.length ? signerHere(e, castellan) : null;
     const head = cert && !waits[e.id] ? glanceOf(ctx, e)?.head : null;
     if (!cert || !head) continue;
     const memo = `${build} ${e.id}@${head}`;
@@ -158,7 +167,7 @@ export async function signingAhead(ctx: Ctx, employees: Employee[], next: Date |
       const repo = checkoutOf(e);
       if (!(await commitOf(ctx.run, repo, head))) await fetchBranch(ctx.run, repo, e.branch);
       const v = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(ctx.run, repo, head, f)] as [string, string | null])));
-      const signs = 'version' in v && !(await releasedOf(ctx, e)).some((r) => r.version === v.version) && (await needsSigning(ctx.run, { id: e.id, repo, commit: head, kitJson: await showFile(ctx.run, repo, head, 'kit.json') }));
+      const signs = 'version' in v && !(await releasedOf(ctx, e)).some((r) => r.version === v.version) && (await needsSigning(ctx.run, { id: e.id, repo, commit: head, kitJson: await showFile(ctx.run, repo, head, 'kit.json'), castellan, checkout: repo }));
       if (signs) due.push({ e, version: (v as { version: string }).version, cert, memo });
       else aheadFine.add(memo);
     } catch (err) {
