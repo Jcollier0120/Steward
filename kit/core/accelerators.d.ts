@@ -325,6 +325,13 @@ export type Written = {
  */
 export declare function readWorkOrder(v: any): WorkOrder | undefined;
 /**
+ * config.json's `workOrder` as the core reads it (parseAccelerators): only with `acceleratorOrder` "auto" (or none), so
+ * a person's own list of accelerators is kept for every work.
+ * @param {any} raw config.json, parsed.
+ * @returns {WorkOrder | undefined}
+ */
+export declare function workOrderIn(raw: any): WorkOrder | undefined;
+/**
  * The accelerators in one work's order (`workOrder`'s): the kinds it names first, in its order, the rest after it as
  * given (the auto order); with runningFirst, those whose server `running` says is up before those whose isn't, that order
  * kept otherwise, unless as many of the work wait as its batchAt: then the order is kept as it is. No order for the work:
@@ -469,7 +476,9 @@ export declare function npuServes(list: ReadonlyArray<{
  * Manor's "Use the graphics card for models when there's an NPU" (settings.json's `gpuWithNpu`) applied: when it's
  * false and the list has an NPU that serves something, a graphics card keeps only the work no enabled NPU here serves
  * (kit 2.69.0: the card on demand), so it is never a candidate for the NPU's own work, not even the fallback when the
- * NPU fails or is busy. On a PC whose NPU serves chat, vision and embeddings (a Snapdragon) every card is left out, as
+ * NPU fails or is busy. With the PC's work order (`order`, config.json's `workOrder` as workOrderIn reads it), it also
+ * keeps the work the order puts a graphics card first for, though the NPU serves it, on demand like the rest (kit
+ * 2.135.3, cardWorkBesideNpu): AMD XDNA 2's pictures on the Radeon. Never chat. On a PC whose NPU serves chat, vision and embeddings (a Snapdragon) every card is left out, as
  * before; on one whose NPU can't see (Intel's), the card keeps vision alone: its server is started by the first vision
  * request and stopped by the keeper once unused (gpuIdleStopMinutes). A card's reranker, an add-on, is left out with
  * the rest, as before: the NPU reranks where it can (a Snapdragon X2's, kit 2.100.0), else the processor. The processor stays. A card left with nothing is dropped; one
@@ -478,6 +487,7 @@ export declare function npuServes(list: ReadonlyArray<{
  * @template {{ kind: AcceleratorKind, enabled?: boolean, chat?: unknown, vision?: unknown, embed?: unknown }} A
  * @param {A[]} list
  * @param {boolean} gpuWithNpu
+ * @param {WorkOrder} [order] The PC's work order: without it, as before kit 2.135.3.
  * @returns {A[]}
  */
 export declare function withoutGpuBesideNpu<A extends {
@@ -486,17 +496,21 @@ export declare function withoutGpuBesideNpu<A extends {
     chat?: unknown;
     vision?: unknown;
     embed?: unknown;
-}>(list: A[], gpuWithNpu: boolean): A[];
+}>(list: A[], gpuWithNpu: boolean, order?: WorkOrder): A[];
 /**
  * Of a graphics card's kinds, those it does beside an NPU that serves `npu`, with Manor's gpuWithNpu off: the routed
- * work (chat, vision, embeddings) no NPU serves. The one rule requests (withoutGpuBesideNpu), the keeper and setup
- * follow; a reranker is never among them.
+ * work (chat, vision, embeddings) no NPU serves, and, with the PC's work order, the work it puts a graphics card first
+ * for, though the NPU serves it (kit 2.135.3: AMD XDNA 2's pictures). The owner's ruling (2026-10-24): "Yes: on AMD,
+ * pictures go to the Radeon on demand even with the graphics-card switch off; chat stays off the card." So chat never
+ * is, whatever an order says. The one rule requests (withoutGpuBesideNpu), the keeper and setup follow; a reranker is
+ * never among them.
  * @template {string} K
  * @param {readonly K[]} kinds
  * @param {readonly string[]} npu
+ * @param {WorkOrder} [order] The PC's work order: without it, only the work no NPU serves, as before kit 2.135.3.
  * @returns {K[]}
  */
-export declare function cardWorkBesideNpu<K extends string>(kinds: readonly K[], npu: readonly string[]): K[];
+export declare function cardWorkBesideNpu<K extends string>(kinds: readonly K[], npu: readonly string[], order?: WorkOrder): K[];
 /**
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
  * anything, unless some entries couldn't be read (then the config needs fixing, and they're named).
