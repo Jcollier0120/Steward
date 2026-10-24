@@ -50,7 +50,9 @@ const amdEntries = [
     chat: { baseUrl: 'http://x:18191', model: 'qwen3-vl-2b-instruct' }, vision: { model: 'qwen3-vl-2b-instruct' }, embed: { baseUrl: 'http://x:18192', model: 'qwen3-embedding-0.6b' },
   },
 ];
-const amdOrder: core.WorkOrder = { chat: { devices: ['npu', 'gpu', 'cpu'] }, vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true, batchAt: 4 }, embed: { devices: ['gpu', 'cpu'] } };
+const amdOrder: core.WorkOrder = { chat: { devices: ['npu', 'gpu', 'cpu'] }, vision: { devices: ['gpu', 'npu', 'cpu'] }, embed: { devices: ['gpu', 'cpu'] } };
+/** AMD's pictures until kit 2.135.1: the Radeon first unless only FastFlowLM was up, and from 4 waiting whoever's was. */
+const runningFirstOrder: core.WorkOrder = { ...amdOrder, vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true, batchAt: 4 } };
 
 const configs: { case: string; raw: unknown; hw?: core.Hardware }[] = [
   {
@@ -269,23 +271,27 @@ const candidateCases: { case: string; need: core.Need; failures?: Record<string,
   { case: 'the last resort still keeps background work off a card a game is using', need: bg('chat', 500), failures: { 'gpu-a': failed(1), 'gpu-b': failed(2), npu: failed(3) }, games: gameOnB },
   { case: 'one working is enough: the failed stay skipped', need: bg('chat', 500), failures: { 'gpu-a': failed(1), 'gpu-b': failed(9.5) } },
   { case: 'nothing fits: no candidates and nothing skipped', need: bg('chat', 20_000) },
-  // Each work's own order (kit 2.111.0): AMD's, the Radeon first for pictures, unless only the NPU's server is up.
+  // Each work's own order (kit 2.111.0): AMD's, the Radeon first for pictures, whoever's server is up (kit 2.135.1, the
+  // owner's ruling), and the first that can take the work alone, waited for when busy.
   { case: "workOrder: a picture goes to the Radeon first by vision's order, both servers down", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: false, 'gpu-amd-radeon-860m-graphics': false } },
-  { case: "workOrder: runningFirst, only the NPU's server up: the NPU is first, and so the only candidate", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false } },
-  { case: 'workOrder: runningFirst, both servers up: the Radeon alone, waited for when busy', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true } },
-  { case: "workOrder: runningFirst, only the Radeon's server up: the Radeon first", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: false, 'gpu-amd-radeon-860m-graphics': true } },
+  { case: "workOrder: only the NPU's server up: the Radeon alone all the same, its server started (kit 2.135.1)", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false } },
+  { case: 'workOrder: both servers up: the Radeon alone, waited for when busy', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true } },
+  { case: "workOrder: only the Radeon's server up: the Radeon alone", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: false, 'gpu-amd-radeon-860m-graphics': true } },
   { case: "workOrder: with nothing known of the servers, vision's order alone", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder },
+  { case: 'workOrder: 4 pictures waiting with only the NPU up: the Radeon alone, as for one', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false }, waiting: 4 },
   { case: "workOrder: chat's order puts the NPU first, the only candidate", need: bg('chat', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: false, 'gpu-amd-radeon-860m-graphics': true } },
+  { case: "workOrder: chat with the NPU failed lately: the Radeon alone, the next in chat's order (kit 2.135.1)", need: bg('chat', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, failures: { npu: failed(2) } },
   { case: 'workOrder: the Radeon failed lately, so a picture goes to the NPU', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: false, 'gpu-amd-radeon-860m-graphics': false }, failures: { 'gpu-amd-radeon-860m-graphics': failed(2) } },
+  { case: 'workOrder: the agent resting the Radeon after a long line: the NPU alone', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, deferredMs: { 'gpu-amd-radeon-860m-graphics': 60_000, npu: 0 } },
   { case: 'no workOrder: a picture goes to the NPU first, as before', need: bg('vision', 500), config: { accelerators: amdEntries } },
-  // The owner's batch rule (batchAt): from 4 pictures waiting, the Radeon first whoever's server is up.
-  { case: "workOrder: batchAt, 3 pictures waiting and only the NPU's server up: the NPU, as for one", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false }, waiting: 3 },
-  { case: "workOrder: batchAt, 4 pictures waiting and only the NPU's server up: the Radeon alone, its server started, the batch in its line", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false }, waiting: 4 },
-  { case: 'workOrder: batchAt, 4 pictures waiting with both servers up: the Radeon alone, none shared out to the NPU', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, waiting: 4 },
-  { case: 'workOrder: batchAt, 4 pictures waiting and the Radeon failed lately: the NPU alone, the next that can take it', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, waiting: 4, failures: { 'gpu-amd-radeon-860m-graphics': failed(2) } },
-  { case: 'workOrder: batchAt, 4 pictures waiting and the agent resting the Radeon after a long line: the NPU alone', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, waiting: 4, deferredMs: { 'gpu-amd-radeon-860m-graphics': 60_000, npu: 0 } },
-  { case: 'workOrder: batchAt, 1 picture waiting with both servers up: the Radeon, by runningFirst', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, waiting: 1 },
-  { case: "workOrder: a work with no batchAt goes by its order however many wait: chat on the NPU", need: bg('chat', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, waiting: 9 },
+  // runningFirst and batchAt, which no generation's order has since kit 2.135.1 (AMD's pictures had them, the owner's
+  // answers of 2026-10-23), still read as they were.
+  { case: "runningFirst, only the NPU's server up: the NPU is first, and so the only candidate", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: runningFirstOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false } },
+  { case: 'runningFirst, both servers up: the Radeon alone', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: runningFirstOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true } },
+  { case: "batchAt, 3 pictures waiting and only the NPU's server up: the NPU, as for one", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: runningFirstOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false }, waiting: 3 },
+  { case: "batchAt, 4 pictures waiting and only the NPU's server up: the Radeon alone, its server started, the batch in its line", need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: runningFirstOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': false }, waiting: 4 },
+  { case: 'batchAt, 4 pictures waiting and the Radeon failed lately: the NPU alone, the next that can take it', need: bg('vision', 500), config: { accelerators: amdEntries }, workOrder: runningFirstOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, waiting: 4, failures: { 'gpu-amd-radeon-860m-graphics': failed(2) } },
+  { case: "a work with no batchAt goes by its order however many wait: chat on the NPU", need: bg('chat', 500), config: { accelerators: amdEntries }, workOrder: amdOrder, running: { npu: true, 'gpu-amd-radeon-860m-graphics': true }, waiting: 9 },
 ];
 
 const looks = (m: Record<string, [boolean, number]>) => Object.fromEntries(Object.entries(m).map(([id, [freeSlot, waiting]]) => [id, { freeSlot, waiting }]));
