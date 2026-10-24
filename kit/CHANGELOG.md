@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.113.1
+
+**The NPU benchmark says where the embedder ran, and its summary compares pictures a picture each: OpenVINO counts a picture's tokens unalike on the NPU and off it.**
+
+### What changed
+
+- **`results.embed.device`** (npu-bench, its report): where the embedding server ran. That is OpenVINO's `--target_device` (on the NPU 3720 the graphics, from its generation's `embedArgs`), or the run's own device off the NPU (llama.cpp's, beside the model); null where the route doesn't say. spec/npu-bench.schema.json has it, not required, so earlier reports still match.
+- **The summary** (`benchSummary`, `summarySay`): each device's `embed.device`, and a row `the embedder ran on` where a column's embedder ran on another device than its model.
+- **No token figure for the pictures batch**: `millijoulesPerToken` is null and there is no `pictures: a token over rest` row. OpenVINO Model Server 2026.4.1 counts a picture as 8 prompt tokens whatever its size on the graphics and the processor, and as its own tokens on the NPU (64 for the suite's 224 px square). The picture and the answers are the same on all three. Measured on a Core Ultra 5 225U, 2026-10-24.
+- spec/NPU-BENCHMARK.md: the Intel Core Ultra 5 225U's series (kit 2.106.0, 2026-10-24). The NPU does the chat jobs for about half the Arc's energy and under a third of the processor's. A picture is cheapest on the Arc. The NPU's embedding rows are the Arc's. Also brought up to date: Reading the summary, the report's `embed`, and On Intel and AMD.
+
+### Before you update
+
+- Nothing: take the kit as usual. Only the benchmark changes, nothing an agent runs.
+
 ## 2.113.0
 
 **Every agent but Manor and Heiward needs a license for its PC. No staff member works for free: sold or not, held back, internal, or one the Exchequer doesn't list, each waits on a PC without one.**

@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.195
+
+**It hands out the kit 2.113.1: the NPU benchmark's guide has Intel's energy figures, and its summary says where the embedding model ran.**
+
+### What changed
+
+- **Intel's energy figures are in the benchmark's guide.** On a Core Ultra 5 225U the NPU does the staff's chat jobs for about half the energy of the Arc graphics, and under a third of the processor's. A picture costs least on the Arc: 13 J, against 17.5 J on the NPU.
+- **The benchmark's summary says where the embedding model ran.** On this Intel generation it runs on the graphics even in the NPU's runs, so that column's embedding figures are the graphics'.
+- **Pictures are compared a picture at a time, not a token at a time.** OpenVINO counts a picture's tokens one way on the NPU and another on the graphics and the processor, even for the same picture, so the per-token figure for pictures misled.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Only the NPU benchmark changes. What the staff run, and where, stays the same.
+
 ## 0.36.194
 
 **It hands out the kit 2.113.0: on a PC without your license, only Heiward runs. No staff member works for free.**
