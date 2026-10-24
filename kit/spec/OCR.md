@@ -304,7 +304,7 @@ The model reads the Latin alphabet alone. Its 189 characters are ASCII, Latin-1'
 - **The better read, line by line** (`keepBetter`).
   - A line of Windows' read holds another alphabet when at least two of its letters, and 15% of them, are neither Latin nor drawn like Latin. Letters drawn like Latin include Cyrillic а, е, о, р, с, Т and Greek Α, Ο, ρ.
   - Such a line replaces the model's lines it overlaps (by half the smaller box). Windows' other lines there come with it, left to right, so a line of both alphabets reads whole. A line where the model found nothing goes in by its height.
-  - Every other line stays the model's. Text in the Latin alphabet always keeps the model's read, which reads 1,223 of the check's 1,253 lines exactly on a Snapdragon's NPU against Windows OCR's 733.
+  - Every other line stays the model's. Text in the Latin alphabet always keeps the model's read, which reads 1,223 of the check's 1,253 lines exactly on a Snapdragon's NPU and on Intel's, against Windows OCR's 733 and 736.
 - **What it says.** `engine` ends in `+windows` when Windows' lines are in the result. The agent's log has a line for each read again. `ocr-check` measures each engine alone, without it.
 - **What it costs.** A Windows OCR read of each such page, beside the model's: 465 mJ a picture on a Core Ultra 5 225U and 698 mJ on a Ryzen AI 7 350. The model's own read costs 859 mJ on Intel's NPU, and 4.9 to 7.0 J on a processor.
 - **Not yet measured on such a PC.** The PCs here have English alone. So the read again was tested with Windows' English OCR, and with Windows' lines given in Russian. Pictures drawn in Russian (capitals too), Greek, Chinese, Japanese and Arabic all set it off, as does Russian among English. English prose doesn't.
@@ -322,6 +322,9 @@ Each gets the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent
   | The model on the NPU | 1,212/1,253 | 171 ms | 55 ms | 859 mJ |
   | The model on the processor | 1,212/1,253 | 326 ms | 972 ms | 6,991 mJ |
 
+  - **Model 2** (kit 2.134.1) had the check again on the same PC on 2026-10-24, with the manor stopped. It reads 1,223 of the 1,253 lines exactly on the NPU and 1,224 on the processor, as on the X2, against Windows OCR's 736. Against model 1 it reads more lines at 11 px (125 against 123), 13 px (106 against 105), on pages (180 against 178), on the held-out screens (156 against 151) and in the held-out browser (28 against 27), and the same in every other group. No group reads worse than with model 1, or than with Windows OCR, in characters, words or lines.
+  - **The NPU and the processor differ on one line**, as on the X2: the NPU drops the space in "Scan_0042 (2) - Copy.jpg", on a held-out screen at 14 px. Every other line reads the same on both.
+  - **Model 2's times and energy** aren't measured cleanly, so the table's are model 1's. Its graphs have model 1's shapes and operators, so a picture's work is the same. A Claude Code session on the PC kept a core busy through the run, so rest was 15 W rather than 5.4. Even so, a picture beyond the start took 158 ms and 50 ms of processor on the NPU, and 62 ms and 64 ms with Windows OCR. The processor, sharing its cores, took 397 ms and 1,188 ms. Over that rest a picture cost 961 mJ on the NPU, 3,469 mJ on the processor and 376 mJ with Windows OCR, figures that don't compare with the table's.
   - **It meets the rule below.** No group reads worse on the NPU than with Windows OCR, and it spends less processor time a picture.
   - **It spends more energy a picture**, 1.85 times Windows OCR's. Even the cores' share is a little more (580 mJ against 548), where the program's own processor time is less: OpenVINO's driver works outside the program. By the owner's rule below, it reads there for how much better it reads.
   - **How the energy was measured:** the package's (RAPL), over the rest measured just before. It's the median of three rounds that took the three engines in turn, each reading the check's 32 GDI pictures three times.
@@ -343,7 +346,7 @@ Each gets the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent
   - **Compiling** takes minutes a graph, on about one core: 18 for the detector, 3.5 to 7.5 for each recognizer width. All seven at once take 28.5 minutes on about five cores, with a 5.5 GB peak. Compiled, they keep 33 MB.
   - **What could change that:** an int8 QDQ copy, the precision VitisAI is built for, or a newer plugin. Either needs the check again.
 
-**Model 2 on them** isn't measured yet: the figures above are model 1's. Its graphs have model 1's shapes and operators, with new weights, and the program's self-check still compares each NPU's read with the processor's before it reads, so an NPU that read model 2 differently would be refused.
+**Model 2 on AMD's NPU** isn't measured yet: the figures above are model 1's. (Intel's NPU 3720 is, above.) Its graphs have model 1's shapes and operators, with new weights, and the program's self-check still compares each NPU's read with the processor's before it reads, so an NPU that read model 2 differently would be refused.
 
 **The owner's rule for every route (2026-10-24):** accuracy is never given up for less power. The reader must read with a high degree of accuracy, and spend as little power as it can while doing so. So:
 
