@@ -140,7 +140,7 @@ export const OPENVINO_PACK: NpuPack = {
 
 /**
  * The Intel NPU generations (npu-vendors.json's) whose reader reads with the model on the NPU by default, Intel's
- * plugin fetched for it. Measured by ocr-check on an Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU
+ * plugin fetched for it (kit 2.117.0). Measured by ocr-check on an Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU
  * 3720 shows Meteor Lake's 7D1D), 2026-10-24: 1,212 of 1,253 lines exactly against Windows' OCR's 736, no group worse,
  * and 55 ms of processor a picture against 61. It spends more a picture than Windows' OCR (859 mJ against 465 mJ over
  * rest, the package's): the owner chose the model for how much better it reads. Other generations keep Windows' OCR

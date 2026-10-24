@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased
+## 2.117.0
 
 **The text reader reads with our own model on Intel's NPU 3720 too: on a Core Ultra 5 225U it reads 1,212 of the check's 1,253 lines exactly, where Windows OCR read 736.**
 

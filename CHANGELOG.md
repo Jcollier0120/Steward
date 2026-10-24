@@ -2,9 +2,9 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## Unreleased
+## 0.36.203
 
-**On an Intel Core Ultra with the NPU 3720, the staff read text in pictures with the manor's own model on the NPU too: 1,212 of the check's 1,253 lines exactly, where Windows OCR read 736.**
+**It hands out the kit 2.117.0: on an Intel Core Ultra with the NPU 3720, the staff read text in pictures with the manor's own model on the NPU too: 1,212 of the check's 1,253 lines exactly, where Windows OCR read 736.**
 
 ### What changed
 
