@@ -1199,7 +1199,7 @@ setTimeout(() => process.exit(0), 8000);
   }
 });
 
-test("a server whose program isn't there says so plainly, and it's a failure (kit 2.113.3); a program on PATH is the spawn's to find", async () => {
+test("a server whose program isn't there says so plainly, and it's a failure (kit 2.113.5); a program on PATH is the spawn's to find", async () => {
   fresh();
   noGames();
   // As on the X2 whose GenieX was in the Claude app's own AppData alone: the staff found no geniex.exe.

@@ -2887,7 +2887,7 @@ export interface SetupOptions {
   /** Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu() read now, when left out). */
   gpuWithNpu?: boolean;
   /**
-   * The person said yes to the download already (kit 2.113.3): setup's own run outside a packaged app (outside-run.ts),
+   * The person said yes to the download already (kit 2.113.5): setup's own run outside a packaged app (outside-run.ts),
    * which was asked in the app. Its plan isn't said again, and a second download (the card's, the processor's, in the
    * NPU's place) isn't made without `yes`: nobody is there to ask.
    */
@@ -2903,7 +2903,7 @@ export interface SetupOptions {
 /**
  * What a plan would write under AppData (outside.ts' inAppData), each in a few words. In a packaged app (the Claude
  * desktop app is one) those writes would land in the app's own folder, which nothing outside it sees: setup runs
- * outside it instead, and refuses them where it can't (setupCommand). From kit 2.113.3:
+ * outside it instead, and refuses them where it can't (setupCommand). From kit 2.113.5:
  * - Qualcomm's route: GenieX itself (its installer installs it for this user in %LOCALAPPDATA%\GenieX CLI, and writes
  *   HKCU; Castellan's signed build is put together there), and the kit's build of its plugin (npu-patch.ts) over its
  *   llama_cpp folder. Its models go in %USERPROFILE%\.cache\geniex, and the Hexagon embedding server (llama.cpp's,
@@ -2935,7 +2935,7 @@ export function writesAppData(plan: SetupPlan, env: NodeJS.ProcessEnv = process.
 }
 
 /**
- * The rest of setup run outside the packaged app it was started in (kit 2.113.3: outside.ts), once the person has seen
+ * The rest of setup run outside the packaged app it was started in (kit 2.113.5: outside.ts), once the person has seen
  * the plan and said yes: as a one-off task Task Scheduler starts, its lines passed on as they come. Its exit code and
  * entries; null when Task Scheduler won't run it and nothing it writes is in AppData (setup then runs here, as before).
  * Where something is, it's refused, in plain words.
@@ -3041,7 +3041,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     }
   }
   // Inside a packaged app (the Claude desktop app), what setup and the servers it tries write to AppData would be that
-  // app's alone: the rest runs outside it, from Task Scheduler (kit 2.113.3). Asked only for the PC's own setup, not a test's.
+  // app's alone: the rest runs outside it, from Task Scheduler (kit 2.113.5). Asked only for the PC's own setup, not a test's.
   const packaged = o.asked ? null : (o.packaged ?? (o.io || o.detection ? null : packagedOutsideTests));
   if (settingUp && packaged && (await packaged())) {
     const outside = await setUpOutside(o, plan, { configFile, home: o.home ?? toolsHome(), gpuWithNpu: withNpu }, log);

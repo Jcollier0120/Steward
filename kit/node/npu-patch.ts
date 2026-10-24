@@ -89,7 +89,7 @@ export interface NpuPatchDeps {
   /**
    * The packaged app this keeper runs inside (outside.ts' packagedApp), or null: there, a server's file in AppData
    * (GenieX's, in %LOCALAPPDATA%\GenieX CLI) is moved by a run outside it (`outside`: outside.ts' runOutside), since in
-   * the package it would move for this process alone (kit 2.113.3). None in a test run unless the test gives one.
+   * the package it would move for this process alone (kit 2.113.5). None in a test run unless the test gives one.
    */
   packaged?: () => Promise<unknown>;
   outside?: (job: OutsideJob) => Promise<unknown>;

@@ -658,7 +658,7 @@ export class ServerNotRunning extends Error {}
 export class ManorStopped extends ServerNotRunning {}
 
 /**
- * The server's program isn't where its startCommand says (kit 2.113.3): its setup removed, or never seen by the staff
+ * The server's program isn't where its startCommand says (kit 2.113.5): its setup removed, or never seen by the staff
  * (setup run inside a packaged app once left GenieX in that app's own AppData, which the staff can't see). A failure,
  * marked as one, and said plainly rather than as Node's ENOENT, which it gives for a missing working folder too. The
  * keeper sets the server up again (server-repair.ts).
@@ -931,7 +931,7 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: StartOpti
 async function startOnce(ep: Endpoint, waitMs: number, readyMs: number, o: StartOptions): Promise<ServerReady> {
   const [cmd, ...args] = ep.startCommand!.map((a) => expandEnv(a));
   const program = path.win32.basename(cmd);
-  // Its program looked for first (kit 2.113.3): a program on PATH (no folder named) is left to the spawn.
+  // Its program looked for first (kit 2.113.5): a program on PATH (no folder named) is left to the spawn.
   if (path.win32.isAbsolute(cmd) && !existsSync(cmd)) throw new ProgramMissing(core.say.notInstalled(program, cmd));
   const startedAt = Date.now();
   let spawnError: Error | undefined;

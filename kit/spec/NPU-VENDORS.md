@@ -408,7 +408,7 @@ An NPU entry a person configured is left alone unless `npu` is asked for by name
 
 The entry carries everything an agent and the keeper need: the server's `startCommand` (with its port), its `env` where the server needs one (OpenVINO Model Server's `PYTHONHOME` and `PATH`, as its `setupvars` script sets them), the caps, the timeouts and the quirks.
 
-### Setup from inside a packaged app (kit 2.113.3)
+### Setup from inside a packaged app (kit 2.113.5)
 
 The Claude desktop app is an MSIX package, and so is every process a session in it starts. Windows keeps what such a process writes under AppData (%LOCALAPPDATA%, %APPDATA%) in the package's own folder (`%LOCALAPPDATA%\Packages\<package>\LocalCache`), and its HKCU writes in the package's own hive. The process that wrote them reads them back where it wrote them; nothing outside the package sees them. The profile itself, `%TEMP%` and `%ProgramData%` aren't redirected.
 
@@ -453,13 +453,13 @@ So pictures go to the Radeon first. Starting its server costs about 56 J over a 
 **Intel's pictures stay on the NPU** (the NPU 3720 on a Core Ultra 5 225U, 2026-10-24). In the benchmark's Arc run, OpenVINO Model Server on the graphics, a picture cost 13.3 J over rest. On the NPU it cost 17.5 J, and 14.6 J of that was the cores', since the NPU route's picture encoder runs on the processor (Qwen3-VL-2B on Intel's NPU, above). By AMD's rule, the Arc would take batches, and single pictures once its server is warm. But neither of the Arc's servers gives that saving with the right answers:
 
 - **OpenVINO on the graphics misreads fine text.** With its encoder on the Arc, it read the 896 × 896 tally picture (TALLY 4827 in greyscale) as 4877 three times in four. The 513, 449 and 448 px pictures it read the same each time, as the processor does. That is the misread it made with the NPU route's encoder moved to the graphics (above). The NPU and the processor read the 896 px picture right, and a screenshot is larger still. Setup also gives the Arc no OpenVINO server: it would be a third server beside the NPU's two, and those two already hold the 16 GB PC's whole budget (Memory on a 16 GB Intel PC, above).
-- **The card's own server spends twice the NPU's.** Setup gives Intel's integrated graphics llama.cpp's Vulkan build with the picture encoder on the processor (setup.ts' `encodesOnProcessor`: with the encoder on the graphics, they lose the device). This PC's card has b11669 with Qwen3-VL-4B Q4_K_M and its Q8_0 projector, as it was set up. Setup now gives Qwen3-VL-2B, whose projector is about the same size (445 MB against 454 MB) and also runs on the processor. Measured in two rounds with the manor running:
-  - each new picture, warm: 41 J over rest (28–49 J), in 1.7–2.7 s, 26–44 J of it the cores';
-  - its start and a first picture: 56–66 J in 4.7–8.3 s;
-  - memory held: 4.6 GB;
-  - answers: the suite's four, the same as the NPU's.
+- **The card's own server spends more than the NPU's.** Setup gives Intel's integrated graphics llama.cpp's Vulkan build with the picture encoder on the processor (setup.ts' `encodesOnProcessor`: with the encoder on the graphics, they lose the device). Measured with the manor running, in three rounds that took three servers in turn, the order rotating. Each started from stopped and read one picture, then read the suite's four pictures twice, warm. The first warm picture is left out: it repeats the start's picture, and llama-server answered it from its cache.
+  - **The card as setup gives it now** (LLAMA_PIN b11734, Qwen3-VL-2B Q4_K_M with its Q8_0 projector, MODEL_PINS): 36 J a new picture over rest (30–48 J, the middle half) in 1.9 s; 20–68 J to start and read a first picture, in 3.6–6.1 s; 3.2 GB held.
+  - **The NPU in the same rounds:** 20 J a picture (18–26 J) in 1.4 s; 57–90 J to start and read a first picture, in about 7 s. The benchmark's 17.5 J was measured with the manor stopped.
+  - **This PC's card as an older kit set it up** (b11669, Qwen3-VL-4B Q4_K_M): 46 J (35–59 J) in 2.7 s; 73–96 J to start; 4.9 GB. A card moves to the 2B at its next Set up local AI, which plans every card again; the keeper's look downloads nothing.
+  - **Answers:** the suite's four, the same on all three.
 
-So as the manor runs it, a picture costs more on the Arc than on the NPU, whatever the batch size. No `batchAt` pays, and Intel's vision has no order. That changes if OpenVINO's encoder on the graphics reads fine text right, or if llama.cpp's Vulkan build keeps its device with the encoder on Intel's graphics.
+So as the manor runs it, a picture costs about 1.8 times as much on the Arc as on the NPU, whatever the batch size. No `batchAt` pays, and Intel's vision has no order. That changes if OpenVINO's encoder on the graphics reads fine text right, or if llama.cpp's Vulkan build keeps its device with the encoder on Intel's graphics.
 
 ## Ports
 
@@ -540,9 +540,9 @@ A route's command changes between kits: Intel's NPU 3720 got its 128-token promp
 
 Since kit 2.86.0 the same look offers the NPU its own embeddings where its entry has none, with nothing downloaded. The Snapdragon X2 Elite set up before kit 2.63.0 had its chat on the Hexagon and its embeddings on the Adreno: with Manor's `gpuWithNpu` off, Reeve's search used npu-embed's nomic-embed-text v1.5 (every input cut to 128 tokens; 8 of 9 in the eval above) and Chamberlain's and Clerk's embeddings the card. The Hexagon's llama-server (b11125) and Qwen3-Embedding-0.6B were already on it, the model being the card's own file, so the look takes them up after their test: 124 ms a chunk against the card's 265, 9 of 9, the card's own vectors (an index made by either serves both), and the card left to the person. Reeve's indexes, named by their model, are built again once with Qwen3-Embedding (Reeve's settling in).
 
-### A server whose program is missing (kit 2.113.3)
+### A server whose program is missing (kit 2.113.5)
 
-A server's program can be gone from where its entry starts it. It may have been set up from inside a packaged app before kit 2.113.3 (Setup from inside a packaged app, above), or someone removed its files. A request to it then fails at once with `ProgramMissing`: "… isn't installed where the staff look for it (…)" (accelerators.ts). The keeper's look (`startRepairs`, server-repair.ts) sets it up again, as Manor's Set up local AI would with `--yes`, for that accelerator alone: `npu`, or a card or the processor for what it served. Setup itself runs outside a packaged app where the keeper runs in one.
+A server's program can be gone from where its entry starts it. It may have been set up from inside a packaged app before kit 2.113.5 (Setup from inside a packaged app, above), or someone removed its files. A request to it then fails at once with `ProgramMissing`: "… isn't installed where the staff look for it (…)" (accelerators.ts). The keeper's look (`startRepairs`, server-repair.ts) sets it up again, as Manor's Set up local AI would with `--yes`, for that accelerator alone: `npu`, or a card or the processor for what it served. Setup itself runs outside a packaged app where the keeper runs in one.
 
 - **Only a program setup puts there** (`setupFolders`): one in the tools home, or in a route's install folder (GenieX's `%LOCALAPPDATA%\GenieX CLI`). A person's own command (a script, a program elsewhere, one on PATH) is never replaced, and a switched-off entry is left alone.
 - **Missing for 5 minutes** (`REPAIR_AFTER_MS`) across looks first, so a setup or an update replacing it meanwhile isn't taken for a loss. A program whose path changes starts its 5 minutes again.

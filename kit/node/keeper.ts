@@ -1052,7 +1052,7 @@ export function startSmallModelRefresh(o: { logFile?: string } = {}): void {
 }
 
 /**
- * A server whose program is gone from where config.json starts it, set up again (server-repair.ts, kit 2.113.3): in the
+ * A server whose program is gone from where config.json starts it, set up again (server-repair.ts, kit 2.113.5): in the
  * background, at most one setup at a time, and not while the NPU's refresh tests its servers (the next look tries).
  * What it did goes in the keeper's log, setup's own lines too.
  */

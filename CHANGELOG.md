@@ -2,9 +2,9 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.197
+## 0.36.199
 
-**It hands out the kit 2.113.3: setting up local AI from the Claude desktop app no longer hides the NPU's server from the staff, and a server whose program is missing is set up again by itself.**
+**It hands out the kit 2.113.5: setting up local AI from the Claude desktop app no longer hides the NPU's server from the staff, and a server whose program is missing is set up again by itself.**
 
 ### What changed
 
@@ -16,6 +16,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. A PC whose NPU server was set up from the Claude app before this has it set up again by the staff, a few minutes after the update; that downloads the server again.
+
+## 0.36.198
+
+**It hands out the kit 2.113.4: the guide's figures for a picture on an Intel Core Ultra's graphics are now those of the card server setup gives today.**
+
+### What changed
+
+- **On Intel's NPU 3720, pictures still stay on the NPU, with the right figures.** The card figure came from a PC still on an older setup (Qwen3-VL-4B on llama.cpp b11669). Setup now gives the graphics Qwen3-VL-2B on b11734. Measured in turn with the NPU, it spent 36 J on a picture against the NPU's 20 J. It's faster and holds 3.2 GB rather than 4.9 GB, but still costs about 1.8 times the NPU's energy.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Where pictures go doesn't change.
 
 ## 0.36.196
 

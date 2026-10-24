@@ -9,7 +9,7 @@ import { alive } from './apart.ts';
 import { powershell } from './ps.ts';
 
 /**
- * Setting up outside a packaged app (kit 2.113.3). The Claude desktop app is an MSIX package, and so is every
+ * Setting up outside a packaged app (kit 2.113.5). The Claude desktop app is an MSIX package, and so is every
  * process a session in it starts: Windows keeps whatever such a process writes under AppData (%LOCALAPPDATA%,
  * %APPDATA%) in the package's own folder (%LOCALAPPDATA%\Packages\<package>\LocalCache), and its HKCU registry writes
  * in the package's own hive. The process that wrote them sees them where it wrote them; nothing outside the package

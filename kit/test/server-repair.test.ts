@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // A model server whose program is gone from where config.json starts it, set up again by the keeper (server-repair.ts,
-// kit 2.113.3): as on the X2 whose GenieX was in the Claude app's own AppData alone. A fake PC: its files a list, its
+// kit 2.113.5): as on the X2 whose GenieX was in the Claude app's own AppData alone. A fake PC: its files a list, its
 // clock a number, setup a stand-in that says what it was asked.
 const home = mkdtempSync(path.join(tmpdir(), 'kit-server-repair-'));
 process.env.REEVE_HOME = home;

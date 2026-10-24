@@ -6,7 +6,7 @@ import { manorStopped } from './manor.ts';
 import { NPU_CATALOG, serverExe } from './npu-vendors.ts';
 
 /**
- * A model server whose program is gone from where config.json starts it, set up again by the keeper (kit 2.113.3).
+ * A model server whose program is gone from where config.json starts it, set up again by the keeper (kit 2.113.5).
  *
  * On 2026-10-24 the X2's GenieX was found only in the Claude desktop app's own AppData: setup had run from a session in
  * that app, which is packaged, so Windows kept what it wrote to AppData to the app alone (outside.ts). The staff, started

@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { OutsideJob, OutsideSetupResult } from './outside.ts';
 
 /**
- * A job run outside the packaged app that asked for it (outside.ts' runOutside, kit 2.113.3): `node outside-run.ts
+ * A job run outside the packaged app that asked for it (outside.ts' runOutside, kit 2.113.5): `node outside-run.ts
  * <job folder>`, started by Task Scheduler. Its process id goes in pid.json first, each line it says in log.txt, and
  * its result in result.json last, then it exits.
  *

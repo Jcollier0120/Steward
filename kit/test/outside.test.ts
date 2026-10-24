@@ -7,7 +7,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-// Setting up outside a packaged app (outside.ts, kit 2.113.3): the Claude desktop app is one, and Windows keeps what a
+// Setting up outside a packaged app (outside.ts, kit 2.113.5): the Claude desktop app is one, and Windows keeps what a
 // session in it writes to AppData to the app alone. Which process runs inside one, which paths are AppData, and the
 // one-off Task Scheduler task a step runs as instead: Task Scheduler stands in, and the run outside (outside-run.ts)
 // runs for real, in a temporary folder.
