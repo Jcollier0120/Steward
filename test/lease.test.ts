@@ -346,9 +346,14 @@ test('the claims ref out of reach: claimed here as before; shared on the next re
   assert.deepEqual([a.claim.version, a.claim.source], ['0.4.12', undefined]);
   const b = await C.claimVersion(s.ctx, s.e, { branch: 'claude/second', by: 'claude', for: 'more', remote: gone() });
   assert.equal(b.claim.version, '0.4.13');
+  // A round that can't read the claims ref, out of reach still or its git failing outright, leaves them here for the next.
+  const rows = [{ repo: 'Jcollier0120/Fake', name: 'Fake', main: { version: '0.4.10' }, release: { version: '0.4.10' }, prs: [] }];
+  await C.shareClaims(realRun, rows, [{ repo: 'Jcollier0120/Fake', remote: gone(), sha: null }]);
+  const failing: Runner = () => Promise.reject(new Error('git failed'));
+  await C.shareClaims(failing, rows, [{ repo: 'Jcollier0120/Fake', remote: s.remoteRepo, sha: null }]);
+  assert.deepEqual(C.loadClaims().map((c) => [c.version, c.source]), [['0.4.12', undefined], ['0.4.13', undefined]]);
   // Meanwhile another PC, which could reach the remote, claimed 0.4.13 for its own work.
   await R.writeRef(realRun, s.remoteRepo, C.CLAIMS_REF, C.CLAIMS_FILE, JSON.stringify([{ repo: 'Jcollier0120/Fake', version: '0.4.13', branch: 'claude/desk', by: 'claude', for: "the desktop's fix", at: new Date().toISOString() }]), null, 'desk');
-  const rows = [{ repo: 'Jcollier0120/Fake', name: 'Fake', main: { version: '0.4.10' }, release: { version: '0.4.10' }, prs: [] }];
   await C.shareClaims(realRun, rows, [{ repo: 'Jcollier0120/Fake', remote: s.remoteRepo, sha: await shaOf(s.remoteRepo, C.CLAIMS_REF) }]);
   assert.deepEqual((await sharedClaims(s.remoteRepo)).map((c) => [c.version, c.branch]), [['0.4.13', 'claude/desk'], ['0.4.12', 'claude/offline']], "this PC's free one went up");
   assert.deepEqual(C.claimClashes(), ["Jcollier0120/Fake 0.4.13 was claimed on another PC too (for the desktop's fix) while this PC couldn't reach the remote: claim a new version for claude/second (claim-version) before you merge it"]);
