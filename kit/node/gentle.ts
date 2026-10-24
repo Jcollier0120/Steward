@@ -144,13 +144,7 @@ function applyPace(): Promise<void> {
     if (want === applied) return;
     applied = want;
     try {
-      const source = gentleSource();
-      const dll = signedHelper('gentle', source) ?? gentleDll(source);
-      let first: string | null = null;
-      if (!existsSync(dll)) {
-        mkdirSync(path.dirname(dll), { recursive: true });
-        first = source;
-      }
+      const { dll, first } = helperDll();
       const took = (await powershell(gentleScript(process.pid, gentle, cap, dll, first, outsideCeiling ? 0 : ceilingCap()), { timeoutMs: 120_000 })).trim();
       if (took !== (cap ? 'eco io cap worker' : 'eco io cap')) console.log(`${new Date().toISOString()} the ${p} pace took only in part (${took}): what didn't take stays as it was`);
     } catch (e) {
@@ -158,6 +152,38 @@ function applyPace(): Promise<void> {
     }
   });
   return pending;
+}
+
+/** The helper's DLL (the kit's signed one where it ships it, prebuilt.ts), and its source when no agent has compiled it yet. */
+function helperDll(): { dll: string; first: string | null } {
+  const source = gentleSource();
+  const dll = signedHelper('gentle', source) ?? gentleDll(source);
+  if (existsSync(dll)) return { dll, first: null };
+  mkdirSync(path.dirname(dll), { recursive: true });
+  return { dll, first: source };
+}
+
+/**
+ * A program the agent started that works for it while it lives (the text reader on the processor, ocr-npu.ts; kit
+ * 2.135.0), set to the agent's pace beyond what it inherits: Windows gives a process's children its priority class and
+ * its job, but not its efficiency mode or its disk priority. At a gentle pace the program gets both, as the agent has
+ * them, and stays in the agent's job (no job of its own); at a full pace, before any round set a pace, once
+ * keepResponsive() was called, or where Windows' calls are off (KIT_GENTLE=0, not Windows), nothing is done. It's set
+ * once, as the program starts: one started at a gentle pace keeps it until it ends. Never throws; what took ("eco io
+ * cap"), or null when nothing was done or it couldn't be.
+ */
+export async function paceStarted(pid: number | undefined, o: { pace?: Pace | null; run?: (script: string) => Promise<string> } = {}): Promise<string | null> {
+  const p = o.pace === undefined ? (responsive ? null : wanted) : o.pace;
+  if (p !== 'gentle' || !pid) return null;
+  if (!o.run && (process.platform !== 'win32' || process.env.KIT_GENTLE === '0')) return null;
+  try {
+    // After the agent's own pace, which compiles the helper where no agent has yet.
+    await pending;
+    const { dll, first } = helperDll();
+    return (await (o.run ?? ((s: string) => powershell(s, { timeoutMs: 120_000 })))(gentleScript(pid, true, 0, dll, first))).trim();
+  } catch {
+    return null;
+  }
 }
 
 /** How often a process that contains itself reads the pace again: a file read, PowerShell only when it changed. */

@@ -110,7 +110,7 @@ test('the page while it settles in: the pill, and the banner only where its firs
 });
 
 // Heiward's background pace for every agent (gentle.ts, kit 2.50.0): efficiency mode, very low disk priority, a cap.
-const { gentleCap, gentleDll, gentleScript } = await import('./fixture/src/kit/gentle.ts');
+const { gentleCap, gentleDll, gentleScript, paceStarted } = await import('./fixture/src/kit/gentle.ts');
 
 test('the processor cap at a gentle pace: a quarter, and two processors at most', () => {
   assert.equal(gentleCap(4), 2500, '4 processors: a quarter (one)');
@@ -131,6 +131,21 @@ test('the gentle script: compiles the helper only when asked to, to a name of it
   assert.ok(first.includes("'C:/o''k/gentle.dll'"), 'paths quoted');
   assert.match(first, /\[KitGentle\]::Set\(42, \$false, 1111\) \+ ' ' \+ \[KitGentle\]::Join\(42\)$/, 'a cap at either pace: the worker joins its job');
   assert.match(gentleScript(42, false, 0, 'C:/x/gentle.dll', null), /\[KitGentle\]::Set\(42, \$false, 0\)$/, 'no cap: no job to join');
+});
+
+test("a program the agent started (the text reader on the processor, kit 2.135.0): at a gentle pace, efficiency mode and disk priority, in the agent's job; nothing at a full one", async () => {
+  const scripts: string[] = [];
+  const run = async (script: string) => (scripts.push(script), 'eco io cap');
+  assert.equal(await paceStarted(42, { pace: 'gentle', run }), 'eco io cap');
+  assert.match(scripts[0], /\[KitGentle\]::Set\(42, \$true, 0\)$/, "no cap of its own: it stays in the agent's job");
+  assert.equal(await paceStarted(42, { pace: 'full', run }), null);
+  assert.equal(await paceStarted(42, { pace: null, run }), null, 'no pace set yet: as Windows started it');
+  assert.equal(await paceStarted(undefined, { pace: 'gentle', run }), null, 'no process');
+  assert.equal(scripts.length, 1, 'only the gentle one ran');
+  const refused = async () => {
+    throw new Error('refused');
+  };
+  assert.equal(await paceStarted(42, { pace: 'gentle', run: refused }), null, 'never throws');
 });
 
 test("the manor's ceiling (kit 2.78.3): 85% of the processor and of memory, written once", () => {

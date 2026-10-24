@@ -332,6 +332,19 @@ test("the NPU's line too long: a program of its own on the processor reads inste
   assert.deepEqual(started.map((a) => a[a.indexOf('--on') + 1]), ['cpu'], "the NPU's program not started without its turn");
 });
 
+test("a program on the processor reads at the agent's pace (efficiency mode at a gentle one, kit 2.135.0); the NPU's as started", async () => {
+  const paced: (number | undefined)[] = [];
+  const o = { start: (args: string[], cwd: string) => startFake(args, cwd), paced: async (pid: number | undefined) => void paced.push(pid) };
+  const r = await m.modelReader({ env: {}, arch: 'arm64', home: readyPlace('arm64', m.QNN_PACK), ...o });
+  assert.equal(r?.engine, 'model-npu');
+  assert.deepEqual(paced, [], "the NPU's program isn't set");
+  m.resetModelReader();
+  const cpu = await m.modelReader({ env: { KIT_OCR_ENGINE: 'model' }, arch: 'x64', home: readyPlace('x64', null), ...o });
+  assert.equal(cpu?.engine, 'model-cpu');
+  assert.equal(paced.length, 1, 'set once, as it started');
+  assert.equal(typeof paced[0], 'number', 'by its process id');
+});
+
 test("an NPU that fails the program's check isn't used, and isn't tried again for a while", async () => {
   const where = readyPlace('arm64', m.QNN_PACK);
   let starts = 0;

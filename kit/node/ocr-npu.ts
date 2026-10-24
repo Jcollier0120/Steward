@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { startFailed } from './console.ts';
+import { paceStarted } from './gentle.ts';
 import { locksDir, LockTimeout, withLock } from './lock.ts';
 import { acceleratorTurn, NpuBusy } from './npu.ts';
 import { currentLane, type Lane } from './npu-queue.ts';
@@ -202,7 +203,9 @@ export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt
  * less there, but the owner's rule, 2026-10-24, is never to trade how well it reads for less power. On a Core Ultra 5
  * 225U's processor, and on a Ryzen AI 7 350's, model 1 read the check's lines as on the NPU, 1,212 of 1,253 against
  * Windows' OCR's 736, at 16 times the processor time a picture; on a Snapdragon X2 Elite's, 20 times (spec/OCR.md, "On
- * the processor").
+ * the processor"). At a gentle pace the program there runs in Windows' efficiency mode (kit 2.135.0, gentle.ts'
+ * paceStarted): on the X2's processor the same lines for about half the energy a picture (3.2 J against 6.7 J over
+ * rest, model 2), and a quarter longer.
  */
 export const ON_PROCESSOR = true;
 
@@ -748,6 +751,8 @@ export interface ReaderOptions {
   fetch?: (place: ReaderPlace, arch: OcrArch, pack: NpuPack | null) => void;
   prepare?: (place: ReaderPlace, pack: NpuPack) => Promise<Prepared>;
   turn?: typeof acceleratorTurn;
+  /** A stand-in for gentle.ts' paceStarted: a program started on the processor, set to the agent's pace. */
+  paced?: (pid: number | undefined) => Promise<unknown>;
   now?: number;
 }
 
@@ -780,10 +785,13 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
     o.log?.(line);
   };
   const begin = o.start ?? (async (a: string[], cwd: string) => ReaderHost.start(await readerExe(), a, cwd));
+  const paced = o.paced ?? paceStarted;
   // Qualcomm's compiler holds about 2 GB until its program ends (317 MB without it, measured on a Snapdragon X2): a
-  // program that compiled its graphs is started again, and loads them from the cache.
+  // program that compiled its graphs is started again, and loads them from the cache. One on the processor reads at
+  // the agent's pace: in Windows' efficiency mode at a gentle one (kit 2.135.0; ON_PROCESSOR says what it saves).
   const start = (a: string[], cwd: string) =>
     begin(a, cwd).then((h) => {
+      if (h.hello.on === 'cpu') void paced(h.pid);
       if (!h.hello.compiled || h.hello.on !== 'npu') return h;
       h.close();
       return begin(a, cwd);
