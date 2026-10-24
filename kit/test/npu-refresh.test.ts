@@ -157,6 +157,9 @@ test("an NPU 3720 set up before its embeddings took the graphics' turn: moved in
   for (const cards of [[IGPU], undefined]) assert.equal((await refreshNpu(fakePc(setUpEntry({ cards: [IGPU] }), { cards }).deps)).did, 'current', String(cards));
 });
 
+/** The GenieX setup puts on a Snapdragon X or X2 (their pin, 0.9.3): a Snapdragon PC below has it, unless a test says otherwise. */
+const GENIEX_PIN = V.pinnedRoute(V.NPU_CATALOG.routes.qualcomm, 'snapdragon-x2').version;
+
 const INTEL_EMBED = V.NPU_CATALOG.routes.intel.embedServer!;
 const INTEL_OWN = `${INTEL_EMBED.server} ${INTEL_EMBED.version}`;
 const offerWords = (e: Record<string, any>) => `embeddings: on the NPU's own server (${INTEL_OWN}, ${e.embed.model})`;
@@ -245,13 +248,15 @@ test("a Snapdragon's embeddings offered: GenieX's files copied over its embeddin
   const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
   const x2 = parseNpus(X2, 'arm64')[0];
   const ramBytes = 47.6 * 1024 ** 3;
-  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, small: false })!;
+  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, small: false, serverVersion: GENIEX_PIN })!;
   const withEmbed = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model } }), timeouts: { ...MEASURED } } as Record<string, any>;
   const { embed: _e, ...chatOnly } = withEmbed;
-  const es = V.NPU_CATALOG.routes.qualcomm.embedServer!;
+  const es = plan.route.embedServer!;
+  assert.ok(es.overlay, "GenieX 0.9.3's embedding server takes its files");
   const on = (overlay: (from: string, into: string, files: string[]) => number) => {
     const pc = fakePc(structuredClone(chatOnly));
     pc.deps.detect = async () => (pc.did.push('detect'), { npu: x2, ramBytes } as any);
+    pc.deps.serverVersion = async () => GENIEX_PIN;
     pc.deps.overlay = (from, into, files) => (pc.did.push(`overlay ${from} -> ${into} (${files.length})`), overlay(from, into, files));
     return pc;
   };
@@ -553,13 +558,15 @@ test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once 
   const x2 = parseNpus(X2, 'arm64')[0];
   const x1 = parseNpus(X1, 'arm64')[0];
   // What an older kit wrote on an X2 (any, before kit 2.78.0; one of 20 GB or more, before 2.78.8): the route's 4B, on
-  // GenieX's QAIRT plugin, its embeddings on llama-server. The X Elite's command with its fallback, the same route's.
-  const plan = V.planNpu({ support: x1, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, fallback: true })!;
+  // GenieX's QAIRT plugin, its embeddings on llama-server, here on the GenieX the X2 pins now. The X Elite's command
+  // with its fallback, the same route's.
+  const plan = V.planNpu({ support: x1, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, fallback: true, serverVersion: GENIEX_PIN })!;
   const fourB = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model } }), timeouts: { ...MEASURED } };
   assert.equal(fourB.chat!.model, 'qualcomm/Qwen3-VL-4B-Instruct:W4A16');
   const on = (npu: typeof x2, ramGb: number, exists: (p: string) => boolean) => {
     const pc = fakePc(fourB, { exists });
     pc.deps.detect = async () => (pc.did.push('detect'), { npu, ramBytes: ramGb * 1024 ** 3 } as any);
+    pc.deps.serverVersion = async () => GENIEX_PIN;
     return pc;
   };
   const TWO_B = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
@@ -574,11 +581,11 @@ test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once 
     // Pulled: its command tested in the NPU's turn, then written, the PC's own timeouts kept.
     const pulled = on(x2, ramGb, () => true);
     const r = await refreshNpu(pulled.deps);
-    assert.deepEqual(r, { did: 'refreshed', changes: [`model ${TWO_B} in qualcomm/Qwen3-VL-4B-Instruct:W4A16's place`, '--compute npu added', '--vit-compute GPUOpenCL added', '--nctx 2560 added', 'GENIEX_IMAGE_MAX_TOKENS=1024 added', 'pictures: at most 1024 tokens'] }, `${ramGb} GB`);
+    assert.deepEqual(r, { did: 'refreshed', changes: [`model ${TWO_B} in qualcomm/Qwen3-VL-4B-Instruct:W4A16's place`, '--compute npu added', '--nctx 2560 added', 'GENIEX_IMAGE_MAX_TOKENS=1024 added', 'pictures: at most 1024 tokens'] }, `${ramGb} GB`);
     assert.ok(pulled.did.includes('stop geniex.exe http://127.0.0.1:18181') && pulled.did.includes('stop llama-server.exe http://127.0.0.1:18182'), pulled.did.join(', '));
     assert.equal(pulled.npu().chat.model, TWO_B, `${ramGb} GB`);
     assert.deepEqual(pulled.npu().vision, { model: TWO_B, pictureTokens: 1024 }, `${ramGb} GB`);
-    assert.deepEqual(pulled.npu().chat.startCommand.slice(-6), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL', '--nctx', '2560'], `${ramGb} GB`);
+    assert.deepEqual(pulled.npu().chat.startCommand.slice(-4), ['--compute', 'npu', '--nctx', '2560'], `${ramGb} GB`);
     assert.deepEqual(pulled.npu().embed, fourB.embed, `${ramGb} GB: its embeddings as they were`);
     assert.deepEqual(pulled.npu().timeouts, MEASURED, `${ramGb} GB`);
     assert.match(pulled.log.join('\n'), /now start with this kit's command \(2\.75\.0\): model unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0 in qualcomm\/Qwen3-VL-4B-Instruct:W4A16's place/);
@@ -589,19 +596,25 @@ test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once 
   for (const ramGb of [15.6, 47.6]) assert.deepEqual(await refreshNpu(on(x1, ramGb, () => true).deps), { did: 'current' }, `X Elite, ${ramGb} GB`);
 });
 
-test("an X2 set up with the 2B by kit 2.78.8 to 2.80.1: its window cut to 2,560 tokens and its pictures fitted within 1,024, after the same test", async () => {
+test("an X2 on the 2B with no window or picture cap in its command (as kits 2.78.8 to 2.80.1 wrote it): its window cut to 2,560 tokens and its pictures fitted within 1,024, after the same test", async () => {
   const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
   const x2 = parseNpus(X2, 'arm64')[0];
-  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true })!;
+  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, serverVersion: GENIEX_PIN })!;
   const now = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model } }), timeouts: { ...MEASURED } };
   // What those kits wrote: GenieX's default window (4,096), every picture at its own size, and no cap for GenieX itself.
+  // (They ran GenieX 0.8.0, which setup now replaces with the pin's: here the PC has the pin's, so its command alone is behind.)
   const before = structuredClone(now) as Record<string, any>;
   before.chat.startCommand = before.chat.startCommand.slice(0, -2);
   delete before.vision.pictureTokens;
   delete before.chat.env;
-  assert.deepEqual(before.chat.startCommand.slice(-4), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL']);
-  const pc = fakePc(before);
-  pc.deps.detect = async () => (pc.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+  assert.deepEqual(before.chat.startCommand.slice(-2), ['--compute', 'npu']);
+  const x2Pc = (entry: Record<string, any>) => {
+    const pc = fakePc(entry);
+    pc.deps.detect = async () => (pc.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+    pc.deps.serverVersion = async () => GENIEX_PIN;
+    return pc;
+  };
+  const pc = x2Pc(before);
   const r = await refreshNpu(pc.deps);
   assert.deepEqual(r, { did: 'refreshed', changes: ['--nctx 2560 added', 'GENIEX_IMAGE_MAX_TOKENS=1024 added', 'pictures: at most 1024 tokens'] });
   assert.ok(pc.did.includes('turn') && pc.did.includes('stop geniex.exe http://127.0.0.1:18181'), pc.did.join(', '));
@@ -613,23 +626,21 @@ test("an X2 set up with the 2B by kit 2.78.8 to 2.80.1: its window cut to 2,560 
   // Set up by kit 2.80.2: GenieX given the same cap as the kit's pictures (its patched plugin reads it), after the same test.
   const lastKit = structuredClone(now) as Record<string, any>;
   delete lastKit.chat.env;
-  const capped = fakePc(lastKit);
-  capped.deps.detect = async () => (capped.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+  const capped = x2Pc(lastKit);
   assert.deepEqual(await refreshNpu(capped.deps), { did: 'refreshed', changes: ['GENIEX_IMAGE_MAX_TOKENS=1024 added'] });
   assert.deepEqual(capped.npu().chat.env, { GENIEX_IMAGE_MAX_TOKENS: '1024' });
   assert.ok(capped.did.includes('stop geniex.exe http://127.0.0.1:18181'), capped.did.join(', '));
   // Set up by this kit: current.
-  const fresh = fakePc(now);
-  fresh.deps.detect = async () => (fresh.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
-  assert.deepEqual(await refreshNpu(fresh.deps), { did: 'current' });
+  assert.deepEqual(await refreshNpu(x2Pc(now).deps), { did: 'current' });
 });
 
-test("an X2 the Smith's Use it moved to GenieX 0.9.1: its command kept, never put back to 0.8.0's; its embeddings offered on b11645, the llama.cpp that loads 0.9's libraries", async () => {
+test("an X2 the Smith's Use it moved to a later GenieX than the pin: its command kept, never put back to the pin's; its embeddings offered on b11645, the llama.cpp that loads 0.9's libraries; an older GenieX left for setup, which puts the pin's in its place", async () => {
   const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
   const x2 = parseNpus(X2, 'arm64')[0];
   const q = V.NPU_CATALOG.routes.qualcomm;
+  const LATER = '0.10.2';
   // What Use it writes (the Smith's useTrial): the try's route, at the candidate's version, without embeddings.
-  const tried = V.routeFor({ ...structuredClone(q), version: '0.9.1' }, 'snapdragon-x2');
+  const tried = V.routeFor({ ...structuredClone(q), version: LATER }, 'snapdragon-x2');
   const used = { ...V.npuEntry(tried, { tools, exe: V.serverExe(tried, tools), port: q.port, portable: (p) => portablePath(p, home) }), timeouts: { ...MEASURED } };
   assert.deepEqual(used.chat!.startCommand!.slice(-4), ['--compute', 'npu', '--nctx', '2560']);
   const on = (version: string | null) => {
@@ -639,21 +650,26 @@ test("an X2 the Smith's Use it moved to GenieX 0.9.1: its command kept, never pu
     pc.deps.overlay = (from, into, files) => (pc.did.push(`overlay ${files.length} from ${path.win32.basename(path.win32.dirname(from))} into ${path.win32.basename(into)}`), files.length);
     return pc;
   };
-  const pc = on('0.9.1');
+  const pc = on(LATER);
   const r = await refreshNpu(pc.deps);
   assert.deepEqual(r, { did: 'refreshed', changes: ["embeddings: on the NPU's own server (llama.cpp b11645, qwen3-embedding-0.6b-gguf)"] });
   assert.ok(pc.did.includes('overlay 13 from GenieX CLI into b11645-hexagon'), pc.did.join(', '));
-  assert.deepEqual(pc.npu().chat, used.chat, "its command as Use it wrote it: no --vit-compute, which crashes GenieX 0.9.1's first picture");
+  assert.deepEqual(pc.npu().chat, used.chat, 'its command as Use it wrote it');
   assert.match(pc.npu().embed.startCommand[0], /\\b11645-hexagon\\llama-server\.exe$/);
   // Its next look, embeddings and all: current.
   const next = fakePc(pc.npu());
   next.deps.detect = async () => (next.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
-  next.deps.serverVersion = async () => '0.9.1';
+  next.deps.serverVersion = async () => LATER;
   assert.deepEqual(await refreshNpu(next.deps), { did: 'current' });
-  // Read as the route's own 0.8.0 (as before kit 2.88.1), the look would have put --vit-compute GPUOpenCL back.
-  const old = await refreshNpu(on('0.8.0').deps);
-  assert.equal(old.did, 'refreshed');
-  assert.ok(old.changes!.includes('--vit-compute GPUOpenCL added'), old.changes!.join(', '));
+  // An older GenieX than the pin (0.8.0, before kit 2.88.1; 0.9.1, kit 2.98.0 to 2.107.0): left for setup, which the
+  // keeper runs again by itself (set-up-again.ts, kit 2.115.0) to put the pin's 0.9.3 in its place; nothing stopped or written.
+  for (const version of ['0.8.0', '0.9.1']) {
+    const older = on(version);
+    assert.deepEqual(await refreshNpu(older.deps), { did: 'needs-setup' }, version);
+    assert.ok(!older.did.includes('turn'), version);
+    assert.deepEqual(older.npu().chat, used.chat, version);
+    assert.equal(readNpuRefresh(older.configFile)?.did, 'needs-setup', `${version}: what the keeper's setting up again reads`);
+  }
   // A GenieX that can't say its version may be 0.8.0 (an X2 set up before kit 2.88.1), 0.9.1 or 0.9.3 (one set up since,
   // or moved): its command kept as it is, nothing written, so a later look asks again.
   const unsaid = on(null);
@@ -680,7 +696,7 @@ test("an X2 the Smith's Use it moved to GenieX 0.9.1: its command kept, never pu
 test("an X2 whose NPU reranks (kit 2.100.0): its reranker stopped with the others when the command changes, and made again on the embedding server written now, its file and port kept", async () => {
   const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
   const x2 = parseNpus(X2, 'arm64')[0];
-  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true })!;
+  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, serverVersion: GENIEX_PIN })!;
   const file = '%USERPROFILE%\\.manor\\accelerators\\models\\qwen3-reranker-0.6b-q8_0.gguf';
   const now = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model }, rerank: { file, model: 'qwen3-reranker-0.6b', port: 18186 } }), timeouts: { ...MEASURED } };
   assert.equal(now.rerank!.baseUrl, 'http://127.0.0.1:18186');
@@ -689,6 +705,7 @@ test("an X2 whose NPU reranks (kit 2.100.0): its reranker stopped with the other
   const x2Pc = (entry: Record<string, any>) => {
     const pc = fakePc(entry);
     pc.deps.detect = async () => (pc.did.push('detect'), { npu: x2, ramBytes: 47.6 * 1024 ** 3 } as any);
+    pc.deps.serverVersion = async () => GENIEX_PIN;
     return pc;
   };
   assert.deepEqual(await refreshNpu(x2Pc(now).deps), { did: 'current' }, "set up by this kit: its reranker is setup's");

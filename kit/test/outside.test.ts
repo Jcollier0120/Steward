@@ -43,13 +43,40 @@ test("a packaged app is found among a process's ancestors (Manor's insidePackage
   const loop = O.parseProcessTable('10|11|C:\\a.exe\n11|10|C:\\b.exe');
   assert.equal(O.packagedAncestor(loop, 10), null, 'a loop ends');
 
-  const at = (pid: number, env: NodeJS.ProcessEnv = {}) => O.packagedApp({ pid, table: async () => TABLE, env });
+  const probed: NodeJS.ProcessEnv[] = [];
+  const none = (p: { env?: NodeJS.ProcessEnv }) => (probed.push(p.env ?? {}), null);
+  const at = (pid: number, env: NodeJS.ProcessEnv = {}) => O.packagedApp({ pid, table: async () => TABLE, env, probe: none });
   const win = process.platform === 'win32';
   assert.equal((await at(1400))?.exe, win ? CLAUDE : undefined, 'only Windows has packaged apps');
+  assert.equal(probed.length, 0, 'an ancestor found: no probe');
   assert.equal(await at(2100), null);
   assert.equal(await at(1400, { [O.OUTSIDE_ENV]: '1' }), null, 'a run outside never looks again');
-  assert.equal(await O.packagedApp({ pid: 1400, table: async () => Promise.reject(new Error('no CIM')) }), null, "a table that can't be read: none");
+  assert.equal(await O.packagedApp({ pid: 1400, table: async () => Promise.reject(new Error('no CIM')), env: {}, probe: none }), null, "a table that can't be read, and a probe that finds none: none");
+  assert.equal(probed.length, win ? 2 : 0, 'no ancestor found: the probe asked, each time');
   assert.equal(await O.packagedOutsideTests(), null, 'none in a test run');
+});
+
+test("a gap among the ancestors: the package is found by where a write to AppData lands (kit 2.115.0)", async (t) => {
+  if (process.platform !== 'win32') return t.skip('Windows only');
+  const local = path.join(home, 'gap', 'AppData', 'Local');
+  const cache = path.join(local, 'Packages', 'Claude_pzs8sxrjxfjjc', 'LocalCache', 'Local');
+  mkdirSync(cache, { recursive: true });
+  mkdirSync(path.join(local, 'Packages', 'Microsoft.WindowsTerminal_8wekyb3d8bbwe', 'LocalCache', 'Local'), { recursive: true });
+  const env = { LOCALAPPDATA: local };
+  const redirected = (f: string) => path.join(cache, path.basename(f));
+  const listing = () => [...readdirSync(local), ...readdirSync(cache)].filter((f) => f.startsWith('kit-redirect-'));
+
+  assert.equal(O.redirectedTo({ env, lands: redirected })?.exe, path.win32.join(local, 'Packages', 'Claude_pzs8sxrjxfjjc'), "a write kept by the Claude app's package");
+  assert.equal(O.redirectedTo({ env }), null, 'a write that lands where it was written: no package');
+  assert.deepEqual(listing(), [], 'the marker removed both times');
+  assert.equal(O.redirectedTo({ env: {} }), null, 'no %LOCALAPPDATA%');
+  assert.equal(O.redirectedTo({ env: { LOCALAPPDATA: path.join(home, 'gap', 'nowhere') } }), null, "a marker that can't be written");
+
+  // The session's node whose parent exited (Git's timeout): the walk stops at the gap, the probe finds the package.
+  const gap = ['1400|1350|C:\\Program Files\\nodejs\\node.exe', `1200|900|${CLAUDE}`].join('\r\n');
+  const found = await O.packagedApp({ pid: 1400, table: async () => gap, env, probe: (p) => O.redirectedTo({ ...p, lands: redirected }) });
+  assert.match(found?.exe ?? '', /Packages\\Claude_pzs8sxrjxfjjc$/);
+  assert.equal(await O.packagedApp({ pid: 1400, table: async () => gap, env, probe: O.redirectedTo }), null, "the staff's, outside any package");
 });
 
 test("AppData is %LOCALAPPDATA%, %APPDATA% and the profile's AppData, in any case; %TEMP% and the rest of the profile aren't", () => {

@@ -17,6 +17,7 @@ import { keyInside, pathKey, samePath } from './real-path.ts';
 import { removeRetiredModels } from './retired.ts';
 import { RULES } from './rules.ts';
 import { repairMissing } from './server-repair.ts';
+import { AGAIN_LOOK_MS, AGAIN_QUIET_MS, removeReplaced, setUpAgain } from './set-up-again.ts';
 import { kitVersion, refreshCardVision, refreshSmallModel, setupCommand, testNpuEmbed, testNpuEntry } from './setup.ts';
 
 /**
@@ -949,6 +950,13 @@ export const npuRefreshLog = (env: NodeJS.ProcessEnv = process.env) => path.join
 let npuRefresh: Promise<void> | null = null;
 let npuDetected: Promise<Detection> | null = null;
 
+/** This PC, asked once in the process however many looks take it (the NPU's refresh, setting up again). */
+const detectOnce = (): Promise<Detection> =>
+  (npuDetected ??= detect().catch((e) => {
+    npuDetected = null;
+    throw e;
+  }));
+
 /**
  * The NPU's servers brought up to this kit's command (npu-refresh.ts): looked at once for each kit version, in the
  * background, so a look never waits for it; while someone uses the NPU, or after a test that failed for its server, a later
@@ -956,7 +964,8 @@ let npuDetected: Promise<Detection> | null = null;
  * in npuRefreshLog. This PC is asked once in the process, however many looks it takes.
  */
 export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): void {
-  if (npuRefresh) return;
+  // Not while the NPU is set up again with this kit's pins (startRepairs): that setup tests its servers.
+  if (npuRefresh || againOn === 'npu') return;
   const logFile = o.logFile ?? reaperLog();
   const serverLog = npuRefreshLog();
   const dirs = kitLockDirsOf({ id: 'npu', slots: 1 });
@@ -973,11 +982,7 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
     configFile: acceleratorConfigFile(),
     tools: toolsHome(),
     now: Date.now,
-    detect: () =>
-      (npuDetected ??= detect().catch((e) => {
-        npuDetected = null;
-        throw e;
-      })),
+    detect: detectOnce,
     // Each one looked at, so its next look knows whether it was in use since (lastUseMs).
     idle: () =>
       [dirs, embedDirs()]
@@ -1052,16 +1057,42 @@ export function startSmallModelRefresh(o: { logFile?: string } = {}): void {
 }
 
 /**
- * A server whose program is gone from where config.json starts it, set up again (server-repair.ts, kit 2.113.5): in the
- * background, at most one setup at a time, and not while the NPU's refresh tests its servers (the next look tries).
- * What it did goes in the keeper's log, setup's own lines too.
+ * A server whose program is gone from where config.json starts it, set up again (server-repair.ts, kit 2.113.5); then,
+ * when nothing was, an accelerator behind the kit's pins (set-up-again.ts, kit 2.115.0: another llama.cpp build or model
+ * for a card or the processor, another server or model for the NPU), set up again beside its present entry, once nobody
+ * has used it for AGAIN_QUIET_MS, looked for every AGAIN_LOOK_MS; then the files such a switch left unused, removed once
+ * nothing has named them for three days. In the background, at most one setup at a time, and not while the NPU's
+ * refresh tests its servers (the next look tries). What it did goes in the keeper's log, setup's own lines too.
  */
 let repairing: Promise<void> | null = null;
+/** The accelerator being set up again now (setUpAgain), so the NPU's refresh leaves the NPU to it meanwhile. */
+let againOn: string | null = null;
+let againLooked = 0;
 export function startRepairs(o: { logFile?: string; config?: () => Record<string, any> } = {}): void {
   if (repairing || npuRefresh) return;
   const logFile = o.logFile ?? reaperLog();
   const log = (line: string) => logLine(logFile, line);
-  repairing = repairMissing({ raw: o.config, log, setup: (x) => setupCommand({ ...x, log: (line) => log(`setup: ${line}`) }) })
+  const setup = (x: Parameters<typeof setupCommand>[0]) => setupCommand({ ...x, log: (line) => log(`setup: ${line}`) });
+  repairing = repairMissing({ raw: o.config, log, setup })
+    .then((r) => {
+      if (r.did === 'set-up' || Date.now() - againLooked < AGAIN_LOOK_MS) return;
+      againLooked = Date.now();
+      return setUpAgain({
+        kit: kitVersion(),
+        detect: detectOnce,
+        idle: (a) => Date.now() - lastUseMs(lockDirsOf(a)) >= AGAIN_QUIET_MS,
+        setup: async (x) => {
+          againOn = x.ids[0] ?? null;
+          try {
+            return await setup(x);
+          } finally {
+            againOn = null;
+          }
+        },
+        log,
+      }).catch((e: any) => log(`the accelerators couldn't be looked at against this kit's pins: ${e?.message ?? e}`));
+    })
+    .then(() => removeReplaced({ running: () => modelServerProcesses().then((ps) => ps.map((p) => p.line)), log }))
     .then(() => {})
     .catch((e: any) => log(`the servers' programs couldn't be looked at: ${e?.message ?? e}`))
     .finally(() => (repairing = null));
@@ -1071,7 +1102,7 @@ export function startRepairs(o: { logFile?: string; config?: () => Record<string
  * One look: each server, then the orphans. config.json and Manor's switch are read afresh, so a change applies at the
  * next look. With the PC's own reaper (pcReaper's), it first brings hardware.json, the cards' vision commands, the
  * NPU's command and the cards' Qwen3-VL-2B file up to date (and removes the model files the NPU no longer runs, once nothing
- * names them), and sets up again a server whose program is missing (startRepairs), whether or not it's handed config.json: the Smith hands the one it read for its round, and
+ * names them), and sets up again a server whose program is missing or that is behind the kit's pins (startRepairs), whether or not it's handed config.json: the Smith hands the one it read for its round, and
  * until kit 2.78.8 that kept all three from ever running under it (Reeve leaves the looks to the Smith). A test's
  * reaper asks no PC.
  */

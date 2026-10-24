@@ -7,6 +7,7 @@ import { startFailed } from './console.ts';
 import { locksDir, LockTimeout, withLock } from './lock.ts';
 import { acceleratorTurn, NpuBusy } from './npu.ts';
 import { currentLane, type Lane } from './npu-queue.ts';
+import { type NpuReport, readNpuReport } from './npu-report.ts';
 import { compileHelperScript, prebuiltName, signedHelper } from './prebuilt.ts';
 import { powershell, psStart } from './ps.ts';
 import { download, type Download } from './setup.ts';
@@ -19,10 +20,11 @@ import { download, type Download } from './setup.ts';
  *
  * - What it needs is fetched once for every agent on the PC, in the background, into the reader's shared folder
  *   (ocrHome: %USERPROFILE%\.npu-agent\ocr, beside the NPU's line and the kit's helpers): ONNX Runtime from Microsoft's
- *   release, the NPU maker's plugin from its own NuGet package (Qualcomm's, on an Arm PC), and the model from the
- *   manor's releases, each pinned by size and SHA-256, keeping only the files it uses and their notices. About 226 MB
- *   to fetch on a Snapdragon, 242 MB kept (Qualcomm's compiler alone is 182 MB), and 13 MB of compiled graphs. Until
- *   all of it is there, Windows' OCR reads, as before.
+ *   release, the NPU maker's plugin from its own NuGet package (Qualcomm's on an Arm PC, Intel's on an Intel NPU of a
+ *   generation measured for it: OPENVINO_GENERATIONS), and the model from the manor's releases, each pinned by size and
+ *   SHA-256, keeping only the files it uses and their notices. About 226 MB to fetch on a Snapdragon, 242 MB kept
+ *   (Qualcomm's compiler alone is 182 MB), and 13 MB of compiled graphs; 199 MB on an Intel Core Ultra, 131 MB kept
+ *   (OpenVINO's plugin is 112 MB), and 48 MB of compiled graphs. Until all of it is there, Windows' OCR reads, as before.
  * - The program (a kit helper, signed: prebuilt.ts) loads the model once and stays, reading picture after picture,
  *   until no picture has come for two minutes. It runs in the cache folder, where what a runtime leaves in its working
  *   folder (VitisAI's signature files) belongs, and keeps each NPU's compiled graphs there.
@@ -30,13 +32,14 @@ import { download, type Download } from './setup.ts';
  *   caller's lane: background reads wait their turn, and a background batch the line is too long for goes to Windows'
  *   OCR instead of waiting.
  * - Before it reads anything, the program reads a picture it draws itself on the NPU and on the processor; an NPU that
- *   reads it differently isn't used. Where there's no NPU the model can use (an x64 PC, for now: Intel's and AMD's are
- *   still to be measured), it reads on the processor only when ON_PROCESSOR says that's worth it; else Windows' OCR.
+ *   reads it differently isn't used. Where there's no NPU the model can use (AMD's is still to be measured, and Intel
+ *   generations other than OPENVINO_GENERATIONS), it reads on the processor only when ON_PROCESSOR says that's worth
+ *   it; else Windows' OCR.
  *
  * KIT_OCR_ENGINE: `windows` reads with Windows' OCR alone, `model` with the model wherever it can (on the processor
  * too); unset, the model where it's worth it. Under node:test it's Windows' OCR unless KIT_OCR_ENGINE says otherwise,
- * so no test fetches the model. KIT_OCR_NPU: `none` keeps the model off the NPU; `openvino` tries Intel's NPU, `vitisai`
- * AMD's (tests).
+ * so no test fetches the model. KIT_OCR_NPU: `none` keeps the model off the NPU; `openvino` tries Intel's plugin on any
+ * x64 PC (a test, on a generation not measured yet), `vitisai` AMD's (a test).
  */
 
 /** A file the reader fetches: where from, and what it must be. */
@@ -157,6 +160,22 @@ export const VITISAI_PACK: NpuPack = {
   folder: 'winml-2.4.89',
 };
 
+/**
+ * The Intel NPU generations (npu-vendors.json's) whose reader reads with the model on the NPU by default, Intel's
+ * plugin fetched for it (kit 2.117.0). Measured by ocr-check on an Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU
+ * 3720 shows Meteor Lake's 7D1D), 2026-10-24: 1,212 of 1,253 lines exactly against Windows' OCR's 736, no group worse,
+ * and 55 ms of processor a picture against 61. It spends more a picture than Windows' OCR (859 mJ against 465 mJ over
+ * rest, the package's): the owner chose the model for how much better it reads. Other generations keep Windows' OCR
+ * until they're measured.
+ */
+export const OPENVINO_GENERATIONS: readonly string[] = ['meteor-lake'];
+
+/** An NPU's maker and generation, as setup's report of it names them (npu-report.ts). */
+export type NpuChip = Pick<NpuReport['chip'], 'vendor' | 'generation'>;
+
+/** This PC's NPU as its last setup reported it (npu-report.json's chip), or null when none is kept; none in a test run. */
+export const npuChipOutsideTests = (): NpuChip | null => (process.env.NODE_TEST_CONTEXT ? null : (readNpuReport()?.chip ?? null));
+
 /** The model's version: its release in the manor's public releases is ocr-model-v<version>. */
 export const MODEL_VERSION = '1';
 const MODEL_RELEASE = `https://github.com/Jcollier0120/Manor-releases/releases/download/ocr-model-v${MODEL_VERSION}`;
@@ -226,16 +245,19 @@ export function missingIn(place: ReaderPlace, exists: (p: string) => boolean = e
 }
 
 /**
- * The NPU maker's plugin this PC's reader takes: Qualcomm's on an Arm PC; Intel's and AMD's only as tests
- * (KIT_OCR_NPU=openvino, vitisai).
+ * The NPU maker's plugin this PC's reader takes: Qualcomm's on an Arm PC; Intel's on an x64 PC whose NPU is of a
+ * generation measured for it (OPENVINO_GENERATIONS), or on any x64 PC as a test (KIT_OCR_NPU=openvino); AMD's only as
+ * a test (KIT_OCR_NPU=vitisai).
  */
-export function packFor(arch: string, env: NodeJS.ProcessEnv = process.env): NpuPack | null {
+export function packFor(arch: string, env: NodeJS.ProcessEnv = process.env, chip: () => NpuChip | null = npuChipOutsideTests): NpuPack | null {
   const want = env.KIT_OCR_NPU?.trim().toLowerCase();
   if (want === 'none') return null;
   if (arch === 'arm64') return QNN_PACK;
-  if (arch === 'x64' && want === 'openvino') return OPENVINO_PACK;
-  if (arch === 'x64' && want === 'vitisai') return VITISAI_PACK;
-  return null;
+  if (arch !== 'x64') return null;
+  if (want === 'openvino') return OPENVINO_PACK;
+  if (want === 'vitisai') return VITISAI_PACK;
+  const c = chip();
+  return c?.vendor === 'intel' && !!c.generation && OPENVINO_GENERATIONS.includes(c.generation) ? OPENVINO_PACK : null;
 }
 
 /** Which engine reads: Windows' OCR alone, the model wherever it can, or (unset) the model where it's worth it. */

@@ -36,13 +36,21 @@ function makeZip(file: string, files: Record<string, string>): void {
   rmSync(src, { recursive: true, force: true });
 }
 
-test('the plugin a PC takes: Qualcomm\'s on Arm, none on x64 unless Intel\'s is tried, none at all when told', () => {
+test("the plugin a PC takes: Qualcomm's on Arm, Intel's on a generation measured for it or when tried, none at all when told", () => {
+  const intel = (generation: string | null) => () => ({ vendor: 'intel' as const, generation });
   assert.equal(m.packFor('arm64', {}), m.QNN_PACK);
-  assert.equal(m.packFor('x64', {}), null, "Intel's and AMD's NPUs are still to be measured");
+  assert.equal(m.packFor('x64', {}), null, 'no NPU report in a test run');
+  assert.equal(m.packFor('x64', {}, intel('meteor-lake')), m.OPENVINO_PACK, "Intel's NPU 3720 was measured");
+  assert.equal(m.packFor('x64', {}, intel('lunar-lake')), null, 'a generation not measured yet keeps Windows OCR');
+  assert.equal(m.packFor('x64', {}, intel(null)), null);
+  assert.equal(m.packFor('x64', {}, () => ({ vendor: 'amd' as const, generation: 'xdna2' })), null, "AMD's NPU is still to be measured");
+  assert.equal(m.packFor('x64', {}, () => null), null, 'no NPU, or no setup yet');
   assert.equal(m.packFor('x64', { KIT_OCR_NPU: 'openvino' }), m.OPENVINO_PACK);
   assert.equal(m.packFor('x64', { KIT_OCR_NPU: ' VitisAI' }), m.VITISAI_PACK);
-  assert.equal(m.packFor('arm64', { KIT_OCR_NPU: 'vitisai' }), m.QNN_PACK, "an Arm PC has no AMD NPU");
+  assert.equal(m.packFor('arm64', { KIT_OCR_NPU: 'vitisai' }), m.QNN_PACK, 'an Arm PC has no AMD NPU');
+  assert.equal(m.packFor('x64', { KIT_OCR_NPU: 'none' }, intel('meteor-lake')), null);
   assert.equal(m.packFor('arm64', { KIT_OCR_NPU: 'none' }), null);
+  assert.equal(m.packFor('ia32', {}, intel('meteor-lake')), null);
 });
 
 test("AMD's: Windows ML's DLL in its own folder, the program told to load only compiled graphs where it reads", () => {

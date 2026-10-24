@@ -549,7 +549,7 @@ test("an X Elite on its fallback 4B tries its own 2B again at Set up local AI (n
   assert.match(person.npuNote ?? '', /left as it is/);
 });
 
-test("every Snapdragon X2 runs Qwen3-VL-2B whatever its memory, its pictures on the Hexagon with its GenieX 0.9.3 (on the Adreno with 0.8.0); the X Elite too, on GenieX 0.9.3, with the 4B should the 2B fail", async () => {
+test("every Snapdragon X2 runs Qwen3-VL-2B whatever its memory, its pictures on the Hexagon with its GenieX 0.9.3 (put in 0.8.0's place, which read them on the Adreno); the X Elite too, on GenieX 0.9.3, with the 4B should the 2B fail", async () => {
   const tools = path.join(home, 'tools');
   const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';
   const TWO_B = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
@@ -569,9 +569,12 @@ test("every Snapdragon X2 runs Qwen3-VL-2B whatever its memory, its pictures on 
     assert.equal(e.chat!.model, TWO_B, what);
     assert.deepEqual(e.vision, { model: TWO_B, pictureTokens: 1024 }, `${what}: GenieX's llama.cpp reads a picture at its own size, so the kit fits it within 1,024 tokens and counts it so`);
     assert.deepEqual(e.chat!.startCommand, [G, 'serve', '--skip-update', '--host', '127.0.0.1:18181', '--keepalive', '3600', '--compute', 'npu', '--nctx', '2560'], `${what}: its language model on the Hexagon and its pictures' encoder on the Hexagon's second session (GenieX 0.9.1 on), a 2,560-token window`);
-    // An X2 set up before with GenieX 0.8.0, whose llama.cpp reads every picture as grey on the Hexagon: its encoder on the Adreno.
-    const older = V.npuEntry((await plan(NPU.x2, arm, [G], '0.8.0')).npu!.route, { tools, exe: G });
-    assert.deepEqual(older.chat!.startCommand!.slice(7), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL', '--nctx', '2560'], what);
+    // An X2 set up before with GenieX 0.8.0 (whose llama.cpp reads every picture as grey on the Hexagon, so its encoder
+    // went on the Adreno): the pin's 0.9.3 put in its place (kit 2.115.0), with 0.9.3's command.
+    const olderPlan = (await plan(NPU.x2, arm, [G], '0.8.0')).npu!;
+    assert.equal(olderPlan.route.version, '0.9.3', what);
+    assert.equal(olderPlan.installed, false, `${what}: not left as it is`);
+    assert.deepEqual(V.npuEntry(olderPlan.route, { tools, exe: G }).chat!.startCommand, e.chat!.startCommand, what);
     assert.deepEqual(validateAccelerators({ accelerators: [e] }), [], what);
     assert.deepEqual(validateKeeperConfig({ accelerators: [e] }), [], what);
     // Its window holds whatever the kit lets through: a request at the route's cap, and a picture at its count with room
@@ -710,15 +713,22 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
   assert.equal(V.pinnedRoute(q, 'snapdragon-x').download.sha256, '886d9f1a48cf6c1694338a13fc66be9d28e7fc5a3a5970d49b63de554a6ce17a');
   for (const g of [V.UNKNOWN_GENERATION, null]) assert.equal(V.pinnedRoute(q, g), q, `${g}`);
 
-  // setup on a PC whose GenieX is 0.9.1 (setup from kit 2.98.0 to 2.107.0, or Use it left it): run as it is, not moved to the
-  // pin; its command, its embedding server in a folder of its own.
+  // setup on a PC whose GenieX is a later one than the pin (the Smith's Use it left it): run as it is, not put back to
+  // the pin; its command, its embedding server in a folder of its own.
   const plan = (version: string | null, have: string[] = [G]) => planSetup({ detection: parseDetection(`${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(have), serverVersion: async () => version });
+  const later = (await plan('0.10.2')).npu!;
+  assert.equal(later.route.version, '0.10.2');
+  assert.equal(later.installed, true);
+  assert.equal(later.download, null, "it doesn't put the pin's 0.9.3 back");
+  assert.equal(later.build, null);
+  // One older than the pin (0.9.1: setup from kit 2.98.0 to 2.107.0): the pin's 0.9.3 put in its place, from Castellan's
+  // signed build (kit 2.115.0; until then it ran as it was, and the pin never reached it).
   const p = (await plan('0.9.1')).npu!;
-  assert.equal(p.route.version, '0.9.1');
-  assert.equal(p.installed, true);
-  assert.equal(p.download, null, "it doesn't put 0.8.0 back, nor 0.9.3 over it");
-  assert.equal(p.build, null);
-  assert.equal(V.pluginPatchOf(p.route, 'snapdragon-x2')!.serverVersion, '0.9.1', "0.9.1's patch, over 0.9.1's own");
+  assert.equal(p.route.version, '0.9.3');
+  assert.equal(p.installed, false);
+  assert.equal(p.download, null, 'no installer');
+  assert.equal(p.build?.signed.what, 'geniex-cli-windows-arm64-v0.9.3-castellan.zip');
+  assert.equal(V.pluginPatchOf(p.route, 'snapdragon-x2')!.serverVersion, '0.9.3', "0.9.3's patch, over 0.9.3's own");
   assert.equal(p.embed!.exe, path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon', 'llama-server.exe'));
   assert.equal(p.embed!.download!.what, 'llama-b11645-bin-win-opencl-adreno-arm64.zip');
   assert.equal(p.embed!.download!.size, 13566094);
@@ -728,8 +738,9 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
   assert.equal(e.embed!.startCommand![0], p.embed!.exe);
   assert.deepEqual(e.embed!.env, { ADSP_LIBRARY_PATH: path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon') });
   assert.deepEqual(validateAccelerators({ accelerators: [e] }), []);
-  // GenieX 0.8.0 there: as before. None there, or one that can't say: the X2's pin, 0.9.3 (pinnedRoute).
-  assert.equal((await plan('0.8.0')).npu!.embed!.server.version, 'b11125');
+  // GenieX 0.8.0 there: the pin's too, and its embedding server. None there, or one that can't say: the X2's pin, 0.9.3 (pinnedRoute).
+  assert.equal((await plan('0.8.0')).npu!.route.version, '0.9.3');
+  assert.equal((await plan('0.8.0')).npu!.embed!.server.version, 'b11645');
   for (const have of [[G], []]) {
     const n = (await plan(null, have)).npu!;
     assert.equal(n.route.version, '0.9.3', `${have.length}`);

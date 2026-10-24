@@ -43,7 +43,7 @@ export function readRetiredRecord(configFile: string): RetiredRecord {
 }
 
 /** Every string in config.json, its %VARIABLES% expanded, in lower case: the servers' commands, their models' ids. */
-function configStrings(v: unknown, env: Record<string, string | undefined>, out: string[] = []): string[] {
+export function configStrings(v: unknown, env: Record<string, string | undefined>, out: string[] = []): string[] {
   if (typeof v === 'string') out.push(expandEnv(v, env).toLowerCase());
   else if (Array.isArray(v)) for (const x of v) configStrings(x, env, out);
   else if (v && typeof v === 'object') for (const x of Object.values(v)) configStrings(x, env, out);
@@ -71,7 +71,8 @@ function found(r: NpuRetired, at: string): string[] {
   }
 }
 
-function bytesOf(p: string): number {
+/** A file's size, or its folder's files' together; 0 when it can't be read. */
+export function bytesOf(p: string): number {
   try {
     const st = statSync(p);
     if (!st.isDirectory()) return st.size;
@@ -82,7 +83,7 @@ function bytesOf(p: string): number {
 }
 
 /** Removes a file, or a folder by way of its aside name; throws what Windows says when it won't. */
-function remove(p: string): void {
+export function removeAside(p: string): void {
   if (!statSync(p).isDirectory()) return rmSync(p);
   const aside = p + ASIDE;
   rmSync(aside, { recursive: true, force: true });
@@ -149,7 +150,7 @@ export async function removeRetiredModels(o: {
     if (isNamed(d.path, d.r, lines!)) continue;
     const bytes = bytesOf(d.path);
     try {
-      remove(d.path);
+      removeAside(d.path);
       removed.push(d.path);
       delete unnamed[d.path];
       o.log(`removed ${path.win32.basename(d.path)}${bytes > 0 ? ` (${(bytes / 1024 ** 3).toFixed(2)} GB)` : ''}: nothing has used it for ${days(now - Date.parse(d.since))} days (${d.server} retired it in kit ${d.r.since})`);

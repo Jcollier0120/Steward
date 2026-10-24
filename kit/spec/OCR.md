@@ -146,7 +146,7 @@ At scale 1, Windows OCR reads only a quarter to a half of the lines of small scr
 
 ## Our own model
 
-Since kit 2.114.0 (decided 2026-10-23, measured 2026-10-24), the reader reads with a text-reading model of our own, on the NPU. It had to:
+Since kit 2.114.0 (decided 2026-10-23, measured 2026-10-24), the reader reads with a text-reading model of our own, on the NPU: Qualcomm's, and Intel's NPU 3720 ([Intel and AMD](#intel-and-amd)). It had to:
 
 - never read worse than Windows OCR in any of the check's groups;
 - read at least 99.5% of lines exactly on screen text from 12 px up, and on document pages;
@@ -240,7 +240,7 @@ The last two kinds can't be told apart by shape. Only the words around them tell
 
 - **The fetch.** What the model needs is fetched once for every agent on the PC, in the background, into the reader's shared folder (`%USERPROFILE%\.npu-agent\ocr`, `KIT_OCR_HOME`):
   - ONNX Runtime 1.27.0, from Microsoft's release;
-  - the NPU maker's plugin, from its own NuGet package (Qualcomm's QNN 2.6.0 on an Arm PC);
+  - the NPU maker's plugin, from its own NuGet package (Qualcomm's QNN 2.6.0 on an Arm PC, Intel's OpenVINO 1.7.0 on an Intel NPU 3720);
   - the model, from the release `ocr-model-v1` in the manor's public releases.
 
   Each is pinned by size and SHA-256 (`MODEL_FILES` and the rest), and only the files the reader uses are kept, with their notices. Until all of it is there, Windows OCR reads.
@@ -259,23 +259,38 @@ The last two kinds can't be told apart by shape. Only the words around them tell
   - `KIT_OCR_ENGINE=windows` reads with Windows OCR alone;
   - `KIT_OCR_ENGINE=model` reads with the model wherever it can, the processor included;
   - unset, the model reads where it's worth it;
-  - `KIT_OCR_NPU=none` keeps the model off the NPU, `KIT_OCR_NPU=openvino` tries Intel's and `KIT_OCR_NPU=vitisai` AMD's (tests);
+  - `KIT_OCR_NPU=none` keeps the model off the NPU, `KIT_OCR_NPU=openvino` tries Intel's plugin on any x64 PC (a test, where the NPU isn't a 3720), and `KIT_OCR_NPU=vitisai` AMD's (a test);
   - under `node:test`, Windows OCR reads unless `KIT_OCR_ENGINE` says otherwise, so no test fetches the model.
 
 ### On the processor
 
-With no NPU the model runs on, or an NPU that fails the self-check, the model could read on the processor instead. It reads as well there as on the NPU (1,212/1,253). But on the X2's processor a picture beyond the start costs 498 ms and 1,452 ms of processor (four threads), with a 463 MB peak. That is 20 times Windows OCR's processor time, far from gentle in the background. So `ON_PROCESSOR` is false, and Windows OCR reads where the NPU can't.
+With no NPU the model runs on, or an NPU that fails the self-check, the model could read on the processor instead. It reads as well there as on the NPU (1,212/1,253). But on the X2's processor a picture beyond the start costs 498 ms and 1,452 ms of processor (four threads), with a 463 MB peak. That is 20 times Windows OCR's processor time, far from gentle in the background. On an Intel Core Ultra 5 225U it's 326 ms and 972 ms of processor, 16 times Windows OCR's, and 7.0 J against Windows OCR's 0.47 J. So `ON_PROCESSOR` is false, and Windows OCR reads where the NPU can't.
 
 What could change that: reading a picture in one piece on the processor rather than in the NPU's tiles (a 1280×720 screenshot is six tiles, 2.7 times its pixels), or an int8 copy. Neither is measured yet. `KIT_OCR_ENGINE=model` reads on the processor anyway.
 
 ### Intel and AMD
 
-Neither has been measured yet. Both get the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent as test requests:
+Each gets the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent as a test request:
 
-- **Intel** (OpenVINO's NPU plugin 1.7.0, `KIT_OCR_NPU=openvino`): the route is there, as a test.
+- **Intel's NPU 3720** (Core Ultra Series 1, and the 200U and 200H: `OPENVINO_GENERATIONS`). The model reads there by default, through OpenVINO's NPU plugin 1.7.0. Which generation a PC's NPU is comes from setup's report of it (`npu-report.json`), so a PC reads with Windows OCR until its local AI is set up. Measured on a Core Ultra 5 225U (Arrow Lake-U) on 2026-10-24, with the manor stopped:
+
+  | | Lines read exactly | A picture beyond the start | Its processor time | Its energy over rest |
+  |---|---|---|---|---|
+  | Windows OCR | 736/1,253 | 59 ms | 61 ms | 465 mJ |
+  | The model on the NPU | 1,212/1,253 | 171 ms | 55 ms | 859 mJ |
+  | The model on the processor | 1,212/1,253 | 326 ms | 972 ms | 6,991 mJ |
+
+  - **It meets the rule below.** No group reads worse on the NPU than with Windows OCR, and it spends less processor time a picture.
+  - **It spends more energy a picture**, 1.85 times Windows OCR's. Even the cores' share is a little more (580 mJ against 548), where the program's own processor time is less: OpenVINO's driver works outside the program. The owner chose the model for how much better it reads.
+  - **How the energy was measured:** the package's (RAPL), over the rest measured just before. It's the median of three rounds that took the three engines in turn, each reading the check's 32 GDI pictures three times.
+  - **A start** costs 11.8 J on the NPU, against Windows OCR's 7.0 J. The program holds 325 to 435 MB while it's loaded.
+  - **Each graph alone** (the program's `--bench`): a 640×640 detector tile takes 9.7 ms, and a recognizer line 0.7 ms at 128 wide to 4.1 ms at 2,048. Lines read in batches save time only at the two narrowest widths, so they're read one at a time.
+  - **Sharing the NPU.** It reads as fast while OpenVINO Model Server holds the NPU for chat (a detector tile in 9.3 ms), and the chat still answers.
+
+  Other Intel generations (Lunar Lake's NPU 4000 and later) keep Windows OCR until they're measured.
 - **AMD:** VitisAI through Windows ML is still to be added, as Envoy reaches it. It needs every shape fixed and the CPU fallback off. VitisAI runs an FP32 model as BF16, so the FP32 files are tried first, and an int8 QDQ copy if they read worse.
 
-Each becomes its PC's default if it reads no worse than Windows OCR in any group, at no more processor time a picture than Windows OCR.
+Each becomes its PC's default if it reads no worse than Windows OCR in any group, at no more processor time a picture than Windows OCR. Where it also spends more energy a picture, as Intel's does, the owner decides.
 
 ### Where the model is published
 

@@ -25,8 +25,8 @@ const log = (line: string) => appendFileSync(file('log.txt'), `${line}\n`);
 async function doJob(job: OutsideJob): Promise<unknown> {
   if (job.kind === 'setup') {
     const { setupCommand } = await import('./setup.ts');
-    const r = await setupCommand({ ...job.options, kinds: job.options.kinds as any, asked: true, log });
-    return { code: r.code, entries: r.entries ?? [] } satisfies OutsideSetupResult;
+    const r = await setupCommand({ ...job.options, kinds: job.options.kinds as any, cpuKinds: job.options.cpuKinds as any, asked: true, log });
+    return { code: r.code, entries: r.entries ?? [], ...(r.busy ? { busy: true } : {}), ...(r.blocked ? { blocked: true } : {}) } satisfies OutsideSetupResult;
   }
   const { putPatchIn, putStockBack } = await import('./npu-patch.ts');
   const { sha256File } = await import('./npu-vendors.ts');

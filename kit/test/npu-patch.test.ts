@@ -417,7 +417,10 @@ test("inside a packaged app (the Claude desktop app), GenieX's plugin in AppData
     const fresh = fakePc();
     jobs.length = 0;
     const local = inLocal ? path.dirname(path.dirname(fresh.folder)) : path.join(home, 'elsewhere');
-    assert.deepEqual(await patchNpu({ ...fresh.deps, env: { LOCALAPPDATA: local }, packaged: async () => packaged, outside }), { did: 'patched' });
+    // A profile of its own too: without one, AppData is also the real profile's (outside.ts appDataFolders), and this
+    // test's folders are in its %TEMP%, under the real %LOCALAPPDATA%.
+    const env = { LOCALAPPDATA: local, USERPROFILE: path.join(home, 'profile') };
+    assert.deepEqual(await patchNpu({ ...fresh.deps, env, packaged: async () => packaged, outside }), { did: 'patched' });
     assert.deepEqual(jobs, []);
     assert.equal(fresh.plugin(), BUILD);
   }
