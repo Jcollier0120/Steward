@@ -2,6 +2,22 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.113.2
+
+**Intel's pictures stay on the NPU, and the guide says why.**
+
+### What changed
+
+- spec/NPU-VENDORS.md (Each work's order on a generation, Intel's pictures stay on the NPU) records the measurements on a Core Ultra 5 225U, 2026-10-24.
+  - OpenVINO on the Arc spent 13.3 J on a picture against the NPU's 17.5 J, but read the 896 px tally picture's 4827 as 4877 three times in four. The NPU and the processor read it right.
+  - The card server setup gives Intel's integrated graphics (llama.cpp Vulkan, its encoder on the processor, `encodesOnProcessor`) spent about 41 J a picture warm, and 56–66 J to start and read its first.
+  - So no `batchAt` pays, and Intel's generations record no `order`.
+- spec/NPU-BENCHMARK.md: the 225U's picture bullet says the same.
+
+### Before you update
+
+- Nothing: take the kit as usual. Only the guides change.
+
 ## 2.113.1
 
 **The NPU benchmark says where the embedder ran, and its summary compares pictures a picture each: OpenVINO counts a picture's tokens unalike on the NPU and off it.**

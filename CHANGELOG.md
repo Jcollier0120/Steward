@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.196
+
+**It hands out the kit 2.113.2: the guide says why pictures on an Intel Core Ultra stay on the NPU, though the graphics read one for less energy in the benchmark.**
+
+### What changed
+
+- **On Intel's NPU 3720, pictures stay on the NPU.** In the benchmark, OpenVINO on the Arc graphics spent less on a picture than the NPU did (13 J against 17.5 J). But it misread fine text in a larger picture three times in four, where the NPU read it right. The graphics' server that setup actually runs reads pictures with the processor, and spent about 41 J on each. So no batch of pictures is cheaper on the graphics. AMD's rule, which sends batches to the Radeon, doesn't carry over.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Where pictures go doesn't change.
+
 ## 0.36.195
 
 **It hands out the kit 2.113.1: the NPU benchmark's guide has Intel's energy figures, and its summary says where the embedding model ran.**
