@@ -492,6 +492,78 @@ namespace KitOcrNpu
         }
     }
 
+    /// <summary>
+    /// A folder deleted with all in it, however deep: AMD's compiler leaves paths past 260 characters, which .NET 4.8's
+    /// Directory.Delete can't reach (PathTooLongException). Through Windows' own calls on \\?\ paths; a junction inside
+    /// goes, never what it points to. Never throws: what can't go stays.
+    /// </summary>
+    public static class Tree
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct FindData
+        {
+            public uint Attributes, Created0, Created1, Accessed0, Accessed1, Written0, Written1, SizeHigh, SizeLow, Reserved0, Reserved1;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string Name;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)] public string ShortName;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr FindFirstFileW(string name, out FindData data);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool FindNextFileW(IntPtr h, out FindData data);
+
+        [DllImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool FindClose(IntPtr h);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool DeleteFileW(string name);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool RemoveDirectoryW(string name);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool SetFileAttributesW(string name, uint attributes);
+
+        const uint Folder = 0x10, ReadOnly = 0x1, Reparse = 0x400, Normal = 0x80;
+
+        /// <summary>Deletes <paramref name="folder"/> and all in it; whether it's gone.</summary>
+        public static bool Delete(string folder)
+        {
+            if (!Directory.Exists(folder)) return true;
+            Remove(@"\\?\" + Path.GetFullPath(folder).TrimEnd('\\'));
+            return !Directory.Exists(folder);
+        }
+
+        static void Remove(string dir)
+        {
+            FindData d;
+            IntPtr h = FindFirstFileW(dir + @"\*", out d);
+            if (h != new IntPtr(-1))
+            {
+                try
+                {
+                    do
+                    {
+                        if (d.Name == "." || d.Name == "..") continue;
+                        string p = dir + "\\" + d.Name;
+                        if ((d.Attributes & ReadOnly) != 0) SetFileAttributesW(p, (d.Attributes & Folder) != 0 ? Folder : Normal);
+                        if ((d.Attributes & Folder) == 0) DeleteFileW(p);
+                        else if ((d.Attributes & Reparse) != 0) RemoveDirectoryW(p);
+                        else Remove(p);
+                    } while (FindNextFileW(h, out d));
+                }
+                finally { FindClose(h); }
+            }
+            RemoveDirectoryW(dir);
+        }
+    }
+
     /// <summary>A picture as rows of blue, green, red bytes, three to a pixel, no padding.</summary>
     public sealed class Picture
     {
@@ -711,9 +783,12 @@ namespace KitOcrNpu
     /// <summary>The detector and the recognizer, on the NPU or the processor, and the reading between them.</summary>
     public sealed class Reader : IDisposable
     {
-        public const int Tile = 640, Overlap = 64, Height = 48, MaxWidth = 2048;
-        // Fewer on AMD's NPU (Program.AmdWidths), where each is a compile of minutes; --widths sets them for a test.
+        public const int Tile = 640, Overlap = 64, Height = 48, ModelWidth = 2048;
+        // Fewer on AMD's NPU (Program.AmdWidths), where each is a compile of minutes and 2,048 doesn't compile; --widths
+        // sets them for a test.
         public static int[] Buckets = { 128, 256, 384, 512, 768, 1024, 1536, 2048 };
+        /// <summary>The widest a line is read: the widest of Buckets (a wider line is narrowed to it).</summary>
+        public static int MaxWidth { get { return Buckets[Buckets.Length - 1]; } }
         // The detector's settings (PP-OCR's DB post-processing, axis-aligned): what counts as text, a box's least mean
         // score, and how far a box grows past the shrunk text it finds.
         const float Thresh = 0.3f, BoxThresh = 0.5f, Unclip = 1.6f;
@@ -1406,7 +1481,8 @@ namespace KitOcrNpu
             string ahead = compiled ? null : ShippedGraph(winml, models, g.Name);
             shipped = false;
             Directory.CreateDirectory(dir);
-            if (!compiled && Directory.Exists(graph)) Directory.Delete(graph, true);
+            // What a compile that never finished left (the compiler's own folders, deep) goes first.
+            if (!compiled) Tree.Delete(graph);
             if (ahead != null)
             {
                 Directory.CreateDirectory(graph);
@@ -1434,13 +1510,19 @@ namespace KitOcrNpu
                     last = e;
                     if (!shipped) break;
                     shipped = false;
-                    if (Directory.Exists(graph)) Directory.Delete(graph, true);
+                    Tree.Delete(graph);
                 }
                 finally { ort.ReleaseOptions(o); }
             }
             if (s == null)
             {
-                if (!compiled) File.WriteAllText(failed, (tries + 1).ToString(CultureInfo.InvariantCulture) + "\n" + last.Message + "\n");
+                if (!compiled)
+                {
+                    File.WriteAllText(failed, (tries + 1).ToString(CultureInfo.InvariantCulture) + "\n" + last.Message + "\n");
+                    // A failed compile's folders (66 MB for one recognizer width) aren't kept; a compiled graph that
+                    // didn't open (the NPU busy) is.
+                    Tree.Delete(graph);
+                }
                 throw last;
             }
             if (!compiled)
@@ -1459,9 +1541,7 @@ namespace KitOcrNpu
             foreach (string d in Directory.GetDirectories(cache, "vitisai-*"))
             {
                 if (string.Equals(Path.GetFileName(d), keep, StringComparison.OrdinalIgnoreCase)) continue;
-                try { Directory.Delete(d, true); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
+                Tree.Delete(d);
             }
         }
 
@@ -1513,7 +1593,7 @@ namespace KitOcrNpu
         {
             // The junction before any compiler starts, so none races another to make it.
             VitisAiThrough(winml, root);
-            string exe = Process.GetCurrentProcess().MainModule.FileName;
+            string exe = Process.GetCurrentProcess().MainModule.FileName, dir = VitisAiDir(winml, ModelCache(root, modelsDir));
             int n = CompilersAtOnce(missing.Count);
             atOnce = n;
             SemaphoreSlim slots = new SemaphoreSlim(n, n);
@@ -1536,7 +1616,8 @@ namespace KitOcrNpu
                         start.UseShellExecute = false;
                         start.CreateNoWindow = true;
                         start.RedirectStandardOutput = true;
-                        string answer = null;
+                        string answer = null, graph = Path.Combine(dir, missing[at].Name), failedFile = graph + ".failed";
+                        int triesBefore = Tries(failedFile), exit;
                         using (Process p = Process.Start(start))
                         {
                             try { p.PriorityClass = ProcessPriorityClass.BelowNormal; }
@@ -1545,9 +1626,22 @@ namespace KitOcrNpu
                             string line;
                             while ((line = p.StandardOutput.ReadLine()) != null) if (line.StartsWith("{\"compiled\":", StringComparison.Ordinal)) answer = line;
                             p.WaitForExit();
-                            if (p.ExitCode != 0 || answer == null || answer.Contains("\"error\":")) Interlocked.Increment(ref failed);
+                            exit = p.ExitCode;
                         }
-                        said[at] = answer ?? "{\"compiled\":" + Json(missing[at].Name) + ",\"error\":\"it ended without saying\"}";
+                        if (exit != 0 || answer == null || answer.Contains("\"error\":"))
+                        {
+                            Interlocked.Increment(ref failed);
+                            if (answer == null) answer = "{\"compiled\":" + Json(missing[at].Name) + ",\"error\":\"it ended without saying (exit " + exit + ")\"}";
+                            // A compiler that ended without saying (AMD's ends its program on some graphs) counts as a try,
+                            // and its folders go, as VitisAiSession does for one that says.
+                            if (Tries(failedFile) <= triesBefore)
+                            {
+                                try { File.WriteAllText(failedFile, (triesBefore + 1).ToString(CultureInfo.InvariantCulture) + "\nit ended without saying (exit " + exit + ")\n"); }
+                                catch (IOException) { }
+                            }
+                            if (!File.Exists(graph + ".ready")) Tree.Delete(graph);
+                        }
+                        said[at] = answer;
                     }
                     finally { slots.Release(); }
                 });
@@ -1565,12 +1659,7 @@ namespace KitOcrNpu
         /// <summary>The compilers' working folders, once they've ended.</summary>
         static void CleanWork(string dir)
         {
-            foreach (string w in Directory.GetDirectories(dir, "work-*"))
-            {
-                try { Directory.Delete(w, true); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
-            }
+            foreach (string w in Directory.GetDirectories(dir, "work-*")) Tree.Delete(w);
         }
 
         /// <summary>--compile: one graph for AMD's NPU, compiled (or put in place, when compiled ahead), opened once and closed.</summary>
@@ -1608,6 +1697,7 @@ namespace KitOcrNpu
         static int Prepare(string root, string winml, int[] given, string export)
         {
             Stopwatch sw = Stopwatch.StartNew();
+            string each = "[]";
             try
             {
                 try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal; }
@@ -1616,7 +1706,6 @@ namespace KitOcrNpu
                 string cache = ModelCache(root, modelsDir), dir = VitisAiDir(winml, cache);
                 List<Graph> missing = VitisAiMissing(dir, graphs);
                 int failures = 0, atOnce = 0;
-                string each = "[]";
                 if (missing.Count > 0) each = CompileInParallel(winml, root, missing, out failures, out atOnce);
                 CleanWork(dir);
                 if (failures == 0)
@@ -1624,11 +1713,12 @@ namespace KitOcrNpu
                     KeepOnlyVitisAi(cache);
                     if (export != null) Export(winml, dir, graphs, export);
                 }
+                // What's kept: each graph's one compiled file.
                 long bytes = 0;
                 foreach (Graph g in graphs)
                 {
-                    string graph = Path.Combine(dir, g.Name);
-                    if (Directory.Exists(graph)) foreach (string f in Directory.GetFiles(graph, "*", SearchOption.AllDirectories)) bytes += new FileInfo(f).Length;
+                    FileInfo rai = new FileInfo(Path.Combine(dir, g.Name, g.Name + ".rai"));
+                    if (rai.Exists) bytes += rai.Length;
                 }
                 Say("{\"prepared\":" + (failures == 0 ? "1" : "0") + ",\"graphs\":" + graphs.Count + ",\"compiled\":" + missing.Count + ",\"failed\":" + failures +
                     ",\"atOnce\":" + atOnce + ",\"ms\":" + sw.ElapsedMilliseconds + ",\"bytes\":" + bytes + ",\"plugin\":" + Json(AmdPluginVersion(VitisAiPlugin(winml))) + ",\"each\":" + each + "}");
@@ -1636,7 +1726,7 @@ namespace KitOcrNpu
             }
             catch (Exception e)
             {
-                Say("{\"prepared\":0,\"ms\":" + sw.ElapsedMilliseconds + ",\"error\":" + Json(e.Message) + "}");
+                Say("{\"prepared\":0,\"ms\":" + sw.ElapsedMilliseconds + ",\"error\":" + Json(e.Message) + ",\"each\":" + each + "}");
                 return 1;
             }
         }
@@ -1681,9 +1771,7 @@ namespace KitOcrNpu
             {
                 if (d == here || !System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(d), "^[0-9a-f]{12}-[0-9a-f]{12}-c[0-9]+$")) continue;
                 if (Directory.GetLastWriteTimeUtc(d) > DateTime.UtcNow.AddDays(-7)) continue;
-                try { Directory.Delete(d, true); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
+                Tree.Delete(d);
             }
             return here;
         }
@@ -1854,9 +1942,9 @@ namespace KitOcrNpu
                 List<int> widths = new List<int>();
                 foreach (string w in widthList.Split(',')) widths.Add(int.Parse(w, CultureInfo.InvariantCulture));
                 for (int k = 0; k < widths.Count; k++)
-                    if (widths[k] % 8 != 0 || (k > 0 && widths[k] <= widths[k - 1]) || (k == widths.Count - 1 && widths[k] != Reader.MaxWidth))
+                    if (widths[k] < 8 || widths[k] % 8 != 0 || (k > 0 && widths[k] <= widths[k - 1]) || widths[k] > Reader.ModelWidth)
                     {
-                        Say("{\"hello\":1,\"error\":\"--widths takes widths in order, each a multiple of 8, the last " + Reader.MaxWidth + "\"}");
+                        Say("{\"hello\":1,\"error\":\"--widths takes widths in order, each a multiple of 8, at most " + Reader.ModelWidth + "\"}");
                         return 2;
                     }
                 Reader.Buckets = widths.ToArray();
