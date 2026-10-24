@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.135.0
+
+**The text reader on the processor runs in Windows' efficiency mode at a gentle pace: the same lines read, for about half the energy a picture.**
+
+### What changed
+
+- **gentle.ts** has `paceStarted(pid)`: a program the agent started is set to the agent's pace beyond what it inherits. Windows passes a process's priority class and job on to the programs it starts, but not its efficiency mode (EcoQoS) or its disk priority. At a gentle pace the program gets both, through the same signed helper the agent's own pace uses, and stays in the agent's job. At a full pace, before any round set a pace, or with `KIT_GENTLE=0`, nothing is done.
+- **ocr-npu.ts** calls it for every program it starts on the processor: where no NPU reads, where an NPU fails its self-check, and for a background batch the NPU's line is too long for. The NPU's program is left as it starts. `ReaderOptions.paced` stands in for it in tests.
+- Measured on a Snapdragon X2 Elite's processor (model 2, the check's 41 pictures, energy of the SoC and memory over rest): at a gentle pace a picture cost 6.7 J and 655 ms before, and costs 3.2 J and 812 ms in efficiency mode. Every picture read exactly as before. The figures, and what was measured and not taken (fewer threads, bigger pieces than the NPU's tiles, int8 copies), are in spec/OCR.md, "On the processor".
+
+### Before you update
+
+- Nothing: it updates itself as usual. The signed helpers are unchanged, so nothing is compiled anew.
+
 ## 2.134.1
 
 **The text reader reads with our model 2 (`ocr-model-v2`). Fine-tuned again on small screen text, it reads 1,223 of the check's 1,253 lines exactly on a Snapdragon's NPU, against model 1's 1,211 and Windows OCR's 733, and no group worse than either.**

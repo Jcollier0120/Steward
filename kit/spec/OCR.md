@@ -253,7 +253,7 @@ A capital I is no longer read as l. 0 and o can't always be told apart by shape:
   - the model, from the release `ocr-model-v2` in the manor's public releases.
 
   Each is pinned by size and SHA-256 (`MODEL_FILES` and the rest), and only the files the reader uses are kept, with their notices. Until all of it is there, Windows OCR reads.
-- **The program.** `ocr-npu.cs`, a kit helper shipped signed, runs ONNX Runtime through its C API. It loads the model once and reads picture after picture until no picture has come for two minutes. On an Arm PC it runs as Arm (its manifest), not as x64 under emulation.
+- **The program.** `ocr-npu.cs`, a kit helper shipped signed, runs ONNX Runtime through its C API. It loads the model once and reads picture after picture until no picture has come for two minutes. On an Arm PC it runs as Arm (its manifest), not as x64 under emulation. On the processor it runs at the agent's pace: at a gentle one, in Windows' efficiency mode with a very low disk priority, as the agent does (since kit 2.135.0, [On the processor](#on-the-processor)).
 - **On Qualcomm's NPU:**
   - static shapes only: the detector reads 640×640 tiles overlapping by 64, and the recognizer reads lines 48 high at eight widths, from 128 to 2,048;
   - fp16, with the CPU fallback forbidden;
@@ -288,7 +288,26 @@ No group reads worse with the model than with Windows OCR. A picture costs 7.0 t
 
 **And so does any PC whose NPU fails its self-check (kit 2.124.0, the owner's call, 2026-10-24).** A Snapdragon whose NPU reads the program's own picture differently, or an Intel NPU 3720 that does, reads on the processor rather than with Windows OCR. With every maker's PC on the processor, the list of makers went: `ON_PROCESSOR` is simply true. On the X2's processor that is the 498 ms and 1,452 ms of processor a picture above, and a Snapdragon fetches its usual files (Qualcomm's plugin is used only on the NPU). Windows OCR still reads until the model has been fetched, and when `KIT_OCR_ENGINE=windows` says so. Since kit 2.126.0 a background batch the NPU's line is too long for is read on the processor too ([How it runs](#how-it-runs), the NPU queue).
 
-What could change that: reading a picture in one piece on the processor rather than in the NPU's tiles (a 1280×720 screenshot is six tiles, 2.7 times its pixels), or an int8 copy. Neither is measured yet. `KIT_OCR_ENGINE=model` reads on the processor anyway.
+**At a gentle pace, in Windows' efficiency mode (kit 2.135.0).** Windows gives the programs an agent starts its below-normal priority and its job, so they share its cap on the processor, but not its efficiency mode (EcoQoS) or its very low disk priority. Since kit 2.135.0 a program the reader starts on the processor gets both at a gentle pace (`gentle.ts`' `paceStarted`), and Windows runs it on the efficient cores at a low clock. It does exactly the same work, so it reads exactly the same lines, only slower and for less energy. At a full pace it runs as before, and the NPU's program is left as it starts. Measured on the X2's processor on 2026-10-24: model 2, four threads, the check's 41 pictures, three rounds of each, medians, the energy of the SoC and memory over rest. The runs were held to cores 0–7 (the owner's rule for this PC); cores 0–5 are the X2's efficient cluster, as Windows classes them, and 6–17 its fast ones.
+
+| | A picture | Its processor time | Its energy over rest |
+|---|---|---|---|
+| Normal priority, as before | 489 ms | 1,364 ms | 7,870 mJ |
+| The same, on fast cores only (6–11) | 382 ms | 789 ms | 7,553 mJ |
+| In efficiency mode | 583 ms | 1,629 ms | 3,163 mJ |
+| A gentle pace before: below normal, in a job capped at two processors' worth | 655 ms | 1,360 ms | 6,718 mJ |
+| The same, on fast cores only | 487 ms | 728 ms | 8,356 mJ |
+| A gentle pace now: and in efficiency mode | 812 ms | 1,651 ms | 3,153 mJ |
+
+So at a gentle pace a picture on the processor costs about half the energy it did (3.2 J against 6.7 to 8.4 J, as Windows places it), and takes a quarter to two thirds longer. Its peak memory was 409 MB against 464 MB. Every one of the 42 pictures read exactly as before, and the check on the processor in efficiency mode read 1,224 of its 1,253 lines exactly, every group as before in characters, words and lines (three runs).
+
+**Measured and not taken (2026-10-24, model 2):**
+
+- **Fewer threads.** Two threads and one read the same lines for no less energy: 9.4 J and 8.3 J a picture against four threads' 7.7 J, and one thread's rounds ranged from 5.1 J to 9.4 J as Windows placed it. Where the work runs, and at what clock, matters more than how many threads run it.
+- **Bigger pieces.** Reading a picture in pieces up to 1,280, 2,048 or 4,096 pixels a side, rather than in the NPU's 640×640 tiles, took 23% to 33% less time (whole pictures up to 2,048: 5.3 J against 7.7 J a picture). But about 11 pictures read differently: more lines were right in all (1,134 or 1,135 of the 41 pictures' 1,160 against 1,131), yet the held-out screens read 155 lines against 157, and the peak memory grew from 464 MB to 832–2,252 MB. A group that reads worse is a loss, by the owner's rule.
+- **int8 copies.** ONNX Runtime's dynamic int8 read three to five times slower on the processor (its integer convolutions), and read 24 pictures differently with the recognizer quantized, 10 with the detector.
+
+`KIT_OCR_ENGINE=model` reads on the processor anyway.
 
 ### Other alphabets
 

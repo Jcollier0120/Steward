@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.224
+
+**It hands out the kit 2.135.0: when our text-reading model reads on the processor in the background, it uses about half the energy it did.**
+
+### What changed
+
+- At the gentle pace (Manor's Settings, and the default), the model's reader on the processor now runs in Windows' efficiency mode, as the agents themselves do. Windows runs it on the efficient cores at a low clock. It reads exactly the same text, a little slower. On a Snapdragon X2 Elite a picture took 3.2 J instead of 6.7 J, and 0.8 s instead of 0.65 s.
+- This is the reader on PCs whose NPU the model doesn't use, and the one that helps when the NPU is busy. Reading on the NPU is unchanged, and so is everything at the full pace.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.223
 
 **It hands out the kit 2.134.1: our own text-reading model is better at small screen text. It reads 1,223 of the check's 1,253 lines exactly, against 1,211 before and Windows' own OCR's 733.**
