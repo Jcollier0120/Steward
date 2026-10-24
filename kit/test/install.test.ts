@@ -19,6 +19,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');
 const { DEV_CHECKOUT, MANOR_STARTUP, OLD_TASK_NAME, OLD_WAKE_TASK_NAME, PAGE_START_MS, TASK_NAME, WAKE_TASK_NAME, appFolder, dropOldTask, isOwnTask, runOwnTask, taskAccount, taskName, homePageTaskXml, install, purgeRefusal, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
 const { ANNOUNCEMENT, announcementOf, checkAnnouncement, kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl, sumsText, zipName } = await import('./fixture/src/kit/release.ts');
+const { headings: noticeHeadings } = await import('./fixture/src/kit/notices.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 
 let n = 0;
@@ -651,9 +652,9 @@ test('a mistyped option is refused before anything is done', async () => {
 
 // ---------------------------------------------------------------- the release
 
-test('a release carries src (no tests) with the kit in src/kit, art, package.json, LICENSE, kit.json and tools/kit.ts, and nothing else: no README', () => {
+test('a release carries src (no tests) with the kit in src/kit, art, package.json, LICENSE, kit.json and tools/kit.ts, and nothing else: no README, no document', () => {
   const picked = pickReleaseFiles([
-    'src/cli.ts', 'src\\watch\\index.ts', 'src/ocr.ps1', 'src/thing.test.ts', 'src/kit/npu.ts', 'src/kit/VERSION', 'art/icon.svg', 'package.json', 'README.md', 'LICENSE',
+    'src/cli.ts', 'src\\watch\\index.ts', 'src/ocr.ps1', 'src/thing.test.ts', 'src/kit/npu.ts', 'src/kit/VERSION', 'src/kit/spec/RELEASES.md', 'art/icon.svg', 'package.json', 'README.md', 'LICENSE',
     'test/agent.test.ts', 'tools/kit.ts', 'tools\\convert.ts', 'kit.json', 'tsconfig.json', 'package-lock.json', '.gitignore', 'artifacts/x/X-1.zip', 'node_modules/typescript/package.json', 'docs/x.md',
   ]);
   assert.deepEqual(picked, ['LICENSE', 'art/icon.svg', 'kit.json', 'package.json', 'src/cli.ts', 'src/kit/VERSION', 'src/kit/npu.ts', 'src/ocr.ps1', 'src/watch/index.ts', 'tools/kit.ts']);
@@ -793,9 +794,16 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   assert.deepEqual(files.filter((f) => f.endsWith('.ts') && !f.startsWith('tools/')), ['src/cli.ts']);
   assert.ok(files.includes('src/cli.js') && files.includes('src/kit/install.js') && files.includes('src/kit/release.js'));
   assert.ok(!files.includes('README.md'));
+  assert.deepEqual(files.filter((f) => /\.md$/i.test(f)), [], 'no document, the kit\'s included');
+  assert.ok(files.includes('THIRD-PARTY-NOTICES.txt') && files.includes('src/kit/geniex/NOTICE'));
   const built = path.join(tmp, 'built');
   mkdirSync(built, { recursive: true });
-  execFileSync(tar, ['-x', '-f', zipOf(), '-C', built, 'src', 'package.json', 'release.json'], { windowsHide: true });
+  execFileSync(tar, ['-x', '-f', zipOf(), '-C', built, 'src', 'package.json', 'release.json', 'THIRD-PARTY-NOTICES.txt'], { windowsHide: true });
+  // Its notices: the kit's vendored builds, each with its license and notice (the fixture has no page to bundle).
+  const notices = readFileSync(path.join(built, 'THIRD-PARTY-NOTICES.txt'), 'utf8');
+  assert.deepEqual(noticeHeadings(notices), ['src\\kit\\geniex', 'src\\kit\\openvino']);
+  assert.match(notices, /BSD 3-Clause License[\s\S]*not Qualcomm's release/);
+  assert.match(r.stdout, /THIRD-PARTY-NOTICES\.txt: src\\kit\\geniex, src\\kit\\openvino/);
   assert.equal(readFileSync(path.join(built, 'src', 'cli.ts'), 'utf8'), "import './cli.js';\n");
   assert.equal(JSON.parse(readFileSync(path.join(built, 'release.json'), 'utf8')).form, 'minified');
   assert.match(r.stdout, /built with esbuild \d+\.\d+\.\d+: \d+ TypeScript/);

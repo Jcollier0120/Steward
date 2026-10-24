@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.214
+
+**It hands out the kit 2.128.0: every staff member's release carries the notices for what others made in it, and no longer carries the developers' documents.**
+
+### What's new
+
+- **THIRD-PARTY-NOTICES.txt in every staff member's app folder.** It names each part someone else made that the release carries, with its license: the parts of React in its page, and the builds of GenieX's plugin and OpenVINO GenAI the staff use on an NPU. A release that would carry something with no notice for it isn't built.
+
+### What changed
+
+- **Staff releases are a little smaller.** The developers' pages and READMEs no longer come with them; nothing on your PC read them.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.213
 
 **It hands out the kit 2.127.0: AMD's NPU was tried for reading the text in pictures, and reads it worse, so an AMD PC keeps reading it with our own model on the processor.**

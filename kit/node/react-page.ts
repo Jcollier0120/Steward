@@ -8,6 +8,7 @@ import { lookFor, sceneSvg } from './look.ts';
 import { manorLink, manorSettingsUrl } from './manor.ts';
 import type { Onboarding } from './onboarding.ts';
 import { loadEsbuild, type Esbuild } from './minify.ts';
+import { bundledPackages, type BundledPackage } from './notices.ts';
 import { ago, CSS, esc, lookCss, pillOf, SETTLING_SVG, settlingText } from './page.ts';
 import { demoAnswer, shownDataDir } from './demo.ts';
 import { AGENT_ONBOARDING, needsSettings, type NeedsSettings } from './required.ts';
@@ -168,8 +169,19 @@ export function reactPage(o: { token: string; data: { shell: PageShell; body: un
  * module. `nodeModules` is where React is found when the entry's own folders have none (a release's stage).
  */
 export async function bundlePage(entry: string, esbuild: Esbuild, o: { minify?: boolean; nodeModules?: string } = {}): Promise<string> {
-  const r = await esbuild.build({
-    entryPoints: [entry],
+  return (await bundled(entry, esbuild, o, false)).text;
+}
+
+/** bundlePage's bundle, and the npm packages it carries (kit 2.128.0): for the release's notices (notices.ts). */
+export async function bundlePageWith(entry: string, esbuild: Esbuild, o: { minify?: boolean; nodeModules?: string } = {}): Promise<{ text: string; packages: BundledPackage[] }> {
+  return bundled(entry, esbuild, o, true);
+}
+
+async function bundled(entry: string, esbuild: Esbuild, o: { minify?: boolean; nodeModules?: string }, listed: boolean): Promise<{ text: string; packages: BundledPackage[] }> {
+  // Its inputs are named from its working folder: the entry's.
+  const base = path.dirname(path.resolve(entry));
+  const r = (await esbuild.build({
+    entryPoints: [path.resolve(entry)],
     bundle: true,
     write: false,
     format: 'esm',
@@ -180,28 +192,30 @@ export async function bundlePage(entry: string, esbuild: Esbuild, o: { minify?: 
     legalComments: 'none',
     define: { 'process.env.NODE_ENV': JSON.stringify(o.minify ? 'production' : 'development') },
     ...(o.nodeModules ? { nodePaths: [o.nodeModules] } : {}),
+    ...(listed ? { metafile: true, absWorkingDir: base } : {}),
     logLevel: 'silent',
-  });
+  })) as Awaited<ReturnType<Esbuild['build']>> & { metafile?: { inputs: Record<string, unknown> } };
   const text = r.outputFiles?.[0]?.text;
   if (text === undefined) throw new Error(`the page couldn't be built: ${r.errors[0]?.text ?? 'no output'}`);
-  return text;
+  return { text, packages: listed ? bundledPackages(Object.keys(r.metafile?.inputs ?? {}), base) : [] };
 }
 
 /**
  * A release's page (release.ts): src/web/main.tsx bundled, minified unless `readable`, into src/web/page.js in the
  * stage; and the page's sources left out (src/web's other files and the kit's react part), since the bundle carries
  * them all and the server imports none of them (src/web/types.ts's types only). React comes from the agent's own
- * node_modules, a devDependency. Null for an agent with no React page.
+ * node_modules, a devDependency. Null for an agent with no React page. `packages`: the npm packages the bundle
+ * carries, whose notices the release keeps (notices.ts).
  */
-export async function releasePage(stage: string, root: string, esbuild: Esbuild, readable = false): Promise<{ kb: number } | null> {
+export async function releasePage(stage: string, root: string, esbuild: Esbuild, readable = false): Promise<{ kb: number; packages: BundledPackage[] } | null> {
   const entry = path.join(stage, PAGE_ENTRY);
   if (!existsSync(entry)) return null;
-  const js = await bundlePage(entry, esbuild, { minify: !readable, nodeModules: path.join(root, 'node_modules') });
+  const { text: js, packages } = await bundlePageWith(entry, esbuild, { minify: !readable, nodeModules: path.join(root, 'node_modules') });
   rmSync(path.join(stage, 'src', 'web'), { recursive: true, force: true });
   rmSync(path.join(stage, 'src', 'kit', 'react'), { recursive: true, force: true });
   mkdirSync(path.join(stage, 'src', 'web'), { recursive: true });
   writeFileSync(path.join(stage, PAGE_BUNDLE), js);
-  return { kb: Math.ceil(Buffer.byteLength(js) / 1024) };
+  return { kb: Math.ceil(Buffer.byteLength(js) / 1024), packages };
 }
 
 /** The newest change under the page's sources: a checkout builds again only after one. */

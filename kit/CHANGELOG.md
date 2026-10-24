@@ -2,6 +2,30 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.128.0
+
+**A release carries no documents, and carries THIRD-PARTY-NOTICES.txt, made from what it carries. A release that carries something of others' with no notice for it isn't built.**
+
+### What's new
+
+- **notices.ts:** `THIRD-PARTY-NOTICES.txt` at the zip's top level, written by `release.ts` after the page, minify and the native files, as Manor's release writes its own (spec/RELEASES.md, "Notices"). Each part has its heading between two lines of `=`, where the release carries it, its license, and the license and notice files its maker asks to be kept, copied in whole:
+  - the npm packages bundled into the page (react, react-dom, scheduler), from esbuild's metafile, with their license files from `node_modules` (the bundle leaves their license comments out);
+  - each folder with license or notice files of its own (`isLicenseFile`), but the agent's top level and `src\kit\`: `src\kit\geniex` and `src\kit\openvino` today;
+  - the native files' notices (kit.json's `native` `notices`).
+- **The release refuses** (`Not built: it carries what others made with no notice for it: ...`) a bundled package with no license file, a `.dll`, `.exe`, `.node`, `.wasm` or font with no license or notice file in its folder or one above it (outside `src\kit\prebuilt`, the kit's own builds), and native files whose kit.json lists no `notices`.
+- **`geniex/NOTICE`:** the GenieX plugin builds' statement that they're modified builds, what changed and that they aren't Qualcomm's release. Until now only its README said so, and READMEs no longer ship.
+- **react-page.ts `bundlePageWith`:** the bundle with the npm packages in it. `releasePage` returns them as `packages`, beside `kb`.
+
+### What changed
+
+- **No `.md` goes in a release** (`isDoc` in `pickReleaseFiles`): the kit's pages in `src\kit\spec\` and the READMEs beside its vendored builds stay out, as the agent's own README always did. Nothing reads them at run time; the spec part's `.json` files still go. A license or notice file written as `.md` still goes.
+- An installed copy is about 0.5 MB (18 files) smaller for it.
+
+### Before you update
+
+- An agent whose own `src\` or `art\` carries a program, library or font of someone else's needs that maker's license (and a `NOTICE`, for a modified build) beside it, or its release won't build. None of the staff does today.
+- An agent that builds its release with its own tool, not `release.ts` (Manor, Reeve), gets neither change: Manor writes its own notices; Reeve's tool needs the same steps.
+
 ## 2.127.0
 
 **AMD's NPU, through VitisAI, can read with our own model as a test (`KIT_OCR_NPU=vitisai`). Measured on a Ryzen AI 7 350, it reads worse, so the program's self-check refuses it, and an AMD PC reads on the processor as since 2.121.0.**
