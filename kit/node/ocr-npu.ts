@@ -33,14 +33,15 @@ import { download, type Download } from './setup.ts';
  *   caller's lane: background reads wait their turn, and a background batch the line is too long for goes to Windows'
  *   OCR instead of waiting.
  * - Before it reads anything, the program reads a picture it draws itself on the NPU and on the processor; an NPU that
- *   reads it differently isn't used. Where there's no NPU the model can use (AMD's is still to be measured, and Intel
- *   generations other than OPENVINO_GENERATIONS), or an NPU that fails that check, it reads on the processor
- *   (ON_PROCESSOR).
+ *   reads it differently isn't used. Where there's no NPU the model can use (AMD's reads worse as VitisAI compiles the
+ *   model, and Intel generations other than OPENVINO_GENERATIONS aren't measured yet), or an NPU that fails that check,
+ *   it reads on the processor (ON_PROCESSOR).
  *
  * KIT_OCR_ENGINE: `windows` reads with Windows' OCR alone, `model` with the model wherever it can (on the processor
  * too); unset, the model where it's worth it. Under node:test it's Windows' OCR unless KIT_OCR_ENGINE says otherwise,
  * so no test fetches the model. KIT_OCR_NPU: `none` keeps the model off the NPU; `openvino` tries Intel's plugin on any
- * x64 PC (a test, on a generation not measured yet), `vitisai` AMD's (a test).
+ * x64 PC (a test, on a generation not measured yet), `vitisai` AMD's (a test, which the program's check refuses: it
+ * reads worse).
  */
 
 /** A file the reader fetches: where from, and what it must be. */
@@ -194,12 +195,13 @@ export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt
 };
 
 /**
- * Whether the model reads on the processor where no NPU can: on an AMD PC until its NPU's route (VitisAI) is measured,
- * an Intel PC whose NPU isn't of OPENVINO_GENERATIONS or that has none, and a PC whose NPU fails the program's check
- * (kit 2.124.0; AMD's and Intel's since 2.121.0 and 2.122.0). Windows' OCR costs less there, but the owner's rule,
- * 2026-10-24, is never to trade how well it reads for less power. On a Core Ultra 5 225U's processor it reads the
- * check's lines as on the NPU, 1,212 of 1,253 against Windows' OCR's 736, at 16 times the processor time a picture;
- * on a Snapdragon X2 Elite's, 20 times (spec/OCR.md, "On the processor").
+ * Whether the model reads on the processor where no NPU can: on an AMD PC, whose NPU reads worse as VitisAI compiles
+ * the model (measured in kit 2.126.0), an Intel PC whose NPU isn't of OPENVINO_GENERATIONS or that has none, and a PC
+ * whose NPU fails the program's check (kit 2.124.0; AMD's and Intel's since 2.121.0 and 2.122.0). Windows' OCR costs
+ * less there, but the owner's rule, 2026-10-24, is never to trade how well it reads for less power. On a Core Ultra 5
+ * 225U's processor, and on a Ryzen AI 7 350's, it reads the check's lines as on the NPU, 1,212 of 1,253 against
+ * Windows' OCR's 736, at 16 times the processor time a picture; on a Snapdragon X2 Elite's, 20 times (spec/OCR.md, "On
+ * the processor").
  */
 export const ON_PROCESSOR = true;
 
@@ -229,7 +231,8 @@ const READY = 'ready';
 /**
  * AMD's NPU's graphs for this model, compiled ahead on a Ryzen AI PC (the program's --prepare --export, zipped and put
  * in the manor's releases): a PC whose plugin compiled them puts them in its cache instead of compiling for half an
- * hour. Only that plugin's version (the program checks graphs.txt); any other compiles its own. Null: none yet.
+ * hour. Only that plugin's version (the program checks graphs.txt); any other compiles its own. Null: none, while AMD's
+ * NPU reads worse.
  */
 export const AMD_GRAPHS: { plugin: string; zip: Pinned; files: readonly string[] } | null = null;
 
@@ -252,7 +255,7 @@ export function missingIn(place: ReaderPlace, exists: (p: string) => boolean = e
 /**
  * The NPU maker's plugin this PC's reader takes: Qualcomm's on an Arm PC; Intel's on an x64 PC whose NPU is of a
  * generation measured for it (OPENVINO_GENERATIONS), or on any x64 PC as a test (KIT_OCR_NPU=openvino); AMD's only as
- * a test (KIT_OCR_NPU=vitisai).
+ * a test (KIT_OCR_NPU=vitisai), since it reads worse as VitisAI compiles the model.
  */
 export function packFor(arch: string, env: NodeJS.ProcessEnv = process.env, chip: () => NpuChip | null = npuChipOutsideTests): NpuPack | null {
   const want = env.KIT_OCR_NPU?.trim().toLowerCase();
@@ -688,7 +691,7 @@ interface EngineState {
   preparing: boolean;
   /**
    * AMD's NPU isn't tried before then (its compile failed, or another agent is compiling): the processor reads meanwhile
-   * where the model reads there (onProcessor), else Windows' OCR.
+   * where the model reads there (ON_PROCESSOR), else Windows' OCR.
    */
   npuWaitUntil: number;
   said: Set<string>;
@@ -761,7 +764,7 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
 
   /**
    * AMD's NPU's graphs compiled in the background, once for every agent on the PC (a lock beside the NPU's), while the
-   * processor reads (onProcessor) or Windows' OCR; the program starts on the NPU from the first batch after.
+   * processor reads (ON_PROCESSOR) or Windows' OCR; the program starts on the NPU from the first batch after.
    */
   const prepareInBackground = (k: NpuPack) => {
     if (state.preparing) return;

@@ -329,47 +329,55 @@ function amdPrepare(said: { prepared: 0 | 1; error?: string } = { prepared: 1 })
   return { calls, open, first, prepare };
 }
 
-test("AMD's NPU: its graphs compiled once, in the background, while Windows' OCR reads; then read there", async () => {
+test("AMD's NPU: the model reads on the processor while its graphs compile, once, in the background; then on the NPU", async () => {
+  if (!m.ON_PROCESSOR) return;
   const where = readyPlace('x64', m.VITISAI_PACK);
   const started: string[][] = [];
   const start = (args: string[], cwd: string) => (started.push(args), startFake(args, cwd));
   const amd = amdPrepare();
   const l = logs();
   const o = { env: { KIT_OCR_NPU: 'vitisai' }, arch: 'x64', home: where, start, prepare: amd.prepare, log: l.log };
-  assert.equal(await m.modelReader(o), null, "Windows' OCR reads while they compile");
+  const r = await m.modelReader(o);
+  assert.equal(r?.engine, 'model-cpu', 'the processor reads while they compile');
+  assert.deepEqual(started.map((a) => a[a.indexOf('--on') + 1]), ['npu', 'cpu']);
   assert.ok(started[0].includes('--compiled-only'), 'the program reading never compiles');
   await amd.first;
   assert.deepEqual(amd.calls, ['vitisai']);
-  assert.equal(await m.modelReader(o), null);
-  assert.equal(started.length, 1, 'not started again while compiling');
+  assert.ok(l.lines.some((x) => /compiling the text reader's model .*: the model reads on the processor until then/.test(x)));
+  const page = (f: string) => [{ file: path.join(home, f), scale: 1, orient: true }];
+  assert.equal((await r!.read(page('a.png')))[0]?.engine, 'model-cpu');
+  assert.equal((await m.modelReader(o))?.engine, 'model-cpu');
+  assert.equal(started.length, 2, 'not started again while compiling');
   amd.open();
   await l.seen(/AMD's NPU compiled the text reader's model \(5 graphs, 3 at once, in 1 min\)/);
-  const r = await m.modelReader(o);
-  assert.equal(r?.engine, 'model-npu');
-  assert.equal(started.length, 2, 'its graphs compiled already: started once');
+  assert.equal((await r!.read(page('b.png')))[0]?.engine, 'model-npu', 'from the next batch, on the NPU');
+  assert.equal(started.length, 3, 'its graphs compiled already: started once');
+  assert.ok(started[2].includes('--vitisai'));
+  assert.equal((await m.modelReader(o))?.engine, 'model-npu');
   assert.deepEqual(amd.calls, ['vitisai'], 'compiled once');
-  const got = await r!.read([{ file: path.join(home, 'amd.png'), scale: 1, orient: true }]);
-  assert.equal(got[0]?.engine, 'model-npu');
   assert.equal(existsSync(path.join(path.dirname(process.env.NPU_AGENT_NPU_LOCK!), 'ocr-prepare')), false, 'the lock given back');
 });
 
-test("AMD's NPU: a compile that fails leaves Windows' OCR reading, and isn't tried again for a while", async () => {
+test("AMD's NPU: a compile that fails leaves the processor reading, and isn't tried again for a while", async () => {
+  if (!m.ON_PROCESSOR) return;
   const where = readyPlace('x64', m.VITISAI_PACK);
-  let starts = 0;
-  const start = (args: string[], cwd: string) => (starts++, startFake(args, cwd));
+  const started: string[][] = [];
+  const start = (args: string[], cwd: string) => (started.push(args), startFake(args, cwd));
   const amd = amdPrepare({ prepared: 0, error: 'the compiler ended' });
   const l = logs();
   const o = { env: { KIT_OCR_NPU: 'vitisai' }, arch: 'x64', home: where, start, prepare: amd.prepare, log: l.log };
-  assert.equal(await m.modelReader(o), null);
+  const r = await m.modelReader(o);
   amd.open();
-  await l.seen(/couldn't compile the text reader's model \(the compiler ended\)/);
-  assert.equal(await m.modelReader(o), null);
-  assert.equal(await m.modelReader({ ...o, now: Date.now() + 11 * 60_000 }), null);
-  assert.equal(starts, 1, 'not started again');
+  await l.seen(/couldn't compile the text reader's model \(the compiler ended\): the model reads on the processor/);
+  assert.equal((await r!.read([{ file: path.join(home, 'c.png'), scale: 1, orient: true }]))[0]?.engine, 'model-cpu');
+  assert.equal((await m.modelReader(o))?.engine, 'model-cpu');
+  assert.equal((await m.modelReader({ ...o, now: Date.now() + 11 * 60_000 }))?.engine, 'model-cpu');
+  assert.equal(started.filter((a) => a.includes('--vitisai')).length, 1, 'the NPU not tried again for a while');
   assert.deepEqual(amd.calls, ['vitisai']);
 });
 
 test("AMD's NPU: while another agent compiles, this one doesn't, and looks again in a while", async () => {
+  if (!m.ON_PROCESSOR) return;
   const L = await import('./fixture/src/kit/lock.ts');
   const where = readyPlace('x64', m.VITISAI_PACK);
   const started: string[][] = [];
@@ -380,57 +388,20 @@ test("AMD's NPU: while another agent compiles, this one doesn't, and looks again
   let release!: () => void;
   const held = L.withLock(path.join(L.locksDir, 'ocr-prepare'), () => new Promise<void>((r) => (release = r)));
   await new Promise((r) => setTimeout(r, 50));
-  assert.equal(await m.modelReader(o), null);
-  await l.seen(/another agent on this PC is compiling/);
+  assert.equal((await m.modelReader(o))?.engine, 'model-cpu');
+  await l.seen(/another agent on this PC is compiling the text reader's model for AMD's NPU: the model reads on the processor/);
   assert.deepEqual(amd.calls, [], 'not compiled twice');
-  assert.equal(await m.modelReader(o), null);
-  assert.equal(started.length, 1, 'not started again yet');
+  assert.equal((await m.modelReader(o))?.engine, 'model-cpu');
+  assert.equal(started.filter((a) => a.includes('--vitisai')).length, 1, 'the NPU not tried again yet');
   release();
   await held;
   amd.open();
   const later = { ...o, now: Date.now() + 11 * 60_000 };
-  assert.equal(await m.modelReader(later), null, 'ten minutes on: still not compiled here, so compiled now');
+  const r = await m.modelReader(later);
+  await r!.read([{ file: path.join(home, 'd.png'), scale: 1, orient: true }]);
   await l.seen(/AMD's NPU compiled/);
-  assert.deepEqual(amd.calls, ['vitisai']);
+  assert.deepEqual(amd.calls, ['vitisai'], 'ten minutes on: still not compiled here, so compiled now');
   assert.equal((await m.modelReader(later))?.engine, 'model-npu');
-});
-
-test("AMD's NPU on an AMD PC: the model reads on the processor while its graphs compile, then on the NPU", async () => {
-  const where = readyPlace('x64', m.VITISAI_PACK);
-  const started: string[][] = [];
-  const start = (args: string[], cwd: string) => (started.push(args), startFake(args, cwd));
-  const amd = amdPrepare();
-  const l = logs();
-  const env = { KIT_OCR_NPU: 'vitisai', PROCESSOR_IDENTIFIER: 'AMD64 Family 26 Model 36 Stepping 0, AuthenticAMD' };
-  const r = await m.modelReader({ env, arch: 'x64', home: where, start, prepare: amd.prepare, log: l.log });
-  assert.equal(r?.engine, 'model-cpu', 'the processor reads while they compile');
-  assert.deepEqual(started.map((a) => a[a.indexOf('--on') + 1]), ['npu', 'cpu']);
-  await amd.first;
-  assert.ok(l.lines.some((x) => /compiling the text reader's model .*: the model reads on the processor until then/.test(x)));
-  const page = (f: string) => [{ file: path.join(home, f), scale: 1, orient: true }];
-  assert.equal((await r!.read(page('a.png')))[0]?.engine, 'model-cpu');
-  assert.equal(started.length, 2);
-  amd.open();
-  await l.seen(/AMD's NPU compiled/);
-  assert.equal((await r!.read(page('b.png')))[0]?.engine, 'model-npu', 'from the next batch, on the NPU');
-  assert.equal(started.length, 3);
-  assert.ok(started[2].includes('--vitisai'));
-});
-
-test("AMD's NPU on an AMD PC: a compile that fails leaves the processor reading", async () => {
-  const where = readyPlace('x64', m.VITISAI_PACK);
-  const started: string[][] = [];
-  const start = (args: string[], cwd: string) => (started.push(args), startFake(args, cwd));
-  const amd = amdPrepare({ prepared: 0, error: 'the compiler ended' });
-  const l = logs();
-  const env = { KIT_OCR_NPU: 'vitisai', PROCESSOR_IDENTIFIER: 'AMD64 Family 26 Model 36 Stepping 0, AuthenticAMD' };
-  const r = await m.modelReader({ env, arch: 'x64', home: where, start, prepare: amd.prepare, log: l.log });
-  amd.open();
-  await l.seen(/couldn't compile the text reader's model \(the compiler ended\): the model reads on the processor/);
-  assert.equal((await r!.read([{ file: path.join(home, 'c.png'), scale: 1, orient: true }]))[0]?.engine, 'model-cpu');
-  assert.equal((await m.modelReader({ env, arch: 'x64', home: where, start, prepare: amd.prepare }))?.engine, 'model-cpu');
-  assert.equal(started.filter((a) => a.includes('--vitisai')).length, 1, 'the NPU not tried again for a while');
-  assert.deepEqual(amd.calls, ['vitisai']);
 });
 
 test("AMD's compile: the program with --prepare and without --compiled-only, its answer found below the compiler's noise", async () => {

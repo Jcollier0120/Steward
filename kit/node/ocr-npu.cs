@@ -18,7 +18,8 @@
 // and memory allow (--prepare does only that, and exits; --export then copies them out for a release). Its compiler can't
 // place a recognizer wider than 1,024 (AmdWidths), so a longer line is narrowed to that. --graphs gives graphs compiled
 // ahead, used when this PC's plugin is the one that compiled them; --compiled-only reads on the processor rather than
-// compile, its hello saying "prepare":true.
+// compile, its hello saying "prepare":true. As plugin 1.8.75 compiles the model (FP32 run as BF16) it reads worse than
+// the processor, so the self-check refuses it (spec/OCR.md, "Intel and AMD").
 //
 // It says hello once, on one line of JSON: {"hello":1,"on":"npu"|"cpu","ep":"qnn"|...,"why":...,"loadMs":n,"compiled":n,...}
 // (compiled: the graphs it compiled rather than loaded; Qualcomm's compiler holds 2 GB until the program ends). What
@@ -785,7 +786,7 @@ namespace KitOcrNpu
     public sealed class Reader : IDisposable
     {
         public const int Tile = 640, Overlap = 64, Height = 48, ModelWidth = 2048;
-        // Fewer on AMD's NPU (Program.AmdWidths), where each is a compile of minutes and 2,048 doesn't compile; --widths
+        // Fewer on AMD's NPU (Program.AmdWidths), where each is a compile of minutes and 1,280 doesn't compile; --widths
         // sets them for a test.
         public static int[] Buckets = { 128, 256, 384, 512, 768, 1024, 1536, 2048 };
         /// <summary>The widest a line is read: the widest of Buckets (a wider line is narrowed to it).</summary>
@@ -1336,7 +1337,8 @@ namespace KitOcrNpu
         /// The recognizer's widths on AMD's NPU: a compile each, of 3.5 to 7.5 minutes (measured on a Ryzen AI 7 350, with
         /// Windows ML's VitisAI plugin 1.8.75), several at once beside the detector's 18. Its compiler can't place one
         /// 1,280 wide or more ("DMA channel location ... cannot access full range of the shared buffer memory space"), so
-        /// the widest is 1,024, and a longer line is narrowed to it.
+        /// the widest is 1,024, and a longer line is narrowed to it (on the processor, the check's 952 lines read the same
+        /// so). Lines are read one at a time there: VitisAI leaves part of a batch of more to the processor, and refuses.
         /// </summary>
         public static readonly int[] AmdWidths = { 128, 256, 384, 512, 768, 1024 };
         static string vitisAiPlugin, amdKey;
