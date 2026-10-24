@@ -2,21 +2,64 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.125.0
+## 2.130.0
 
 **Page sign-in is on by default (kit 2.96.0's plan, its last step): a page's GETs need its token or its cookie once every staff member installed in the account runs this kit or a later one.**
 
 ### What changed
 
 - **page-access.ts** `strictPages()`: `KIT_STRICT_PAGES=1` always, `0` never, unset `strictByDefault()`.
-  - `strictByDefault()` is strict once `olderStaff()` finds no staff member installed in this account with a kit before `STRICT_FROM` (2.125.0). An install is a `.<id>\app` folder in the home with a kit.json, Manor's too, or one in an `<ID>_HOME`; its kit is its `src\kit\VERSION`, else kit.json's pin. It looks once a minute.
+  - `strictByDefault()` is strict once `olderStaff()` finds no staff member installed in this account with a kit before `STRICT_FROM` (2.130.0). An install is a `.<id>\app` folder in the home with a kit.json, Manor's too, or one in an `<ID>_HOME`; its kit is its `src\kit\VERSION`, else kit.json's pin. It looks once a minute.
   - Under node --test it is never strict unless the test gives it a home to look in, so a test's pages answer as before.
 - **react/page-data.ts**: a page whose `/api/page` answers 401 reloads itself. A tab opened before strict, in a browser without the cookie, goes through Castellan and comes back signed in.
 
 ### Before you update
 
-- An agent whose code GETs another page (or its own, from its CLI or MCP server) must send the token before it takes this kit: 2.118.0's `pageHeaders(url)` or `staffHeaders(id)`. Put that change on its main before this kit's bump. Pages refuse only once every installed staff member has 2.125.0, so an older one is never turned away.
+- An agent whose code GETs another page (or its own, from its CLI or MCP server) must send the token before it takes this kit: 2.118.0's `pageHeaders(url)` or `staffHeaders(id)`. Put that change on its main before this kit's bump. Pages refuse only once every installed staff member has 2.130.0, so an older one is never turned away.
 - A developer's script that reads a page's GETs needs the token from its server.json. `KIT_STRICT_PAGES=0` in the page's environment keeps it open.
+
+## 2.127.0
+
+**AMD's NPU, through VitisAI, can read with our own model as a test (`KIT_OCR_NPU=vitisai`). Measured on a Ryzen AI 7 350, it reads worse, so the program's self-check refuses it, and an AMD PC reads on the processor as since 2.121.0.**
+
+### What's new
+
+- **ocr-npu.ts** `KIT_OCR_NPU=vitisai` takes `VITISAI_PACK`: Windows ML 2.4.89 from Microsoft's NuGet package (52 MB fetched, 1 MB kept), which asks Windows for AMD's VitisAI plugin. Nothing of AMD's is fetched.
+- **ocr-npu.cs** `--vitisai <folder>` reads on AMD's NPU. Every shape is fixed and the CPU fallback is off.
+  - **Its graphs** are compiled into the reader's cache, keyed by the model, the NPU's driver and the plugin. The plugin is reached through a junction in the cache, since its compiler can't open itself from under WindowsApps.
+  - **`--prepare`** compiles them, each in a program of its own, as many at once as the cores and memory allow, below normal priority. `--export` copies them out for a release, and `--graphs` takes graphs compiled ahead.
+  - **`--compiled-only`** reads on the processor rather than compile; its hello says `"prepare":true`.
+- **ocr-npu.ts** `prepareReader` runs `--prepare` (up to 90 minutes, `PREPARE_MS`), under a lock beside the NPU's, so one agent on a PC compiles. `modelReader` compiles in the background while the processor reads, and starts on the NPU from the next batch once they're compiled. After a failed compile the NPU isn't tried for six hours; while another agent compiles, it looks again in ten minutes.
+- **`AMD_GRAPHS`** pins graphs compiled ahead, for a release: null, while AMD's NPU reads worse.
+
+### What changed
+
+- **AMD's recognizer stops at 1,024 wide** (`AmdWidths`): its compiler can't place 1,280 or wider. A longer line is narrowed; on the processor, the check's lines read the same so.
+- **A failed compile** leaves no folder behind, its paths too long for .NET deleted through Win32. One that ends without a word counts as a failed try.
+- **ocr-npu.cs's signed copy** (`prebuilt/ocr-npu-3fa4156fe5a3.exe`) is removed, as its source changed: each PC compiles the program itself, as the kit does for an unsigned helper, until it's signed again (`tools/sign-helpers.ts`).
+
+### Measured (spec/OCR.md, "On the processor" and "Intel and AMD")
+
+- **AMD's NPU** (plugin 1.8.75, FP32 run as BF16) reads the same as the processor for 94 to 95% of lines 128 to 384 wide, 39% at 512, 1% at 768 and 40% at 1,024. Its detector changes 255 of 952 lines.
+- **The model on a Ryzen AI 7 350's processor** reads 1,212 of 1,253 lines, against Windows OCR's 736. A picture takes 268 ms and 776 ms of processor, and 4,875 mJ against Windows OCR's 698 mJ.
+
+### Before you update
+
+- Nothing. AMD's NPU is a test; nothing changes on any PC by default.
+
+## 2.126.0
+
+**When the NPU's line is too long for a background batch, a second copy of the text reader reads it with our own model on the processor. Windows OCR used to read it. The owner chose how well it reads over the power it costs.**
+
+### What changed
+
+- **ocr-npu.ts:** a batch the NPU's turn gives up on (`NpuBusy`: the line too long, no turn within 10 minutes, or the NPU resting) is now read by a second program started with `--on cpu`. It reads the rest of the batch, or all of it if the NPU's program had no turn to start. The second program is started beside the NPU's when it's first needed. It holds the processor's sessions while it runs and ends itself after two minutes idle, as the NPU's does. If it can't start, Windows OCR reads, as before.
+- **The reader's fetch tries a rename again** (`renameSoon`) every 100 ms for up to five seconds when Windows refuses it for a moment (EPERM, EACCES or EBUSY), as with a folder just unpacked whose DLLs an antivirus is still scanning. It used to fail the fetch, and Windows OCR read until the next try.
+- **`ReaderOptions.turn`:** a stand-in for the NPU's turn, for tests.
+
+### Before you update
+
+- Nothing.
 
 ## 2.124.0
 
