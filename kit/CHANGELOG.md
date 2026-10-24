@@ -2,6 +2,33 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.132.2
+
+**The text reader reads with our model 2 (`ocr-model-v2`). Fine-tuned again on small screen text, it reads 1,223 of the check's 1,253 lines exactly on a Snapdragon's NPU, against model 1's 1,211 and Windows OCR's 733, and no group worse than either.**
+
+### What changed
+
+- **ocr-npu.ts** pins `ocr-model-v2` (`MODEL_VERSION` is `'2'`): a new `rec.onnx` and `NOTICE.txt`. The detector, `charset.txt` and `LICENSE.txt` are model 1's.
+- **The recognizer** was fine-tuned from model 1 on 60,000 more generated lines, mostly 11 to 13 px. They aim at what model 1 got wrong: spaces between short words, figures and signs ("Col 17", "Time & language"), narrow marks, zeros, and a capital I. Model 1's raised space output is gone.
+- **The check, by group,** in lines read exactly on the NPU, model 2 against model 1:
+  - screens at 11 px: 125/132 against 123;
+  - screens at 13 px: 106/108 against 105;
+  - pages: 180/182 against 178;
+  - held-out screens: 156/165 against 150;
+  - held-out browser: 28/28 against 27;
+  - every other group the same.
+
+  The processor reads as the NPU does (1,224). 15 of model 1's 42 missed lines are now right, and 3 others are newly missed.
+- **spec/OCR.md** has model 2's figures, what's left (30 lines, from 42), and the owner's rule for choosing how a PC reads:
+  - accuracy is never given up for less power;
+  - a route that reads clearly better wins over a cheaper one, without asking the owner again;
+  - the least energy decides between routes that read as well.
+
+### Before you update
+
+- Nothing to do. After the update, each PC fetches model 2 (4 MB) once, in the background, and reads as before until it's in place. An NPU compiles model 2's graphs on its first start, about 17 s on a Snapdragon. Model 1's folder stays, for agents on older kits.
+- Model 2 hasn't been measured on Intel's or AMD's PCs yet. The program's self-check still compares each NPU's read with the processor's before it reads.
+
 ## 2.132.1
 
 **The text reader's helper is prebuilt and signed again: `kit/node/prebuilt/ocr-npu-8d1348367dd3.exe`, for `ocr-npu.cs` as it is since 2.127.0.**
