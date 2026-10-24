@@ -436,7 +436,7 @@ const { sizing } = await import('./fixture/src/kit/setup.ts');
 const STRIX = 'npu2|32.0.203.376|2026-06-01|Advanced Micro Devices, Inc.|PCI\\VEN_1022&DEV_17F0&SUBSYS_88EE103C&REV_10\\4&2EA2F1A3&0&0141|NPU Compute Accelerator Device';
 const AMD_PC = parseDetection(`adapter|0|4098|536870912|17179869184|0x00000000_0x0000b2b2|0|AMD Radeon(TM) 890M Graphics
 ${STRIX}
-cpu|12|24|AMD Ryzen AI 9 HX 370 w/ Radeon 890M
+cpu|9|24|AMD Ryzen AI 9 HX 370 w/ Radeon 890M
 ram|34359738368
 `);
 const RADEON_ID = AMD_PC.cards[0].id;
@@ -519,7 +519,7 @@ test("the person's choices stand: Manor's switch off, their own acceleratorOrder
 test('a card the work would not fit on beside the rest (setup leaves pictures off it) gains nothing: a plan that would not give it the work leaves it as it is', async () => {
   const small = parseDetection(`adapter|0|4318|4294967296|17179869184|0x00000000_0x0000c1c1|0|NVIDIA GeForce RTX 2050
 ${STRIX}
-cpu|12|24|AMD Ryzen AI 9 HX 370 w/ Radeon 890M
+cpu|9|24|AMD Ryzen AI 9 HX 370 w/ Radeon 890M
 ram|34359738368
 `);
   const id = small.cards[0].id;
