@@ -518,7 +518,8 @@ export class Npu {
     // goes by that (AMD's pictures: the Radeon, unless only FastFlowLM is up).
     const running = await this.serversUp(serving, work, cfg.workOrder);
     // Unless as many of the work wait as its batchAt: then the order is kept whoever's server is up, and a batch starts the
-    // first device's (AMD's: 4 pictures start the Radeon's, the owner's rule). The caller's own batch counts, when it says.
+    // first device's and waits in its line (AMD's: 4 pictures go to the Radeon, the owner's rule), not shared out to a free
+    // NPU by the pick. The caller's own batch counts, when it says.
     const batchAt = cfg.workOrder?.[work]?.batchAt;
     const waiting = batchAt && running ? Math.max(opts.batch ?? 1, waitingFor(work, serving.map((a) => turnFor(a, work, cfg.accelerators)))) : undefined;
     // Each candidate's turn for this work: its own, or another device's its server runs on (an endpoint's `turn`).

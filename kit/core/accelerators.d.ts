@@ -339,6 +339,14 @@ export declare function workOrdered<A extends {
     kind: AcceleratorKind;
 }>(list: A[], order: WorkOrderOf | undefined, running?: Record<string, boolean>, waiting?: number): A[];
 /**
+ * Whether as many of the work wait as its order's batchAt: a batch, which keeps the order whoever's server is up
+ * (kit 2.112.1; Reeve's routing reads it too).
+ * @param {WorkOrderOf | undefined} order
+ * @param {number} [waiting]
+ * @returns {boolean}
+ */
+export declare function isBatch(order: WorkOrderOf | undefined, waiting?: number): boolean;
+/**
  * The cap for one kind of request on an accelerator: its endpoint's own (maxContextTokens on chat, vision or embed)
  * when it has one, else the accelerator's.
  * @param {Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>} a
@@ -617,7 +625,11 @@ export declare function gameCards(rules: Rules, load: GpuLoad, accs: Accelerator
  * accelerators in that order first (workOrdered), with `running` saying whose servers are up for its runningFirst. The
  * NPU first then means first in that order: AMD's pictures go to the Radeon, and to the NPU only when its server is up
  * and the Radeon's isn't. With its batchAt, from that many of the work waiting (`waiting`, this request included) the
- * order is kept whoever's server is up: 4 pictures waiting start the Radeon's (the owner's rule).
+ * order is kept whoever's server is up: 4 pictures waiting start the Radeon's (the owner's rule). **It waits in one line**
+ * (kit 2.112.1): where the order puts one first, by its runningFirst or a batch, the first in it that can take the request
+ * is the only candidate, as the NPU first is. A busy Radeon is waited for, not passed over for a free NPU or processor
+ * that spends more on the work (AMD's pictures: 26.6 J each on the NPU against the Radeon's 10.4). The others take it only
+ * when that one can't: failed lately, a game's, or rested after a long line.
  * @param {Rules} rules
  * @param {Accelerator[]} accs
  * @param {Need} need
