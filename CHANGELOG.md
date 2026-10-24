@@ -19,6 +19,22 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. Each PC fetches the new model (4 MB) once, in the background, and reads as before until it's in place.
 
+## 0.36.222
+
+**It hands out the kit 2.134.0: every staff member's release carries the notices for what others made in it, and no longer carries the developers' documents.**
+
+### What's new
+
+- **THIRD-PARTY-NOTICES.txt in every staff member's app folder.** It names each part someone else made that the release carries, with its license: the parts of React in its page, and the builds of GenieX's plugin and OpenVINO GenAI the staff use on an NPU. A release that would carry something with no notice for it isn't built.
+
+### What changed
+
+- **Staff releases are a little smaller.** The developers' pages and READMEs no longer come with them; nothing on your PC read them.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.221
 
 **It hands out the kit 2.133.0: your staff's pages open only from Castellan, so no other program or Windows account on the PC can read them or press their buttons.**
