@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.212
+
+**It hands out the kit 2.126.0: when the NPU is too busy for the staff's background text reading, our own model reads it on the processor rather than Windows' own.**
+
+### What changed
+
+- **Background text reading no longer drops to Windows' own when the NPU is busy.** When the NPU has a long line of other work, the Clerk, the Scribe and the Warrener read the text in pictures with our own model on the processor instead. Before, Windows' own text recognition read them. It uses more of the processor and more power for those pictures, and reads far more of the text right.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.210
 
 **It hands out the kit 2.124.0: wherever a PC's NPU can't read with our own model, the staff read the text in pictures with it on the processor, a Snapdragon's included.**
