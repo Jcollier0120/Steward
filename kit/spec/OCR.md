@@ -146,13 +146,13 @@ At scale 1, Windows OCR reads only a quarter to a half of the lines of small scr
 
 ## Our own model
 
-Since kit 2.114.0 (decided 2026-10-23, measured 2026-10-24), the reader reads with a text-reading model of our own, on the NPU: Qualcomm's, and Intel's NPU 3720 ([Intel and AMD](#intel-and-amd)). Where no NPU can read with it, it reads on the processor: on an AMD PC since kit 2.121.0, on an Intel PC whose NPU isn't measured yet (or that has none) since 2.122.0, and wherever an NPU fails its self-check since 2.124.0 ([On the processor](#on-the-processor)). It had to:
+Since kit 2.114.0 (decided 2026-10-23, measured 2026-10-24), the reader reads with a text-reading model of our own (model 2 since kit 2.131.0), on the NPU: Qualcomm's, and Intel's NPU 3720 ([Intel and AMD](#intel-and-amd)). Where no NPU can read with it, it reads on the processor: on an AMD PC since kit 2.121.0, on an Intel PC whose NPU isn't measured yet (or that has none) since 2.122.0, and wherever an NPU fails its self-check since 2.124.0 ([On the processor](#on-the-processor)). It had to:
 
 - never read worse than Windows OCR in any of the check's groups;
 - read at least 99.5% of lines exactly on screen text from 12 px up, and on document pages;
 - be the smallest model that does that, under Apache-2.0 or MIT.
 
-The first it does: it reads better than Windows OCR in every group, and as well on PDFs' text layers, which neither engine reads. The second it does for screens at 15 and 18 px and the browser at 100 to 150%. It doesn't at 12 and 13 px, on pages, or on the held-out set: [what's left](#whats-left-and-why) says why.
+The first it does: it reads better than Windows OCR in every group, and as well on PDFs' text layers, which neither engine reads. The second it does for screens at 15 and 18 px, the browser at 100 to 150%, and the held-out browser. It doesn't at 12 and 13 px, on pages, in the browser at 200%, or on the held-out screens and page: [what's left](#whats-left-and-why) says why.
 
 ### The choice: PP-OCRv6 tiny, fine-tuned
 
@@ -165,6 +165,7 @@ PaddleOCR's PP-OCRv6 tiny (Apache-2.0): its text detector as published (0.43 M p
 | v6 tiny, its recognizer fine-tuned (a step every 8 columns) | 2.3 MB (189 characters) | 1,100 | the NPU |
 | and a step every 4 columns, and Roman numerals | 2.3 MB | 1,114 | the NPU |
 | and the space's output raised by 1: **ocr-model-v1** | 2.3 MB | 1,118 | the NPU |
+| fine-tuned again on 60,000 lines of the check's kind, mostly 11 to 13 px, the space's output as trained: **ocr-model-v2** | 2.3 MB | 1,130 | the NPU |
 | Windows OCR | | 643 | the processor |
 
 What made the difference:
@@ -172,40 +173,49 @@ What made the difference:
 - **Our characters, not 6,906.** The recognizer's head covers the 189 characters screens and documents use: Latin with its accents, figures, punctuation, symbols. That halves its file and removes look-alikes from other scripts.
 - **Fine-tuning on text drawn as screens draw it.** The training lines were about 200,000 generated strings: prose, interface text, code, paths, URLs, numbers, accented words, capitals, typography, Roman numerals, and random characters. They were drawn by GDI and GDI+ (ClearType, grey and black-and-white) and by Edge at 100 to 250%, from 9 px up, in the installed text fonts. The check's held-out fonts and their near twins were left out, and so was every string in `ocr-check.json`. Each line was cut out with the room the detector's boxes leave, and padded as the reader pads it.
 - **A step every 4 columns.** At 8, a run of narrow characters ("...", "ll", a space at 11 px) has fewer steps than it needs: CTC needs a blank between two of the same character. The last pooling now pools the height alone, and the convolution after it is dilated, so the weights are the same and the steps twice as many. It costs nothing measurable on the NPU.
-- **The space's output raised by 1.** This was chosen on held-back drawn lines, never on the check (`tools/ocr-model/space_bias.py`), and is built into the model's head.
+- **The space's output raised by 1 (model 1).** This was chosen on held-back drawn lines, never on the check (`tools/ocr-model/space_bias.py`), and is built into model 1's head.
+- **Lines of the check's kind (model 2).** Model 1 missed mostly spaces next to figures and signs ("Col 17", "Time & language"), narrow marks, zeros and a capital I, at 11 to 13 px. The training's GDI+ drawing is the check's own, so what was missing wasn't the drawing but lines of that kind at those sizes. Model 2 was fine-tuned from model 1 on 60,000 more generated lines, from 9 to 31 px but mostly 11 to 13, in the screen and page fonts:
+  - short words, figures and signs a space apart, as status bars and settings show them;
+  - file names, paths, abbreviations, dashes, quotes and percentages;
+  - groups of zeros, times and hex;
+  - words with a capital I or a lowercase l.
+
+  Again no string of the check's and no held-out font was used. The step kept was the one that read most held-back lines exactly, those of both rounds, never the check. With it the space's output needs no raising: as trained, it reads the held-back lines best, so model 2 has none.
 
 PP-OCRv5's recognizer read more than v6 tiny's as published. But fine-tuned, the tiny one reads more than v5's as published, at a third of its size, so v5 wasn't fine-tuned. `tools/ocr-model` has the whole recipe: the strings, the drawing, the training, the export, and the scoring.
 
 ### How it reads
 
-The check on the same Snapdragon X2 Elite Extreme as [the baseline](#the-baseline-windows-ocr), kit 2.114.0, 2026-10-24, three runs, scale 1. Its processes were held to 8 of the 18 cores, as heavy runs on that PC are, which is why Windows OCR's times are higher than the baseline's. Each cell gives characters, words, exact lines, and ms a picture:
+The check on the same Snapdragon X2 Elite Extreme as [the baseline](#the-baseline-windows-ocr), kit 2.131.0 with model 2, 2026-10-24, three runs, scale 1. Its processes were held to 8 of the 18 cores, as heavy runs on that PC are. Times vary from run to run there (model 1's run, under the same cap, measured every engine slower, Windows OCR at 55 ms a picture), so compare them within a run. Each cell gives characters, words, exact lines, and ms a picture:
 
 | group | Windows OCR | the model, on the NPU | the model, on the processor |
 |---|---|---|---|
-| screens, 11 px | 81.4%, 65.3%, 34/132, 64 | 99.8%, 97.7%, 123/132, 112 | 99.8%, 97.7%, 123/132, 465 |
-| screens, 12 px | 88.1%, 75.3%, 33/120, 59 | 99.8%, 97.8%, 112/120, 105 | 99.8%, 97.8%, 112/120, 465 |
-| screens, 13 px | 91.7%, 85.0%, 55/108, 50 | 99.9%, 99.7%, 105/108, 96 | 99.9%, 99.7%, 105/108, 426 |
-| screens, 15 px | 96.1%, 91.9%, 60/96, 45 | 100%, 100%, 96/96, 93 | 100%, 100%, 96/96, 416 |
-| screens, 18 px | 96.3%, 96.3%, 63/80, 40 | 100%, 100%, 80/80, 85 | 100%, 100%, 80/80, 382 |
-| pages | 96.0%, 92.5%, 123/182, 116 | 99.9%, 99.5%, 178/182, 185 | 99.9%, 99.5%, 178/182, 732 |
-| browser, 100% | 94.1%, 89.8%, 34/52, 48 | 100%, 100%, 52/52, 97 | 100%, 100%, 52/52, 446 |
-| browser, 125% | 95.1%, 92.1%, 37/53, 37 | 100%, 100%, 53/53, 107 | 100%, 100%, 53/53, 474 |
-| browser, 150% | 98.5%, 95.9%, 43/53, 46 | 100%, 100%, 53/53, 128 | 100%, 100%, 53/53, 546 |
-| browser, 200% | 98.9%, 96.3%, 46/55, 62 | 100%, 99.7%, 54/55, 189 | 100%, 99.7%, 54/55, 811 |
-| PDF, scanned page | 99.1%, 98.1%, 30/33, 666 | 100%, 100%, 33/33, 2,244 | 100%, 100%, 33/33, 2,469 |
-| PDF, text layer | 100%, 100%, 60/60, 60 | the same, 96 | the same, 51 |
-| held-out screens | 91.3%, 84.3%, 67/165, 57 | 99.7%, 97.9%, 150/165, 98 | 99.8%, 98.1%, 151/165, 437 |
-| held-out page | 99.6%, 98.2%, 31/36, 116 | 99.9%, 99.6%, 35/36, 189 | 99.9%, 99.6%, 35/36, 765 |
-| held-out browser | 97.3%, 92.9%, 17/28, 37 | 99.9%, 99.5%, 27/28, 112 | 99.9%, 99.5%, 27/28, 473 |
-| the bench's 25 | 91.5%, 84.1%, 368/718, 55 | 99.9%, 99.0%, 694/718, 97 | 99.9%, 99.0%, 694/718, 439 |
-| all 41 pictures and 2 PDFs | 93.4%, 87.6%, 733/1,253, 55 | 99.9%, 99.1%, 1,211/1,253, 101 | 99.9%, 99.2%, 1,212/1,253, 446 |
+| screens, 11 px | 81.4%, 65.3%, 34/132, 42 | 99.8%, 97.7%, 125/132, 69 | 99.8%, 97.7%, 125/132, 526 |
+| screens, 12 px | 88.1%, 75.3%, 33/120, 42 | 99.8%, 98.3%, 112/120, 65 | 99.8%, 98.3%, 112/120, 488 |
+| screens, 13 px | 91.7%, 85.0%, 55/108, 33 | 99.9%, 99.9%, 106/108, 63 | 99.9%, 99.9%, 106/108, 482 |
+| screens, 15 px | 96.1%, 91.9%, 60/96, 29 | 100%, 100%, 96/96, 59 | 100%, 100%, 96/96, 445 |
+| screens, 18 px | 96.3%, 96.3%, 63/80, 26 | 100%, 100%, 80/80, 55 | 100%, 100%, 80/80, 425 |
+| pages | 96.0%, 92.5%, 123/182, 75 | 99.98%, 99.9%, 180/182, 116 | 99.98%, 99.9%, 180/182, 792 |
+| browser, 100% | 94.1%, 89.8%, 34/52, 35 | 100%, 100%, 52/52, 60 | 100%, 100%, 52/52, 450 |
+| browser, 125% | 95.1%, 92.1%, 37/53, 46 | 100%, 100%, 53/53, 67 | 100%, 100%, 53/53, 494 |
+| browser, 150% | 98.5%, 95.9%, 43/53, 49 | 100%, 100%, 53/53, 80 | 100%, 100%, 53/53, 638 |
+| browser, 200% | 98.9%, 96.3%, 46/55, 71 | 99.96%, 99.7%, 54/55, 120 | 99.96%, 99.7%, 54/55, 897 |
+| PDF, scanned page | 99.1%, 98.1%, 30/33, 775 | 100%, 100%, 33/33, 1,964 | 100%, 100%, 33/33, 3,011 |
+| PDF, text layer | 100%, 100%, 60/60, 68 | the same, 95 | the same, 65 |
+| held-out screens | 91.3%, 84.3%, 67/165, 37 | 99.8%, 98.7%, 156/165, 63 | 99.9%, 99.0%, 157/165, 461 |
+| held-out page | 99.6%, 98.2%, 31/36, 77 | 99.9%, 99.6%, 35/36, 120 | 99.9%, 99.6%, 35/36, 845 |
+| held-out browser | 97.3%, 92.9%, 17/28, 42 | 100%, 100%, 28/28, 69 | 100%, 100%, 28/28, 476 |
+| the bench's 25 | 91.5%, 84.1%, 368/718, 36 | 99.9%, 99.2%, 699/718, 63 | 99.9%, 99.2%, 699/718, 482 |
+| all 41 pictures and 2 PDFs | 93.4%, 87.6%, 733/1,253, 39 | 99.9%, 99.4%, 1,223/1,253, 64 | 99.9%, 99.4%, 1,224/1,253, 476 |
+
+Against model 1 (kit 2.114.0's run), model 2 reads more lines exactly at 11 px (125 against 123), 13 px (106 against 105), on pages (180 against 178), on the held-out screens (156 against 150) and in the held-out browser (28 against 27), and the same in every other group. No group reads worse than with model 1, or than with Windows OCR, in characters, words or lines.
 
 What it costs, on the NPU:
 
-- A start with nothing to read: 744 ms, 766 ms of processor and 296 MB, against 353 ms and 100 MB for Windows OCR's PowerShell. The program stays loaded until no picture has come for two minutes, so this is paid once per spell of reading.
-- The 41 pictures in one process: 5.5 s, 4.1 s of processor, a 366 MB peak. So a picture beyond the start costs 117 ms and 80 ms of processor, against 65 ms and 71 ms for Windows OCR (226 MB peak).
-- A scanned PDF page takes 2.2 s through `ocrFiles`: its PowerShell renders the page, then the model reads it. Windows OCR reads it in that same PowerShell, in 0.7 s.
-- The first start on a PC compiles the NPU's nine graphs (the detector's tile, and the recognizer at eight widths), about 17 s, and keeps them in the cache (13 MB).
+- A start with nothing to read: 566 ms, 484 ms of processor and 297 MB, against 307 ms and 101 MB for Windows OCR's PowerShell. The program stays loaded until no picture has come for two minutes, so this is paid once per spell of reading.
+- The 41 pictures in one process: 3.6 s, 2.2 s of processor, a 368 MB peak. So a picture beyond the start costs 75 ms and 42 ms of processor, against 46 ms and 48 ms for Windows OCR (227 MB peak).
+- A scanned PDF page takes 2.0 s through `ocrFiles`: its PowerShell renders the page, then the model reads it. Windows OCR reads it in that same PowerShell, in 0.8 s.
+- The first start on a PC compiles the NPU's nine graphs (the detector's tile, and the recognizer at eight widths), about 17 s, and keeps them in the cache (13 MB). The cache is kept by the models' hashes, so a new model is compiled afresh, and a model's graphs no agent has used for a week are deleted.
 - The fetch is 226 MB once: ONNX Runtime 79 MB, Qualcomm's runtime 144 MB, the model 4 MB. 242 MB is kept, of which Qualcomm's compiler alone is 182 MB.
 - Chat on the NPU, with the reader reading the check's pictures over and over beside it (five chats each, medians):
   - chat alone: 1.44 s;
@@ -216,23 +226,22 @@ What it costs, on the NPU:
 
 ### What's left, and why
 
-On the NPU, 42 of the 1,253 lines aren't read exactly. Characters are 99.7% or better in every group:
+On the NPU, 30 of the 1,253 lines aren't read exactly. Model 1 missed 42: model 2 reads 15 of those, and misses 3 that model 1 read. Characters are 99.8% or better in every group:
 
-- **23: a space missing between two words**, in screen text at 11 to 14 px ("Col17", "file or" read as "fileor"). The check draws small screen text with narrower gaps between words than the training lines had. Where the model is unsure, the step goes to a letter beside the gap. Raising the space's output by 1 recovered some. More starts putting spaces inside words: held-back lines fell from 93.67% exact at 1 to 92.55% at 3.
-- **13: a narrow mark, or a letter, misread**:
-  - five lost a dot, a backslash or a hyphen 1 or 2 pixels wide, at 11 to 13 px ("config.json" read as "configjson");
-  - two read a closing double quote as a single one;
-  - two read "%" as "8" in a held-out font;
-  - three misread letters (a page in Times New Roman, and two held-out lines);
+- **17: a space missing, or one too many.** Fourteen lost a space between two words or signs, in screen text at 11 and 12 px and on the held-out screens ("file or" read as "fileor", "Time & language" as "Time &language", "Zoom 125%" as "Zoom125%"). Three put one in ("1 7 items", `build\ Release`). The check draws small screen text with gaps of a pixel or two between words. Where the model is unsure, the step goes to a letter beside the gap. Model 2's lines taught it most of model 1's misses of this kind ("Col 17", "Order #A-55210", "Ethernet 2: 940"), but not these.
+- **9: a narrow mark, or a letter, misread**:
+  - four lost a dot or a backslash 1 or 2 pixels wide, at 11 to 13 px ("config.json" read as "configjson", "0.17.15" as "0.1715");
+  - two read a closing double quote as a single one, in Georgia and in the browser at 200%;
+  - one read "%" as "8" in a held-out font;
+  - one lost a letter, on the page in Times New Roman ("Setings");
   - one added a stray mark.
-- **4: an old-style 0 read as o.** These are Georgia's figures and a held-out font's, which are drawn as a small o.
-- **2: a capital I read as l.** In Calibri and a held-out sans they are the same shape.
+- **4: 0 and o mistaken for each other.** Three are in held-out fonts ("18:oo", "0xCo00"), and one read "Do" as "D0" at 12 px.
 
-The last two kinds can't be told apart by shape. Only the words around them tell, and the recognizer reads characters, not words. What would close the rest, none of it done yet:
+A capital I is no longer read as l. 0 and o can't always be told apart by shape: only the words around them tell, and the recognizer reads characters, not words. What would close the rest, none of it done yet:
 
-- training lines drawn with the check's spacing at 11 to 13 px;
-- a bigger recognizer (PP-OCRv5's, at 3.4 times the size);
-- a word list for 0 and o, and I and l.
+- a bigger recognizer (PP-OCRv5's, at 3.4 times the size), for the spaces and marks the tiny one still misses at 11 and 12 px;
+- a word list for 0 and o;
+- another round of lines of this kind, though each helps less: model 2's took 15 of model 1's 42 and lost 3.
 
 ### How it runs
 
@@ -241,7 +250,7 @@ The last two kinds can't be told apart by shape. Only the words around them tell
 - **The fetch.** What the model needs is fetched once for every agent on the PC, in the background, into the reader's shared folder (`%USERPROFILE%\.npu-agent\ocr`, `KIT_OCR_HOME`):
   - ONNX Runtime 1.27.0, from Microsoft's release;
   - the NPU maker's plugin, from its own NuGet package (Qualcomm's QNN 2.6.0 on an Arm PC, Intel's OpenVINO 1.7.0 on an Intel NPU 3720), or for AMD's test, Windows ML 2.4.89, which asks Windows for AMD's plugin;
-  - the model, from the release `ocr-model-v1` in the manor's public releases.
+  - the model, from the release `ocr-model-v2` in the manor's public releases.
 
   Each is pinned by size and SHA-256 (`MODEL_FILES` and the rest), and only the files the reader uses are kept, with their notices. Until all of it is there, Windows OCR reads.
 - **The program.** `ocr-npu.cs`, a kit helper shipped signed, runs ONNX Runtime through its C API. It loads the model once and reads picture after picture until no picture has come for two minutes. On an Arm PC it runs as Arm (its manifest), not as x64 under emulation.
@@ -264,9 +273,9 @@ The last two kinds can't be told apart by shape. Only the words around them tell
 
 ### On the processor
 
-With no NPU the model runs on, or an NPU that fails the self-check, the model could read on the processor instead. It reads as well there as on the NPU (1,212/1,253). But on the X2's processor a picture beyond the start costs 498 ms and 1,452 ms of processor (four threads), with a 463 MB peak. That is 20 times Windows OCR's processor time, far from gentle in the background. On an Intel Core Ultra 5 225U it's 326 ms and 972 ms of processor, 16 times Windows OCR's, and 7.0 J against Windows OCR's 0.47 J. So `ON_PROCESSOR` was false, and Windows OCR read where the NPU couldn't. Since kit 2.124.0 it's true: the owner chose how well it reads over what it costs, step by step, below.
+With no NPU the model runs on, or an NPU that fails the self-check, the model could read on the processor instead. It reads as well there as on the NPU (1,224/1,253 with model 2, 1,212 with model 1). But on the X2's processor a picture beyond the start cost 498 ms and 1,452 ms of processor (four threads) in model 1's run, with a 463 MB peak. That is 20 times Windows OCR's processor time, far from gentle in the background. On an Intel Core Ultra 5 225U it's 326 ms and 972 ms of processor, 16 times Windows OCR's, and 7.0 J against Windows OCR's 0.47 J. So `ON_PROCESSOR` was false, and Windows OCR read where the NPU couldn't. Since kit 2.124.0 it's true: the owner chose how well it reads over what it costs, step by step, below.
 
-**An AMD PC reads on the processor (kit 2.121.0, the owner's call, 2026-10-24).** The owner's rule: never trade how well it reads for less power, and spend the least power among what reads well. So an AMD PC (by Windows' `PROCESSOR_IDENTIFIER`, `AuthenticAMD`, then) reads with the model on its processor, where Windows OCR reads 736 of the check's lines to its 1,212. It fetches about 81 MB (ONNX Runtime and the model, no NPU plugin) and keeps 19 MB. AMD's NPU, measured since, reads worse ([Intel and AMD](#intel-and-amd)), so the processor it stays. Measured on a Ryzen AI 7 350 on 2026-10-24 (kit 2.127.0), with the manor stopped: the check's three runs, and the energy as Intel's is measured below:
+**An AMD PC reads on the processor (kit 2.121.0, the owner's call, 2026-10-24).** The owner's rule: never trade how well it reads for less power, and spend the least power among what reads well. So an AMD PC (by Windows' `PROCESSOR_IDENTIFIER`, `AuthenticAMD`, then) reads with the model on its processor, where Windows OCR reads 736 of the check's lines to model 1's 1,212. It fetches about 81 MB (ONNX Runtime and the model, no NPU plugin) and keeps 19 MB. AMD's NPU, measured since, reads worse ([Intel and AMD](#intel-and-amd)), so the processor it stays. Measured on a Ryzen AI 7 350 on 2026-10-24 (kit 2.127.0, model 1), with the manor stopped: the check's three runs, and the energy as Intel's is measured below:
 
 | | Lines read exactly | A picture beyond the start | Its processor time | Its energy over rest |
 |---|---|---|---|---|
@@ -295,7 +304,7 @@ The model reads the Latin alphabet alone. Its 189 characters are ASCII, Latin-1'
 - **The better read, line by line** (`keepBetter`).
   - A line of Windows' read holds another alphabet when at least two of its letters, and 15% of them, are neither Latin nor drawn like Latin. Letters drawn like Latin include Cyrillic а, е, о, р, с, Т and Greek Α, Ο, ρ.
   - Such a line replaces the model's lines it overlaps (by half the smaller box). Windows' other lines there come with it, left to right, so a line of both alphabets reads whole. A line where the model found nothing goes in by its height.
-  - Every other line stays the model's. Text in the Latin alphabet always keeps the model's read, which reads 1,212 of the check's 1,253 lines exactly against Windows OCR's 736.
+  - Every other line stays the model's. Text in the Latin alphabet always keeps the model's read, which reads 1,223 of the check's 1,253 lines exactly on a Snapdragon's NPU against Windows OCR's 733.
 - **What it says.** `engine` ends in `+windows` when Windows' lines are in the result. The agent's log has a line for each read again. `ocr-check` measures each engine alone, without it.
 - **What it costs.** A Windows OCR read of each such page, beside the model's: 465 mJ a picture on a Core Ultra 5 225U and 698 mJ on a Ryzen AI 7 350. The model's own read costs 859 mJ on Intel's NPU, and 4.9 to 7.0 J on a processor.
 - **Not yet measured on such a PC.** The PCs here have English alone. So the read again was tested with Windows' English OCR, and with Windows' lines given in Russian. Pictures drawn in Russian (capitals too), Greek, Chinese, Japanese and Arabic all set it off, as does Russian among English. English prose doesn't.
@@ -305,7 +314,7 @@ The model reads the Latin alphabet alone. Its 189 characters are ASCII, Latin-1'
 
 Each gets the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent as a test request:
 
-- **Intel's NPU 3720** (Core Ultra Series 1, and the 200U and 200H: `OPENVINO_GENERATIONS`). The model reads there by default, through OpenVINO's NPU plugin 1.7.0. Which generation a PC's NPU is comes from setup's report of it (`npu-report.json`), so a PC reads with Windows OCR until its local AI is set up. Measured on a Core Ultra 5 225U (Arrow Lake-U) on 2026-10-24, with the manor stopped:
+- **Intel's NPU 3720** (Core Ultra Series 1, and the 200U and 200H: `OPENVINO_GENERATIONS`). The model reads there by default, through OpenVINO's NPU plugin 1.7.0. Which generation a PC's NPU is comes from setup's report of it (`npu-report.json`), so a PC reads with Windows OCR until its local AI is set up. Measured on a Core Ultra 5 225U (Arrow Lake-U) on 2026-10-24, with model 1 and the manor stopped:
 
   | | Lines read exactly | A picture beyond the start | Its processor time | Its energy over rest |
   |---|---|---|---|---|
@@ -314,7 +323,7 @@ Each gets the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent
   | The model on the processor | 1,212/1,253 | 326 ms | 972 ms | 6,991 mJ |
 
   - **It meets the rule below.** No group reads worse on the NPU than with Windows OCR, and it spends less processor time a picture.
-  - **It spends more energy a picture**, 1.85 times Windows OCR's. Even the cores' share is a little more (580 mJ against 548), where the program's own processor time is less: OpenVINO's driver works outside the program. The owner chose the model for how much better it reads.
+  - **It spends more energy a picture**, 1.85 times Windows OCR's. Even the cores' share is a little more (580 mJ against 548), where the program's own processor time is less: OpenVINO's driver works outside the program. By the owner's rule below, it reads there for how much better it reads.
   - **How the energy was measured:** the package's (RAPL), over the rest measured just before. It's the median of three rounds that took the three engines in turn, each reading the check's 32 GDI pictures three times.
   - **A start** costs 11.8 J on the NPU, against Windows OCR's 7.0 J. The program holds 325 to 435 MB while it's loaded.
   - **Each graph alone** (the program's `--bench`): a 640×640 detector tile takes 9.7 ms, and a recognizer line 0.7 ms at 128 wide to 4.1 ms at 2,048. Lines read in batches save time only at the two narrowest widths, so they're read one at a time.
@@ -334,8 +343,14 @@ Each gets the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent
   - **Compiling** takes minutes a graph, on about one core: 18 for the detector, 3.5 to 7.5 for each recognizer width. All seven at once take 28.5 minutes on about five cores, with a 5.5 GB peak. Compiled, they keep 33 MB.
   - **What could change that:** an int8 QDQ copy, the precision VitisAI is built for, or a newer plugin. Either needs the check again.
 
-Each becomes its PC's default if it reads no worse than Windows OCR in any group, and since the owner's rule of 2026-10-24, no worse than the model on the processor: how well it reads comes first, then the least energy among what reads well. Where it spends more energy a picture than Windows OCR, as Intel's does, the owner decides.
+**Model 2 on them** isn't measured yet: the figures above are model 1's. Its graphs have model 1's shapes and operators, with new weights, and the program's self-check still compares each NPU's read with the processor's before it reads, so an NPU that read model 2 differently would be refused.
+
+**The owner's rule for every route (2026-10-24):** accuracy is never given up for less power. The reader must read with a high degree of accuracy, and spend as little power as it can while doing so. So:
+
+- a route can be its PC's default only if it reads no worse than Windows OCR in any group, and no worse than the model on the processor;
+- a route that reads clearly better wins over a cheaper one that reads worse, without asking the owner again, as Intel's NPU does over Windows OCR at 1.85 times its energy a picture;
+- the least energy decides only between routes that read as well, as an NPU does over the processor.
 
 ### Where the model is published
 
-The release `ocr-model-v1` in the manor's public releases holds `det.onnx`, `rec.onnx`, `charset.txt`, `LICENSE.txt` (Apache-2.0, PaddleOCR's) and `NOTICE.txt`, which says what was changed. No training data is included. A model that reads differently is a new version: a new release with new pins (`MODEL_VERSION`, `MODEL_FILES`), never a changed asset.
+The release `ocr-model-v2` in the manor's public releases (since kit 2.131.0; `ocr-model-v1` before) holds `det.onnx`, `rec.onnx`, `charset.txt`, `LICENSE.txt` (Apache-2.0, PaddleOCR's) and `NOTICE.txt`, which says what was changed. No training data is included. A model that reads differently is a new version: a new release with new pins (`MODEL_VERSION`, `MODEL_FILES`), never a changed asset.
