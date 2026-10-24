@@ -212,6 +212,7 @@ test("main's entries are stamped on steward/stamp-<sha7>, never on main: a PR op
   const create = p.r.gh.find((a) => a[1] === 'create')!;
   assert.deepEqual(create.slice(0, 11), ['pr', 'create', '--repo', REPO, '--base', 'main', '--head', `steward/stamp-${sha}`, '--title', 'Fake 0.4.2: version and changelog, stamped by the Steward', '--body-file']);
   assert.match(create[11], new RegExp(`^The entries main carried at ${sha}, stamped: v0\\.4\\.2\\.\\n`));
+  assert.match(create[11], /Only version lines, CHANGELOG\.md and the changes files they came from change\. Opened and merged by the Steward at a build/);
   // Merged by the Steward at the stamp's head, its branch deleted.
   assert.deepEqual(p.r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '41', '--repo', REPO, '--merge', '--match-head-commit', stamp, '--delete-branch']]);
   assert.equal(p.stampRefs(), '');
@@ -247,27 +248,12 @@ test("a vouch that covered main's head is carried to the stamp before its PR ope
   assert.ok(p.ctx.lines.includes(`[fake] Jcollier0120 vouched for ${stamp.slice(0, 7)}: not tested again before its release`), p.ctx.lines.join('\n'));
 });
 
-test("a stamp GitHub won't merge is left open, and said so; an entry that says nothing isn't stamped, and nothing is pushed", async () => {
-  const refuse = 'GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)';
-  const p = onMain('stamp-refused', { [fragmentFor('claude/feature')]: ENTRY('A feature.') }, { refuse });
-  const s = await stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] });
-  assert.deepEqual(s, { done: false, note: `stamped v0.4.1, but its PR is open still (GitHub wouldn't merge #41: ${refuse}): the next build merges it, and then releases it`, version: '0.4.1', url: PR_URL });
-  assert.equal(p.main(), p.head, 'main as it was');
-  assert.equal(p.stampRefs(), `refs/heads/steward/stamp-${p.head.slice(0, 7)}`);
-
-  const q = onMain('stamp-empty', { [fragmentFor('claude/empty')]: '\n' });
-  const e = await stampMain(q.ctx, q.e, { released: ['0.4.0'], taken: [] });
-  assert.deepEqual(e, { done: false, note: `its entries on main at ${q.head.slice(0, 7)} weren't stamped: changes/claude-empty.md says nothing: that needs its author` });
-  assert.deepEqual(q.r.gh.map((a) => a.slice(0, 2)), [['pr', 'list']], 'only its open stamps looked for: nothing opened');
-  assert.equal(q.stampRefs(), '');
-  assert.equal(existsSync(stampDirOf(q.ctx.settings, q.e)), false, 'its worktree removed');
-});
-
 test("a stamp an earlier build left open is merged by the next while main hasn't moved, never stamped twice; once main has moved, it is closed and main stamped again", async () => {
   const refuse = 'GraphQL: Pull request is not mergeable (mergePullRequest)';
   const p = onMain('stamp-left-open', { [fragmentFor('claude/feature')]: ENTRY('A feature.') }, { refuse });
   const first = await stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] });
-  assert.equal(first?.done, false);
+  assert.deepEqual(first, { done: false, note: `stamped v0.4.1, but its PR is open still (GitHub wouldn't merge #41: ${refuse}): the next build merges it, and then releases it`, version: '0.4.1', url: PR_URL });
+  assert.equal(p.main(), p.head, 'main as it was');
   const left = sh(p.origin, 'rev-parse', `refs/heads/steward/stamp-${p.head.slice(0, 7)}`);
 
   // The next build, GitHub willing now: the stamp left open is merged as it is, with no second commit or push.

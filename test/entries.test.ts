@@ -106,52 +106,6 @@ const ctxOf = (p: { dir: string; checkout: string }, run = runner(() => ok('')).
   return { e, ctx: ctxFor({ employees: [e], workRoot: path.join(p.dir, 'work'), run, neutralDir: p.dir }) };
 };
 
-test("a build stamps main's entries through a PR of its own, merged by it: the version set, the entry moved into the changelog", async () => {
-  const p = onMain('stamp');
-  const g = github(p, { vouched: true });
-  const { e, ctx } = ctxOf(p, g.run);
-  assert.equal(await usesChanges(ctx, e), true);
-  const { results, merged } = await stampAll(ctx, [e]);
-  assert.deepEqual(results.map((r) => [r.outcome, r.message, r.version, r.url]), [['done', 'stamp: stamped v0.4.2, and merged it', '0.4.2', 'https://github.com/Jcollier0120/Fake/pull/31']], ctx.lines.join('\n'));
-  assert.deepEqual(merged, ['fake #31']);
-  const branch = stampBranch(p.main);
-  const stamped = sh(p.origin, 'rev-parse', `refs/heads/${branch}`);
-  assert.equal(sh(p.origin, 'rev-parse', `${stamped}^`), p.main, "on main's head");
-  assert.equal(g.seen.mainBefore, p.main, 'never a push to main: it moves by the PR alone');
-  assert.equal(sh(p.origin, 'rev-parse', 'refs/heads/main'), stamped, 'merged');
-  const at = (f: string) => sh(p.origin, 'show', `${stamped}:${f}`);
-  assert.equal(JSON.parse(at('package.json')).version, '0.4.2');
-  const lock = JSON.parse(at('package-lock.json'));
-  assert.deepEqual([lock.version, lock.packages[''].version], ['0.4.2', '0.4.2']);
-  assert.match(at('src/app.ts'), /version: '0\.4\.2'/);
-  assert.deepEqual(at('CHANGELOG.md').split('\n').filter((l) => l.startsWith('## ')), ['## 0.4.2', '## 0.4.1', '## 0.4.0']);
-  assert.match(at('CHANGELOG.md'), /## 0\.4\.2\n\n\*\*A feature\.\*\*/);
-  assert.equal(sh(p.origin, 'ls-tree', '-r', '--name-only', stamped, 'changes/'), CHANGES_README, 'its file gone, the folder kept');
-  assert.deepEqual(sh(p.origin, 'diff', '--name-only', p.main, stamped).split('\n').sort(), ['CHANGELOG.md', 'changes/0.4.2.md', 'package-lock.json', 'package.json', 'src/app.ts'], 'only versions and entries');
-  const title = 'Fake 0.4.2: version and changelog, stamped by the Steward';
-  assert.equal(sh(p.origin, 'log', '-1', '--format=%s', stamped), title);
-  const create = g.gh.find((a) => a[0] === 'pr' && a[1] === 'create')!;
-  assert.deepEqual(['--base', '--head', '--title'].map((k) => create[create.indexOf(k) + 1]), ['main', branch, title]);
-  assert.match(create[create.indexOf('--body-file') + 1], new RegExp(`The entries main carried at ${p.main.slice(0, 7)}, stamped: v0\\.4\\.2\\.`));
-  assert.deepEqual(mergesOf(g.gh), [['pr', 'merge', '31', '--repo', 'Jcollier0120/Fake', '--merge', '--delete-branch']]);
-  const merge = g.gh.find((a) => a[1] === 'merge')!;
-  assert.equal(merge[merge.indexOf('--match-head-commit') + 1], stamped, 'at the head it pushed');
-  // Only versions and entries changed: the vouch that covered main's head covers the stamp, so the build doesn't test it.
-  const vouch = g.gh.find((a) => a[0] === 'api' && a.includes('-X'))!;
-  assert.ok(vouch.includes(`repos/Jcollier0120/Fake/statuses/${stamped}`), vouch.join(' '));
-  assert.ok(vouch.includes(`description=Only versions and changelog changed since ${p.main.slice(0, 7)}: Jcollier0120 vouched for ${p.main.slice(0, 7)}`), vouch.join(' '));
-  assert.equal(existsSync(stampDirOf(ctx.settings, e)), false, 'its worktree removed');
-});
-
-test('a stamp of main no vouch covers carries none', async () => {
-  const p = onMain('stamp-unvouched');
-  const g = github(p);
-  const { e, ctx } = ctxOf(p, g.run);
-  const s = await stampMain(ctx, e, { released: ['0.4.0', '0.4.1'], taken: [] });
-  assert.equal(s?.done, true, s?.note);
-  assert.deepEqual(g.gh.filter((a) => a[0] === 'api' && a.includes('-X')), [], 'no status set: the build tests it');
-});
-
 test('a version taken meanwhile: the next free one, and why', () => {
   const p = onMain('stamp-taken');
   const s = stampTree(p.checkout, employee(p.checkout), { released: ['0.4.0', '0.4.1'], taken: ['0.4.2'] });
@@ -179,6 +133,7 @@ test('main with no entry has nothing to stamp; an empty entry, or one naming ano
   const none = onMain('stamp-none', { file: 'docs/notes.md' });
   const a = github(none);
   const n = ctxOf(none, a.run);
+  assert.equal(await usesChanges(n.ctx, n.e), true, 'on the new format: it has changes/README.md');
   assert.equal(await stampMain(n.ctx, n.e, { released: ['0.4.0', '0.4.1'], taken: [] }), null);
   assert.deepEqual(a.gh, [], 'nothing asked of GitHub');
   assert.equal(sh(none.origin, 'for-each-ref', 'refs/heads/steward/'), '', 'nothing pushed');

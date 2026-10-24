@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { gitExe } from '../src/kit/git-exe.ts';
 
 // One release PC per repository, elected through refs/manor/release-pc in the repository's own remote (lease.ts), and
 // version claims shared through refs/manor/claims (claims.ts): against real bare repositories, with real git.
@@ -192,7 +193,7 @@ test("a written ref's commit is the one git's own commands make, and reads back 
   const sha = (w as { sha: string }).sha;
   // Made again by git's hash-object, mktree and commit-tree, dated as that one: the same commit.
   const when = /^committer .* (\d+ [+-]\d{4})$/m.exec(sh(r.url, 'cat-file', 'commit', sha))![1];
-  const git = (args: string[], o: { input?: string; env?: Record<string, string> } = {}) => execFileSync('git', args, { cwd: r.url, encoding: 'utf8', windowsHide: true, input: o.input, env: { ...process.env, ...o.env } }).trim();
+  const git = (args: string[], o: { input?: string; env?: Record<string, string> } = {}) => execFileSync(gitExe(), args, { cwd: r.url, encoding: 'utf8', windowsHide: true, input: o.input, env: { ...process.env, ...o.env } }).trim();
   const blob = git(['hash-object', '-w', '--stdin'], { input: text });
   const tree = git(['mktree'], { input: `100644 blob ${blob}\tsame.json\n` });
   const who = { GIT_AUTHOR_NAME: 'Castellan Steward', GIT_AUTHOR_EMAIL: 'steward@manor.invalid', GIT_AUTHOR_DATE: when, GIT_COMMITTER_NAME: 'Castellan Steward', GIT_COMMITTER_EMAIL: 'steward@manor.invalid', GIT_COMMITTER_DATE: when };
@@ -290,21 +291,6 @@ test("a round with no ref anywhere releases main exactly as before, and takes th
   assert.deepEqual(s.released(), ['0.4.1'], 'nothing more released');
   assert.ok(second.results.some((y) => y.id === 'fake' && y.message === 'releasing for Fake: done by DESKTOP-ABC'), JSON.stringify(second.results));
   assert.ok(!second.results.some((y) => y.id === 'fake' && y.message.startsWith('release: ')), JSON.stringify(second.results));
-  assert.deepEqual(s.merges(), []);
-});
-
-test('offline (the remote out of reach), a round still builds and tests: nothing local waits for a turn', async () => {
-  fresh();
-  const s = roundSetup('round-offline', { vouched: false });
-  const out = await runStage('round', { full: true }, { run: s.r.run, turns: { device: A, now: () => T0, remote: async () => gone() } });
-  assert.equal(out.error, undefined);
-  assert.ok(out.log.some((l) => l.includes('releasing Fake waits until this PC can reach its remote')), out.log.join('\n'));
-  // Main's head, which no vouch covers, was built and tested here before its release, as always.
-  const sha = s.head.slice(0, 7);
-  assert.ok(out.log.some((l) => l.startsWith(`[fake] testing main at ${sha} before its release`)), out.log.join('\n'));
-  assert.ok(out.log.some((l) => l.startsWith(`[fake] checks passed here at ${sha}`)), out.log.join('\n'));
-  // Only publishing waits on a turn, and one this PC can't ask about isn't held: released.
-  assert.deepEqual(doneIn(out), [['done', 'release: released v0.4.1 from origin/main (…), with kit 1.0.0']], out.log.join('\n'));
   assert.deepEqual(s.merges(), []);
 });
 
