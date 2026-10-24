@@ -63,10 +63,11 @@ import { slotNames } from './queue.js';
  * npu-vendors.json's `order`, kit 2.111.0).
  * @property {AcceleratorKind[]} devices The kinds of device, first preferred; any it leaves out follow, in the auto order.
  * @property {boolean} [runningFirst] A device whose server is running goes before one whose server isn't, the order kept
- * otherwise: on AMD's Ryzen AI 300, a picture goes to the Radeon unless only FastFlowLM is up.
+ * otherwise. No generation's order has it since kit 2.135.1: until then, on AMD's Ryzen AI 300, a picture went to the
+ * Radeon unless only FastFlowLM was up.
  * @property {number} [batchAt] With runningFirst: from this many of the work waiting (`waiting`, this request included),
- * the order is kept whoever's server is up, so a batch starts the first device's server. On AMD's Ryzen AI 300, 4 pictures
- * waiting go to the Radeon even while only FastFlowLM is up (the owner's rule, 2026-10-23).
+ * the order is kept whoever's server is up, so a batch starts the first device's server (AMD's pictures had 4 until kit
+ * 2.135.1).
  */
 
 /** @typedef {Partial<Record<Work, WorkOrderOf>>} WorkOrder */
@@ -903,13 +904,14 @@ export function gameCards(rules, load, accs, opts) {
  *
  * **The work's own order** (kit 2.111.0): the config's `workOrder` for the request's kind, when it has one, puts the
  * accelerators in that order first (workOrdered), with `running` saying whose servers are up for its runningFirst. The
- * NPU first then means first in that order: AMD's pictures go to the Radeon, and to the NPU only when its server is up
- * and the Radeon's isn't. With its batchAt, from that many of the work waiting (`waiting`, this request included) the
- * order is kept whoever's server is up: 4 pictures waiting start the Radeon's (the owner's rule). **It waits in one line**
- * (kit 2.112.1): where the order puts one first, by its runningFirst or a batch, the first in it that can take the request
- * is the only candidate, as the NPU first is. A busy Radeon is waited for, not passed over for a free NPU or processor
- * that spends more on the work (AMD's pictures: 26.6 J each on the NPU against the Radeon's 10.4). The others take it only
- * when that one can't: failed lately, a game's, or rested after a long line.
+ * NPU first then means first in that order: AMD's pictures go to the Radeon (since kit 2.135.1 whoever's server is up,
+ * the owner's ruling). With its runningFirst, those whose server is up go first, and with its batchAt, from that many of
+ * the work waiting (`waiting`, this request included), the order is kept whoever's server is up. **It waits in one
+ * line**: the first in the order that can take the request is the only candidate, as the NPU first is (kit 2.112.1 where
+ * a runningFirst or a batch put one first; kit 2.135.1 for any order). A busy Radeon is waited for, not passed over for a
+ * free NPU or processor that spends more on the work (AMD's pictures: 26.6 J each on the NPU against the Radeon's 10.4;
+ * embeddings: 44.1 mJ a token on the processor against 12.8). The others take it only when that one can't: failed
+ * lately, a game's, or rested after a long line.
  * @param {Rules} rules
  * @param {Accelerator[]} accs
  * @param {Need} need
@@ -954,8 +956,8 @@ export function candidates(rules, accs, need, state = {}) {
     }
     list.push(acc);
   }
-  // The work's order puts one first (its runningFirst, or a batch): the first that can take it, alone (above).
-  const first = !npuFirst && !!order && (!!order.runningFirst || isBatch(order, state.waiting));
+  // The work has an order: the first in it that can take it, alone (above).
+  const first = !npuFirst && !!order;
   return { list: first ? list.slice(0, 1) : list, skipped, npuFirst };
 }
 
