@@ -1956,6 +1956,29 @@ test('beside an Intel NPU with no room for its embeddings (16 GB), with the swit
   assert.ok(!got.some((d) => CHAT_GGUF.test(d) || VL_GGUF.test(d)), got.join('\n'));
 });
 
+// AMD's XDNA 2 (kit 2.135.3, the owner's ruling): its work order puts the Radeon first for pictures, so with the switch
+// off too the card is set up for them, run on demand; chat stays on the NPU.
+test("beside AMD's NPU, with the switch off, the Radeon is planned for the pictures its work order puts it first for and its embeddings, never chat; a person's own list of accelerators leaves pictures to the NPU", async () => {
+  const tools = path.join(home, 'beside-amd');
+  const RADEON = 'gpu-amd-radeon-tm-890m-graphics';
+  const plan = (gpuWithNpu: boolean, raw: Record<string, unknown> = {}) => planSetup({ detection: parseDetection(`${AMD_IGPU}${NPU.strix}\n${X64('AMD Ryzen AI 9 HX 370 w/ Radeon 890M')}`), ids: [], raw, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu });
+  const off = await plan(false);
+  assert.deepEqual(off.npu?.kinds, ['chat', 'vision']);
+  assert.deepEqual(off.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[RADEON, ['vision', 'embed'], ['chat']]]);
+  assert.ok(describePlan(off).includes(`AMD Radeon(TM) 890M Graphics (${RADEON}): chat not set up on it: the NPU does that, and "Use the graphics card for models when there's an NPU" is off`), describePlan(off).join('\n'));
+  const files = off.downloads.map((d) => path.win32.basename(d.dest));
+  assert.ok(files.includes('Qwen3VL-2B-Instruct-Q4_K_M.gguf') && files.includes('mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf'), `the card's picture model and projector: ${files.join()}`);
+  assert.ok(files.some((f) => EMBED_GGUF.test(f)), files.join());
+  assert.ok(!files.some((f) => CHAT_GGUF.test(f)), `no chat model for the card: ${files.join()}`);
+  // The switch on: the card is set up as before.
+  const on = await plan(true);
+  assert.equal(on.leftToNpu, undefined);
+  assert.ok(on.targets[0].kinds.includes('vision') && on.targets[0].kinds.includes('embed'), on.targets[0].kinds.join());
+  // A person's own list of accelerators: the core reads no work order, so the card is set up for its embeddings alone, as before.
+  const theirs = await plan(false, { acceleratorOrder: ['npu', RADEON, 'cpu'] });
+  assert.deepEqual(theirs.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[RADEON, ['embed'], ['chat', 'vision']]]);
+});
+
 test('the NPU failing its test at setup: the card takes its chat and pictures, beside its embeddings', async () => {
   const run = await intelSetup('beside-nonpu', { gpuWithNpu: false, npu: { answers: false } });
   assert.equal(run.r.code, 0, run.log.join('\n'));

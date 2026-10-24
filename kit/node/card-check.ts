@@ -90,7 +90,8 @@ export async function cardCheck(o: CardCheckOptions = {}): Promise<{ ok: boolean
   const raw = { ...io.config(), gpuIdleStopMinutes: idleMs / MIN };
   const accs = configuredAccelerators(raw);
   const npuDoes = core.npuServes(accs);
-  const card = cardOnDemand(accs, false, core.workOrderIn(raw)).find((c) => c.kinds.includes('vision'));
+  const order = core.workOrderIn(raw);
+  const card = cardOnDemand(accs, false, order).find((c) => c.kinds.includes('vision'));
   if (!add('config', npuDoes.includes('chat') && !!card,
     !npuDoes.length ? 'no NPU serves anything in config.json: set the NPU up first'
       : !npuDoes.includes('chat') ? `the NPU doesn't chat (${npuDoes.join(', ')})`
@@ -102,12 +103,22 @@ export async function cardCheck(o: CardCheckOptions = {}): Promise<{ ok: boolean
   const cardAcc = accs.find((a) => a.id === card!.id)!;
   const visionBase = endpointFor(cardAcc, 'vision').baseUrl;
   const vision = servers.find((s) => s.base === visionBase);
-  const others = servers.filter((s) => s.acc.id === card!.id && s.base !== visionBase);
+  // The card's servers for the work it keeps out (its others on demand, AMD's embeddings, aren't the check's).
+  const kept = core.withoutGpuBesideNpu(accs, false, order).find((a) => a.id === card!.id)!;
+  const onDemand = new Set(card!.kinds.flatMap((k) => {
+    try {
+      return [endpointFor(kept, k).baseUrl];
+    } catch {
+      return [];
+    }
+  }));
+  const others = servers.filter((s) => s.acc.id === card!.id && s.base !== visionBase && !onDemand.has(s.base));
+  const alsoOnDemand = card!.kinds.filter((k) => k !== 'vision');
   if (!add('keeper', !!vision && !vision.keptOut && vision.idleMs === idleMs && others.every((s) => s.keptOut),
     !vision ? `the keeper has no server for ${card!.id}'s vision at ${visionBase} (no startCommand?)`
       : vision.keptOut ? `the keeper would keep ${card!.id}'s vision server out: it would never serve`
         : others.some((s) => !s.keptOut) ? `the keeper would keep ${others.filter((s) => !s.keptOut).map((s) => s.base).join(', ')} running on the card`
-          : `vision at ${visionBase} is stopped after ${idleMs / MIN} min unused${others.length ? `; the card's other servers (${others.map((s) => s.base).join(', ')}) are kept out` : ''}`)) return done();
+          : `vision at ${visionBase} is stopped after ${idleMs / MIN} min unused${alsoOnDemand.length ? `; its ${alsoOnDemand.join(', ')} on demand too` : ''}${others.length ? `; the card's other servers (${others.map((s) => s.base).join(', ')}) are kept out` : ''}`)) return done();
 
   // 2. Nothing of the card's running yet: it must be seen to start. One left from earlier is stopped as the keeper would.
   if (await io.running(vision!)) {
