@@ -139,6 +139,27 @@ test("another staff member's token, from its server.json in this account's own d
   assert.deepEqual(A.staffHeaders('wright', { env: {}, home: fake }), {}, 'only a token');
 });
 
+test("a page's token by its address (kit 2.118.0): <id>.localhost on the port its server.json names, Manor's too, nothing else", () => {
+  const fake = path.join(home, 'profile-by-address');
+  for (const [id, port] of [['wright', 18989], ['manor', 18585]] as const) {
+    mkdirSync(path.join(fake, `.${id}`), { recursive: true });
+    writeFileSync(path.join(fake, `.${id}`, 'server.json'), JSON.stringify({ pid: 1, port, token: `tok_${id}_0123456789` }));
+  }
+  const o = { env: {}, home: fake };
+  assert.deepEqual(A.serverFile(path.join(fake, '.wright')), { port: 18989, token: 'tok_wright_0123456789' });
+  assert.equal(A.serverFile(path.join(fake, '.nobody')), null);
+  assert.deepEqual(A.pageHeaders('http://wright.localhost:18989/api/work', o), { 'x-token': 'tok_wright_0123456789' });
+  assert.deepEqual(A.pageHeaders(new URL('http://Wright.localhost:18989/'), o), { 'x-token': 'tok_wright_0123456789' }, 'a URL, any case');
+  assert.deepEqual(A.pageHeaders('http://manor.localhost:18585/api/state', o), { 'x-token': 'tok_manor_0123456789' }, "Manor's page takes x-token too");
+  assert.deepEqual(A.pageHeaders('http://wright.localhost:28989/api/work', o), {}, "a checkout's page, 10000 above, isn't sent the installed one's token");
+  assert.deepEqual(A.pageHeaders('http://127.0.0.1:18989/api/work', o), {}, 'an address that names no page: staffHeaders(id) there');
+  assert.deepEqual(A.pageHeaders('https://wright.localhost:18989/', o), {});
+  assert.deepEqual(A.pageHeaders('http://evil.example/wright.localhost:18989', o), {});
+  assert.deepEqual(A.pageHeaders('not a url', o), {});
+  assert.deepEqual(A.pageHeaders('http://bailiff.localhost:19090/', o), {}, 'no server.json: no header, as before');
+  assert.deepEqual(A.pageHeaders('http://wright.localhost:18989/', { env: { WRIGHT_HOME: path.join(fake, 'elsewhere') }, home: fake }), {}, 'its <ID>_HOME, as the page writes it');
+});
+
 // ---------------------------------------------------------------- not strict: as before
 
 test('not strict, every GET is answered as before (an older Manor, the Steward, the Surveyor); the token on a GET is welcome and changes nothing', async () => {

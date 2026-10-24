@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.118.0
+
+**The kit's calls to Castellan carry its token, and a page's token is found by its address: the callers' step before page sign-in goes on (kit 2.96.0's plan).**
+
+### What's new
+
+- **page-access.ts**:
+  - `pageToken(url)` and `pageHeaders(url)`: the token for a local page by its address, `http://<id>.localhost:<port>/…` as `agentUrl` and Manor's link give it, from that page's server.json. It goes only to the port server.json names, so a checkout's page 10000 above is never sent the installed copy's token. Manor's address gets Manor's token, which its page takes as `x-token`.
+  - `serverFile(dir)`: a page's port and token from the server.json in its data folder.
+- **manor.ts** `manorHeaders(link)`: Manor's token (`x-manor-token`), from server.json in its folder, only for the port its settings name.
+
+### What changed
+
+- **The kit's calls to Castellan carry its token**: `passOnOtherPcs` (`GET /api/peers/result`) and `manorIcon` (`/favicon.svg`). A Castellan from before its sign-in writes no server.json, and they go without it, as before.
+- **askRepair** takes the page's token from the server.json its address names (`pageToken`) before it reads `GET /` for it, which a strict page never gives.
+
+### Before you update
+
+- An agent that GETs another staff member's page (`/api/*`, or `GET /` for its token) must send its token: `pageHeaders(url)` for an `agentUrl` address, `staffHeaders(id)` for a 127.0.0.1 one. So must an agent's CLI or MCP server that GETs its own page from another process. A later kit makes the GETs need it, and only once every staff member installed in the account runs that kit, so nothing breaks before then. A refused call answers 401: let it degrade quietly.
+
 ## 2.115.0
 
 **The keeper sets an accelerator up again by itself when a later kit pins another llama.cpp build, model or NPU server; and setup finds a packaged app through gaps in its process chain.**
