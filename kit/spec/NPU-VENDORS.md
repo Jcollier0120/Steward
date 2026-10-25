@@ -135,7 +135,7 @@ Through kit 2.135.3 a PC under 20 GB got no NPU reranker: it went to the graphic
 - **Giving way (b) costs more than it frees.** Stopping the reranker in a chat's turn, as the embedding server is stopped, took 0.12–0.33 s (finding the process), so that chat took 0.18–0.39 s against 0.06; the next rerank then waited for the server's start (1.1–1.5 s) and took 1.8–2.2 s against 0.85. It would free 1.1 GB of the NPU's memory and about 1.4 GB of the PC's, which the measured levels didn't need.
 - **Off the NPU (c) holds more, slower.** The Adreno's reranker holds 2.08 GB of the PC's memory (the card has none of its own) and takes 1,558 ms for ten files; the processor's 1.6 GB and 2,286 ms ([above](#reranking-on-the-hexagon-kit-21000)).
 
-So a 16 GB X2 holds all three (a): the route's `rerankServer.smallPc` names `snapdragon-x2`, and `rerankFits` lets setup put the reranker on its NPU as on a bigger PC. The keeper stops it as it stops the embedding server, at the small PC's 5 minutes, and it doesn't give way to chat. **The first-generation X** keeps the rule as it was: it wasn't measured, its pictures are read on the Adreno (`--vit-compute GPUOpenCL`), and its fallback Qwen3-VL-4B holds 4,238 MB of the NPU's memory, which with both llama-servers (2,206 MB) is over the 6.2 GB share. **Intel's and AMD's routes** have no NPU reranker (Intel's: No reranker on Intel's NPU, below), so this changes nothing for them; one added later would be weighed the same way, its NPU memory against the share and the device limit under a ballast.
+So a 16 GB X2 holds all three (a): the route's `rerankServer.smallPc` names `snapdragon-x2`, and `rerankFits` lets setup put the reranker on its NPU as on a bigger PC. The keeper stops it as it stops the embedding server, at the small PC's 5 minutes, and it doesn't give way to chat. **The first-generation X** keeps the rule as it was: it wasn't measured, its pictures are read on the Adreno (`--vit-compute GPUOpenCL`), and its fallback Qwen3-VL-4B holds 4,238 MB of the NPU's memory, which with both llama-servers (2,206 MB) is over the 6.2 GB share. **Intel's and AMD's routes** have no NPU reranker (Intel's: No reranker on Intel's NPU, below; AMD's: Reranking on AMD's NPU, below, tried and not carried yet), so this changes nothing for them; one added later would be weighed the same way, its NPU memory against the share and the device limit under a ballast.
 
 A PC set up before keeps its reranker on the card or the processor, since Set up local AI doesn't ask for one; once setup runs with the reranker asked for (Reeve's sharper search), the NPU's is added, and it answers first (`autoOrder` puts the NPU first) with the card's kept behind it, as on a bigger PC since kit 2.100.0.
 
@@ -471,6 +471,36 @@ Until kit 2.135.5 a card's reranker was never kept beside an NPU with Manor's sw
   The same ranks, in half the time, at a hundredth of the processor's time. The card's 1.9 GB is freed when the keeper stops its server. Energy isn't measured yet.
 
 **When to look again:** when a reranker runs on Intel's NPU (above), and when the energy of a search's rerank is measured on the card and the processor.
+
+### Reranking on AMD's NPU (2026-10-24, tried, not carried yet)
+
+Reeve's reranker (`rerank`) goes to the Radeon or the processor on AMD, as before. Qwen3-Reranker-0.6B does run on the Ryzen AI 7 350's NPU (XDNA 2), as a fixed-length ONNX graph that VitisAI compiles to BF16, through Windows ML's VitisAI plugin 1.8.75 (the one Envoy's host loads; NPU driver 32.0.20102.4480). It ranks Reeve's 24 questions as the Radeon's llama.cpp does, in 19% less time and 96% less processor time, for more memory and a turn on the NPU beside chat. Nothing in the kit runs it: it would take a reranking server of the kit's own, so it waits for that decision.
+
+- **The model.** `tomaarsen/Qwen3-Reranker-0.6B-seq-cls` (Apache-2.0, as Qwen's original): Qwen3-Reranker-0.6B with its "yes" and "no" logits folded into one classification head, so its sigmoid is llama.cpp's `relevance_score`. Each document gets llama.cpp's Qwen3 rerank template, the same tokens. Exported in FP32 at fixed lengths for VitisAI:
+  - The graph takes the tokens' embeddings (`[1, S, 1024]`). The host reads each token's row from the model's own table (621 MB, memory-mapped), so the NPU holds no table.
+  - The rotary tables are full-size, one per head (`[1, 16, S, 128]` and `[1, 8, S, 128]`): the plugin computes the broadcast form wrongly.
+  - A constant causal mask (−100), right padding, and the score read at the last real token.
+  - The template's first 60 tokens (the system prompt, the instruction and `<Query>:`) are the same for every document. Their keys and values are computed once in FP32 and kept in the graph as constants, and the graph takes only what follows. That keeps out the massive activation of Qwen's first token (8,114 in the residual stream, against at most 414 for the others), and lets 512 tokens hold a 572-token document.
+  - Two lengths, 512 and 640 after those 60 tokens, each its own session. 233 of the 238 documents Reeve sent fit 512 and all fit 640 (the longest is 691 tokens), so none is cut.
+- **The compile:** 21 minutes for 512 and 36 for 640, once, about one core's work (a compile peaked at 5.2 GB of the PC's memory). About 500 MB of cache each; each opens in about 1 s after that.
+
+Measured on the Dell 14 (Ryzen AI 7 350, Radeon 860M, 16 GB), 2026-10-24, the manor stopped and the display held on. Reeve's 24 captured reranks (ten files of 1,600 characters each) were replayed in three interleaved runs per route. The Radeon ran llama.cpp b11734 Vulkan with the kit's flags and Qwen3-Reranker-0.6B Q8_0 (ggml-org's GGUF, the kit's pin):
+
+| | NPU, 512 and 640 (BF16) | NPU, 640 alone (BF16) | Radeon 860M (llama.cpp, Q8_0) |
+|---|---|---|---|
+| Reeve's 24 questions, blended with search's order: right file first / in the top five, mean reciprocal rank (words alone: 10 / 21, 0.611) | 12 / 19, 0.633 | 12 / 19, 0.633 | 12 / 19, 0.638 |
+| Order against FP32 (PyTorch, uncut): the same first file / the same top three / swapped pairs | 22 / 15 / 40, up to 0.166 apart | the same scores | 23 / 20 / 16, up to 0.099 apart |
+| Ten files, median (p90); the three runs' medians | 2,337 ms (2,420); 2,336–2,342 | 3,172 ms (3,189); 3,171–3,174 | 2,882 ms (3,137); 2,717–2,953 |
+| Processor time a rerank, median | 31 ms | 31 ms | 703 ms |
+| Memory it holds | 3,125 MB private, 1,232 MB of the NPU's | 1,926 MB private, 660 MB of the NPU's | 2,047 MB private, 1,883 MB of the card's |
+
+- **Reeve's questions come out the same at the top.** Five of them move by one or two places, three up on the NPU and two down, both NPU routes alike. The reranker's own order is a little further from FP32's than the Radeon's Q8_0 is, from BF16 throughout.
+- **640 alone is slower than the Radeon:** 3,182 ms against 3,116 in an earlier replay of the same reranks, 3,172 against 2,882 in this one. The NPU's run medians stay within 0.3% of each other; the Radeon's vary by up to 9%.
+- **Beside FastFlowLM** (Qwen3.5-2B at a 4,096-token context, chats and reranks at the same moment on purpose), with 640 alone: no `ERT_CMD_STATE_TIMEOUT`, every chat and rerank answered, and the same scores after. But each slows the other. A 77-token chat took 14.2–14.7 s against 4.1–4.2 s alone, and a rerank 3.3–5.7 s against 3.2 s. So a rerank would take the NPU's turn, as on the Hexagon, and wait for a chat, as a chat would for it. The NPU held 3,899 MB with both loaded. The 512 graph without the constant start behaved the same.
+- **Without the constant start**, a 512-token graph cut 49 of the 238 documents (20 / 11 / 49 against FP32), and a 1,024-token one took 5,636 ms for ten files.
+- **a16w8 (16-bit activations, 8-bit weights) doesn't compile.** The plugin's compiler crashes without a message about 4 minutes into its int8 compile. It also crashes on a one-layer graph, and with any group of ops left in float. 8-bit activations compile, but those are too coarse for the model's norms. On the processor the a16w8 copy ranks nearly as the Radeon does (22 / 19 / 20 against FP32), so it's worth trying again with a later plugin. Without the constant start it ranks wrongly even on the processor: the first token's activation leaves 16 bits too little range for the others' norms.
+
+**What carrying it would take:** a reranking server of the kit's own, on ONNX Runtime with the VitisAI plugin as Envoy's host loads it. It would hold the two graphs, built at setup from the model (about an hour of compiling, once), and take the NPU's turn for each rerank. Energy wasn't measured: the owner put the energy runs off until the feature work is done.
 
 ### FastFlowLM's pictures with sides of 32 px (AMD)
 
