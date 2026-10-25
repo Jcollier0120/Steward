@@ -102,9 +102,10 @@ export const gpuKeptOut = (accs: Accelerator[], withNpu: boolean, order?: core.W
 /**
  * What the graphics cards still do while they're kept out beside the NPU (gpuKeptOut): the work no NPU here serves,
  * and the work the PC's work order (`order`) puts the card first for (kit 2.135.3), never chat, each card's server
- * started by a request and stopped once unused (kit 2.69.0). Vision beside Intel's NPU, and beside AMD's XDNA 2 (its
- * order puts the Radeon first for pictures); none beside a Snapdragon's. Empty when the cards aren't kept out (they do
- * everything they're set up for).
+ * started by a request and stopped once unused (kit 2.69.0). Vision beside Intel's NPU, and its reranker when one was
+ * ticked (kit 2.135.5: its route's order puts the card first for it); vision beside AMD's XDNA 2 (its order puts the
+ * Radeon first for pictures); none beside a Snapdragon's. Empty when the cards aren't kept out (they do everything
+ * they're set up for).
  */
 export function cardOnDemand(accs: Accelerator[], withNpu: boolean, order?: core.WorkOrder): { id: string; kinds: EndpointKind[] }[] {
   if (!gpuKeptOut(accs, withNpu, order)) return [];

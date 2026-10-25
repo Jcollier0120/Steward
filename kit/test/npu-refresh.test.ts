@@ -47,13 +47,19 @@ const capOf = (e: Record<string, any>) => {
 };
 
 let n = 0;
-/** A PC with config.json holding `entry` beside a graphics card, the keeper's deps faked, and what each did. */
-function fakePc(entry: Record<string, any> | null, o: { record?: object; workOrder?: object; support?: object; idle?: boolean; answers?: string[]; embeds?: string[]; exists?: (p: string) => boolean; during?: (file: string) => void; cards?: object[] } = {}) {
+/**
+ * A PC with config.json holding `entry` beside a graphics card, the keeper's deps faked, and what each did. Its
+ * `rerankOrder` is the one this kit's setup writes for its NPU (Intel's, kit 2.135.5), unless one is given (undefined:
+ * none, a PC set up before).
+ */
+function fakePc(entry: Record<string, any> | null, o: { record?: object; workOrder?: object; rerankOrder?: object; support?: object; idle?: boolean; answers?: string[]; embeds?: string[]; exists?: (p: string) => boolean; during?: (file: string) => void; cards?: object[] } = {}) {
   const dir = path.join(home, `pc-${++n}`);
   mkdirSync(dir, { recursive: true });
   const configFile = path.join(dir, 'config.json');
   const card = { id: 'gpu-arc', kind: 'gpu', chat: { baseUrl: 'http://127.0.0.1:18191', model: 'qwen3-4b', startCommand: ['llama-server.exe', '--port', '18191'] } };
-  writeFileSync(configFile, JSON.stringify({ accelerators: [card, ...(entry ? [entry] : [])], acceleratorOrder: 'auto', jobs: { toast: false }, ...(o.workOrder ? { workOrder: o.workOrder } : {}) }, null, 2));
+  const npu = (o.support ?? support) as { vendor?: keyof typeof V.NPU_CATALOG.routes; generation?: string | null };
+  const rerankOrder = 'rerankOrder' in o ? o.rerankOrder : npu.vendor ? V.workOrderFor(V.NPU_CATALOG.routes[npu.vendor], npu.generation)?.rerank : undefined;
+  writeFileSync(configFile, JSON.stringify({ accelerators: [card, ...(entry ? [entry] : [])], acceleratorOrder: 'auto', jobs: { toast: false }, ...(o.workOrder ? { workOrder: o.workOrder } : {}), ...(rerankOrder ? { rerankOrder } : {}) }, null, 2));
   if (o.record) writeFileSync(npuRefreshFile(configFile), JSON.stringify(o.record));
   const did: string[] = [];
   const log: string[] = [];
@@ -547,14 +553,14 @@ test('a command that needs a download, another server, or no NPU at all: left fo
   const pointed = fakePc(other);
   assert.deepEqual(await refreshNpu(pointed.deps), { did: 'not-route' });
   assert.deepEqual(pointed.npu().chat.startCommand, other.chat.startCommand, "a person's own server left alone");
-  const none = fakePc(null);
+  const none = fakePc(null, { rerankOrder: undefined });
   assert.deepEqual(await refreshNpu(none.deps), { did: 'no-npu' });
-  assert.deepEqual(none.did, [], 'no NPU in config.json: this PC not asked');
+  assert.deepEqual(none.did, [], 'no NPU in config.json, nor an order: this PC not asked');
 });
 
 const STRIX = 'npu2|32.0.203.376|2026-06-01|Advanced Micro Devices, Inc.|PCI\\VEN_1022&DEV_17F0&SUBSYS_88EE103C&REV_10\\4&2EA2F1A3&0&0141|NPU Compute Accelerator Device';
 
-test("each work's order brought to this kit's (kit 2.135.1): an AMD PC set up when its pictures went to the NPU while only FastFlowLM was up gets the Radeon first for every picture, whatever its NPU's entry; a generation with no order loses one", async () => {
+test("each work's order brought to this kit's (kit 2.135.1): an AMD PC set up when its pictures went to the NPU while only FastFlowLM was up gets the Radeon first for every picture, whatever its NPU's entry; an Intel PC its reranker's, apart (kit 2.135.5); a generation with no order loses one", async () => {
   const amd = parseNpus(STRIX, 'x64')[0];
   const OLD = { chat: { devices: ['npu', 'gpu', 'cpu'] }, vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true, batchAt: 4 }, embed: { devices: ['gpu', 'cpu'] } };
   const order = V.workOrderFor(V.NPU_CATALOG.routes.amd, amd.generation)!;
@@ -586,11 +592,26 @@ test("each work's order brought to this kit's (kit 2.135.1): an AMD PC set up wh
   assert.equal(readFileSync(current.configFile, 'utf8'), before);
   assert.deepEqual(current.log, []);
 
-  // An Intel NPU 3720, whose generation has no order: one written by mistake is taken out, as setup does; its NPU's entry current.
+  // An Intel NPU 3720, whose route orders a reranker alone (kit 2.135.5): the routed work's order written by mistake
+  // is taken out, as setup does, and the reranker's written apart, as rerankOrder, which a kit before leaves alone;
+  // its NPU's entry current.
   const intel = fakePc(setUpEntry(), { workOrder: OLD });
   assert.deepEqual(await refreshNpu(intel.deps), { did: 'current' });
   assert.equal(intel.config().workOrder, undefined);
-  assert.match(intel.log.join('\n'), /each work's order is now this kit's \(2\.75\.0\): none, the NPU first for every work/);
+  assert.deepEqual(intel.config().rerankOrder, { devices: ['gpu', 'cpu'] });
+  assert.match(intel.log.join('\n'), /each work's order is now this kit's \(2\.75\.0\): rerank gpu, cpu$/m);
+  // One set up before kit 2.135.5, with no order at all: the reranker's comes with the look, nothing else changed.
+  const before2135 = fakePc(setUpEntry(), { rerankOrder: undefined });
+  const was = before2135.config();
+  assert.deepEqual(await refreshNpu(before2135.deps), { did: 'current' });
+  assert.deepEqual(before2135.config(), { ...was, rerankOrder: { devices: ['gpu', 'cpu'] } });
+  // A Snapdragon X Elite's generation has no order: both taken out.
+  const x1 = parseNpus('npu2|30.0.140.1000|2025-03-01|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0D0A&SUBSYS_CRD08380&REV_0001\\2&DABA3FF&0|Snapdragon(R) X Elite - X1E78100 - Qualcomm(R) Hexagon(TM) NPU', 'arm64')[0];
+  const none = fakePc(null, { workOrder: OLD, rerankOrder: { devices: ['gpu', 'cpu'] }, support: x1 });
+  assert.deepEqual(await refreshNpu(none.deps), { did: 'no-npu' });
+  assert.equal(none.config().workOrder, undefined);
+  assert.equal(none.config().rerankOrder, undefined);
+  assert.match(none.log.join('\n'), /each work's order is now this kit's \(2\.75\.0\): none, the NPU first for every work/);
 });
 
 test("a Snapdragon X2 set up with the 4B, whatever its memory: Qwen3-VL-2B once setup has pulled it, never pulled here; an X Elite on the 4B keeps it (its fallback)", async () => {

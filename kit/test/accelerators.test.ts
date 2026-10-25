@@ -1367,6 +1367,18 @@ test("the core's rule with the PC's work order (kit 2.135.3, the owner's ruling)
   assert.deepEqual(serving(core.withoutGpuBesideNpu(amd.accelerators, false)), ['npu: chat vision', 'gpu-radeon: embed', 'cpu: chat']);
   assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'vision']), ['embed']);
   assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'vision'], amd.workOrder), ['vision', 'embed']);
+  // Intel's route puts the card first for a reranker (kit 2.135.5, the owner's ruling): beside its NPU, which chats,
+  // sees and embeds, the card keeps its reranker alone; an order that puts the processor first for it keeps none.
+  const intelOrder = workOrderFor(NPU_CATALOG.routes.intel, 'meteor-lake')!;
+  assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'vision', 'embed'], intelOrder), ['rerank']);
+  assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'embed'], intelOrder), ['vision', 'rerank']);
+  assert.deepEqual(core.cardWorkBesideNpu(['rerank'], ['chat'], { rerank: { devices: ['cpu', 'gpu'] } }), []);
+  assert.deepEqual(core.cardWorkBesideNpu(['rerank'], ['chat']), [], 'no order: never the reranker, as before');
+  // AMD's order puts the Radeon first for pictures and embeddings, not a reranker: it waits for its own VitisAI trial.
+  const amdOrder = workOrderFor(NPU_CATALOG.routes.amd, 'xdna2')!;
+  assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'vision'], amdOrder), ['vision', 'embed']);
+  const onIntel = [raw.accelerators[0], raw.accelerators[1], raw.accelerators[2]] as unknown as Accelerator[];
+  assert.deepEqual(core.withoutGpuBesideNpu(onIntel, false, intelOrder).map((a) => [a.id, Object.keys(a).filter((k) => ['chat', 'vision', 'embed', 'rerank'].includes(k))]), [['npu', ['chat', 'vision']], ['gpu-radeon', ['embed', 'rerank']], ['cpu', ['chat']]]);
   // The switch on: unchanged, the order or not.
   assert.equal(core.withoutGpuBesideNpu(amd.accelerators, true, amd.workOrder), amd.accelerators);
   // An order that put the card first for chat would still not take chat to it.
@@ -1380,13 +1392,16 @@ test("the core's rule with the PC's work order (kit 2.135.3, the owner's ruling)
   assert.equal(own.workOrder, undefined);
   assert.deepEqual(serving(core.withoutGpuBesideNpu(own.accelerators, false, own.workOrder)), ['npu: chat vision', 'gpu-radeon: embed', 'cpu: chat']);
   assert.deepEqual(core.workOrderIn(raw), core.readWorkOrder(ORDER));
-  // Intel's and Snapdragon's routes write no order: their lists are as before.
-  for (const [vendor, generation] of [['intel', 'lunar-lake'], ['intel', 'panther-lake'], ['qualcomm', 'snapdragon-x'], ['qualcomm', 'snapdragon-x2']] as const) {
+  // Snapdragon's routes write no order: their lists are as before. Intel's orders a reranker alone (kit 2.135.5), which
+  // the agents' requests don't read (the keeper's list, above): theirs are as before too.
+  for (const [vendor, generation] of [['qualcomm', 'snapdragon-x'], ['qualcomm', 'snapdragon-x2']] as const) {
     assert.equal(workOrderFor(NPU_CATALOG.routes[vendor], generation), null, `${vendor} ${generation}`);
   }
-  // Beside an NPU that chats and embeds and doesn't see (Intel's 4B), with no order: the card keeps vision alone, as before.
+  for (const generation of ['lunar-lake', 'panther-lake']) assert.deepEqual(workOrderFor(NPU_CATALOG.routes.intel, generation), intelOrder, `intel ${generation}`);
+  // Beside an NPU that chats and embeds and doesn't see (Intel's 4B), with no order or Intel's: the card keeps vision alone, as before.
   const intel = config({ accelerators: [{ ...raw.accelerators[0], vision: undefined, embed: { baseUrl: B + '6', model: 'e' } }, raw.accelerators[1], raw.accelerators[2]] }).accelerators;
   assert.deepEqual(serving(core.withoutGpuBesideNpu(intel, false)), ['npu: chat embed', 'gpu-radeon: vision', 'cpu: chat']);
+  assert.deepEqual(serving(core.withoutGpuBesideNpu(intel, false, intelOrder)), ['npu: chat embed', 'gpu-radeon: vision', 'cpu: chat']);
 });
 
 test("Manor's gpuWithNpu off, with an NPU: none of the NPU's work goes to the card, not even as the fallback; the processor still serves", async () => {

@@ -1239,6 +1239,15 @@
         },
         "licence": "OpenVINO Model Server: Apache-2.0"
       },
+      "order": {
+        "rerank": {
+          "devices": [
+            "gpu",
+            "cpu"
+          ],
+          "basis": "Reeve's 23 search questions over the manor's repositories (each one's first ten files from Reeve's keyword search, as its search sends them to the reranker: about 500 tokens a file), on Intel Core Ultra 5 225U with Intel Graphics (Arrow Lake-U, NPU 3720, 16 GB), Qwen3-Reranker-0.6B Q8_0 on llama.cpp b11734 with the kit's server arguments, 2026-10-24: the same ranks on the card as on the processor, blended as Reeve's search blends them (the right file first for 12 of 23, in the first five for 18, mean reciprocal rank 0.621, against 8, 17 and 0.502 for the keywords alone). A search's ten files took a median 7.9 s on the card (p90 8.6 s) and 16.2 s on the processor (p90 17.7 s), for 1.67 s of processor time against 193 s. While it runs, the card's server holds about 1.9 GB of the PC's memory (the card shares it), the processor's 0.66 GB; the keeper stops it once unused (gpuIdleStopMinutes), as it does a card's pictures beside the NPU. No NPU of Intel's reranks: OpenVINO Model Server's rerank doesn't compile on the NPU 3720, on 2026.4.1 or main's weekly 2026.5.0.eec7daac4 (spec/NPU-VENDORS.md, No reranker on Intel's NPU). Batching gains nothing: --parallel 4 or 10, --kv-unified and -fa on came within 5%, the card being compute-bound at about 500 to 570 tokens a second. Energy isn't measured yet. The owner's ruling (2026-10-24): \"Yes: on Intel, a ticked reranker goes to the graphics card on demand even with the switch off, like AMD's pictures; it stops when idle.\""
+        }
+      },
       "pluginPatch": {
         "what": "Castellan's build of OpenVINO GenAI 2026.4.1.0's openvino_genai.dll: openvinotoolkit/openvino.genai at tag 2026.4.1.0 with two fixes of Castellan's (kit node/openvino/README.md), signed with Castellan's certificate. A prompt without a picture to Qwen3-VL no longer crashes on the NPU, and a request that fails part-way no longer makes every later one fail until the server restarts",
         "serverVersion": "2026.4.1",

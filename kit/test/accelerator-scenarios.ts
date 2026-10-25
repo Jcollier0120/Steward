@@ -171,8 +171,24 @@ const configs: { case: string; raw: unknown; hw?: core.Hardware }[] = [
     },
   },
   {
+    case: "rerankOrder, a reranker's order (kit 2.135.5): read as the work order's rerank, kept apart from workOrder, where a kit before refuses it; one in workOrder left out",
+    raw: {
+      accelerators: amdEntries,
+      workOrder: { vision: { devices: ['gpu', 'npu', 'cpu'] }, rerank: { devices: ['cpu'] } },
+      rerankOrder: { devices: ['gpu', 'cpu'], runningFirst: true, batchAt: 1 },
+    },
+  },
+  {
+    case: "rerankOrder alone: the work order is a reranker's alone",
+    raw: { accelerators: amdEntries, rerankOrder: { devices: ['gpu', 'cpu'] } },
+  },
+  {
+    case: 'rerankOrder written wrong is none',
+    raw: { accelerators: amdEntries, workOrder: { chat: { devices: ['npu'] } }, rerankOrder: { devices: ['gpu', 'tpu'] } },
+  },
+  {
     case: "workOrder isn't read beside a person's acceleratorOrder list: the list is kept for every work",
-    raw: { accelerators: amdEntries, acceleratorOrder: ['gpu-amd-radeon-860m-graphics'], workOrder: { vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true } } },
+    raw: { accelerators: amdEntries, acceleratorOrder: ['gpu-amd-radeon-860m-graphics'], workOrder: { vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true } }, rerankOrder: { devices: ['gpu', 'cpu'] } },
   },
   {
     case: "workOrder: a batchAt that isn't a whole number, 2 or more, is left out, and its work kept",

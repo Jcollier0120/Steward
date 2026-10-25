@@ -1375,6 +1375,333 @@
    }
   },
   {
+   "case": "rerankOrder, a reranker's order (kit 2.135.5): read as the work order's rerank, kept apart from workOrder, where a kit before refuses it; one in workOrder left out",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ],
+    "workOrder": {
+     "vision": {
+      "devices": [
+       "gpu",
+       "npu",
+       "cpu"
+      ]
+     },
+     "rerank": {
+      "devices": [
+       "cpu"
+      ]
+     }
+    },
+    "rerankOrder": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ],
+     "runningFirst": true,
+     "batchAt": 1
+    }
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 4096,
+      "quirks": [
+       "sides-of-32"
+      ],
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      }
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 0.5,
+      "slots": 1,
+      "maxContextTokens": 8192,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ],
+    "order": "auto",
+    "workOrder": {
+     "vision": {
+      "devices": [
+       "gpu",
+       "npu",
+       "cpu"
+      ]
+     },
+     "rerank": {
+      "devices": [
+       "gpu",
+       "cpu"
+      ],
+      "runningFirst": true
+     }
+    },
+    "requestTimeoutMs": 180000,
+    "legacy": false,
+    "problems": []
+   }
+  },
+  {
+   "case": "rerankOrder alone: the work order is a reranker's alone",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ],
+    "rerankOrder": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
+    }
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 4096,
+      "quirks": [
+       "sides-of-32"
+      ],
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      }
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 0.5,
+      "slots": 1,
+      "maxContextTokens": 8192,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ],
+    "order": "auto",
+    "workOrder": {
+     "rerank": {
+      "devices": [
+       "gpu",
+       "cpu"
+      ]
+     }
+    },
+    "requestTimeoutMs": 180000,
+    "legacy": false,
+    "problems": []
+   }
+  },
+  {
+   "case": "rerankOrder written wrong is none",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "maxContextTokens": 4096,
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "model": "qwen3.5:2b"
+      },
+      "quirks": [
+       "sides-of-32"
+      ]
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "memoryGb": 0.5,
+      "maxContextTokens": 8192,
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ],
+    "workOrder": {
+     "chat": {
+      "devices": [
+       "npu"
+      ]
+     }
+    },
+    "rerankOrder": {
+     "devices": [
+      "gpu",
+      "tpu"
+     ]
+    }
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 4096,
+      "quirks": [
+       "sides-of-32"
+      ],
+      "chat": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      },
+      "vision": {
+       "baseUrl": "http://x:18184",
+       "model": "qwen3.5:2b"
+      }
+     },
+     {
+      "id": "gpu-amd-radeon-860m-graphics",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 0.5,
+      "slots": 1,
+      "maxContextTokens": 8192,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "vision": {
+       "baseUrl": "http://x:18191",
+       "model": "qwen3-vl-2b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://x:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     }
+    ],
+    "order": "auto",
+    "workOrder": {
+     "chat": {
+      "devices": [
+       "npu"
+      ]
+     }
+    },
+    "requestTimeoutMs": 180000,
+    "legacy": false,
+    "problems": []
+   }
+  },
+  {
    "case": "workOrder isn't read beside a person's acceleratorOrder list: the list is kept for every work",
    "raw": {
     "accelerators": [
@@ -1421,6 +1748,12 @@
       ],
       "runningFirst": true
      }
+    },
+    "rerankOrder": {
+     "devices": [
+      "gpu",
+      "cpu"
+     ]
     }
    },
    "expect": {
