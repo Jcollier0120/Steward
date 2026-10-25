@@ -14,7 +14,9 @@ import torch.nn as nn
 from onnx import helper
 from onnx2torch import convert
 
-ACTS = {'relu': 'Relu', 'hardswish': 'HardSwish', 'hardgelu': 'HardSigmoid'}
+ACTS = {'relu': 'Relu', 'hardswish': 'HardSwish', 'hardgelu': 'HardSigmoid', 'sigmoidgelu': 'Sigmoid'}
+# sigmoidgelu: x * sigmoid(1.702 x), GELU's sigmoid form (at most 0.02 from it).
+SIGMOID_GELU = 1.702
 # hardgelu: x times HardSigmoid(x) at this slope, x * clip(0.304 x + 0.5, 0, 1): the slope nearest a GELU over inputs
 # spread as N(0, 2) (root-mean-square error 0.031, a ReLU's 0.105; HardSwish's slope, 1/6, gives 0.176).
 HARDGELU_ALPHA = 0.304
@@ -55,6 +57,12 @@ def swap_gelus(model: onnx.ModelProto, act: str) -> int:
             if act == 'hardgelu':
                 nodes.append(helper.make_node('HardSigmoid', [x], [f'gelu_free_{i}/gate'], name=f'gelu_free_{i}/gate',
                                               alpha=HARDGELU_ALPHA, beta=0.5))
+                nodes.append(helper.make_node('Mul', [x, f'gelu_free_{i}/gate'], [y], name=f'gelu_free_{i}'))
+            elif act == 'sigmoidgelu':
+                if not any(t.name == 'gelu_free/slope' for t in g.initializer):
+                    g.initializer.append(helper.make_tensor('gelu_free/slope', onnx.TensorProto.FLOAT, [], [SIGMOID_GELU]))
+                nodes.append(helper.make_node('Mul', [x, 'gelu_free/slope'], [f'gelu_free_{i}/scaled'], name=f'gelu_free_{i}/scaled'))
+                nodes.append(helper.make_node('Sigmoid', [f'gelu_free_{i}/scaled'], [f'gelu_free_{i}/gate'], name=f'gelu_free_{i}/gate'))
                 nodes.append(helper.make_node('Mul', [x, f'gelu_free_{i}/gate'], [y], name=f'gelu_free_{i}'))
             else:
                 nodes.append(helper.make_node(ACTS[act], [x], [y], name=f'gelu_free_{i}'))
