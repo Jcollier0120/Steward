@@ -375,3 +375,49 @@ export function rerankGraph(o: GraphOptions): OnnxGraph {
 
 /** A graph's model file's bytes (ONNX opset 17, as the trial's). */
 export const graphBytes = (g: OnnxGraph): Uint8Array => onnxModel(g, { opset: 17, producer: 'manor-kit' });
+
+// ------------------------------------------------------------------------------------------------
+// The tokenizer's files
+
+/** Qwen2's split pattern, as its tokenizer.json has it and rerank-npu.cs' Tokenizer runs it. */
+export const SPLIT_PATTERN = String.raw`(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+`;
+
+/**
+ * rerank-npu.cs' tokenizer files from the model's tokenizer.json: vocab.txt (a token a line, its line its id), merges.txt
+ * (a pair a line, by rank) and added.txt ("id TAB text" a line). Throws on a tokenizer other than the one the program
+ * runs: Qwen2's byte-level BPE, NFC first, split by SPLIT_PATTERN.
+ */
+export function tokenizerFiles(tokenizerJson: string): Record<'vocab.txt' | 'merges.txt' | 'added.txt', string> {
+  const t = JSON.parse(tokenizerJson);
+  const m = t.model ?? {};
+  const pre = t.pre_tokenizer?.pretokenizers ?? [];
+  const plain =
+    m.type === 'BPE' &&
+    !m.dropout &&
+    !m.byte_fallback &&
+    !m.continuing_subword_prefix &&
+    !m.end_of_word_suffix &&
+    !m.ignore_merges &&
+    t.normalizer?.type === 'NFC' &&
+    pre.length === 2 &&
+    pre[0].type === 'Split' &&
+    pre[0].pattern?.Regex === SPLIT_PATTERN &&
+    pre[0].behavior === 'Isolated' &&
+    !pre[0].invert &&
+    pre[1].type === 'ByteLevel' &&
+    !pre[1].add_prefix_space &&
+    !pre[1].use_regex;
+  if (!plain) throw new Error("the model's tokenizer isn't Qwen2's byte-level BPE as the program runs it");
+  const vocab: string[] = [];
+  for (const [token, id] of Object.entries(m.vocab as Record<string, number>)) vocab[id] = token;
+  const merges = (m.merges as (string | [string, string])[]).map((p) => (Array.isArray(p) ? p.join(' ') : p));
+  const added = (t.added_tokens as { id: number; content: string; normalized: boolean; lstrip: boolean; rstrip: boolean }[]).map((a) => {
+    if (a.normalized || a.lstrip || a.rstrip) throw new Error(`the model's tokenizer's ${a.content} isn't a plain added token`);
+    return `${a.id}\t${a.content}`;
+  });
+  const line = /[\r\n\u0085\u2028\u2029]/;
+  for (let i = 0; i < vocab.length; i++) if (vocab[i] === undefined || line.test(vocab[i]) || vocab[i].includes(' ')) throw new Error(`the model's tokenizer's token ${i} can't be a line of vocab.txt`);
+  if (merges.some((p) => line.test(p) || p.split(' ').length !== 2)) throw new Error("the model's tokenizer has a merge that can't be a line of merges.txt");
+  if (added.some((a) => line.test(a))) throw new Error("the model's tokenizer has an added token that can't be a line of added.txt");
+  return { 'vocab.txt': `${vocab.join('\n')}\n`, 'merges.txt': `${merges.join('\n')}\n`, 'added.txt': `${added.join('\n')}\n` };
+}

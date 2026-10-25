@@ -339,10 +339,7 @@ export interface FetchIo {
 /** Fetches what `place` is missing, the smallest first: the model, ONNX Runtime, the NPU's plugin. Throws on the first that fails. */
 export async function fetchReader(place: ReaderPlace, arch: OcrArch, pack: NpuPack | null, io: FetchIo = {}): Promise<void> {
   const get = io.download ?? ((d: Download) => download(d));
-  const unpack = io.unpack ?? unpackMembers;
-  const exists = (p: string) => existsSync(path.join(p, READY));
-  const downloads = path.join(place.home, 'downloads');
-  if (!exists(place.models)) {
+  if (!existsSync(path.join(place.models, READY))) {
     io.log?.(`fetching the text reader's model (${Math.round(Object.values(MODEL_FILES).reduce((n, f) => n + f.size, 0) / 1e6)} MB)`);
     const tmp = `${place.models}.fetching`;
     rmSync(tmp, { recursive: true, force: true });
@@ -351,8 +348,21 @@ export async function fetchReader(place: ReaderPlace, arch: OcrArch, pack: NpuPa
     rmSync(place.models, { recursive: true, force: true });
     renameSoon(tmp, place.models);
   }
+  await fetchRuntime(place, arch, pack, io);
+}
+
+/**
+ * Fetches the runtime `place` is missing: ONNX Runtime, then the NPU's plugin (and AMD's graphs, where some are
+ * pinned). The text reader's, and AMD's NPU's reranker's (rerank-npu.ts), which runs on the same. Throws on the first
+ * that fails.
+ */
+export async function fetchRuntime(place: ReaderPlace, arch: OcrArch, pack: NpuPack | null, io: FetchIo & { for?: string } = {}): Promise<void> {
+  const get = io.download ?? ((d: Download) => download(d));
+  const unpack = io.unpack ?? unpackMembers;
+  const exists = (p: string) => existsSync(path.join(p, READY));
+  const downloads = path.join(place.home, 'downloads');
   const fetchZip = async (what: string, f: Pinned, name: string, into: string, files: { member: string; as: string }[]) => {
-    io.log?.(`fetching ${what} for the text reader (${Math.round(f.size / 1e6)} MB)`);
+    io.log?.(`fetching ${what} for ${io.for ?? 'the text reader'} (${Math.round(f.size / 1e6)} MB)`);
     const zip = path.join(downloads, name);
     try {
       await get({ what, ...f, dest: zip, have: false });

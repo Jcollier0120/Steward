@@ -20,6 +20,7 @@ import { shadowedRoutes } from './kit-routes.ts';
 import { dataFile, writeJson } from './store.ts';
 import { repair, repairKinds } from './repair.ts';
 import { peerResult, workStatus, type WorkExtra } from './work-status.ts';
+import { kitSettingUp } from './work-tasks.ts';
 
 /**
  * The agent's page and API, on 127.0.0.1 only. On top of that, the same rules as Manor's server:
@@ -232,10 +233,13 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     // `license` (kit 2.45.0), only for an agent the Exchequer sells: how the license Manor holds stands for it
     // (license-check.ts). Once a trial has ended, `running` is false and `summary` says so; a license it can't judge only
     // says why in `license.problem`, and it runs.
+    // `settingUp`: the agent's own, else the kit's (work-tasks.ts' kitSettingUp, kit 2.137.0: AMD's NPU's reranker compiled).
     '/api/ping': () => {
       const developer = isDeveloper();
       const license = licenseNow();
-      return { json: { app: APP.id, name: APP.name, version: APP.version, ...(developer ? { pid: process.pid } : {}), ...dutyStatus(duty(), true, holdText(license)), ...licensePing(license), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), developer, repairs: repairKinds(), ...opts.ping?.() } };
+      const own = opts.ping?.() ?? {};
+      const kit = own.settingUp ? null : kitSettingUp();
+      return { json: { app: APP.id, name: APP.name, version: APP.version, ...(developer ? { pid: process.pid } : {}), ...dutyStatus(duty(), true, holdText(license)), ...licensePing(license), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), developer, repairs: repairKinds(), ...own, ...(kit ? { settingUp: kit } : {}) } };
     },
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
     // Manor's icon, from this agent's own address, for the title bar's "Back to <manor>" (manor.ts).

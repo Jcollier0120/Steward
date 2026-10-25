@@ -16,7 +16,7 @@ import { LockTimeout, withLock } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, fallbackDevices, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, plannedAt, planNpu, type PowerToolCheck, rerankFits, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage, workOrderFor } from './npu-vendors.ts';
+import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, fallbackDevices, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, NPU_RERANK_HELPER, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, plannedAt, planNpu, type PowerToolCheck, rerankFits, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage, workOrderFor } from './npu-vendors.ts';
 import { inAppData, type OutsideJob, type OutsideSetupResult, OutsideUnavailable, packagedOutsideTests, runOutside } from './outside.ts';
 import { RETIRED_GRACE_MS } from './retired.ts';
 import type { StageDeps } from './set-up-again.ts';
@@ -728,6 +728,15 @@ export function keepingAddOns(made: AcceleratorEntry, had: Accelerator | Acceler
   return { ...out, ...Object.fromEntries(keep.map((k) => [k, was[k]])) };
 }
 
+/**
+ * The NPU's entry just set up, with the reranker the kit made on AMD's NPU kept (kit 2.137.0, rerank-npu.ts: its own
+ * program, NPU_RERANK_HELPER, which no setup makes): it runs beside whatever serves chat there.
+ */
+export function keepingNpuRerank<E extends AcceleratorEntry>(made: E, had: Accelerator | AcceleratorEntry | undefined): E {
+  const kit = had?.rerank;
+  return kit && !made.rerank && NPU_RERANK_HELPER.test(path.win32.basename(kit.startCommand?.[0] ?? '')) ? { ...made, rerank: kit } : made;
+}
+
 /** The kinds of an accelerator's entry that a setup of `kinds` keeps (keepingAddOns): their ports stay theirs. */
 export function keptKinds(had: Accelerator | undefined, kinds: readonly EndpointKind[], leftToNpu: readonly EndpointKind[] = []): EndpointKind[] {
   if (!had) return [];
@@ -1429,7 +1438,7 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
     npu = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), { ...io, catalogs });
     blocked.push(...(npu.blocked ?? []));
     problems.push(...npu.problems);
-    if (npu.entry) entries.push({ ...npu.entry, name: core.deviceName(plan.npu.support.label) });
+    if (npu.entry) entries.push({ ...keepingNpuRerank(npu.entry, readAccelerators(raw).accelerators.find((a) => a.kind === 'npu')), name: core.deviceName(plan.npu.support.label) });
   }
   // In the PC's shared folder, one account at a time; what another put in place meanwhile isn't downloaded again.
   await inSharedTools(path.dirname(plan.modelsDir), io.log, async (shared) => {

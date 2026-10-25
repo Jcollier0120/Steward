@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { SettingUp } from './server.ts';
 
 /**
  * The work an agent's process has under way (kit 2.76.0, spec/WORK-STATUS.md): each piece of it as a task, running or
@@ -120,4 +121,20 @@ export const workTasks = (): Task[] => [...tasks.values()].map((t) => ({ ...t })
 /** For tests: forget every task. */
 export function resetWorkTasks(): void {
   tasks.clear();
+  settingUps.clear();
 }
+
+const settingUps = new Map<string, SettingUp>();
+
+/**
+ * The kit's own long piece of work done once on a PC (kit 2.137.0: AMD's NPU's reranker compiled, rerank-npu.ts), by
+ * `key`, while it runs (null: done). The agent's ping says it as its `settingUp` (server.ts) when the agent's own
+ * says none, so Manor's card shows it, calm, as it shows the agent's own.
+ */
+export function setSettingUp(key: string, s: SettingUp | null): void {
+  if (s) settingUps.set(key, s);
+  else settingUps.delete(key);
+}
+
+/** The kit's setting-up now, the first begun; null when there's none. */
+export const kitSettingUp = (): SettingUp | null => settingUps.values().next().value ?? null;

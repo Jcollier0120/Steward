@@ -905,6 +905,12 @@ export function embedTurn(route: NpuRoute, cards: readonly GraphicsCard[]): stri
   return (intel.find((c) => c.memoryGb < OWN_MEMORY_GB) ?? intel[0])?.id;
 }
 
+/**
+ * AMD's NPU's reranker's program (kit 2.137.0, rerank-npu.ts): the kit's helper rerank-npu.cs, named for its source
+ * (prebuilt.ts), signed or compiled on the PC. Not a program setup installs: the keeper's look sets it up.
+ */
+export const NPU_RERANK_HELPER = /^rerank-npu-[0-9a-f]{12}(\.signed)?\.exe$/i;
+
 /** Whether a configured NPU entry runs this route's server (its chat endpoint's program). */
 export function runsRoute(entry: { chat?: { startCommand?: string[] } } | undefined, route: NpuRoute, tools: string): boolean {
   const exe = entry?.chat?.startCommand?.[0];

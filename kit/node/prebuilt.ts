@@ -11,7 +11,7 @@ import { locksDir } from './lock.ts';
  * for its source; a PC copies it into the shared kit folder and runs that. When a helper's source has changed since it
  * was last signed (tools/sign-helpers.ts), there's no prebuilt copy for it, and the PC compiles it as before.
  */
-export const HELPERS: Readonly<Record<'checks-pace' | 'awake' | 'gentle' | 'working-set' | 'catalog' | 'ocr-npu', HelperSpec>> = {
+export const HELPERS: Readonly<Record<'checks-pace' | 'awake' | 'gentle' | 'working-set' | 'catalog' | 'ocr-npu' | 'rerank-npu', HelperSpec>> = {
   'checks-pace': { ext: 'exe', type: 'ConsoleApplication' },
   awake: { ext: 'exe', type: 'WindowsApplication' },
   gentle: { ext: 'dll', type: 'Library' },
@@ -20,6 +20,8 @@ export const HELPERS: Readonly<Record<'checks-pace' | 'awake' | 'gentle' | 'work
   // The text reader's own model (kit 2.114.0, ocr-npu.ts): it loads ONNX Runtime for the processor it runs on, so on an
   // Arm PC it must run as Arm (the manifest), not as x64 under emulation.
   'ocr-npu': { ext: 'exe', type: 'ConsoleApplication', refs: ['System.dll', 'System.Core.dll', 'System.Drawing.dll'], manifest: 'arm64' },
+  // AMD's NPU's reranker (kit 2.137.0, rerank-npu.ts): x64 alone, as AMD's NPUs are.
+  'rerank-npu': { ext: 'exe', type: 'ConsoleApplication', refs: ['System.dll', 'System.Core.dll'] },
 };
 export type Helper = keyof typeof HELPERS;
 

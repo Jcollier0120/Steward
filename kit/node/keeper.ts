@@ -11,9 +11,10 @@ import { gpuWithNpu } from './manor.ts';
 import { lineSnapshot, lineState, LockTimeout, QueueFull, queueDirFor, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
 import { patchNpu } from './npu-patch.ts';
 import { refreshNpu, whatAnswers } from './npu-refresh.ts';
-import { cardIdleStopMinutes, NPU_CATALOG, npuIdleStopMinutes, smallPc } from './npu-vendors.ts';
+import { cardIdleStopMinutes, NPU_CATALOG, NPU_RERANK_HELPER, npuIdleStopMinutes, smallPc } from './npu-vendors.ts';
 import { powershell, psQuote } from './ps.ts';
 import { keyInside, pathKey, samePath } from './real-path.ts';
+import { startRerankNpu } from './rerank-npu.ts';
 import { removeRetiredModels } from './retired.ts';
 import { RULES } from './rules.ts';
 import { repairMissing } from './server-repair.ts';
@@ -472,6 +473,8 @@ export function manorOwns(p: Pick<SeenProcess, 'pid' | 'path' | 'startedMs'>, o:
 
 /** The programs an NPU's own embedding server is run with, which the keeper looks after: llama-server (Qualcomm's, on the Hexagon) and OpenVINO Model Server (Intel's). */
 const NPU_EMBED_SERVER = /^(llama-server|ovms)(\.exe)?$/i;
+/** An NPU's reranking servers the keeper looks after: an embedding server's program (the X2's llama-server), and the kit's own on AMD's NPU (kit 2.137.0, rerank-npu.ts). */
+const npuRerankServer = (program: string) => NPU_EMBED_SERVER.test(program) || NPU_RERANK_HELPER.test(program);
 
 /** An accelerator's lock folders, one per slot: the kit's (the NPU's lock for the NPU; `<locks>\<id>`, `<id>.2` … for the others). */
 export const lockDirsOf = (a: Pick<Accelerator, 'id' | 'kind' | 'slots'>): string[] => kitLockDirsOf({ id: a.id, slots: a.kind === 'npu' ? 1 : a.slots });
@@ -527,8 +530,8 @@ export function reapedServers(
     // An NPU's embed endpoint is looked after when llama-server (Qualcomm's, on the Hexagon) or OpenVINO Model Server
     // (Intel's: 1.7 GB, kept until it was stopped, before kit 2.71.0) runs it; npu-embed exits by itself.
     const npuEmbed = NPU_EMBED_SERVER.test(path.win32.basename(expandEnv(a.embed?.startCommand?.[0] ?? '')));
-    // Its reranker too (kit 2.100.0): that llama-server, started a third time.
-    const npuRerank = NPU_EMBED_SERVER.test(path.win32.basename(expandEnv(a.rerank?.startCommand?.[0] ?? '')));
+    // Its reranker too (kit 2.100.0): that llama-server, started a third time; or AMD's NPU's, the kit's own program (kit 2.137.0).
+    const npuRerank = npuRerankServer(path.win32.basename(expandEnv(a.rerank?.startCommand?.[0] ?? '')));
     const kinds: EndpointKind[] = a.kind === 'npu' ? ['chat', 'vision', ...(npuEmbed ? (['embed'] as const) : []), ...(npuRerank ? (['rerank'] as const) : [])] : ['chat', 'vision', 'embed', 'rerank'];
     for (const kind of kinds) {
       if (!a[kind]?.model) continue;
@@ -577,6 +580,8 @@ const SERVERS: { program: RegExp; host: string; port: string; defaultPort: numbe
   { program: /(^|[\\/"\s])ovms(\.exe)?["\s]/i, host: 'rest_bind_address', port: 'rest_port', defaultPort: 0 },
   // FastFlowLM (an AMD NPU's): flm serve --port, 52625 without it.
   { program: /(^|[\\/"\s])flm(\.exe)?["\s]/i, host: 'host', port: 'port', defaultPort: 52625 },
+  // AMD's NPU's reranker, the kit's own (rerank-npu.cs): --host and --port, as llama.cpp's.
+  { program: /(^|[\\/"\s])rerank-npu-[0-9a-f]{12}(\.signed)?\.exe["\s]/i, host: 'host', port: 'port', defaultPort: 0 },
 ];
 
 /** The host:port a server's command line serves, by its kind's flags; null when it's none the keeper knows. */
@@ -1119,6 +1124,7 @@ export async function keeperLook(reaper: Reaper, o: { config?: () => Record<stri
     startRepairs({ config: o.config });
     startNpuRefresh();
     startSmallModelRefresh();
+    startRerankNpu({ log: (line) => logLine(reaperLog(), line) });
   }
   const servers = serversToReap((o.config ?? (() => readConfigFile().raw))(), { withNpu: (o.withNpu ?? (() => gpuWithNpu().on))() });
   const looked = await reaper.look(servers);
