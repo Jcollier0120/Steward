@@ -37,8 +37,8 @@ import { kitVersion, refreshCardVision, refreshSmallModel, setupCommand, testNpu
  * run: a card's chat, vision and embedding servers hold some 10 to 14 GB of it, which a game then doesn't get.
  * Reloading one from the disk cache takes seconds.
  *
- * So, once a minute, for each model server the keeper can start again (an NPU's chat, vision and embedding servers,
- * npu-embed exiting by itself when idle; a graphics card's or the processor's chat, vision, embedding and reranking servers), with "in
+ * So, once a minute, for each model server the keeper can start again (an NPU's chat, vision, embedding and reranking
+ * servers, AMD's NPU's reranker the kit's own (rerank-npu.ts, kit 2.137.0), npu-embed exiting by itself when idle; a graphics card's or the processor's chat, vision, embedding and reranking servers), with "in
  * use" meaning someone holds or waits on its accelerator's lock:
  * - **Idle**: when nobody has used its accelerator for `npuIdleStopMinutes` (the NPU) or `gpuIdleStopMinutes` (a
  *   graphics card, or the processor), both 10 by default (rules.json's keeper), it is stopped. The next request
