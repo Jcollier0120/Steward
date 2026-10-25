@@ -105,7 +105,11 @@ export interface NpuRoute {
   /** Where its OpenAI routes start, when not at the root (OpenVINO Model Server's /v3). */
   baseUrlPath?: string;
   serve: string[];
-  /** What its server's environment needs (OpenVINO Model Server's PYTHONHOME and PATH): {tools} is filled in, `%NAME%` kept for when it starts. */
+  /**
+   * What its server's environment needs (OpenVINO Model Server's PYTHONHOME and PATH; GenieX's GENIEX_CLOCK_KEEPER_THREADS
+   * 0, kit 2.136.5, which stops its QAIRT plugin spinning a processor core through every answer): {tools} is filled in,
+   * `%NAME%` kept for when it starts. A PC set up before a change here gets it from npu-refresh, after its test.
+   */
   env?: Record<string, string>;
   /**
    * The variable its server takes the most tokens a picture may be from, set to its vision model's `pictureTokens`

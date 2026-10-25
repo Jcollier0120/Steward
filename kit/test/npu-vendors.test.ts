@@ -389,6 +389,36 @@ test("each work's order by generation (kit 2.111.0): AMD's Ryzen AI 300 sends ev
   assert.deepEqual(withWorkOrder(split, null), { jobs: 1 });
 });
 
+test("GenieX's QAIRT clock keeper off (kit 2.136.5): GENIEX_CLOCK_KEEPER_THREADS 0 in the environment of every GenieX the kit starts, never in its llama-servers', nor another maker's", () => {
+  const tools = 'C:\\Users\\me\\.manor\\accelerators';
+  const planOf = (npu: string, fallback = false) => V.planNpu({ support: parseNpus(npu, 'arm64')[0], tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, fallback })!;
+  // An X2 on the 2B (GenieX's llama.cpp plugin, which never reads it), with its embeddings and reranker on llama-server.
+  const x2 = planOf(NPU.x2);
+  const e = V.npuEntry(x2.route, { tools, exe: x2.exe, port: x2.port, embed: { exe: x2.embed!.exe, model: x2.embed!.model }, rerank: { file: 'C:\\m\\r.gguf', model: 'qwen3-reranker-0.6b', port: 18186 } });
+  assert.deepEqual(e.chat!.env, { GENIEX_CLOCK_KEEPER_THREADS: '0', GENIEX_IMAGE_MAX_TOKENS: '1024' });
+  assert.equal(e.embed!.env!.GENIEX_CLOCK_KEEPER_THREADS, undefined, "the embedding server's own environment");
+  assert.equal(e.rerank!.env!.GENIEX_CLOCK_KEEPER_THREADS, undefined);
+  // An X Elite on its fallback, Qualcomm's QAIRT 4B, which spins a core through every answer without it.
+  const x1 = planOf(NPU.x1, true);
+  const f = V.npuEntry(x1.route, { tools, exe: x1.exe, port: x1.port });
+  assert.equal(f.chat!.model, 'qualcomm/Qwen3-VL-4B-Instruct:W4A16');
+  assert.deepEqual(f.chat!.env, { GENIEX_CLOCK_KEEPER_THREADS: '0' });
+  // As GenieX starts: over whatever the PC's own environment says, the rest of it kept.
+  const started = serverEnv(f.chat!, { Path: 'C:\\Windows', geniex_clock_keeper_threads: '1' });
+  assert.equal(started.GENIEX_CLOCK_KEEPER_THREADS, '0');
+  assert.equal(started.geniex_clock_keeper_threads, undefined, 'one variable, whatever its case');
+  assert.equal(started.Path, 'C:\\Windows');
+  // Every agent reads it back, so whichever starts GenieX sets it.
+  const back = core.parseAccelerators(RULES, { accelerators: [f] }, null) as any;
+  assert.deepEqual(back.accelerators[0].chat.env, { GENIEX_CLOCK_KEEPER_THREADS: '0' });
+  assert.deepEqual(validateKeeperConfig({ accelerators: [e] }), []);
+  // Another maker's server gets none.
+  for (const vendor of ['intel', 'amd'] as const) {
+    const o = V.npuEntry(V.NPU_CATALOG.routes[vendor], { tools, exe: 'C:\\s\\server.exe' });
+    assert.equal(o.chat!.env?.GENIEX_CLOCK_KEEPER_THREADS, undefined, vendor);
+  }
+});
+
 test('config entries per vendor: one server on its own port, its caps and timeouts, and the kit reads them back', () => {
   const tools = 'C:\\Users\\me\\.manor\\accelerators';
   const q = V.npuEntry(V.NPU_CATALOG.routes.qualcomm, { tools, exe: 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe' });
@@ -398,7 +428,7 @@ test('config entries per vendor: one server on its own port, its caps and timeou
     slots: 1,
     maxContextTokens: 2400,
     quirks: ['prefix-leak', 'image-path'],
-    chat: { baseUrl: 'http://127.0.0.1:18181', model: 'qualcomm/Qwen3-VL-4B-Instruct:W4A16', startCommand: ['C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe', 'serve', '--skip-update', '--host', '127.0.0.1:18181', '--keepalive', '3600'] },
+    chat: { baseUrl: 'http://127.0.0.1:18181', model: 'qualcomm/Qwen3-VL-4B-Instruct:W4A16', startCommand: ['C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe', 'serve', '--skip-update', '--host', '127.0.0.1:18181', '--keepalive', '3600'], env: { GENIEX_CLOCK_KEEPER_THREADS: '0' } },
     vision: { model: 'qualcomm/Qwen3-VL-4B-Instruct:W4A16' },
   }, "GenieX: one model for chat and vision, as on the owner's laptop");
 
@@ -1326,6 +1356,12 @@ test("a pulled model's files are checked against their pinned SHA-256s for this 
   assert.match((await V.checkPinned(m, 'g', { tools: home })).join(), /a\.bin is missing/);
   const x2 = V.NPU_CATALOG.routes.qualcomm.models[0].pinned!['snapdragon-x2'];
   assert.equal(Object.keys(x2.files).length, 6, 'the X2 Elite build of Qwen3-VL-4B, as measured on this laptop');
+  // AI Hub's current X2 build (v0.65.0, QAIRT 2.50; pulled on this laptop 2026-10-25, kit 2.136.5), and the one the kit
+  // pinned on 2026-10-04, which an X2 that pulled it then has: still accepted.
+  assert.deepEqual([x2.files['part1_of_4.bin'].size, x2.files['part1_of_4.bin'].sha256], [490795008, '833c7697e3451071105c124e4e54467e4062324cd878e49073c9c92022e815f0']);
+  assert.equal(x2.earlier!.length, 1);
+  assert.deepEqual(Object.keys(x2.earlier![0]), Object.keys(x2.files));
+  assert.deepEqual([x2.earlier![0]['part1_of_4.bin'].size, x2.earlier![0]['part1_of_4.bin'].sha256], [491425792, '5514e142d35de813420c2563053670438b2fa45862c2af116e6e30a9037f2fa3']);
   // The X Elite's build, AI Hub's current one for the first X (v0.65.0, QAIRT 2.50; pulled on this laptop as an X Elite,
   // 2026-10-23): its own context binaries, the same embedding weights.
   const x1 = xElitePins;
@@ -1383,7 +1419,7 @@ test("an X2 plays an X Elite: GenieX on a data folder of its own that names AI H
   assert.deepEqual(V.playedRoute(V.routeFor(q, 'snapdragon-x'), p).models[0].pull.slice(0, 4), ['--data-dir', '{tools}\\played\\snapdragon-x\\geniex', 'pull', 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0']);
   assert.equal(route.models[0].present, '{tools}\\played\\snapdragon-x\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json');
   assert.equal(route.models[0].pinned!['snapdragon-x'].dir, '{tools}\\played\\snapdragon-x\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct');
-  assert.deepEqual(route.env, { GENIEX_DATADIR: '{tools}\\played\\snapdragon-x\\geniex', GGML_HEXAGON_ARCH: 'v73' });
+  assert.deepEqual(route.env, { GENIEX_CLOCK_KEEPER_THREADS: '0', GENIEX_DATADIR: '{tools}\\played\\snapdragon-x\\geniex', GGML_HEXAGON_ARCH: 'v73' });
   assert.deepEqual(route.embedServer!.env, { ADSP_LIBRARY_PATH: '{tools}\\servers\\llama.cpp\\b11125-hexagon', GGML_HEXAGON_ARCH: 'v73' });
   // At the GenieX the X Elite pins (0.9.3), given again to routeFor (as planNpu does): the version's embedding server, still on v73.
   const at093 = V.routeFor(V.playedRoute(V.routeFor(V.pinnedRoute(q, 'snapdragon-x'), 'snapdragon-x'), p), 'snapdragon-x');
@@ -1397,7 +1433,7 @@ test("an X2 plays an X Elite: GenieX on a data folder of its own that names AI H
   const dir = path.join(tools, 'played', 'snapdragon-x', 'geniex');
   const entry = V.npuEntry(route, { tools, exe: 'C:\\GenieX CLI\\geniex.exe', embed: { exe: 'C:\\llama\\llama-server.exe', model: 'C:\\models\\e.gguf' } });
   assert.deepEqual(entry.chat!.startCommand!.slice(0, 4), ['C:\\GenieX CLI\\geniex.exe', '--data-dir', dir, 'serve']);
-  assert.deepEqual(entry.chat!.env, { GENIEX_DATADIR: dir, GGML_HEXAGON_ARCH: 'v73' });
+  assert.deepEqual(entry.chat!.env, { GENIEX_CLOCK_KEEPER_THREADS: '0', GENIEX_DATADIR: dir, GGML_HEXAGON_ARCH: 'v73' });
   assert.deepEqual(entry.embed!.env, { ADSP_LIBRARY_PATH: path.join(tools, 'servers', 'llama.cpp', 'b11125-hexagon'), GGML_HEXAGON_ARCH: 'v73' });
   assert.deepEqual(serverEnv(entry.embed!, {}).GGML_HEXAGON_ARCH, 'v73');
 
