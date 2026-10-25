@@ -437,6 +437,16 @@ Then it exits (0xC0000409) after 3 s, without listing its model. OpenVINO Model 
   On the same texts its scores are squeezed against llama.cpp's (7.3 against 5.3 at the top, −5.7 against −2.6 at the bottom), with a median rank correlation of 0.90 and the same first file for 11 of 23. The cause is neither tokenizing (the server reads `<|im_start|>` as token 151644) nor batching (a document alone scores as in a batch). That leaves the seq-cls conversion against ggml-org's GGUF; which of the two is off wasn't found.
 - **Its API differs from llama.cpp's `/v1/rerank`.** Both take `{model, query, documents, top_n}` and answer `results[]` of `{index, relevance_score}`, which Reeve's `orderOf` reads either way. llama.cpp also gives `model`, `object` and `usage`. The difference that matters is the template: llama.cpp wraps the query and each document in the GGUF's own rerank template (`tokenizer.chat_template.rerank`), while the server's `/v3/rerank` joins them as sent. A caller would have to wrap them in Qwen's template itself.
 - **The card's figures.** The card's reranker reads the ten documents (about 3,900 tokens) one after another at `--parallel 1`, about 0.85 s each. Its server loads in 11 s and takes 1.9 GB of the PC's available memory (2.3 GB after work), with 1.8 GB of the graphics' shared memory.
+- **Batching the ten documents doesn't make it quicker** (2026-10-24, the manor stopped, one run of each, the kit's flags first and last). The same questions and documents, llama.cpp b11734:
+
+  | | Ten files: median / p90 | Processor time a question | Against the kit's flags | The PC's memory taken after (commit) |
+  |---|---|---|---|---|
+  | The card, the kit's flags (`-c 8192 -b 2048 -ub 2048 --parallel 1`) | 7.91–7.96 / 8.54–8.63 s | 1.67 s | | 1.83–1.98 GB (+1.89–2.00) |
+  | The card, `--parallel 4` | 7.64 / 8.30 s | 1.59 s | the same scores | 1.93 GB (+2.00) |
+  | The card, `--parallel 10 --kv-unified` | 7.64 / 8.28 s | 1.59 s | the same ranks; near-ties reordered in 6 questions, scores within 0.088 | 1.81 GB (+2.03) |
+  | The processor (`--device none`) | 16.2 / 17.7 s | 193 s | one question's rank changed, reranked alone; blended, the same | 0.66 GB (+1.16) |
+
+  The ten slots ran together, but the 225U's Intel Graphics is compute-bound at about 500–570 prompt tokens a second whether it reads one document at a time or ten. Each document (about 500 tokens) is already one batch. So 4 or 10 slots save 3–5%, about the noise between runs. `--kv-unified` (also with 4 slots, or with `-b`/`-ub` 4096) moves the scores slightly and reorders near-ties, though no question's rank changed. `-fa on` gave the kit's flags' scores and speed exactly, so it gains nothing. So the route keeps the kit's flags. Only fewer or shorter documents would make it quicker, and Reeve's ten files of 1,600 characters stay, since accuracy comes first.
 
 **When to look again:** when an OpenVINO Model Server release reranks on the NPU at a fixed length, or a server runs GenAI's `TextRerankPipeline` on it. And only if OpenVINO's export then scores as llama.cpp's GGUF does.
 
