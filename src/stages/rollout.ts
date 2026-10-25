@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fetchBranch, showFile } from '../git.ts';
-import { compareVersions, KIT_VERSION } from '../kitfiles.ts';
+import { compareVersions, KIT_VERSION, urgentIn, urgentKits } from '../kitfiles.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bump } from './bump.ts';
@@ -12,7 +12,7 @@ import { hostFor } from '../hosts/index.ts';
 import { LockTimeout, withLock } from '../kit/lock.ts';
 import { apart, STAGE_STALE_MS, withRepo } from './slots.ts';
 import { kitReach, type KitReach } from './kitreach.ts';
-import { releasedTool, releasedTree, stewardClone } from './trialpass.ts';
+import { releasedChangelog, releasedTool, releasedTree, stewardClone } from './trialpass.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
 import { mergeOwn } from './mainbuild.ts';
 import { RETIRED, retiredOf } from '../retired.ts';
@@ -54,6 +54,12 @@ import { RETIRED, retiredOf } from '../retired.ts';
  * rolloutQuietHours without a newer one, and never later than rolloutMaxWaitHours after the oldest kit released since
  * the last one rolled out (rollout-settle.json). A kit whose changelog entry's bold line starts with "Urgent" goes at
  * once. While the newest settles, the kit rolled out last still reaches those behind it, and its folds, as before.
+ *
+ * An urgent kit doesn't wait for the next build either (Steward 0.36.234): kit 2.136.1, an urgent fix merged at 03:44Z on
+ * 2026-10-25, reached the agents only at the 14:00Z build, as the urgent fix's build of the Steward's own took no kit.
+ * Now that build releases the kit and rolls it out to every employee (pipeline.ts kitRides, with urgentKit), and each
+ * employee's entry is an urgent fix too (bump.ts kitBumpEntry): the round after the build finds each one's main marked
+ * urgent, and builds them at once (stages/urgent.ts), each release let out to customers at once (release.ts urgentNote).
  *
  * On the Steward's page (agent.ts: rolloutsBeside) the bumps and pushes run beside the rounds, never inside one (0.36.60).
  * Inside the round, a rollout to some thirty agents, each bump running its checks at the checks pace, held every merge
@@ -127,15 +133,23 @@ const loadRolled = (): string | null => {
   return typeof s?.kit === 'string' && KIT_VERSION.test(s.kit) ? s.kit : null;
 };
 
-/** Whether the kit's changelog entry (its `## <kit>` section, or the whole text when it has none) is marked urgent: its bold line starts with "Urgent". Pure. */
-export function urgentIn(changelog: string | null, kit: string): boolean {
-  if (!changelog) return false;
-  const text = changelog.replace(/\r\n/g, '\n');
-  const heads = [...text.matchAll(/^## +\[?v?(\d+\.\d+\.\d+)\]?.*$/gm)];
-  const at = heads.findIndex((h) => h[1] === kit);
-  const entry = at >= 0 ? text.slice(heads[at].index!, heads[at + 1]?.index ?? text.length) : heads.length ? '' : text;
-  const bold = /^\*\*(.+?)\*\*/m.exec(entry);
-  return !!bold && /^urgent\b/i.test(bold[1].trim());
+/** Kept where the kit's other readers find it (kitonly.ts): kitfiles.ts's. */
+export { urgentIn };
+
+/**
+ * The urgent kit among those the newest brings to the agents, or null: after the older of the kit rolled out last and the
+ * release before the newest (so it stays urgent once rolled out, in the build that rolled it out), up to `newest`. Read
+ * from the kit's CHANGELOG.md at its release (trialpass.ts's releasedChangelog: kits never released on their own too),
+ * else from `changelog`. What lets an urgent fix's build of the Steward's own roll the kit out (pipeline.ts kitRides).
+ */
+export async function urgentKit(ctx: Ctx, newest: string | null, changelog: (kit: string) => Promise<string | null>): Promise<string | null> {
+  if (!newest) return null;
+  const rolled = loadRolled();
+  const before = (ctx.kit?.released ?? []).filter((v) => compareVersions(v, newest) < 0).sort(compareVersions).at(-1) ?? null;
+  const from = rolled && before ? (compareVersions(rolled, before) < 0 ? rolled : before) : (rolled ?? before);
+  if (from && compareVersions(from, newest) >= 0) return null;
+  const text = (await releasedChangelog(ctx, newest).catch(() => null)) ?? (await changelog(newest).catch(() => null));
+  return urgentKits(text, from, newest)[0] ?? null;
 }
 
 /** The released kits newer than the one rolled out last, up to the newest, oldest first. Pure. */
@@ -476,6 +490,9 @@ async function bumpAndPush(ctx: Ctx, plan: RolloutPlan, o: { kit: string; change
   } catch {
     // The entry names the kit alone, and the PR's body points at the kit's changelog.
   }
+  // The employee's entry from the kit's whole changelog where it can be read (a release's notes hold its own entry
+  // alone): a line for every kit since its pin, and marked urgent when one of them is, though a newer kit came after it.
+  const whole = await releasedChangelog(ctx, kit).catch(() => null);
   const folds = Object.fromEntries(plan.bump.filter((b) => b.fold).map((b) => [b.employee.id, b.fold!]));
   // Each bump runs the tests the kit reaches from the kit its branch pins, as the kit's trial did (kitreach.ts), not the
   // whole suite: read from the kit's tag in the Steward's clone. Without the clone, or the tag, each runs them all.
@@ -484,7 +501,7 @@ async function bumpAndPush(ctx: Ctx, plan: RolloutPlan, o: { kit: string; change
     ? async (_e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean): Promise<KitReach> =>
         (await releasedTree(ctx, kit)) ? kitReach(ctx, { repo: clone, head: `refs/tags/kit-v${kit}`, pin, toolChanged }) : { all: `kit ${kit}'s release couldn't be read` }
     : undefined;
-  const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog, folds, ...(tool ? { tool } : {}), ...(reach ? { reach } : {}) });
+  const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog: whole ?? changelog, folds, ...(tool ? { tool } : {}), ...(reach ? { reach } : {}) });
   const ready = bumped.filter((r) => r.outcome === 'done');
   for (const r of bumped.filter((x) => x.outcome !== 'done' && x.outcome !== 'skipped')) {
     // One the network cut short (the kit's net.ts) is tried again next round, not held until the branch moves. Held at

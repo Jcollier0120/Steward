@@ -100,6 +100,24 @@ export function changelogBetween(changelog: string, from: string | null, to: str
     .join('\n\n');
 }
 
+/** Whether the kit's changelog entry (its `## <kit>` section, or the whole text when it has none) is marked urgent: its bold line starts with "Urgent". Pure. */
+export function urgentIn(changelog: string | null, kit: string): boolean {
+  if (!changelog) return false;
+  const text = changelog.replace(/\r\n/g, '\n');
+  const heads = [...text.matchAll(/^## +\[?v?(\d+\.\d+\.\d+)\]?.*$/gm)];
+  const at = heads.findIndex((h) => h[1] === kit);
+  const entry = at >= 0 ? text.slice(heads[at].index!, heads[at + 1]?.index ?? text.length) : heads.length ? '' : text;
+  const bold = /^\*\*(.+?)\*\*/m.exec(entry);
+  return !!bold && /^urgent\b/i.test(bold[1].trim());
+}
+
+/** The kit versions after `from` (every one when null) up to `kit` whose entries in `changelog` are urgent (urgentIn), oldest first. Pure. */
+export function urgentKits(changelog: string | null, from: string | null, kit: string): string[] {
+  if (!changelog) return [];
+  const versions = [...changelogBetween(changelog, from, kit).matchAll(/^## +\[?v?(\d+\.\d+\.\d+)/gm)].map((m) => m[1]);
+  return versions.filter((v) => urgentIn(changelog, v)).sort(compareVersions);
+}
+
 /** -1, 0 or 1, comparing x.y.z versions number by number. */
 export function compareVersions(a: string, b: string): number {
   const pa = a.split('.').map(Number);

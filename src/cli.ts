@@ -53,7 +53,8 @@ const USAGE = `${APP.id}: ${APP.role}
                    version not yet released tested (unless a vouch covers it) and released. It goes by the
                    build pipeline (Settings: Build pipeline): between builds a round only looks, except for an
                    urgent fix (a commit on main whose changelog entry starts "**Urgent fix:"), which builds at
-                   once for its repository
+                   once for its repository; an urgent kit goes out to every agent in that build, and each is
+                   built at once after it
   build [--employees a,b] [--to-customers]
                    the owner's override of the build pipeline: a build now, outside the set times, for the
                    repositories named or all; --to-customers lets its releases out to customers at once, not

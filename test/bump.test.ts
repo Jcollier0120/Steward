@@ -15,6 +15,7 @@ const { bumpBranch } = await import('../src/stages/common.ts');
 const { bumpOne, kitBumpEntry, onlyFlaky, repin, replacingEntry, wholeTestSteps } = await import('../src/stages/bump.ts');
 const { prBody, push, pushOne } = await import('../src/stages/push.ts');
 const { claimsFile, loadClaims } = await import('../src/claims.ts');
+const { isUrgent } = await import('../src/kit/exchequer.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type GhScript = Parameters<typeof runner>[0];
 
@@ -410,6 +411,48 @@ test("a bump's changelog entry: each kit version's headline since the one it pin
   // A kit entry whose Before you update is "Nothing" adds nothing to it.
   assert.match(kitBumpEntry({ version: '0.4.7', from: '1.0.2', kit: '1.0.3', changelog: kitLog.replace('**Pages use the whole window.** More.', '**Pages.**\n\n### Before you update\n\nNothing: it updates itself as usual.') }), /### Before you update\n\nNothing: it updates itself as usual\.$/);
   assert.match(kitBumpEntry({ version: '0.4.7', from: '1.0.3', kit: '1.0.1', changelog: kitLog }), /a step back[\s\S]*- A step back to the Steward's kit 1\.0\.1, from 1\.0\.3\./);
+});
+
+test("a kit bump that brings an urgent kit is an urgent fix itself: its bold line starts \"**Urgent fix:\", naming the kits when a newer one came after; a plain kit's isn't", () => {
+  const kitLog = [
+    '## 1.0.4',
+    '',
+    '**Faster pages.**',
+    '',
+    '## 1.0.3',
+    '',
+    '**Urgent fix: the PowerShell worker starts in a signed release.**',
+    '',
+    '### Before you update',
+    '',
+    '- Nothing in an agent\'s code: take the kit and release.',
+    '',
+    '## 1.0.2',
+    '',
+    '**Urgent: updates no longer stop.**',
+    '',
+    '## 1.0.1',
+    '',
+    '**Already had.**',
+    '',
+  ].join('\n');
+  const bold = (entry: string) => entry.split('\n')[2];
+  // The urgent kit alone: the entry is the urgent fix the Steward's rule reads (the kit's exchequer.ts isUrgent).
+  const one = kitBumpEntry({ version: '0.5.84', from: '1.0.2', kit: '1.0.3', changelog: kitLog });
+  assert.equal(bold(one), "**Urgent fix: it carries the Steward's kit 1.0.3, with an urgent fix to the parts every agent of the manor shares.**");
+  assert.match(one, /^- The Steward's kit 1\.0\.3: Urgent fix: the PowerShell worker starts in a signed release\.$/m);
+  assert.match(one, /### Before you update\n\n- Nothing in an agent's code: take the kit and release\.$/);
+  assert.equal(isUrgent(one), true);
+  // A newer plain kit came out before it was released (the kit's whole changelog read, rollout.ts): urgent still, naming it.
+  assert.equal(bold(kitBumpEntry({ version: '0.5.84', from: '1.0.2', kit: '1.0.4', changelog: kitLog })), "**Urgent fix: it carries the Steward's kit 1.0.4, with an urgent fix to the parts every agent of the manor shares (kit 1.0.3).**");
+  assert.equal(bold(kitBumpEntry({ version: '0.5.84', from: '1.0.1', kit: '1.0.4', changelog: kitLog })), "**Urgent fix: it carries the Steward's kit 1.0.4, with urgent fixes to the parts every agent of the manor shares (kits 1.0.2 and 1.0.3).**");
+  // A later plain kit, the urgent one pinned already: as before.
+  const plain = kitBumpEntry({ version: '0.5.85', from: '1.0.3', kit: '1.0.4', changelog: kitLog });
+  assert.equal(bold(plain), "**It carries the Steward's kit 1.0.4: the parts every agent of the manor shares.**");
+  assert.equal(isUrgent(plain), false);
+  // Nor a step back past an urgent kit, nor a bump with no changelog to read.
+  assert.equal(isUrgent(kitBumpEntry({ version: '0.5.85', from: '1.0.4', kit: '1.0.2', changelog: kitLog })), false);
+  assert.equal(isUrgent(kitBumpEntry({ version: '0.5.85', from: '1.0.2', kit: '1.0.3', changelog: null })), false);
 });
 
 test("a bump's version is claimed: above an open PR's (an agent's own work beside it) and every live claim, the same again when made again", async () => {

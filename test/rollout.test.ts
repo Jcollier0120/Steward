@@ -15,7 +15,8 @@ process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { runStage } = await import('../src/steward.ts');
-const { planRollout, rollout, rolloutFacts, rolloutGate, loadRolloutFailures, settleKit, settlingLine, urgentIn } = await import('../src/stages/rollout.ts');
+const { planRollout, rollout, rolloutFacts, rolloutGate, rolloutSettleFile, loadRolloutFailures, settleKit, settlingLine, urgentIn, urgentKit } = await import('../src/stages/rollout.ts');
+const { urgentKits } = await import('../src/kitfiles.ts');
 const { bumpOne } = await import('../src/stages/bump.ts');
 const { loadClaims } = await import('../src/claims.ts');
 const { roundConditions } = await import('../src/alarms.ts');
@@ -477,4 +478,34 @@ test('an urgent kit goes at once, and one with no published time counts as old e
   assert.deepEqual([normalizeSettings({}).settings.rolloutQuietHours, normalizeSettings({}).settings.rolloutMaxWaitHours], [2, 12]);
   assert.deepEqual([normalizeSettings({ rolloutQuietHours: 0, rolloutMaxWaitHours: '24' }).settings.rolloutQuietHours, normalizeSettings({ rolloutMaxWaitHours: '24' }).settings.rolloutMaxWaitHours], [0, 24]);
   assert.equal(normalizeSettings({ rolloutQuietHours: '' }).settings.rolloutQuietHours, 2, 'empty: the default');
+});
+
+// Steward 0.36.234: an urgent kit goes out in the urgent fix's build of the Steward's own (pipeline.ts kitRides).
+test('the urgent kits a newest kit brings: after the older of the kit rolled out last and the release before it, read from the kit changelog it was given', async () => {
+  const changelog = '# Kit\n\n## 2.9.3\n\n**Lighter tests.**\n\n## 2.9.2\n\n**Urgent fix: the PowerShell worker starts.**\n\n## 2.9.1\n\n**Urgent: an old one.**\n\n## 2.9.0\n\n**First.**\n';
+  assert.deepEqual(urgentKits(changelog, '2.9.0', '2.9.3'), ['2.9.1', '2.9.2'], 'oldest first');
+  assert.deepEqual(urgentKits(changelog, '2.9.2', '2.9.3'), []);
+  assert.deepEqual(urgentKits(changelog, null, '2.9.2'), ['2.9.1', '2.9.2'], 'every one up to it, with no kit to count from');
+  assert.deepEqual(urgentKits(null, '2.9.0', '2.9.3'), []);
+
+  const ctx = ctxFor({ employees: [], workRoot: path.join(home, 'work-urgent-kit'), run: realRun, neutralDir: home, released: ['2.9.3', '2.9.1', '2.9.0'] });
+  const asked: string[] = [];
+  const read = async (k: string) => (asked.push(k), changelog);
+  // 2.9.2, urgent, was never released on its own: 2.9.3 brings it, from 2.9.1 (the release before), with nothing rolled out yet here.
+  rmSync(rolloutSettleFile(), { force: true });
+  assert.equal(await urgentKit(ctx, '2.9.3', read), '2.9.2');
+  assert.deepEqual(asked, ['2.9.3'], "the newest kit's changelog read (no Steward clone here to read its release from)");
+  // Rolled out last at 2.9.0: 2.9.1 counts too.
+  writeFileSync(rolloutSettleFile(), JSON.stringify({ kit: '2.9.0', at: new Date().toISOString() }));
+  assert.equal(await urgentKit(ctx, '2.9.3', read), '2.9.1');
+  // 2.9.3 rolled out already, in the build that rolls it out: still urgent, counted from the release before it.
+  writeFileSync(rolloutSettleFile(), JSON.stringify({ kit: '2.9.3', at: new Date().toISOString() }));
+  assert.equal(await urgentKit(ctx, '2.9.3', read), '2.9.2');
+  // A plain kit after the urgent one was released and rolled out: not urgent.
+  const later = { ...ctx, kit: { ...ctx.kit, released: ['2.9.4', '2.9.3'] } };
+  const withPlain = async () => `## 2.9.4\n\n**Faster pages.**\n\n${changelog.split('\n').slice(2).join('\n')}`;
+  assert.equal(await urgentKit(later, '2.9.4', withPlain), null);
+  assert.equal(await urgentKit(ctx, null, read), null, 'no kit released');
+  assert.equal(await urgentKit(ctx, '2.9.3', async () => null), null, 'no changelog to read');
+  rmSync(rolloutSettleFile(), { force: true });
 });

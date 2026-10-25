@@ -91,6 +91,17 @@ export async function releasedTool(ctx: Ctx, kit: string): Promise<string | null
 }
 
 /**
+ * The kit's whole CHANGELOG.md as released with `kit` (at its tag, fetched as releasedTree fetches it), or null when it
+ * can't be read: every kit version's entry, those never released on their own too, where the release's notes hold its
+ * own entry alone. What the rollout reads for an urgent kit among those it brings (rollout.ts's urgentKit, bump.ts).
+ */
+export async function releasedChangelog(ctx: Ctx, kit: string): Promise<string | null> {
+  if (!(await releasedTree(ctx, kit))) return null;
+  const repo = stewardClone(ctx);
+  return repo ? showFile(ctx.run, repo, `refs/tags/kit-v${kit}`, 'kit/CHANGELOG.md') : null;
+}
+
+/**
  * Why the rollout's bump of `e` to `kit`, from `base`, needn't run its checks again ("kit 1.2.0's trial passed it from
  * abc1234, on main at def5678"), or null when it must: no trial passed it from that commit, or the kit released or the tools/kit.ts
  * handed out (`tool`, its text; undefined for an agent that fills its kit otherwise) isn't the one tried.

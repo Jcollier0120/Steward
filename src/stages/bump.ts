@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { claimVersion } from '../claims.ts';
-import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
+import { changelogBetween, compareVersions, lf, pinText, urgentIn } from '../kitfiles.ts';
 import { whileAwake } from '../kit/awake.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { unsignedGitVars } from '../kit/unsigned-git.ts';
@@ -87,29 +87,37 @@ export const trialBranch = (kit: string) => `steward/trial-kit-${kit}`;
 /**
  * The employee's changelog entry for a kit bump (`## <version>` and all): the kit it now carries, a "What changed"
  * line for each kit version after `from` up to `kit` (that entry's headline), and "Before you update" from those kit
- * entries' own, or that updating needs nothing.
+ * entries' own, or that updating needs nothing. When one of those kit entries is urgent (kitfiles.ts's urgentIn), so is
+ * the employee's: its bold line starts "**Urgent fix:" (the kit's exchequer.ts isUrgent), so it is built at once between
+ * builds (stages/urgent.ts) and let out to customers at once (release.ts urgentNote).
  */
 export function kitBumpEntry(o: { version: string; from: string; kit: string; changelog: string | null }): string {
   const back = compareVersions(o.kit, o.from) < 0;
   const sections = !back && o.changelog ? changelogBetween(o.changelog, o.from, o.kit).split(/^(?=## )/m).filter((s) => s.startsWith('## ')) : [];
   const changed: string[] = [];
   const care: string[] = [];
+  const urgent: string[] = [];
   for (const s of sections) {
     const [heading, ...rest] = lf(s).split('\n');
     const v = headingVersion(heading);
     const body = rest.join('\n');
     const headline = headlineOf(body);
     if (v) changed.push(`- The Steward's kit ${v}${headline ? `: ${headline}` : ''}`);
+    if (v && urgentIn(s, v)) urgent.unshift(v);
     const c = sectionOf(body, HEADINGS.care);
     if (c && !/^nothing\b/i.test(c)) care.push(c);
   }
   // Without the kit's changelog, a line of its own: never a repository's name, which the agent's notes would ship
   // (they're published, and an agent's tests refuse the owner's account in what it ships).
   if (!changed.length) changed.push(back ? `- A step back to the Steward's kit ${o.kit}, from ${o.from}.` : `- The Steward's kit ${o.kit}, after ${o.from}: the parts every agent of the manor shares.`);
+  // The urgent kits it brings, named when the kit it carries isn't the only one ("kit 2.4.1", "kits 2.4.1 and 2.4.2").
+  const named = urgent.length === 1 && urgent[0] === o.kit ? '' : ` (kit${urgent.length > 1 ? 's' : ''} ${urgent.length > 1 ? `${urgent.slice(0, -1).join(', ')} and ${urgent.at(-1)}` : urgent[0]})`;
   return [
     `## ${o.version}`,
     '',
-    `**It carries the Steward's kit ${o.kit}${back ? ', a step back' : ''}: the parts every agent of the manor shares.**`,
+    urgent.length
+      ? `**Urgent fix: it carries the Steward's kit ${o.kit}, with ${urgent.length > 1 ? 'urgent fixes' : 'an urgent fix'} to the parts every agent of the manor shares${named}.**`
+      : `**It carries the Steward's kit ${o.kit}${back ? ', a step back' : ''}: the parts every agent of the manor shares.**`,
     '',
     `### ${HEADINGS.changed}`,
     '',

@@ -12,7 +12,7 @@ process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { boardedUrgent, DEFAULT_PIPELINE, endRound, kitRides, lastBuildTime, lateLine, loadPipeline, nextBuildTime, normalizePipeline, pipelineMode, pipelineView, savePipeline, urgentKey } = await import('../src/pipeline.ts');
+const { boardedUrgent, DEFAULT_PIPELINE, endRound, kitRides, kitStep, lastBuildTime, lateLine, loadPipeline, nextBuildTime, normalizePipeline, pipelineMode, pipelineView, savePipeline, urgentKey } = await import('../src/pipeline.ts');
 const { addToEntry, composeEntry, CHANGES_README, changesReadme, fragmentBody, fragmentFiles, fragmentFor } = await import('../src/entries.ts');
 const { stampBranch, stampMain } = await import('../src/stages/stamp.ts');
 const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
@@ -178,6 +178,22 @@ test("the kit goes into every build, or only the day's first", () => {
   assert.equal(kitRides(first, state, { ...run(13), by: 'owner' }), true, "the owner's build takes it");
   assert.equal(kitRides(THREE, state, { ...run(10), by: 'urgent' }), false, "an urgent fix's doesn't: the next build takes it");
   assert.equal(kitRides(THREE, state, { ...run(10), by: 'signing' }), false, "nor the build for releases that waited to sign");
+  // Steward 0.36.234: an urgent kit goes into the urgent fix's build of the Steward's own, whatever Settings say.
+  assert.equal(kitRides(first, state, { ...run(10), by: 'urgent' }, { urgentKit: true }), true, 'an urgent kit goes in the urgent build');
+  assert.equal(kitRides(THREE, state, { ...run(10), by: 'signing' }, { urgentKit: true }), false, 'never in a signing build');
+  assert.equal(kitRides(first, state, run(13), { urgentKit: true }), false, "a scheduled build goes by Settings: the next day's first takes it");
+});
+
+test("a build's round with the newest kit: rolled out, waited for while main's kit is tried, or left to the next build; the urgent fix's build of the Steward's own waits for its kit", () => {
+  assert.equal(kitStep({ rides: true, waits: null, closing: false, selfUrgent: false }), 'rollout');
+  assert.equal(kitStep({ rides: true, waits: '1.0.2', closing: false, selfUrgent: false }), 'wait', "main's kit still tried keeps the build open");
+  assert.equal(kitStep({ rides: true, waits: '1.0.2', closing: true, selfUrgent: false }), 'rollout', 'not once its time has run out');
+  assert.equal(kitStep({ rides: false, waits: '1.0.2', closing: false, selfUrgent: false }), 'next', "an agent's urgent fix doesn't wait for the kit");
+  // 2026-10-25: the Steward's urgent fix waited for its kit's trial, and the build closed without it, releasing nothing.
+  assert.equal(kitStep({ rides: false, waits: '2.136.1', closing: false, selfUrgent: true }), 'wait', "the Steward's own urgent fix waits for its kit");
+  assert.equal(kitStep({ rides: false, waits: '2.136.1', closing: true, selfUrgent: true }), 'next');
+  assert.equal(kitStep({ rides: false, waits: null, closing: false, selfUrgent: true }), 'next', 'its kit released, a plain one waits for the next build');
+  assert.equal(kitStep({ rides: true, waits: null, closing: false, selfUrgent: true }), 'rollout', 'an urgent one goes out now');
 });
 
 // Steward 0.36.161: releases that waited until this PC could sign build as soon as it can, not at the next build time.

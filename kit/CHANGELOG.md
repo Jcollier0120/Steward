@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.136.4
+
+**A kit entry marked urgent makes every agent's kit bump an urgent fix too: the Steward rolls that kit out in its own urgent build and builds each agent as its bump merges, in minutes rather than at the next build. spec/RELEASE-NOTES.md says so.**
+
+### What changed
+
+- **spec/RELEASE-NOTES.md, The kit bump:** a kit entry whose bold line starts `Urgent fix:` makes each agent's bump entry start `**Urgent fix:`, naming the kit (`**Urgent fix: it carries the Steward's kit 2.136.1, with an urgent fix to the parts every agent of the manor shares.**`; a later plain kit that brings it names it in brackets). Its release is then published urgent, as any marked entry is.
+- **Nothing else in the kit changes.** The Steward 0.36.234 does the rest:
+  - its urgent rule (stages/urgent.ts) reads `kit/CHANGELOG.md` and `kit/changes/` too, so an urgent kit merged alone begins an urgent build of the Steward's own;
+  - that build waits for the kit's trial and whole suite (until now it closed while the kit was tried, and released nothing), releases the kit and the Steward, and rolls the kit out to every agent still behind it (`kitRides` with the urgent kit; a plain kit is still left to the next build);
+  - each bump's entry reads the kit's whole changelog from its `kit-v<kit>` tag, so it sees urgent kits that were never released on their own;
+  - the build closes with the next round two minutes on, which finds each agent's urgent entry on its main and builds it at once, for its repository alone.
+- **Why:** kit 2.136.1, an urgent fix, merged at 03:44Z on 2026-10-25. Its bumps (Clerk 0.5.84 and the rest) had a plain bold line, and the urgent build took no kit, so every agent waited for the 14:00Z build and released at 14:10Z.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.136.3
 
 **On AMD, a ticked reranker runs on the Radeon beside the NPU with "Use the graphics card for models when there's an NPU" off, Manor's default, as on Intel since kit 2.135.5: started by the first rerank, stopped once unused. Nearly the same ranks as the processor's, in a third of the time and a hundredth of its processor time. Chat stays on the NPU. AMD's own NPU reranker was tried and is parked.**

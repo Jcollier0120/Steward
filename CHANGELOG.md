@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.234
+
+**It hands out the kit 2.136.4: an urgent fix to the kit now reaches every agent in about half an hour, instead of waiting for the next build.**
+
+### What changed
+
+- When the kit itself gets an urgent fix, the Steward now tries and releases it at once, hands it out to every agent in that same build, and builds each agent straight after. Until now each agent waited for the next scheduled build: on 2026-10-25 an urgent kit fix took ten hours to reach the agents.
+- An agent's release that brings such a kit now says in its notes that it's an urgent fix, so it goes out to customers at once rather than on the next release day.
+- A kit with no urgent fix in it still goes out at the next build, as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.233
 
 **It hands out the kit 2.136.3: on AMD PCs, sharper search now runs on the graphics card when it's needed, about three times as fast, without keeping the processor busy.**
