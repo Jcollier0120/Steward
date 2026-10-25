@@ -2,6 +2,33 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.136.2
+
+**A schedule stops its rounds after three failed in a row, until the agent is updated or Run now goes through. An error no round can get past is met three times, not every interval all day.**
+
+### What changed
+
+- **Why:** on kit 2.136.1's error (spawn ENAMETOOLONG), the Clerk's round failed 36 times in 24 hours, and Manor's card counted every one. The owner: "We need it to stop trying after 3-5 attempts if it isnt working".
+- **schedule.ts's `every()`** counts the rounds in a row that failed: thrown, or run past the time limit. One that waited for the network or its turn is neither a failure nor a round that went through.
+  - At `STOP_AFTER_FAILURES` (3), its scheduled rounds stop. The log says so once. Its state's `nextRunAt` is null, and its `waiting` says "its rounds stopped after 3 failed in a row: they start again once it's updated, or when Run now goes through".
+  - `runSoon()` and `reschedule()` start none while they're stopped, so the `round` repair doesn't restart them either.
+- **round.json** keeps `failedInARow` on each failed round, and `"stopped": "<version>"` with `waiting` on the one that stopped them (spec/ROUND.md).
+  - A restart at the same version stays stopped, and the log says so at its start.
+  - At another version (the agent updated), the rounds go on, counted afresh.
+- **Run now always runs.** One that goes through starts the rounds again. One that fails leaves them stopped.
+- **`every()`'s `stopAfterFailures`** sets another count for a schedule that must keep trying; 0 never stops.
+- **Tests:** kit/test/round.test.ts covers:
+  - three failures stop the rounds, and runSoon and reschedule start none;
+  - a restart keeps them stopped;
+  - a failed Run now leaves them stopped, and one that goes through starts them again;
+  - another version starts them, counted afresh;
+  - a round that waited for the network doesn't count;
+  - 0 never stops.
+
+### Before you update
+
+- Nothing in an agent's code: take the kit and release. An agent whose rounds must never stop passes `stopAfterFailures: 0` to `every()`.
+
 ## 2.136.1
 
 **Urgent fix: the PowerShell worker starts in a signed release. Since kit 2.123.0 signed ps-worker.ps1, it was too long for a command line: no agent released since could start its worker (spawn ENAMETOOLONG), and every `powershell()` call failed.**
