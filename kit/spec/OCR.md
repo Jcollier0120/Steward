@@ -146,7 +146,7 @@ At scale 1, Windows OCR reads only a quarter to a half of the lines of small scr
 
 ## Our own model
 
-Since kit 2.114.0 (decided 2026-10-23, measured 2026-10-24), the reader reads with a text-reading model of our own (model 2 since kit 2.131.0), on the NPU: Qualcomm's, and Intel's NPU 3720 ([Intel and AMD](#intel-and-amd)). Where no NPU can read with it, it reads on the processor: on an AMD PC since kit 2.121.0, on an Intel PC whose NPU isn't measured yet (or that has none) since 2.122.0, and wherever an NPU fails its self-check since 2.124.0 ([On the processor](#on-the-processor)). It had to:
+Since kit 2.114.0 (decided 2026-10-23, measured 2026-10-24), the reader reads with a text-reading model of our own (model 2 since kit 2.131.0), on the NPU: Qualcomm's, Intel's NPU 3720, and since kit 2.137.0 AMD's XDNA 2, with a copy of its own ([Intel and AMD](#intel-and-amd)). Where no NPU can read with it, it reads on the processor: on an AMD PC from kit 2.121.0 to 2.137.0 (and on the first XDNA still), on an Intel PC whose NPU isn't measured yet (or that has none) since 2.122.0, and wherever an NPU fails its self-check since 2.124.0 ([On the processor](#on-the-processor)). It had to:
 
 - never read worse than Windows OCR in any of the check's groups;
 - read at least 99.5% of lines exactly on screen text from 12 px up, and on document pages;
@@ -249,8 +249,8 @@ A capital I is no longer read as l. 0 and o can't always be told apart by shape:
 
 - **The fetch.** What the model needs is fetched once for every agent on the PC, in the background, into the reader's shared folder (`%USERPROFILE%\.npu-agent\ocr`, `KIT_OCR_HOME`):
   - ONNX Runtime 1.27.0, from Microsoft's release;
-  - the NPU maker's plugin, from its own NuGet package (Qualcomm's QNN 2.6.0 on an Arm PC, Intel's OpenVINO 1.7.0 on an Intel NPU 3720), or for AMD's test, Windows ML 2.4.89, which asks Windows for AMD's plugin;
-  - the model, from the release `ocr-model-v2` in the manor's public releases.
+  - the NPU maker's plugin, from its own NuGet package (Qualcomm's QNN 2.6.0 on an Arm PC, Intel's OpenVINO 1.7.0 on an Intel NPU 3720), or on AMD's XDNA 2, Windows ML 2.4.89, which asks Windows for AMD's plugin;
+  - the model, from the release `ocr-model-v2` in the manor's public releases, and on AMD's XDNA 2 the NPU's own copy, from `ocr-model-v2-amd` (`AMD_MODEL_FILES`).
 
   Each is pinned by size and SHA-256 (`MODEL_FILES` and the rest), and only the files the reader uses are kept, with their notices. Until all of it is there, Windows OCR reads.
 - **The program.** `ocr-npu.cs`, a kit helper shipped signed, runs ONNX Runtime through its C API. It loads the model once and reads picture after picture until no picture has come for two minutes. On an Arm PC it runs as Arm (its manifest), not as x64 under emulation. On the processor it runs at the agent's pace: at a gentle one, in Windows' efficiency mode with a very low disk priority, as the agent does (since kit 2.135.0, [On the processor](#on-the-processor)).
@@ -268,14 +268,14 @@ A capital I is no longer read as l. 0 and o can't always be told apart by shape:
   - `KIT_OCR_ENGINE=windows` reads with Windows OCR alone;
   - `KIT_OCR_ENGINE=model` reads with the model wherever it can, the processor included;
   - unset, the model reads where it's worth it;
-  - `KIT_OCR_NPU=none` keeps the model off the NPU, `KIT_OCR_NPU=openvino` tries Intel's plugin on any x64 PC (a test, where the NPU isn't a 3720), and `KIT_OCR_NPU=vitisai` AMD's (a test);
+  - `KIT_OCR_NPU=none` keeps the model off the NPU, `KIT_OCR_NPU=openvino` tries Intel's plugin on any x64 PC (a test, where the NPU isn't a 3720), and `KIT_OCR_NPU=vitisai` AMD's (a test, where the NPU isn't an XDNA 2);
   - under `node:test`, Windows OCR reads unless `KIT_OCR_ENGINE` says otherwise, so no test fetches the model.
 
 ### On the processor
 
 With no NPU the model runs on, or an NPU that fails the self-check, the model could read on the processor instead. It reads as well there as on the NPU (1,224/1,253 with model 2, 1,212 with model 1). But on the X2's processor a picture beyond the start cost 498 ms and 1,452 ms of processor (four threads) in model 1's run, with a 463 MB peak. That is 20 times Windows OCR's processor time, far from gentle in the background. On an Intel Core Ultra 5 225U it's 326 ms and 972 ms of processor, 16 times Windows OCR's, and 7.0 J against Windows OCR's 0.47 J. So `ON_PROCESSOR` was false, and Windows OCR read where the NPU couldn't. Since kit 2.124.0 it's true: the owner chose how well it reads over what it costs, step by step, below.
 
-**An AMD PC reads on the processor (kit 2.121.0, the owner's call, 2026-10-24).** The owner's rule: never trade how well it reads for less power, and spend the least power among what reads well. So an AMD PC (by Windows' `PROCESSOR_IDENTIFIER`, `AuthenticAMD`, then) reads with the model on its processor, where Windows OCR reads 736 of the check's lines to model 2's 1,224. It fetches about 81 MB (ONNX Runtime and the model, no NPU plugin) and keeps 19 MB. AMD's NPU, measured since, reads worse or costs more ([Intel and AMD](#intel-and-amd)), so the processor it stays. Measured on a Ryzen AI 7 350 on 2026-10-24 (kit 2.134.1, model 2, at normal priority), with the manor stopped and the display held on: the check's three runs, and the energy as Intel's is measured below:
+**An AMD PC reads on the processor (kit 2.121.0, the owner's call, 2026-10-24).** The owner's rule: never trade how well it reads for less power, and spend the least power among what reads well. So an AMD PC (by Windows' `PROCESSOR_IDENTIFIER`, `AuthenticAMD`, then) reads with the model on its processor, where Windows OCR reads 736 of the check's lines to model 2's 1,224. It fetches about 81 MB (ONNX Runtime and the model, no NPU plugin) and keeps 19 MB. Since kit 2.137.0 an AMD PC with an XDNA 2 NPU (Ryzen AI 300 and later) reads on the NPU instead, with a copy of the model made for it, for 27% less energy a picture and three lines fewer, the owner's call ([Intel and AMD](#intel-and-amd)); the first XDNA's PCs still read on the processor. Measured on a Ryzen AI 7 350 on 2026-10-24 (kit 2.134.1, model 2, at normal priority), with the manor stopped and the display held on: the check's three runs, and the energy as Intel's is measured below:
 
 | | Lines read exactly | A picture beyond the start | Its processor time | Its energy over rest |
 |---|---|---|---|---|
@@ -372,9 +372,9 @@ The model reads the Latin alphabet alone. Its 189 characters are ASCII, Latin-1'
 - **The better read, line by line** (`keepBetter`).
   - A line of Windows' read holds another alphabet when at least two of its letters, and 15% of them, are neither Latin nor drawn like Latin. Letters drawn like Latin include Cyrillic а, е, о, р, с, Т and Greek Α, Ο, ρ.
   - Such a line replaces the model's lines it overlaps (by half the smaller box). Windows' other lines there come with it, left to right, so a line of both alphabets reads whole. A line where the model found nothing goes in by its height.
-  - Every other line stays the model's. Text in the Latin alphabet always keeps the model's read, which reads 1,223 of the check's 1,253 lines exactly on a Snapdragon's NPU and on Intel's, against Windows OCR's 733 and 736.
+  - Every other line stays the model's. Text in the Latin alphabet always keeps the model's read, which reads 1,223 of the check's 1,253 lines exactly on a Snapdragon's NPU and on Intel's, and 1,221 on AMD's, against Windows OCR's 733, 736 and 736.
 - **What it says.** `engine` ends in `+windows` when Windows' lines are in the result. The agent's log has a line for each read again. `ocr-check` measures each engine alone, without it.
-- **What it costs.** A Windows OCR read of each such page, beside the model's: 465 mJ a picture on a Core Ultra 5 225U and 701 mJ on a Ryzen AI 7 350. The model's own read costs 859 mJ on Intel's NPU, and 4.8 to 7.0 J on a processor.
+- **What it costs.** A Windows OCR read of each such page, beside the model's: 465 mJ a picture on a Core Ultra 5 225U and 701 mJ on a Ryzen AI 7 350. The model's own read costs 859 mJ on Intel's NPU, 3.5 J on AMD's, and 4.8 to 7.0 J on a processor.
 - **Not yet measured on such a PC.** The PCs here have English alone. So the read again was tested with Windows' English OCR, and with Windows' lines given in Russian. Pictures drawn in Russian (capitals too), Greek, Chinese, Japanese and Arabic all set it off, as does Russian among English. English prose doesn't.
 - **Not covered: Latin letters the model hasn't got.** Polish, Czech, Slovak, Hungarian, Romanian, Turkish and Croatian use letters beyond Latin-1 (ł, ż, č, ř, ő, ș, ğ, ı). The model reads them as the nearest letter it has: "Zażółć" as "Zazóté", "numarası" as "numaras:". Those reads look plain, so nothing reads them again.
 
@@ -401,46 +401,69 @@ Each gets the same check, `ocr-check --engine windows,model-npu,model-cpu`, sent
   - **Sharing the NPU.** It reads as fast while OpenVINO Model Server holds the NPU for chat (a detector tile in 9.3 ms), and the chat still answers.
 
   Other Intel generations (Lunar Lake's NPU 4000 and later) read with the model on the processor until they're measured ([On the processor](#on-the-processor)).
-- **AMD's NPU** (Ryzen AI 300 and later), through VitisAI, AMD's plugin that Windows ML installs, as Envoy reaches it: a test (`KIT_OCR_NPU=vitisai`). Every shape is fixed and the CPU fallback is off. VitisAI compiles each graph once, for minutes, into the reader's cache. The program compiles them in the background (`--prepare`), as many at once as the PC's cores and memory allow, below normal priority, while the processor reads. VitisAI runs the FP32 model as BF16. Measured on a Ryzen AI 7 350 on 2026-10-24 (plugin 1.8.75, Windows ML 2.4.89), with the manor stopped:
-  - **It reads worse, so the program's self-check refuses it**, and the processor reads. Line by line against the processor, over the check's pictures:
+- **AMD's NPU** (XDNA 2: Ryzen AI 300 and later), through VitisAI, AMD's plugin that Windows ML installs, as Envoy reaches it. Since kit 2.137.0 the model reads there by default (`VITISAI_GENERATIONS`), with a copy of its own, `ocr-model-v2-amd` (`AMD_MODEL_FILES`), while the processor's reader, the self-check's yardstick, reads model 2. Every shape is fixed and the CPU fallback is off. VitisAI compiles each graph once into the reader's cache. The program compiles them in the background (`--prepare`), as many at once as the PC's cores and memory allow, below normal priority, while the processor reads. The first XDNA (Ryzen 7040 and 8040) isn't measured, so its PCs read on the processor. Measured on a Ryzen AI 7 350 on 2026-10-25 (plugin 1.8.75, Windows ML 2.4.89), with the manor stopped and the display held on:
 
-    | The recognizer's width | 128 | 256 | 384 | 512 | 768 | 1,024 |
-    |---|---|---|---|---|---|---|
-    | Lines read the same | 95% | 95% | 94% | 39% | 1% | 40% |
+  | Model 2 on the Ryzen AI 7 350 | Lines read exactly | A picture beyond the start | Its processor time | Its energy over rest | A start |
+  |---|---|---|---|---|---|
+  | FP32 on the processor | 1,224/1,253 | 255 ms | 754 ms | 4,757 mJ | 13.6 J |
+  | AMD's copy, int8, on the NPU | 1,221/1,253 | 540 ms | 56 ms | 3,492 mJ | 57.3 J |
 
-    At the narrow widths it's BF16's rounding: a character in a noisy fragment. From 512 wide the graphs come out wrong; most of 768's lines read empty. The detector moves boxes too: with the recognizer on the processor, 255 of 952 lines read differently ("Termin al").
-  - **What it would cost**, for what an accurate copy might be worth: 2,077 mJ a picture over rest (698 mJ of it the NPU's), 3.0 times Windows OCR's and 0.43 times the processor's. A picture takes 418 ms, and 92 ms of the program's processor time. A start costs 28 J, loading seven graphs. Measured as Intel's energy is.
-  - **Its compiler** can't place a recognizer 1,280 wide or more ("DMA channel … cannot access full range of the shared buffer memory space"), so on AMD the widest is 1,024. On the processor, the check's lines read the same so. A batch of more than one line leaves nodes to the processor, which VitisAI refuses, so lines are read one at a time.
-  - **Compiling** takes minutes a graph, on about one core: 18 for the detector, 3.5 to 7.5 for each recognizer width. All seven at once take 28.5 minutes on about five cores, with a 5.5 GB peak. Compiled, they keep 33 MB.
-  - **An int8 copy of model 2** (measured 2026-10-24, same PC and plugin) runs wholly on the NPU, but reads no better than the processor and costs more. ONNX Runtime's QDQ tools quantized it: 16-bit activations, 8-bit weights per channel, calibrated on the reader's own detector tiles and line images. Three copies:
-    - **As quantized**, with the NPU's own GELU. It reads 1,208 lines, worse than the processor in seven groups. The NPU's GELU is coarse: inside the recognizer its outputs were off by about 12% of their range.
-    - **With the GELU rewritten** so the NPU computes it from ReLU pieces whose int8 weights are exact (12 or 16 hinges on its negative half), each HardSigmoid folded into the convolution before it, and the recognizer's last two MatMuls made one 1×1 convolution (the NPU read them up to 10% off). It reads 1,223 lines, one fewer than the processor, much as the X2's and Intel's NPUs do: the lines it misses are spacing and dash calls that int8's rounding flips, and the same copy on the processor flips them too. On the NPU the recognizer reads all 964 of the check's line images as that copy does on the processor.
+  The lines are the check's three runs. The energy is the median of three interleaved rounds, each reading the check's 32 GDI pictures three times: the processor's 4,749 to 4,817 mJ, the NPU's 3,371 to 3,563. Each start there includes a Node.js process starting the kit, which an agent already running doesn't pay. So it's the gap that counts: a start on the NPU costs 44 J more, and saves it back after about 35 pictures. At the agent's gentle pace the processor costs 5.2 J a picture ([On the processor](#on-the-processor)), so the NPU saves a third there.
+  - **What it reads differently.** Six lines worse than the processor, three better, each by a space, a letter or a quote mark:
+    - worse: three dropped spaces ("atleast", "Scan_0042(2)", "NWBK6016"), "gctting-started" and "Doecuments" for "getting" and "Documents", and a closing quote read as an apostrophe;
+    - better: a full stop the processor drops, a space it adds ("numpy ==2.3.4"), and that quote in the browser at 200%.
 
-    | Model 2 on the Ryzen AI 7 350 | Lines read exactly | A picture beyond the start | Its processor time | Its energy over rest | A start |
+    By group: pages 178 against 180, the held-out screens 155 against 157, and the browser at 125% 52 against 53; the screens at 12 px 113 against 112 and the browser at 200% 55 against 54. Every group still reads far better than with Windows OCR (pages 123, the held-out screens 67, the browser at 125% 37). It's the owner's call to take it ([the exceptions](#the-exceptions-the-owners-calls)).
+  - **The copy** (`tools/ocr-model`, its README's "AMD's NPU's copy"). Each of model 2's GELUs (13 in the detector, 10 in the recognizer) is replaced by x times a polynomial gate of clips, products and sums (`polygelu`), within 0.0054 of the GELU everywhere. The NPU computes those exactly as the processor does, where its own GELU is coarse (off by about 12% of its range inside the recognizer) and so is its sigmoid (a table, off by up to 0.02). Then:
+    - the recognizer is fine-tuned a little toward model 2's own, layer by layer;
+    - both are rewritten as AMD's compiler takes them: padding written out, a dilated convolution undilated, batch-norms and HardSigmoids folded into the convolutions before them, the recognizer's last two linear layers made one convolution;
+    - both are quantized: 8-bit weights per channel and 16-bit activations, calibrated on drawn screens and on lines at every width.
+
+    The two files are 1.6 MB.
+  - **Where the three lines go.**
+    - The polynomial alone, in FP32 on the processor, reads 1,223. Its detector drops the space in "Scan_0042 (2)", and its recognizer reads a dash as "·". The fine-tune didn't change either line.
+    - int8's rounding and the NPU's own flip a few more, each way. Over three pages' 284 boxes and lines, the NPU read exactly as the processor does with the same int8 files (the copy before its fine-tune).
+  - **Every width.** The int8 recognizer compiles to 2,048 wide, about a minute a width, so AMD reads at the eight widths the other NPUs do. The FP32 model, in BF16, wouldn't place 1,280 or more. A batch of more than one line leaves nodes to the processor, which VitisAI refuses, so lines are read one at a time.
+  - **Compiling.** The nine graphs take 97 s, three at once, on an idle Ryzen AI 7 350. One at a time beside a busy processor, each takes 3 to 7 minutes. Compiled, they keep 35 MB, and the program holds about 1.3 GB while it's loaded. The FP32 model's seven took 28.5 minutes.
+  - **VitisAI keeps an int8 compile on disk only with `enable_cache_file_io_in_mem=0`** in the session's options, which the program sets. Without it the compiled graph (an XIR `.xmodel`, 3.5 MB for one recognizer width) stays in memory, so every start compiles again (13.8 s for one width, against 0.3 s from disk), and the program, which looks for the compiled folder, reads on the processor.
+  - **Tried before it (2026-10-24 and 25, same PC and plugin):**
+
+    | Model 2 on the Ryzen AI 7 350, 2026-10-24 | Lines read exactly | A picture beyond the start | Its processor time | Its energy over rest | A start |
     |---|---|---|---|---|---|
     | FP32 on the processor | 1,224/1,253 | 252 ms | 741 ms | 4,798 mJ | 4.2 J |
     | int8 on the NPU, its own GELU | 1,208/1,253 | 388 ms | 56 ms | 2,530 mJ | 38 J |
     | int8 on the NPU, GELU in 12 hinges | 1,223/1,253 | 731 ms | 58 ms | 4,902 mJ | 49 J |
     | int8 on the NPU, GELU in 16 hinges | 1,223/1,253 | 829 ms | 62 ms | 5,654 mJ | 51 J |
 
-    Medians of three interleaved rounds, with the manor stopped and the display held on; the rounds' spread was within 5% except the 12 hinges' (4,481 to 5,125 mJ). Of a picture's energy the NPU's own share was 798, 1,659 and 2,016 mJ. The hinges cost NPU time: a detector tile takes 38 to 43 ms against 24 with the NPU's GELU, and a recognizer line 768 wide 13 to 16 ms against 6.
-  - **So the processor stays**, by the owner's rule: the copy that's cheaper reads worse, and the copies that read as well cost as much or more. A model without GELUs (retrained with ReLU or HardSwish) might cost about the first copy's 2.5 J a picture, if it read as well; that's for the owner to decide. The processor's figures here are at normal priority. The gentle pace was measured here before anyone retrains ([On the processor](#on-the-processor)): a picture on the processor costs 5.2 J at a gentle pace, in efficiency mode, and 4.8 J at normal priority. So such a copy would still be about half the processor's energy. Not tried further: 16-bit weights (the VitisAI partitioner crashes), AMD Quark's AdaRound (no change) and its bias correction (it fails on this graph).
-  - **VitisAI keeps an int8 compile on disk only with `enable_cache_file_io_in_mem=0`** in the session's options. Without it the compiled graph (an XIR `.xmodel`, 3.5 MB for one recognizer width) stays in memory, so every start compiles again (13.8 s for one width, against 0.3 s from disk), and the program, which looks for the compiled folder, reads on the processor. An int8 route would need it.
-  - **What could change that:** a newer plugin whose GELU is finer, or a model without GELUs. Either needs the check again.
-
-**Model 2 in BF16 on AMD's NPU** isn't measured: the BF16 figures above are model 1's. (Intel's NPU 3720 is, above.) Its graphs have model 1's shapes and operators, with new weights, and the program's self-check still compares each NPU's read with the processor's before it reads, so an NPU that read model 2 differently would be refused.
+    That day's starts were measured another way (4.2 J for the processor's), so they don't compare with the table above.
+    - **The FP32 model, as BF16**, which is how VitisAI runs it, read worse. From 512 wide the recognizer's graphs came out wrong (768's lines mostly read empty), and the detector moved boxes ("Termin al"). Model 1 cost 2,077 mJ a picture there.
+    - **int8 with the NPU's own GELU** read worse in seven groups.
+    - **The GELU in exact ReLU hinges** read as well as the X2's and Intel's NPUs, but cost as much as the processor. A tile took 38 to 43 ms against 24.
+    - **The GELU as x · sigmoid(1.702 x)** read as well on the processor, but worse on the NPU: its sigmoid's table cost 5 lines on the held-out screens (151 against 156).
+    - **ReLU, HardSwish or a HardSigmoid gate** need retraining, and read worse after it.
+    - **A detector distilled with them** found at most 97.6% of model 2's boxes.
+    - **16-bit weights** crash the VitisAI partitioner. AMD Quark's AdaRound changed nothing, and its bias correction fails on this graph.
 
 **The owner's rule for every route (2026-10-24):** accuracy is never given up for less power. The reader must read with a high degree of accuracy, and spend as little power as it can while doing so. So:
 
-- a route can be its PC's default only if it reads no worse than Windows OCR in any group, and no worse than the model on the processor (with the one exception below);
+- a route can be its PC's default only if it reads no worse than Windows OCR in any group, and no worse than the model on the processor (with the exceptions below);
 - a route that reads clearly better wins over a cheaper one that reads worse, without asking the owner again, as Intel's NPU does over Windows OCR at 1.85 times its energy a picture;
 - the least energy decides only between routes that read as well, as an NPU does over the processor.
 
-**The one exception (the owner's call, 2026-10-24): model 2's dropped space on the NPU.**
+#### The exceptions (the owner's calls)
+
+**Model 2's dropped space on Intel's and the X2's NPUs (2026-10-24).**
 - **What differs.** With model 2, Intel's NPU 3720 and the Snapdragon X2's NPU each read one line fewer than the processor: 1,223 of the check's 1,253 lines against 1,224. On both, the NPU drops the space in "Scan_0042 (2) - Copy.jpg", on a held-out screen at 14 px. Every other line reads the same.
 - **The NPU stays the default on both**, since one space in 1,253 lines isn't worth the processor's energy. On Intel's 225U, a picture on the processor cost 6,991 mJ against the NPU's 859 in model 1's run, at normal priority.
-- **Anything more goes back to the owner:** a wider gap, another NPU, or a later model.
+
+**AMD's copy's three lines on AMD's NPU (2026-10-25).**
+- **What differs.** AMD's copy of model 2 reads 1,221 of the 1,253 lines on a Ryzen AI 7 350's NPU, against the processor's 1,224 ([Intel and AMD](#intel-and-amd)). Six lines read worse and three better, each by a space, a letter or a quote mark. Three groups read a line or two fewer, and every group reads far better than with Windows OCR.
+- **The NPU is the default on XDNA 2**, for 3,492 mJ a picture against the processor's 4,757. The owner's words: "Since we already made an exception for intel and snapdragon and we crush microsoft either way, I think it's an acceptable risk".
+
+**Anything more goes back to the owner:** a wider gap, another NPU, or a later model.
 
 ### Where the model is published
 
 The release `ocr-model-v2` in the manor's public releases (since kit 2.131.0; `ocr-model-v1` before) holds `det.onnx`, `rec.onnx`, `charset.txt`, `LICENSE.txt` (Apache-2.0, PaddleOCR's) and `NOTICE.txt`, which says what was changed. No training data is included. A model that reads differently is a new version: a new release with new pins (`MODEL_VERSION`, `MODEL_FILES`), never a changed asset.
+
+The release `ocr-model-v2-amd` (since kit 2.137.0) holds AMD's NPU's copy of it: `det.onnx` and `rec.onnx` (int8, 1.6 MB in all), `LICENSE.txt` and `NOTICE.txt`, which says what was changed for AMD's NPU. It reads with model 2's `charset.txt`. Pinned as `AMD_MODEL_FILES`, its release named after `MODEL_VERSION`. So a new model needs a new AMD copy, made and measured again, before it ships, or `VITISAI_GENERATIONS` emptied so AMD's PCs read on the processor.
