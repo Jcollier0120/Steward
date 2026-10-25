@@ -2,6 +2,26 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.236
+
+**It hands out the kit 2.136.6: safer uninstalls, the staff's own signed FFmpeg first, and local AI setup that fits your graphics driver and your PC's memory.**
+
+### What changed
+
+- **Uninstall and install check the staff member's folder first.** If its home folder setting is empty, isn't a full path such as `C:\Users\you\.miller`, or points at a folder that isn't that staff member's, they stop and say how to fix it. They delete nothing and leave its scheduled task alone. Before, an empty setting could make an uninstall delete a folder named `app` in whatever folder it ran from.
+- **Video uses the staff's own FFmpeg.** It is signed and LGPL. It now comes before another FFmpeg on the PC. Heiward's FFmpeg is used only while the staff's own can't be downloaded, and the page says so.
+- **Setting up local AI fits your PC better:**
+  - An NVIDIA card whose driver is older than the CUDA build needs (551.61) gets the Vulkan build instead, which works with it. The plan says so and suggests updating the driver.
+  - A graphics card that already runs the CUDA build keeps it.
+  - Graphics built into the processor share the PC's memory. They are set up only when there's no graphics card with memory of its own, and the plan names each one left out.
+  - Built-in graphics and the processor now get only what fits in 40% of the PC's memory. An 8 GB PC chats, without pictures or search. A PC with 12 GB or more gets chat, pictures and search, as before. On a PC with too little memory even for chat, nothing is set up, and the plan says why.
+  - A PC whose only graphics card can't run the models now uses its processor instead.
+  - What you choose to serve yourself is set up as you ask.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Local AI that's already set up stays as it is. The new choices apply the next time you set it up.
+
 ## 0.36.235
 
 **It hands out the kit 2.136.5: on Snapdragon PCs, Qualcomm's 4B model on the NPU no longer keeps a processor core busy while it answers.**

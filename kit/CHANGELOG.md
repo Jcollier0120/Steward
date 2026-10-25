@@ -2,6 +2,49 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.136.6
+
+**Three fixes before launch. Install and uninstall refuse an empty, relative or someone else's data folder. FFmpeg prefers the manor's signed build, and borrows Heiward's only while it can't be fetched. Model setup weighs the NVIDIA driver and the PC's memory, and by default sets up only the cards with memory of their own.**
+
+### What changed
+
+- **install.ts: the data folder is checked before anything is touched.**
+  - `homeRefusal(dataDir)` refuses three kinds of data folder: an empty `<ID>_HOME`, one that isn't a full path (`C:\…` or `\\server\share\…`), and one whose `app` isn't the agent's. An `app` is the agent's when the folder is named for it, or when its release.json, app.old's or app.prev's names the agent's id.
+  - install and safeInstall refuse such a folder with exit 2, before any swap and before app.prev.
+  - `uninstallRefusal(dataDir)` asks homeRefusal's question, and also refuses a folder that is neither named for the agent nor holds a copy of it.
+  - uninstall refuses with exit 2 before --dry-run, and before any task is asked about, ended or deleted. Before, an empty or relative `<ID>_HOME` made a plain uninstall delete `.\app` in whatever folder it ran from, and made an install move that `app` aside and delete it.
+  - `refusedHomeLine` says why, and says to set `<ID>_HOME` to the full path or to remove it.
+  - `purgeRefusal`'s "holds a copy of it" is now that release.json marker, as Manor's purge asks, not any `app` folder.
+  - The default data folder (`%USERPROFILE%\.<id>`) always passes.
+- **ffmpeg.ts: the manor's signed build first.**
+  - `toolDirs` looks in this order: the setting, the shared build, the agent's own, PATH, the one used last, `also`, then Heiward's. Before, PATH and the one used last came before the manor's build.
+  - `HEIWARD_SOURCE` labels Heiward's folder wherever it's reached (on PATH, or as the one used last), except in the setting.
+  - video-shrink.ts' `decideEncoder` fetches the manor's build when only Heiward's is found. It borrows Heiward's only while that fetch fails, and its `why` says so.
+  - Borrowing isn't counted as `ownFailed`, so the decision stays fresh and no test encodes run again. getFfmpeg's 15-minute wait between tries keeps the retries cheap.
+  - The Miller's own `src/ffmpeg.ts` isn't changed here.
+- **detect.ts: each card's display driver.**
+  - DETECT_PS prints Win32_VideoController's `display|<driver>|<PNP id>|<name>` lines.
+  - `parseDisplays` and `withDrivers` give each GpuCard its `driver`, matched by name, else by maker.
+  - A failure to read them is quiet: the driver is then unknown.
+- **setup.ts: which build.**
+  - `variantFor` takes `driver`. An NVIDIA card whose driver is known and older than `CUDA_MIN_DRIVER` (551.61, CUDA 12.4's minimum) gets `vulkan-x64`, with a `why` that the plan's line shows.
+  - `nvidiaDriver` reads NVIDIA's number from Windows' version.
+  - A card whose driver is unknown gets CUDA, as before.
+  - A card whose entry already runs a CUDA build keeps it, so set-up-again and repairs never move it.
+- **setup.ts: which cards, and what fits.**
+  - With no ids, `planSetup` sets up the cards with memory of their own (`OWN_MEMORY_GB`) that a build runs on. Shared-memory cards are set up only when there's none. The plan's new `notes` name each card left out.
+  - With no usable card, the processor is set up. Before, that happened only on a PC with no card at all.
+  - `SHARED_SERVER_GB`, `SHARED_MEMORY_SHARE` (0.4, the NPU's share), `sharedNeedGb` and `sharedFit` keep shared-memory cards and the processor, together, within 40% of the PC's memory.
+  - When their servers don't fit, vision is left off first, then the reranker, then the embeddings. Chat is kept.
+  - When even chat doesn't fit, nothing is set up there: a note when no ids were given, a target's `problem` when it was named.
+  - Kinds given (`kinds`, or `cpuKinds` for the processor) are kept, so set-up-again, repairs and the processor's pass after a failed NPU are unchanged. When the PC's memory is unknown, the plan is made as before.
+  - `SetupTarget.leftWhy`, `SetupPlan.notes` and `leftToNpu[].variant` are new, all optional. runSetup now asks for CUDA's catalogs only for a card left to the NPU that would get a CUDA build.
+  - SMALL_SPEC is already the smallest model everywhere, so the models don't change.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent's own tests that compare a `leftToNpu` entry whole will find its `variant` too.
+
 ## 2.136.5
 
 **GenieX's QAIRT clock keeper is off: GENIEX_CLOCK_KEEPER_THREADS 0 goes in the environment of every GenieX the kit starts, so AI Hub's 4B no longer keeps a processor core spinning through every answer (qualcomm/GenieX#1330). Speed, memory and answers are unchanged. A PC set up before gets it from npu-refresh, after its test. The 4B's X2 pins are AI Hub's v0.65.0 build, with the earlier build kept.**

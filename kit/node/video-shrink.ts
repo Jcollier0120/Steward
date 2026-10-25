@@ -1,6 +1,6 @@
 import { renameSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { encode, findTools, getFfmpeg, grindArgs, pickEncoder, probe, type FindOptions, type GetOptions, type Running, type Tools, type ToolSearch } from './ffmpeg.ts';
+import { encode, findTools, getFfmpeg, grindArgs, HEIWARD_SOURCE, pickEncoder, probe, type FindOptions, type GetOptions, type Running, type Tools, type ToolSearch } from './ffmpeg.ts';
 import { setFileTimes } from './files.ts';
 import { isHdr, type MediaInfo } from './media-probe.ts';
 import { agentOf, audioArgs, RANKED, type Candidate, type Choice, type EncoderWords, type Preset } from './video-encoders.ts';
@@ -138,7 +138,8 @@ const DAY = 24 * 3600_000;
 /**
  * Finds FFmpeg and picks the encoder when there's no decision yet (`e`), the FFmpeg or preset changed, it's a day old,
  * or `force`: `encoder` is the new decision, or undefined when `e` stands (the agent saves it). None found and none
- * named in the FFmpeg setting, the agent fetches the manor's own (ffmpeg.ts, getFfmpeg). One found on this PC none of
+ * named in the FFmpeg setting, the agent fetches the manor's own (ffmpeg.ts, getFfmpeg); so too when only Heiward's
+ * is found, which is borrowed only while the manor's can't be fetched (kit 2.136.6). One found on this PC none of
  * whose encoders works here (an older build without Media Foundation, say, on a Snapdragon) is passed over for the
  * next, in the end the manor's own, until that build changes. Never the one the FFmpeg setting names: that's the
  * person's choice. `words` name the agent in the lines it leaves for its page.
@@ -151,21 +152,24 @@ export async function decideEncoder(
   const d = o.deps ?? realEncoderDeps({ words: o.words });
   const agent = agentOf(o.words);
   const ownNeed = o.words?.ownNeed ?? `Nothing, once this PC can reach GitHub: the ${agent} fetches its own FFmpeg (about 12 MB, LGPL) and starts.`;
-  // The FFmpeg it used last is looked at again, after the setting and PATH (ffmpeg.ts, toolDirs).
+  // The FFmpeg it used last is looked at again, after the setting, the manor's build and PATH (ffmpeg.ts, toolDirs).
   const remembered = e?.ffmpeg?.path ? path.dirname(e.ffmpeg.path) : null;
   const passedOver = [...(e?.passedOver ?? [])];
   const look = async () => {
     let found = await d.find(s.ffmpeg, remembered, passedOver);
-    // None on this PC, and none of the person's own named in Settings: the agent fetches the manor's own.
+    // None on this PC, or only Heiward's, and none of the person's own named in Settings: the agent fetches the manor's
+    // own. Heiward's is borrowed only while that can't be (kit 2.136.6), and isn't a failure to try again sooner for.
     let fetchError: string | null = null;
-    if (!found.tools && !s.ffmpeg.trim()) {
+    let borrowed: string | null = null;
+    if ((!found.tools || found.tools.source === HEIWARD_SOURCE) && !s.ffmpeg.trim()) {
       const got = await d.fetchOwn();
       if ('dir' in got) found = await d.find(s.ffmpeg, remembered, passedOver);
+      else if (found.tools) borrowed = got.error;
       else fetchError = got.error;
     }
-    return { found, fetchError };
+    return { found, fetchError, borrowed };
   };
-  let { found, fetchError } = await look();
+  let { found, fetchError, borrowed } = await look();
   let t = found.tools;
   const fresh =
     e &&
@@ -187,6 +191,7 @@ export async function decideEncoder(
       break;
     }
     found = next.found;
+    borrowed = next.borrowed;
     t = next.found.tools;
     choice = await d.pick(t, s.preset);
   }
@@ -208,6 +213,7 @@ export async function decideEncoder(
     };
   }
   if (ownFailed) return { t, encoder: { ...base, ...choice, why: `${choice.why} The ${agent}'s own FFmpeg, to try instead, couldn't be fetched: ${ownFailed}.`, need: ownNeed } };
+  if (borrowed && t.source === HEIWARD_SOURCE) return { t, encoder: { ...base, ...choice, why: `${choice.why} It's Heiward's FFmpeg, borrowed until the ${agent}'s own can be fetched: ${borrowed}.` } };
   return { t, encoder: { ...base, ...choice } };
 }
 

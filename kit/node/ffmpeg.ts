@@ -16,9 +16,11 @@ import { candidatesIn, chooseEncoder, parseEncoders, threadArgs, videoArgs, type
  * PC has none. The Miller and the Chronicler each carried a copy (their ffmpeg.ts and getffmpeg.ts), pinned to
  * different builds; this is the Miller's, the newer of the two, with the Chronicler's build and its extra folder.
  *
- * One already on this PC comes first: the FFmpeg setting, PATH, the one the agent used last. When there's none, the
- * agent fetches the lean LGPL build made for the manor (dav1d and zlib, with Media Foundation, which reaches the PC's
- * own video encoder, and DirectShow, which reads capture cards), pinned by version and SHA-256. About 12 MB, once.
+ * The FFmpeg setting comes first, then the lean LGPL build made for the manor, signed by it (dav1d and zlib, with Media
+ * Foundation, which reaches the PC's own video encoder, and DirectShow, which reads capture cards), pinned by version and
+ * SHA-256, once fetched; then one already on this PC: PATH, the one the agent used last. When there's none, or only
+ * Heiward's (his own, under the AGPL), the agent fetches the manor's build: about 12 MB, once. Heiward's is borrowed
+ * only while it can't be (kit 2.136.6; before, it was used whenever it was there, and the manor's build never fetched).
  *
  * Fetched once for every agent on the PC (getFfmpeg): into Manor's folder, %USERPROFILE%\.manor\ffmpeg\<version>, which
  * every agent's findTools looks in. Before kit 2.88.0 each agent fetched its own into its data folder; one fetched there
@@ -217,6 +219,8 @@ export const HEIWARD_BIN = '%LOCALAPPDATA%\\Programs\\Heiward\\bin';
 
 /** Shared by every agent: the manor's build in Manor's folder (getFfmpeg). */
 export const SHARED_SOURCE = "the staff's shared FFmpeg";
+/** Heiward's (HEIWARD_BIN), however it's reached but the setting: borrowed only while the manor's can't be fetched (decideEncoder). */
+export const HEIWARD_SOURCE = "Heiward's FFmpeg";
 
 export interface ToolDir {
   dir: string;
@@ -224,12 +228,14 @@ export interface ToolDir {
 }
 
 /**
- * Folders to look for ffmpeg.exe + ffprobe.exe in, in order: the setting; PATH; the folder of the FFmpeg the agent
- * used last (`remembered`, from its state), so a build of your own it found once keeps being found; the manor's build
- * the staff share (`shared`, getFfmpeg); the agent's own (`own`, fetched into its data folder before kit 2.88.0, or
- * when Manor's folder couldn't be made); any `also` (the Chronicler looked at the Miller's); Heiward's. No folder of
- * anyone's PC is built in: a build elsewhere goes in the FFmpeg setting. An older build of the manor's (olderBuild) is
- * left out, but for the setting's: the pinned one is fetched in its place.
+ * Folders to look for ffmpeg.exe + ffprobe.exe in, in order: the setting; the manor's signed build the staff share
+ * (`shared`, getFfmpeg); the agent's own (`own`, fetched into its data folder before kit 2.88.0, or when Manor's folder
+ * couldn't be made); PATH; the folder of the FFmpeg the agent used last (`remembered`, from its state), so a build of
+ * your own it found once keeps being found; any `also` (the Chronicler looked at the Miller's); Heiward's. Before kit
+ * 2.136.6 PATH and the one used last came before the manor's build. Heiward's folder is HEIWARD_SOURCE wherever it's
+ * listed but in the setting, on PATH or as the one used last too. No folder of anyone's PC is built in: a build
+ * elsewhere goes in the FFmpeg setting. An older build of the manor's (olderBuild) is left out, but for the setting's:
+ * the pinned one is fetched in its place.
  */
 export function toolDirs(o: {
   setting: string;
@@ -243,19 +249,22 @@ export function toolDirs(o: {
   agent?: string;
 }): ToolDir[] {
   const out: ToolDir[] = [];
+  const heiward = expandEnv(HEIWARD_BIN, o.env);
+  const key = (dir: string) => path.normalize(dir).replace(/[\\/]+$/, '').toLowerCase();
   const add = (dir: string, source: string, chosen = false) => {
-    if (dir && (chosen || !olderBuild(dir)) && !out.some((d) => d.dir.toLowerCase() === dir.toLowerCase())) out.push({ dir, source });
+    if (!dir || (!chosen && olderBuild(dir)) || out.some((d) => key(d.dir) === key(dir))) return;
+    out.push({ dir, source: !chosen && key(dir) === key(heiward) ? HEIWARD_SOURCE : source });
   };
   if (o.setting.trim()) {
     const s = expandEnv(o.setting.trim(), o.env);
     add(/\.exe$/i.test(s) ? path.dirname(s) : s, 'the FFmpeg setting', true);
   }
-  for (const d of o.pathDirs) if (d.trim()) add(d.trim(), 'PATH');
-  if (o.remembered) add(o.remembered, 'the FFmpeg it used last');
   if (o.shared) add(o.shared, SHARED_SOURCE);
   if (o.own) add(o.own, `the ${o.agent ?? APP.name}'s own FFmpeg`);
+  for (const d of o.pathDirs) if (d.trim()) add(d.trim(), 'PATH');
+  if (o.remembered) add(o.remembered, 'the FFmpeg it used last');
   for (const d of o.also ?? []) add(d.dir, d.source);
-  add(expandEnv(HEIWARD_BIN, o.env), "Heiward's FFmpeg");
+  add(heiward, HEIWARD_SOURCE);
   return out;
 }
 
@@ -348,7 +357,7 @@ export interface FindOptions {
   shared?: boolean;
   /** Manor's folder: manorHome() when left out. */
   home?: string;
-  /** More folders, after the agent's own and before Heiward's. */
+  /** More folders, after the one the agent used last and before Heiward's. */
   also?: ToolDir[];
   /** The agent's name, in its own folder's source: its APP.name when left out. */
   agent?: string;

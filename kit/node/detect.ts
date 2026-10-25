@@ -39,6 +39,11 @@ export interface GpuCard {
   luid: string;
   /** Its own memory in GB, to one decimal. */
   memoryGb: number;
+  /**
+   * Its display driver's version as Windows gives it (Win32_VideoController's DriverVersion, such as 32.0.15.6094), when
+   * detection read one (kit 2.136.6): setup's variantFor weighs an NVIDIA card's before choosing CUDA.
+   */
+  driver?: string;
 }
 
 /** The NPU as detection found it: Windows' name for it, its driver, its maker and generation, and what the manor can do with it. */
@@ -169,6 +174,11 @@ try {
   'cpu|' + $p.Architecture + '|' + $p.NumberOfLogicalProcessors + '|' + $p.Name
   'ram|' + (Get-CimInstance -ClassName Win32_ComputerSystem).TotalPhysicalMemory
 } catch { 'problem|processor: ' + $_.Exception.Message }
+try {
+  foreach ($v in @(Get-CimInstance -ClassName Win32_VideoController)) {
+    'display|' + $v.DriverVersion + '|' + $v.PNPDeviceID + '|' + ([string]$v.Name).Replace('|', ' ')
+  }
+} catch { }
 `;
 
 /**
@@ -234,6 +244,35 @@ export function keyCards(adapters: DxgiAdapter[]): GpuCard[] {
   return out;
 }
 
+/**
+ * The display drivers in DETECT_PS' output (kit 2.136.6): `display|<driver version>|<PNP device id>|<name>`, a line for
+ * each display adapter Windows lists. Reading them may fail quietly: a card's driver is then unknown, as before.
+ */
+export function parseDisplays(text: string): { driver: string; vendorId: number | null; name: string }[] {
+  const out: { driver: string; vendorId: number | null; name: string }[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^display\|([^|]*)\|([^|]*)\|(.*)$/.exec(line.trim());
+    if (!m || !m[1].trim()) continue;
+    const ven = /VEN_([0-9a-f]{4})/i.exec(m[2]);
+    out.push({ driver: m[1].trim(), vendorId: ven ? parseInt(ven[1], 16) : null, name: m[3].trim() });
+  }
+  return out;
+}
+
+/**
+ * Each card with its display driver's version (GpuCard's `driver`): the adapter Windows lists by the card's name, else
+ * by its maker; none when those disagree or there's none.
+ */
+export function withDrivers(cards: GpuCard[], displays: ReturnType<typeof parseDisplays>): GpuCard[] {
+  return cards.map((c) => {
+    const base = c.name.replace(/ #\d+$/, '').toLowerCase();
+    const named = displays.filter((d) => d.name.toLowerCase() === base);
+    const found = named.length ? named : displays.filter((d) => d.vendorId === c.vendorId);
+    const versions = [...new Set(found.map((d) => d.driver))];
+    return versions.length === 1 ? { ...c, driver: versions[0] } : c;
+  });
+}
+
 /** Heiward's recommendation: the most memory of its own, the first on a tie. */
 export function recommendedCard(cards: GpuCard[]): GpuCard | undefined {
   return [...cards].sort((a, b) => b.dedicatedBytes - a.dedicatedBytes || a.index - b.index)[0];
@@ -279,7 +318,7 @@ export function parseDetection(text: string, geniex: string | null = null): Dete
   // Win32_Processor.Architecture: 12 is ARM64, 9 x64.
   const arch = cpuLine ? ({ '12': 'arm64', '9': 'x64', '5': 'arm', '0': 'x86' } as Record<string, string>)[cpuLine[1]] ?? `arch ${cpuLine[1]}` : '';
   return {
-    cards: keyCards(parseAdapters(text)),
+    cards: withDrivers(keyCards(parseAdapters(text)), parseDisplays(text)),
     npu: parseNpus(text, arch || (process.arch === 'arm64' ? 'arm64' : 'x64'))[0] ?? null,
     geniex,
     cpu: cpuLine ? { name: tm(cpuLine[3]) || 'Processor', arch, cores: Number(cpuLine[2]) || 0 } : null,
