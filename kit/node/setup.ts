@@ -157,13 +157,31 @@ export interface Variant {
   cudart?: string;
   /** --device's backend: CUDA, Vulkan, GPUOpenCL; none for the processor. */
   backend: 'CUDA' | 'Vulkan' | 'GPUOpenCL' | null;
+  /** Why it isn't the build the card's maker usually gets, in words for the plan (an NVIDIA driver too old for CUDA). */
+  why?: string;
+}
+
+/** The oldest NVIDIA driver CUDA 12.4's build runs on, on Windows (NVIDIA's CUDA 12.4 release notes): 551.61. */
+export const CUDA_MIN_DRIVER = 551.61;
+
+/**
+ * NVIDIA's own version number from Windows' driver version (kit 2.136.6): the last five digits of its third and
+ * fourth parts, 32.0.15.6094 being 560.94. Null when it isn't one.
+ */
+export function nvidiaDriver(version: string | undefined): number | null {
+  const parts = (version ?? '').trim().split('.');
+  if (parts.length !== 4 || !parts.every((p) => /^\d+$/.test(p))) return null;
+  const digits = `${parts[2]}${parts[3].padStart(4, '0')}`.slice(-5);
+  return digits.length === 5 ? Number(digits.slice(0, 3)) + Number(digits.slice(3)) / 100 : null;
 }
 
 /**
- * NVIDIA on x64: the CUDA 12.4 build and its runtime; AMD, Intel or any other card on x64: Vulkan;
- * Snapdragon's Adreno on Arm64: OpenCL for Adreno; the processor: the CPU build for its architecture.
+ * NVIDIA on x64: the CUDA 12.4 build and its runtime, or Vulkan when its driver is known and older than CUDA_MIN_DRIVER
+ * (kit 2.136.6; before, CUDA whatever the driver, and a card it failed on showed only at --list-devices); AMD, Intel or
+ * any other card on x64: Vulkan; Snapdragon's Adreno on Arm64: OpenCL for Adreno; the processor: the CPU build for its
+ * architecture.
  */
-export function variantFor(t: { kind: 'gpu' | 'cpu' | 'npu'; vendor?: string; arch: string }): Variant | { none: string } {
+export function variantFor(t: { kind: 'gpu' | 'cpu' | 'npu'; vendor?: string; arch: string; driver?: string }): Variant | { none: string } {
   if (t.kind === 'npu') return { none: 'the NPU runs GenieX, not llama.cpp' };
   if (t.kind === 'cpu') {
     if (t.arch === 'arm64' || t.arch === 'x64') return { variant: `cpu-${t.arch}`, backend: null };
@@ -171,6 +189,10 @@ export function variantFor(t: { kind: 'gpu' | 'cpu' | 'npu'; vendor?: string; ar
   }
   const vendor = (t.vendor ?? '').toLowerCase();
   if (t.arch === 'x64') {
+    const nvidia = vendor === 'nvidia' ? nvidiaDriver(t.driver) : null;
+    if (nvidia !== null && nvidia < CUDA_MIN_DRIVER) {
+      return { variant: 'vulkan-x64', backend: 'Vulkan', why: `Vulkan, as its NVIDIA driver ${nvidia.toFixed(2)} is older than CUDA needs (${CUDA_MIN_DRIVER}); update the driver and set up again for CUDA` };
+    }
     if (vendor === 'nvidia') return { variant: 'cuda-12.4-x64', cudart: CUDART_ZIP, backend: 'CUDA' };
     if (vendor === 'qualcomm') return { none: 'an Adreno card on an x64 PC' };
     return { variant: 'vulkan-x64', backend: 'Vulkan' };
@@ -657,6 +679,50 @@ export function sizing(t: { kind: 'gpu' | 'cpu'; memoryGb?: number; ramGb?: numb
   return { ...CARD_SIZES.at(-1)!, ...withLeft(tries.at(-1)!) };
 }
 
+/**
+ * What each server holds of the PC's own memory where its models are in it, in GB (kit 2.136.6): on graphics that share
+ * the PC's memory (under OWN_MEMORY_GB of their own) and on the processor. The one Qwen3-VL-2B server for chat and vision
+ * held 3.06 to 3.4 GB on four PCs (ACCELERATORS.md, Chat and vision on one small model); chat alone, without its
+ * projector, about 0.7 less (SERVER_GB's difference); the embedding server about 1.3 (NPU-VENDORS.md); the reranker
+ * 2.0 on a Radeon 860M. Each at the context setup gives such a target; a longer one adds its KV cache.
+ */
+export const SHARED_SERVER_GB: Record<EndpointKind, number> = { chat: 2.7, vision: 3.4, embed: 1.3, rerank: 2.0 };
+
+/**
+ * The share of the PC's memory the models of graphics that share it and of the processor may hold, all together: the
+ * NPU's own share (NPU_MEMORY_SHARE), counted apart from the NPU's, whose work they take only when it can't. On an
+ * 8 GB PC that's 3.2 GB: chat alone. On a 12 GB one 4.8, and on a 16 GB one 6.4: chat, vision and embeddings.
+ */
+export const SHARED_MEMORY_SHARE = 0.4;
+
+/** The PC's memory a shared-memory target's servers hold at once, by SHARED_SERVER_GB, in GB: chat and vision on one server. */
+export function sharedNeedGb(kinds: EndpointKind[], s: { slots: number; maxContextTokens: number }): number {
+  const shared = kinds.includes('chat') && kinds.includes('vision');
+  // Measured at 4,096 tokens for chat alone, and at vision's 8,192 for the one server for both (serverContext).
+  const kv = (k: EndpointKind) => (k === 'chat' ? Math.max(0, serverContext('chat', s) - 4096) : k === 'vision' ? Math.max(0, Math.max(serverContext('chat', s), serverContext('vision', s)) - 8192) : 0);
+  const gb = kinds.filter((k) => !(shared && k === 'chat')).reduce((sum, k) => sum + SHARED_SERVER_GB[k] + (kv(k) * KV_BYTES) / 1024 ** 3, 0);
+  return Math.round(gb * 100) / 100;
+}
+
+/**
+ * What of `kinds` a shared-memory target serves within `roomGb` of the PC's memory (kit 2.136.6): all of them, else
+ * vision left off first (chat runs without its projector), then the reranker, then the embeddings; chat is kept. When
+ * even that doesn't fit, `fits` is false, with what the least of it would need. Kinds named by the person (`keep`) are
+ * all kept, as sizing keeps them on a card.
+ */
+export function sharedFit(kinds: EndpointKind[], s: { slots: number; maxContextTokens: number }, roomGb: number, keep = false): { fits: boolean; kinds: EndpointKind[]; left: EndpointKind[]; needGb: number } {
+  const tries = [kinds];
+  if (!keep) {
+    for (const drop of ['vision', 'rerank', 'embed'] as const) {
+      const last = tries.at(-1)!;
+      if (last.includes(drop) && last.length > 1 && (drop !== 'embed' || last.includes('chat'))) tries.push(last.filter((k) => k !== drop));
+    }
+  }
+  const fit = (ks: EndpointKind[], fits: boolean) => ({ fits, kinds: ks, left: kinds.filter((k) => !ks.includes(k)), needGb: sharedNeedGb(ks, s) });
+  const found = keep ? kinds : tries.find((ks) => sharedNeedGb(ks, s) <= roomGb);
+  return found ? fit(found, true) : fit(tries.at(-1)!, false);
+}
+
 /** A path as %USERPROFILE%\…, so config.json reads the same for whoever's profile it's in. */
 export function portablePath(p: string, home = homedir()): string {
   return p.toLowerCase().startsWith(home.toLowerCase() + path.sep) ? `%USERPROFILE%${p.slice(home.length)}` : p;
@@ -832,8 +898,10 @@ export interface SetupTarget {
   maxContextTokens: number;
   ports: Partial<Record<EndpointKind, number>>;
   kinds: EndpointKind[];
-  /** Asked for, but left off: they wouldn't fit on the card beside the others (sizing). */
+  /** Asked for, but left off: they wouldn't fit on the card beside the others (sizing), or in the PC's memory (sharedFit). */
   left?: EndpointKind[];
+  /** Why `left` is left off, when it's the PC's memory (kit 2.136.6): the card's own, when absent. */
+  leftWhy?: string;
   /**
    * Left to the NPU beside it (Manor's gpuWithNpu off, kit 2.69.0): the card isn't set up for them, and an entry it
    * had for them is kept as it was (keepingAddOns), never removed.
@@ -862,7 +930,12 @@ export interface SetupPlan {
    */
   npuRerank?: { route: NpuRoute; port: number; label: string };
   /** Each graphics card's work left to the NPU (gpuWithNpu off): not set up on it. A card the NPU would leave nothing (a Snapdragon's) is set up whole, as before, so isn't here. */
-  leftToNpu?: { id: string; name: string; kinds: EndpointKind[] }[];
+  leftToNpu?: { id: string; name: string; kinds: EndpointKind[]; /** The build it would get (kit 2.136.6): runSetup asks for CUDA's catalogs only for a CUDA one. */ variant?: string }[];
+  /**
+   * Accelerators not set up this time, and why, in a line each (kit 2.136.6): with none named, graphics that share the
+   * PC's memory beside a card with memory of its own, and one whose models wouldn't fit in the PC's memory. Absent when none.
+   */
+  notes?: string[];
   build: string | null;
   /** config.json's `npu` is install's GenieX default and this PC has no NPU: setup drops it (withoutNpu). */
   dropNpu: boolean;
@@ -886,7 +959,10 @@ export interface SetupPlan {
 
 export interface PlanInput {
   detection: Detection;
-  /** Ids asked for; none: every graphics card (the processor too when there's no card and no NPU). */
+  /**
+   * Ids asked for; none: every graphics card with memory of its own, else every one (kit 2.136.6; before, every card),
+   * and the processor when there's no card it can use and the NPU doesn't chat.
+   */
   ids: string[];
   /** What each card serves (default all three; the processor chats and sees, and reranks when asked). */
   kinds?: EndpointKind[];
@@ -1003,12 +1079,27 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   // What the cards and the processor are asked for: the rest.
   const restKinds = rerankOnNpu ? kinds.filter((k) => k !== 'rerank') : kinds;
 
-  // Which accelerators. Every graphics card serves all three, as before: the NPU comes first for what it serves, and a
-  // card takes it only when the NPU can't (too big, or failed lately). With no card, the processor chats and sees (one
-  // SMALL_SPEC server) when the NPU doesn't chat, and makes the embeddings when the NPU chats but serves none (Intel's and
-  // AMD's routes).
+  // Which accelerators. Each graphics card set up serves all three, as before, within what fits (sizing, sharedFit): the
+  // NPU comes first for what it serves, and a card takes it only when the NPU can't (too big, or failed lately). With no
+  // card a build runs on, the processor chats and sees (one SMALL_SPEC server) when the NPU doesn't chat, and makes the
+  // embeddings when the NPU chats but serves none (Intel's and AMD's routes).
   const cards = o.detection.cards;
-  let wanted = (o.ids.length ? o.ids : cards.map((c) => c.id)).filter((id) => id !== 'npu');
+  // A card whose entry runs CUDA's build keeps it, whatever its driver (kit 2.136.6 weighs the driver for a card not on
+  // it yet): it ran there, and the keeper's set-up-again and repairs never move it to another build by themselves.
+  const onCuda = new Set(readAccelerators(o.raw).accelerators.filter((a) => ENDPOINT_KINDS.some((k) => /cuda/i.test(path.win32.basename(path.win32.dirname(String(a[k]?.startCommand?.[0] ?? '')))))).map((a) => a.id));
+  const variantOf = (c: GpuCard) => variantFor({ kind: 'gpu', vendor: c.vendor, arch, driver: onCuda.has(c.id) ? undefined : c.driver });
+  const usable = cards.filter((c) => !('none' in variantOf(c)));
+  // With none named, the cards with memory of their own a build runs on (kit 2.136.6; before, every card): graphics
+  // that share the PC's memory are set up only where there's none, as their models would hold the PC's own memory
+  // beside the other card's. A card no build runs on is listed as skipped, as before.
+  const ownCards = usable.filter((c) => c.memoryGb >= OWN_MEMORY_GB);
+  const defaultCards = ownCards.length ? cards.filter((c) => ownCards.includes(c) || !usable.includes(c)) : cards;
+  const notes: string[] = [];
+  if (!o.ids.length && ownCards.length) {
+    const by = ownCards.map((c) => c.name).join(' and ');
+    for (const c of usable.filter((c) => !ownCards.includes(c))) notes.push(`${c.name} (${c.id}): not set up: ${by} take${ownCards.length === 1 ? 's' : ''} its work, and its models would hold the PC's own memory (accelerators setup ${c.id} sets it up anyway)`);
+  }
+  let wanted = (o.ids.length ? o.ids : defaultCards.map((c) => c.id)).filter((id) => id !== 'npu');
   const cpuDefault: EndpointKind[] = !npuServes.has('chat') ? ['chat', ...(npuServes.has('vision') ? [] : ['vision' as const])] : !npuServes.has('embed') ? ['embed'] : [];
   // Beside an NPU, with Manor's switch off, a card is never asked for the NPU's work (the keeper keeps it out): none of it is set up on the card,
   // but the work the PC's work order puts the card first for (kit 2.135.3: AMD's pictures, run on demand), the order setup writes for
@@ -1019,7 +1110,11 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   const besideNpu = o.gpuWithNpu === false && npuServes.size > 0 && !o.kinds?.length;
   const besideOrder = besideNpu && !Array.isArray(o.raw?.acceleratorOrder) && det?.supported && det.vendor ? (workOrderFor(NPU_CATALOG.routes[det.vendor], det.generation) ?? undefined) : undefined;
   const leftToNpu: NonNullable<SetupPlan['leftToNpu']> = [];
-  if (!o.ids.length && !cards.length && o.detection.cpu && cpuDefault.length) wanted = ['cpu'];
+  // No card a build runs on: the processor takes the work (kit 2.136.6; before, only on a PC with no card at all).
+  if (!o.ids.length && !usable.length && o.detection.cpu && cpuDefault.length) wanted = [...wanted, 'cpu'];
+  // What the models of graphics that share the PC's memory and of the processor may hold of it, all together (kit 2.136.6).
+  const sharedRoomGb = Math.round(ramGb * SHARED_MEMORY_SHARE * 10) / 10;
+  let sharedUsedGb = 0;
   const targets: SetupTarget[] = [];
   for (const id of wanted) {
     const card = cards.find((c) => c.id === id);
@@ -1037,20 +1132,44 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     // Only the reranker asked for, and the NPU takes it: nothing for this one to do.
     if (rerankOnNpu && !(card ? cardKinds : cpuKinds).length) continue;
     const left = card ? restKinds.filter((k) => !cardKinds.includes(k)) : [];
-    if (left.length) leftToNpu.push({ id, name: card!.name, kinds: left });
-    const size = sizing({ kind, memoryGb: card?.memoryGb, ramGb, kinds: kind === 'cpu' ? cpuKinds : cardKinds, keepKinds: !!o.kinds?.length });
-    const v = variantFor({ kind, vendor: card?.vendor, arch });
+    const v = card ? variantOf(card) : variantFor({ kind, arch });
+    if (left.length) leftToNpu.push({ id, name: card!.name, kinds: left, ...('none' in v ? {} : { variant: v.variant }) });
+    let size = sizing({ kind, memoryGb: card?.memoryGb, ramGb, kinds: kind === 'cpu' ? cpuKinds : cardKinds, keepKinds: !!o.kinds?.length });
+    const name = card?.name ?? o.detection.cpu?.name ?? 'Processor';
+    // Graphics that share the PC's memory, and the processor: what fits in their share of it beside the others' (kit
+    // 2.136.6; before, all of it whatever the PC's memory). Kinds named are kept; a PC whose memory is unknown, as before.
+    let leftWhy: string | undefined;
+    let tooBig: string | undefined;
+    if ((kind === 'cpu' || (card?.memoryGb ?? 0) < OWN_MEMORY_GB) && ramGb > 0 && !('none' in v)) {
+      const fit = sharedFit(size.kinds, size, Math.round((sharedRoomGb - sharedUsedGb) * 100) / 100, !!o.kinds?.length || (kind === 'cpu' && !!o.cpuKinds?.length));
+      const memory = `this PC's ${Math.round(ramGb)} GB of memory, which ${kind === 'cpu' ? "the processor's" : 'its'} models share`;
+      if (!fit.fits) tooBig = `${memory}, hasn't room for ${fit.kinds.includes('chat') ? 'even its chat model' : `its ${fit.kinds.join(' and ')}`} (${fit.needGb} GB) beside everything else`;
+      else {
+        sharedUsedGb += fit.needGb;
+        if (fit.left.length) {
+          size = { ...size, kinds: fit.kinds, left: [...(size.left ?? []), ...fit.left] };
+          leftWhy = `${memory}, won't hold ${fit.left.length === 1 ? 'it' : 'them'} beside ${fit.kinds.join(' and ')} at once`;
+        }
+      }
+    }
+    // With none named, one that doesn't fit isn't listed as skipped: there's nothing to set up for it.
+    if (tooBig && !o.ids.length) {
+      notes.push(`${name} (${id}): not set up: ${tooBig}`);
+      continue;
+    }
     const t: SetupTarget = {
       id,
       kind,
-      name: card?.name ?? o.detection.cpu?.name ?? 'Processor',
+      name,
       memoryGb: card?.memoryGb,
       vendor: card?.vendor,
       ...size,
+      ...(leftWhy ? { leftWhy } : {}),
       ports: {},
       ...(left.length ? { leftToNpu: left } : {}),
     };
     if ('none' in v) t.problem = v.none;
+    else if (tooBig) t.problem = tooBig;
     else {
       t.variant = v;
       // One SMALL_SPEC server for chat and vision, on chat's port: on a card with memory of its own too, from kit 2.89.0.
@@ -1152,7 +1271,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   }
   const downloadBytes = downloads.filter((d) => !d.have).reduce((n, d) => n + d.size, 0) + (npu?.downloadBytes ?? 0);
   const terms = npu ? npuTerms(npu) : [];
-  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), ...(npuLeftOut ? { npuLeftOut } : {}), ...(npuRerankPlan ? { npuRerank: npuRerankPlan } : {}), ...(leftToNpu.length ? { leftToNpu } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, terms, problems, serversDir, modelsDir };
+  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), ...(npuLeftOut ? { npuLeftOut } : {}), ...(npuRerankPlan ? { npuRerank: npuRerankPlan } : {}), ...(leftToNpu.length ? { leftToNpu } : {}), ...(notes.length ? { notes } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, terms, problems, serversDir, modelsDir };
 }
 
 export const gb = (bytes: number) => `${(bytes / 1e9).toFixed(bytes >= 1e10 ? 0 : 1)} GB`;
@@ -1191,9 +1310,10 @@ export function describePlan(p: SetupPlan): string[] {
       .filter((k) => !(t.chatOnVision && k === 'vision'))
       .map((k) => (t.chatOnVision && k === 'chat' ? `chat and vision on ${t.ports.chat} (one ${specFor('vision').model} server)` : `${k} on ${t.ports[k]}`))
       .join(', ');
-    lines.push(`${t.name} (${t.id}): llama.cpp ${p.build ?? '?'} ${t.variant?.variant}, ${t.slots} slot${t.slots === 1 ? '' : 's'}, ${t.maxContextTokens} tokens a request; ${serves}${t.device ? `; device ${t.device}` : ''}`);
-    if (t.left?.length) lines.push(`  ${t.left.join(' and ')} left off: the card's ${t.memoryGb} GB won't hold it beside ${t.kinds.join(' and ')} at once (to have it anyway: accelerators setup --serve chat,vision,embed)`);
+    lines.push(`${t.name} (${t.id}): llama.cpp ${p.build ?? '?'} ${t.variant?.variant}, ${t.slots} slot${t.slots === 1 ? '' : 's'}, ${t.maxContextTokens} tokens a request; ${serves}${t.device ? `; device ${t.device}` : ''}${t.variant?.why ? `; ${t.variant.why}` : ''}`);
+    if (t.left?.length) lines.push(`  ${t.left.join(' and ')} left off: ${t.leftWhy ?? `the card's ${t.memoryGb} GB won't hold it beside ${t.kinds.join(' and ')} at once`} (to have it anyway: accelerators setup --serve chat,vision,embed)`);
   }
+  for (const n of p.notes ?? []) lines.push(n);
   for (const l of p.leftToNpu ?? []) lines.push(`${l.name} (${l.id}): ${l.kinds.join(' and ')} not set up on it: the NPU does ${l.kinds.length === 1 ? 'that' : 'those'}, and "Use the graphics card for models when there's an NPU" is off`);
   for (const d of p.downloads) lines.push(`  ${d.have ? 'have' : 'get '} ${d.what} (${mb(d.size)})${d.sha256 ? '' : ', no pinned SHA-256: it won\'t be downloaded'}`);
   for (const m of p.models.filter((m) => m.path)) lines.push(`  have ${m.file} (${mb(m.size)}): the NPU's own copy, used where it is`);
@@ -1421,7 +1541,7 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
   // NVIDIA's runtime beside a CUDA build (one the NPU's work may go to too), in one administrator prompt where Smart App
   // Control is on.
   const catalogs = catalogsOnce(io);
-  const cuda = plan.targets.some((t) => t.variant?.cudart && t.folder) || (plan.leftToNpu ?? []).some((l) => /nvidia/i.test(l.name));
+  const cuda = plan.targets.some((t) => t.variant?.cudart && t.folder) || (plan.leftToNpu ?? []).some((l) => (l.variant ? l.variant.startsWith('cuda') : /nvidia/i.test(l.name)));
   const wanted = [...(plan.npu?.catalogs ?? []), ...(cuda ? LLAMA_CATALOGS : [])];
   if (wanted.length) await catalogs(wanted, [...(plan.npu?.catalogs?.length ? [plan.npu.vendor] : []), ...(cuda && LLAMA_CATALOGS.length ? ['cuda'] : [])], (io.smartAppControl ?? smartAppControlOutsideTests)());
   // The NPU first: its entry is written only once its server has answered a test request.

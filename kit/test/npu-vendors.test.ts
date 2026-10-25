@@ -2014,7 +2014,7 @@ test('beside an Intel NPU with no room for its embeddings (16 GB), with the swit
   const off = await planSetup({ detection: LUNAR(), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: false });
   assert.deepEqual(off.npu?.kinds, ['chat', 'vision']);
   assert.deepEqual(off.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['embed'], ['chat', 'vision']]]);
-  assert.deepEqual(off.leftToNpu, [{ id: ARC, name: 'Intel(R) Arc(TM) 140V GPU (16GB)', kinds: ['chat', 'vision'] }]);
+  assert.deepEqual(off.leftToNpu, [{ id: ARC, name: 'Intel(R) Arc(TM) 140V GPU (16GB)', kinds: ['chat', 'vision'], variant: 'vulkan-x64' }]);
   const files = off.downloads.map((d) => path.win32.basename(d.dest));
   assert.ok(files.some((f) => EMBED_GGUF.test(f)), files.join());
   assert.ok(!files.some((f) => CHAT_GGUF.test(f) || VL_GGUF.test(f)), `no chat or vision model for the card: ${files.join()}`);

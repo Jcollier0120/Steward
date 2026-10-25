@@ -266,7 +266,25 @@ test("sizing by memory: all of a card's servers fit at once, with room for the d
 
 test('the plan for a desktop: CUDA with its runtime per card, ports from 18191, models once, sizes added up', async () => {
   const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'plan-'));
-  const plan = await planSetup({ detection: parseDetection(DESKTOP), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home });
+  // With none named, the cards with memory of their own (kit 2.136.6): graphics that share the PC's memory are left out, and say so.
+  const lean = await planSetup({ detection: parseDetection(DESKTOP), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home });
+  assert.deepEqual(
+    lean.targets.map((t) => [t.id, t.variant?.variant ?? t.problem, t.slots, t.maxContextTokens, t.ports]),
+    [
+      ['gpu-nvidia-geforce-rtx-4090', 'cuda-12.4-x64', 2, 16384, { chat: 18191, embed: 18192 }],
+      ['gpu-nvidia-geforce-rtx-4090-2', 'cuda-12.4-x64', 2, 16384, { chat: 18193, embed: 18194 }],
+    ],
+  );
+  const by = 'NVIDIA GeForce RTX 4090 and NVIDIA GeForce RTX 4090 #2 take its work, and its models would hold the PC\'s own memory';
+  assert.deepEqual(lean.notes, [
+    `Intel(R) UHD Graphics 770 (gpu-intel-r-uhd-graphics-770): not set up: ${by} (accelerators setup gpu-intel-r-uhd-graphics-770 sets it up anyway)`,
+    `Graphics card 5 (gpu-graphics-card-5): not set up: ${by} (accelerators setup gpu-graphics-card-5 sets it up anyway)`,
+  ]);
+  assert.ok(describePlan(lean).includes(lean.notes![0]));
+  assert.ok(!lean.downloads.some((d) => /vulkan/.test(d.what)), 'no Vulkan build for them');
+  // Named, every card is set up, as every one was by default before.
+  const plan = await planSetup({ detection: parseDetection(DESKTOP), ids: parseDetection(DESKTOP).cards.map((c) => c.id), raw: {}, releases: RELEASES, hfFiles: hf, home });
+  assert.equal(plan.notes, undefined);
   assert.equal(plan.build, 'b11749');
   assert.deepEqual(
     plan.targets.map((t) => [t.id, t.variant?.variant ?? t.problem, t.slots, t.maxContextTokens, t.ports]),
@@ -302,6 +320,55 @@ test('the plan for a desktop: CUDA with its runtime per card, ports from 18191, 
     ['cudart-llama-bin-win-cuda-12.4-x64.zip', false],
     ['Qwen3VL-2B-Instruct-Q4_K_M.gguf', true],
   ], 'chat alone: the 2B without its projector');
+});
+
+test("an NVIDIA driver too old for CUDA's build gets Vulkan, saying why; one new enough, or not known, CUDA as before (kit 2.136.6)", async () => {
+  const { CUDA_MIN_DRIVER, nvidiaDriver } = await import('./fixture/src/kit/setup.ts');
+  assert.equal(nvidiaDriver('32.0.15.6094'), 560.94);
+  assert.equal(nvidiaDriver('31.0.15.5161'), 551.61);
+  assert.equal(nvidiaDriver('27.21.14.5671'), 456.71);
+  assert.equal(nvidiaDriver(''), null);
+  assert.equal(nvidiaDriver('n/a'), null);
+  assert.equal(CUDA_MIN_DRIVER, 551.61);
+  const nvidia = (driver?: string) => variantFor({ kind: 'gpu', vendor: 'NVIDIA', arch: 'x64', ...(driver === undefined ? {} : { driver }) });
+  assert.deepEqual(nvidia('31.0.15.3742'), { variant: 'vulkan-x64', backend: 'Vulkan', why: 'Vulkan, as its NVIDIA driver 537.42 is older than CUDA needs (551.61); update the driver and set up again for CUDA' });
+  assert.equal((nvidia('31.0.15.5161') as any).variant, 'cuda-12.4-x64');
+  assert.equal((nvidia() as any).variant, 'cuda-12.4-x64', 'not known: CUDA, as before');
+  assert.equal((nvidia('garbled') as any).variant, 'cuda-12.4-x64');
+  assert.deepEqual(variantFor({ kind: 'gpu', vendor: 'AMD', arch: 'x64', driver: '31.0.15.3742' }), { variant: 'vulkan-x64', backend: 'Vulkan' }, "another maker's driver isn't weighed");
+
+  // Detection reads each card's display driver: by its name, else by its maker; none for one Windows doesn't list.
+  const drivers = 'display|31.0.15.3742|PCI\\VEN_10DE&DEV_2684&SUBSYS_16F310DE&REV_A1\\4&1|NVIDIA GeForce RTX 4090\ndisplay|31.0.101.5186|PCI\\VEN_8086&DEV_A780&SUBSYS_00000000&REV_04\\3&1|Intel(R) UHD Graphics 770\n';
+  const old = parseDetection(DESKTOP + drivers);
+  assert.deepEqual(old.cards.map((c) => [c.id, c.driver]), [
+    ['gpu-nvidia-geforce-rtx-4090', '31.0.15.3742'],
+    ['gpu-nvidia-geforce-rtx-4090-2', '31.0.15.3742'],
+    ['gpu-intel-r-uhd-graphics-770', '31.0.101.5186'],
+    ['gpu-graphics-card-5', undefined],
+  ]);
+  assert.equal(parseDetection(DESKTOP).cards[0].driver, undefined, 'no display lines (an older detection): none');
+  const byMaker = parseDetection(DESKTOP + drivers.replace('|NVIDIA GeForce RTX 4090\n', '|NVIDIA GeForce RTX 4090 Laptop GPU\n'));
+  assert.equal(byMaker.cards[0].driver, '31.0.15.3742', 'named otherwise: by its maker');
+
+  // Set up on that driver: Vulkan's build, and no CUDA runtime to download; the plan says why.
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'driver-'));
+  const plan = await planSetup({ detection: old, ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home });
+  assert.deepEqual(plan.targets.map((t) => [t.id, t.variant?.variant, t.variant?.backend]), [
+    ['gpu-nvidia-geforce-rtx-4090', 'vulkan-x64', 'Vulkan'],
+    ['gpu-nvidia-geforce-rtx-4090-2', 'vulkan-x64', 'Vulkan'],
+  ]);
+  assert.ok(!plan.downloads.some((d) => /cuda/.test(d.what)), plan.downloads.map((d) => d.what).join());
+  assert.match(describePlan(plan)[0], /^NVIDIA GeForce RTX 4090 \(gpu-nvidia-geforce-rtx-4090\): llama\.cpp b11749 vulkan-x64, .*; Vulkan, as its NVIDIA driver 537\.42 is older than CUDA needs \(551\.61\); update the driver and set up again for CUDA$/);
+  const current = await planSetup({ detection: parseDetection(DESKTOP + drivers.replace('31.0.15.3742', '32.0.15.6094')), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home });
+  assert.deepEqual(current.targets.map((t) => t.variant?.variant), ['cuda-12.4-x64', 'cuda-12.4-x64']);
+  // A card already on CUDA's build keeps it, whatever its driver: the keeper's set-up-again (which names it and its
+  // kinds) never moves a card that ran there.
+  const exe = '%USERPROFILE%\\.manor\\accelerators\\servers\\llama.cpp\\llama.cpp-b11734-cuda-12.4-x64\\llama-server.exe';
+  const ran = { accelerators: [{ id: 'gpu-nvidia-geforce-rtx-4090', kind: 'gpu', slots: 2, maxContextTokens: 16384, chat: { baseUrl: 'http://127.0.0.1:18191', model: SMALL_SPEC.model, startCommand: [exe, '--port', '18191'] } }] };
+  const kept = await planSetup({ detection: old, ids: [], raw: ran, releases: RELEASES, hfFiles: hf, home });
+  assert.deepEqual(kept.targets.map((t) => t.variant?.variant), ['cuda-12.4-x64', 'vulkan-x64']);
+  const again = await planSetup({ detection: old, ids: ['gpu-nvidia-geforce-rtx-4090'], kinds: ['chat'], raw: ran, releases: RELEASES, hfFiles: hf, home });
+  assert.deepEqual(again.targets.map((t) => t.variant?.variant), ['cuda-12.4-x64']);
 });
 
 test('the plan for this laptop: the Adreno\'s OpenCL build; the NPU is left alone; ports already taken are skipped, an entry keeps its own', async () => {
@@ -866,6 +933,65 @@ test("setup on Intel's integrated graphics: one Qwen3-VL-2B server for chat and 
   const older = { accelerators: [{ id: INTEL_ID, kind: 'gpu', slots: 1, maxContextTokens: 4096, quirks: [], memoryGb: 0.1, chat: intelChat, vision: oldVision(), embed }] };
   const again = await planSetup({ detection: parseDetection(INTEL_LAPTOP), ids: [], raw: older, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
   assert.deepEqual(again.targets[0].ports, { chat: 18192, embed: 18193 });
+});
+
+test("graphics that share the PC's memory, and the processor, set up only what fits in their share of it: vision left off first, then embeddings; chat kept (kit 2.136.6)", async () => {
+  const { sharedFit, sharedNeedGb, SHARED_MEMORY_SHARE } = await import('./fixture/src/kit/setup.ts');
+  const { NPU_MEMORY_SHARE } = await import('./fixture/src/kit/npu-vendors.ts');
+  assert.equal(SHARED_MEMORY_SHARE, NPU_MEMORY_SHARE, "the NPU's share");
+  const one = { slots: 1, maxContextTokens: 4096 };
+  assert.equal(sharedNeedGb(['chat', 'vision', 'embed'], one), 4.7, 'one 2B server for chat and vision, and the embeddings');
+  assert.equal(sharedNeedGb(['chat', 'embed'], one), 4);
+  assert.equal(sharedNeedGb(['chat'], { slots: 1, maxContextTokens: 8192 }), 3.14, 'a longer context adds its KV cache');
+  assert.deepEqual(sharedFit(['chat', 'vision', 'embed'], one, 3.2), { fits: true, kinds: ['chat'], left: ['vision', 'embed'], needGb: 2.7 });
+  assert.deepEqual(sharedFit(['chat', 'vision', 'embed'], one, 4.2).kinds, ['chat', 'embed']);
+  assert.deepEqual(sharedFit(['chat', 'vision', 'embed'], one, 2).fits, false);
+  assert.deepEqual(sharedFit(['vision', 'embed'], one, 1.5), { fits: true, kinds: ['embed'], left: ['vision'], needGb: 1.3 }, "with no chat, the embeddings stay");
+  assert.deepEqual(sharedFit(['chat', 'vision', 'embed'], one, 1, true).kinds, ['chat', 'vision', 'embed'], 'named: all kept');
+
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'shared-'));
+  const at = (bytes: number, more = '') => parseDetection(INTEL_LAPTOP.replace('ram|16541974528', `ram|${bytes}`) + more);
+  const plan = (bytes: number, o: { ids?: string[]; kinds?: any[]; more?: string } = {}) => planSetup({ detection: at(bytes, o.more), ids: o.ids ?? [], ...(o.kinds ? { kinds: o.kinds } : {}), raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  // 8 GB: 3.2 GB for its models, chat alone; no projector, no embedding model downloaded.
+  const eight = await plan(8 * 1024 ** 3);
+  assert.deepEqual(eight.targets.map((t) => [t.id, t.kinds, t.left, t.chatOnVision]), [[INTEL_ID, ['chat'], ['vision', 'embed'], undefined]]);
+  assert.deepEqual(eight.models.map((m) => m.role), ['model']);
+  const said = describePlan(eight);
+  assert.ok(said.includes("  vision and embed left off: this PC's 8 GB of memory, which its models share, won't hold them beside chat at once (to have it anyway: accelerators setup --serve chat,vision,embed)"), said.join('\n'));
+  // 12 GB: 4.8, chat, vision and embeddings (4.7), as before; 16 GB too.
+  assert.deepEqual((await plan(12 * 1024 ** 3)).targets[0].kinds, ['chat', 'vision', 'embed']);
+  assert.equal((await plan(12 * 1024 ** 3)).targets[0].left, undefined);
+  // Named by the person, it's all set up, as asked.
+  assert.deepEqual((await plan(8 * 1024 ** 3, { kinds: ['chat', 'vision', 'embed'] })).targets[0].kinds, ['chat', 'vision', 'embed']);
+  // 4 GB: not even chat. With none named, nothing is set up, and the plan says why; named, it's skipped, saying why.
+  const four = await plan(4 * 1024 ** 3);
+  assert.deepEqual(four.targets, []);
+  assert.deepEqual(four.notes, [`Intel(R) Graphics (${INTEL_ID}): not set up: this PC's 4 GB of memory, which its models share, hasn't room for even its chat model (2.7 GB) beside everything else`]);
+  assert.ok(describePlan(four).includes(four.notes![0]));
+  const named = await plan(4 * 1024 ** 3, { ids: [INTEL_ID] });
+  assert.deepEqual(named.targets.map((t) => [t.id, t.problem]), [[INTEL_ID, four.notes![0].replace(/^.*not set up: /, '')]]);
+  // The processor shares the same memory: with no card, on 8 GB it chats alone.
+  const cpuOnly = await planSetup({ detection: parseDetection('cpu|9|12|Intel(R) Core(TM) Ultra 5 225U\nram|8589934592\n'), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.deepEqual(cpuOnly.targets.map((t) => [t.id, t.kinds, t.left]), [['cpu', ['chat'], ['vision']]]);
+  assert.match(describePlan(cpuOnly).join('\n'), /vision left off: this PC's 8 GB of memory, which the processor's models share, won't hold it beside chat at once/);
+  // A PC whose memory detection couldn't read: as before.
+  const unknown = await planSetup({ detection: parseDetection(INTEL_LAPTOP.replace('ram|16541974528\n', '')), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.deepEqual(unknown.targets[0].kinds, ['chat', 'vision', 'embed']);
+});
+
+test('with no card a llama.cpp build runs on, the processor takes the work; with none named (kit 2.136.6)', async () => {
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'nocard-'));
+  // An NVIDIA card on an Arm64 PC: llama.cpp has no build for it.
+  const arm = 'adapter|0|4318|8589934592|17179869184|0x00000000_0x0000d1f1|0|NVIDIA RTX A500\ncpu|12|12|Snapdragon(R) X Elite\nram|34359738368\n';
+  const plan = await planSetup({ detection: parseDetection(arm), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.deepEqual(plan.targets.map((t) => [t.id, t.variant?.variant ?? t.problem]), [
+    ['gpu-nvidia-rtx-a500', 'no llama.cpp build for a NVIDIA card on Arm64'],
+    ['cpu', 'cpu-arm64'],
+  ]);
+  assert.deepEqual(plan.targets[1].kinds, ['chat', 'vision'], 'chat and vision on one server, as on a PC with no card');
+  // Named, only what's named, as before.
+  const named = await planSetup({ detection: parseDetection(arm), ids: ['gpu-nvidia-rtx-a500'], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
+  assert.deepEqual(named.targets.map((t) => t.id), ['gpu-nvidia-rtx-a500']);
 });
 
 test("a PC set up before: Intel's integrated graphics under 32 GB move chat onto their vision server; anything else stays as it is", async () => {
