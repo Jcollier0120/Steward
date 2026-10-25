@@ -11,17 +11,21 @@ const dataDir = path.join(home, 'data');
 process.env.FIXTURE_HOME = dataDir;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { every, roundFile, roundError, roundTimeLimit } = await import('./fixture/src/kit/schedule.ts');
+const { every, roundFile, roundError, roundTimeLimit, STOP_AFTER_FAILURES } = await import('./fixture/src/kit/schedule.ts');
 const { readJson } = await import('./fixture/src/kit/store.ts');
 const { setDuty } = await import('./fixture/src/kit/duty.ts');
+const { Offline } = await import('./fixture/src/kit/net.ts');
 
 interface Entry {
   started: string;
   finished: string;
-  ok: boolean;
+  ok: boolean | null;
   error: string | null;
   everyMs: number;
   next: string | null;
+  waiting?: string;
+  failedInARow?: number;
+  stopped?: string;
 }
 const file = () => readJson<{ rounds?: Record<string, Entry> }>(roundFile(), {});
 const isIso = (s: unknown) => typeof s === 'string' && new Date(s).toISOString() === s;
@@ -208,4 +212,122 @@ test('a round that runs past its time limit is let go: recorded as timed out, it
 test('the time limit, unless an agent gives its own: three intervals, and at least two hours', () => {
   assert.equal(roundTimeLimit(30 * 60_000), 2 * 3_600_000);
   assert.equal(roundTimeLimit(6 * 3_600_000), 18 * 3_600_000);
+});
+
+test('after three failed rounds in a row its rounds stop, a restart keeps them stopped, and Run now that goes through starts them again', async () => {
+  setDuty(true);
+  assert.equal(STOP_AFTER_FAILURES, 3);
+  let fail = true;
+  let calls = 0;
+  const job = async () => {
+    calls++;
+    if (fail) throw new Error('spawn ENAMETOOLONG');
+  };
+  const first = every(60_000, job, { firstDelayMs: 50_000, name: 'stops' });
+  let again: ReturnType<typeof every> | null = null;
+  try {
+    await oneRound(first);
+    await oneRound(first);
+    let r = file().rounds!.stops;
+    assert.deepEqual([r.ok, r.failedInARow, r.stopped, r.waiting], [false, 2, undefined, undefined]);
+    assert.ok(first.state.nextRunAt, 'two failed: the rounds go on');
+
+    await oneRound(first);
+    r = file().rounds!.stops;
+    assert.deepEqual([r.ok, r.error, r.failedInARow, r.stopped, r.next], [false, 'spawn ENAMETOOLONG', 3, '0.0.1', null]);
+    assert.match(r.waiting!, /stopped after 3 failed in a row: they start again once it's updated, or when Run now goes through/);
+    assert.equal(first.state.nextRunAt, null, 'no round is due');
+    assert.match(first.state.waiting!, /stopped after 3 failed in a row/);
+    assert.equal(first.runSoon(), false, "the agent's own reasons start none");
+    first.reschedule();
+    assert.equal(first.state.nextRunAt, null, 'a new interval starts none');
+
+    // Started again at the same version: still stopped, with no round due.
+    first.stop();
+    again = every(60_000, job, { firstDelayMs: 50_000, name: 'stops' });
+    assert.equal(again.state.nextRunAt, null);
+    assert.match(again.state.waiting!, /stopped after 3 failed in a row/);
+    assert.equal(again.runSoon(), false);
+
+    // Run now still runs: one that fails leaves them stopped.
+    await oneRound(again);
+    r = file().rounds!.stops;
+    assert.deepEqual([r.ok, r.failedInARow, r.stopped, r.next], [false, 4, '0.0.1', null]);
+    assert.match(again.state.waiting!, /stopped after 4 failed in a row/);
+
+    // One that goes through starts them again.
+    fail = false;
+    await oneRound(again);
+    r = file().rounds!.stops;
+    assert.deepEqual([r.ok, r.failedInARow, r.stopped, r.waiting], [true, undefined, undefined, undefined]);
+    assert.ok(again.state.nextRunAt, 'the next round is due again');
+    assert.equal(again.state.waiting, null);
+    assert.equal(calls, 5);
+  } finally {
+    first.stop();
+    again?.stop();
+  }
+});
+
+test('an update starts stopped rounds again: stopped at another version, they go on, counted afresh', async () => {
+  setDuty(true);
+  const was = file() as Record<string, unknown> & { rounds?: Record<string, Entry> };
+  const at = new Date().toISOString();
+  const old: Entry = { started: at, finished: at, ok: false, error: 'it failed', everyMs: 60_000, next: null, failedInARow: 3, stopped: '0.0.0', waiting: 'its rounds stopped after 3 failed in a row' };
+  writeFileSync(roundFile(), JSON.stringify({ ...was, rounds: { ...was.rounds, updated: old } }));
+  const job = every(
+    60_000,
+    async () => {
+      throw new Error('still failing');
+    },
+    { firstDelayMs: 50_000, name: 'updated' },
+  );
+  try {
+    assert.ok(job.state.nextRunAt, 'a round is due');
+    assert.equal(job.state.waiting, null);
+    await oneRound(job);
+    const r = file().rounds!.updated;
+    assert.deepEqual([r.failedInARow, r.stopped], [1, undefined], 'counted from one again');
+  } finally {
+    job.stop();
+  }
+});
+
+test('a round that waits for the network neither counts nor clears the failures; stopAfterFailures 0 never stops', async () => {
+  setDuty(true);
+  const outcomes: (Error | null)[] = [new Error('a'), new Error('b'), new Offline(), new Error('c')];
+  const job = every(
+    60_000,
+    async () => {
+      const e = outcomes.shift();
+      if (e) throw e;
+    },
+    { firstDelayMs: 50_000, name: 'offline-between' },
+  );
+  const never = every(
+    60_000,
+    async () => {
+      throw new Error('always');
+    },
+    { firstDelayMs: 50_000, name: 'never-stops', stopAfterFailures: 0 },
+  );
+  try {
+    await oneRound(job);
+    await oneRound(job);
+    await oneRound(job);
+    let r = file().rounds!['offline-between'];
+    assert.deepEqual([r.ok, r.failedInARow, r.stopped], [null, undefined, undefined], 'offline: no failure');
+    assert.ok(job.state.nextRunAt);
+    await oneRound(job);
+    r = file().rounds!['offline-between'];
+    assert.deepEqual([r.ok, r.failedInARow, r.stopped], [false, 3, '0.0.1'], 'the third failure stops them');
+
+    for (let i = 0; i < 4; i++) await oneRound(never);
+    const n = file().rounds!['never-stops'];
+    assert.deepEqual([n.failedInARow, n.stopped], [4, undefined]);
+    assert.ok(never.state.nextRunAt, 'it never stops');
+  } finally {
+    job.stop();
+    never.stop();
+  }
 });

@@ -15,6 +15,16 @@ import { updateHold } from './update-hold.ts';
 /** How often a scheduled round waiting for Manor's update looks again (update-hold.ts, kit 2.75.2). */
 export const UPDATE_LOOK_MS = 30_000;
 
+/**
+ * How many failed rounds in a row stop a schedule's rounds (kit 2.136.2). The owner, 2026-10-25, after Clerk's round
+ * failed 36 times in a day on an error no round could get past: "We need it to stop trying after 3-5 attempts if it
+ * isnt working". An agent may say otherwise (every()'s `stopAfterFailures`; 0 never stops).
+ */
+export const STOP_AFTER_FAILURES = 3;
+
+/** What a schedule stopped after failing waits for, as its state's and round.json's `waiting` say it. */
+export const stoppedWaiting = (failed: number) => `its rounds stopped after ${failed} failed in a row: they start again once it's updated, or when Run now goes through`;
+
 /** One schedule's rounds, as /api/ping and the page's status pill give them (ISO times). */
 export interface RoundState {
   name: string;
@@ -68,6 +78,14 @@ export interface RoundRecord {
   cpuMs?: number;
   /** The most memory the agent's process held in the round, in megabytes, sampled every few seconds. Since kit 2.56.0. */
   memoryMb?: number;
+  /** How many rounds in a row have failed, this one the last; absent when it didn't fail. Since kit 2.136.2. */
+  failedInARow?: number;
+  /**
+   * Its rounds stopped after STOP_AFTER_FAILURES failed in a row (kit 2.136.2): the agent's version then. No scheduled
+   * round runs until the agent is another version (updated) or a round asked for goes through; `waiting` says so, and
+   * `next` is null.
+   */
+  stopped?: string;
 }
 
 /** The manor's shared clock (kit 2.72.0): the agents' rounds fall on its 30-minute slots, or on a divisor or multiple of them. */
@@ -202,6 +220,17 @@ export function firstRoundDone(name: string): boolean {
   return isObject(was) && wentThroughIn(was)[name] !== undefined;
 }
 
+/**
+ * Whether round.json left schedule `name`'s rounds stopped after failing (RoundRecord's `stopped`) at this version: how
+ * many had failed in a row, or null. Stopped at another version, the agent has been updated since: its rounds go on.
+ */
+function stoppedHere(name: string): number | null {
+  const was = readJson<unknown>(roundFile(), {});
+  const r = isObject(was) && isObject(was.rounds) ? was.rounds[name] : null;
+  if (!isObject(r) || r.stopped !== APP.version) return null;
+  return typeof r.failedInARow === 'number' ? r.failedInARow : STOP_AFTER_FAILURES;
+}
+
 /** Every schedule this process runs, each read when asked. */
 const schedules = new Set<() => RoundState>();
 
@@ -294,6 +323,13 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  *   that never answers, a child process that never ends) can't stop the rounds after it. The job that was let go
  *   may still finish later: then the log says so, and nothing else changes. A job that can stop when asked takes
  *   the signal (`job({ signal })`); one that can't is simply no longer waited for.
+ * - After STOP_AFTER_FAILURES rounds in a row that failed (threw, or ran past their time limit; one that waited for the
+ *   network or its turn is neither a failure nor a round that went through), its scheduled rounds stop (kit 2.136.2), so
+ *   an error no round can get past isn't met again every interval all day. The log says so once; round.json keeps
+ *   `"stopped": "<version>"` with the failed round, its `waiting` saying why and `next` null; its state's `waiting` says
+ *   the same, with no round due. A restart at the same version stays stopped. They start again when the agent is
+ *   updated (another version), or when a round the person asks for (Run now) goes through; one that fails leaves them
+ *   stopped. runSoon() starts none meanwhile. `stopAfterFailures` sets another count; 0 never stops.
  *
  * A scheduled round takes its turn in the work line (pace.ts's inWorkTurn(), kit 2.56.0): a few agents' rounds at a
  * time on this PC, fewer while it is busy, and none while more than the manor's ceiling of its memory is in use (kit
@@ -311,8 +347,14 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
 export function every(
   everyMs: number | (() => number),
   job: (round: { signal: AbortSignal; awake: (what: string) => () => void }) => Promise<void>,
-  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean | (() => boolean); phaseMs?: number; room?: { inUse: () => number | Promise<number>; lookMs?: number } } = {},
+  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean | (() => boolean); phaseMs?: number; room?: { inUse: () => number | Promise<number>; lookMs?: number }; stopAfterFailures?: number } = {},
 ) {
+  const name = opts.name ?? 'round';
+  const stopAfter = opts.stopAfterFailures ?? STOP_AFTER_FAILURES;
+  /** Rounds in a row that failed, and the version its rounds stopped at after too many (null while they go on): round.json's, at this version. */
+  const stoppedBefore = stopAfter > 0 ? stoppedHere(name) : null;
+  let failures = stoppedBefore ?? 0;
+  let halted: string | null = stoppedBefore === null ? null : APP.version;
   let running = false;
   let timer: NodeJS.Timeout | undefined;
   let lastError: string | null = null;
@@ -323,7 +365,7 @@ export function every(
   let lastOffline = false;
   let startedAt: number | null = null;
   /** What the rounds wait for from the person, as the last tick found it. */
-  let waiting: string | null = null;
+  let waiting: string | null = halted ? stoppedWaiting(failures) : null;
   /** When the wait under way ends. */
   let dueAt: number | null = null;
   /** Its first round now: waiting in line, running, or none (RoundState's firstRound). */
@@ -352,6 +394,8 @@ export function every(
   const tick = async (asked = false) => {
     clearTimeout(timer);
     if (running) return;
+    // Stopped after failing too many rounds in a row (kit 2.136.2): only a round the person asks for runs.
+    if (!asked && halted) return;
     // Off duty, only the rounds asked for run.
     if (!asked && !duty().onDuty) {
       if (!stopped) wait();
@@ -368,8 +412,8 @@ export function every(
     waiting = held;
     if (held) {
       if (stopped) return;
-      wait();
-      recordHeld(opts.name ?? 'round', held, interval());
+      if (!halted) wait();
+      recordHeld(name, held, interval());
       return;
     }
     // Manor has an automatic update due for it (update-hold.ts, kit 2.75.2): a scheduled round waits a few minutes, so
@@ -394,7 +438,6 @@ export function every(
     // agent's first in its turn.
     const p = pace();
     void paceProcess(p);
-    const name = opts.name ?? 'round';
     // The heavy first round, asked for or not; only a scheduled one waits its turn.
     const isFirst = !firstRoundDone(name);
     // Which line it waits in (null once it runs), and what the round used: its processor time and its most memory.
@@ -460,6 +503,11 @@ export function every(
       });
       lastError = null;
       lastOk = true;
+      failures = 0;
+      if (halted) {
+        halted = null;
+        console.log(`${new Date().toISOString()} its rounds start again: a round asked for went through`);
+      }
     } catch (e) {
       if (e instanceof LockTimeout || e instanceof QueueFull) {
         // Its turn didn't come before its next round was due: it joins the line again then.
@@ -476,6 +524,7 @@ export function every(
         error = roundError(e);
         offline = await offlineFailure(e).catch(() => false);
         lastOk = offline ? null : false;
+        if (!offline) failures++;
         if (offline) console.log(`${new Date().toISOString()} this PC is offline, so the round waits for the network: ${error}`);
         else console.error(`${new Date().toISOString()} run failed: ${(e as Error).stack ?? e}`);
       }
@@ -495,8 +544,18 @@ export function every(
       startedAt = null;
       const ended = Date.now();
       lastEnded = ended;
-      // A round still running when stop() was called must not set up the next one.
-      if (!stopped) wait();
+      const failedNow = error !== null && !offline;
+      if (failedNow && !halted && stopAfter > 0 && failures >= stopAfter) {
+        halted = APP.version;
+        console.error(`${new Date(ended).toISOString()} ${stoppedWaiting(failures)} (the last: ${error})`);
+      }
+      if (halted) waiting = stoppedWaiting(failures);
+      // A round still running when stop() was called must not set up the next one; nor one whose rounds stopped after failing.
+      if (!stopped && !halted) wait();
+      else if (halted) {
+        clearTimeout(timer);
+        dueAt = null;
+      }
       recordRound(name, {
         started: new Date(started).toISOString(),
         finished: new Date(ended).toISOString(),
@@ -510,12 +569,15 @@ export function every(
         next: state().nextRunAt,
         ...(waitedMs >= 1000 ? { waitedMs } : {}),
         ...measured,
+        ...(failedNow ? { failedInARow: failures } : {}),
+        ...(halted ? { stopped: halted, waiting: stoppedWaiting(failures) } : {}),
       });
     }
   };
   const startPace = pace();
   void paceProcess(startPace);
-  waitFor(opts.firstDelayMs ?? (startPace === 'gentle' ? 120_000 + Math.random() * 780_000 : 30_000 + Math.random() * 150_000));
+  if (halted) console.log(`${new Date().toISOString()} ${name}: ${stoppedWaiting(failures)}`);
+  else waitFor(opts.firstDelayMs ?? (startPace === 'gentle' ? 120_000 + Math.random() * 780_000 : 30_000 + Math.random() * 150_000));
 
   const state = (): RoundState => ({
     name: opts.name ?? 'round',
@@ -524,7 +586,7 @@ export function every(
     lastRunOffline: lastOffline,
     lastError,
     // A wait is kept off duty too, but no round comes of it until the agent is back on duty.
-    nextRunAt: stopped || running || !duty().onDuty || licenseHeld() || needsSettings() ? null : iso(dueAt),
+    nextRunAt: stopped || halted || running || !duty().onDuty || licenseHeld() || needsSettings() ? null : iso(dueAt),
     runningSince: iso(startedAt),
     waiting,
     firstRound: firstNow,
@@ -538,9 +600,9 @@ export function every(
       void tick(true);
       return true;
     },
-    /** Starts a scheduled round now, at the pace (the agent's own reason, not the person's); false as runNow() and off duty. */
+    /** Starts a scheduled round now, at the pace (the agent's own reason, not the person's); false as runNow(), off duty, and once its rounds stopped after failing. */
     runSoon(): boolean {
-      if (running || stopped || licenseHeld() || needsSettings() || !duty().onDuty) return false;
+      if (running || stopped || halted || licenseHeld() || needsSettings() || !duty().onDuty) return false;
       void tick(false);
       return true;
     },
@@ -549,7 +611,7 @@ export function every(
      * Before the first run, and during a run, there's nothing to do: the next wait reads the interval.
      */
     reschedule(): void {
-      if (stopped || running || lastEnded === null) return;
+      if (stopped || halted || running || lastEnded === null) return;
       clearTimeout(timer);
       const now = Date.now();
       waitFor(Math.max(0, dueAfter(lastEnded) - now), now);

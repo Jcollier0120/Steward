@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.232
+
+**It hands out the kit 2.136.2: a staff member whose work keeps failing stops after three tries, instead of trying again all day.**
+
+### What changed
+
+- When a staff member's regular work (its round) fails three times in a row, it stops trying. Until now it tried again at every interval: the Clerk failed 36 times in a day on a problem no try could get past, and Manor counted every one.
+- Its status says its rounds stopped and how they start again; its last error stays on record. It starts again by itself once it's updated, or when you press **Run now** and that round goes through.
+- A round that waited for the network or its turn doesn't count as a failure.
+- The Steward's own rounds follow the same rule.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member takes it with its next update.
+
 ## 0.36.231
 
 **Urgent fix: it hands out the kit 2.136.1. Staff whose latest update signed their scripts can run their PowerShell work again.**
