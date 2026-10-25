@@ -687,19 +687,20 @@ test("an X2 on the 2B with no window or picture cap in its command (as kits 2.78
   };
   const pc = x2Pc(before);
   const r = await refreshNpu(pc.deps);
-  assert.deepEqual(r, { did: 'refreshed', changes: ['--nctx 2560 added', 'GENIEX_IMAGE_MAX_TOKENS=1024 added', 'pictures: at most 1024 tokens'] });
+  assert.deepEqual(r, { did: 'refreshed', changes: ['--nctx 2560 added', 'GENIEX_CLOCK_KEEPER_THREADS=0 added', 'GENIEX_IMAGE_MAX_TOKENS=1024 added', 'pictures: at most 1024 tokens'] });
   assert.ok(pc.did.includes('turn') && pc.did.includes('stop geniex.exe http://127.0.0.1:18181'), pc.did.join(', '));
   assert.deepEqual(pc.npu().chat, now.chat);
   assert.deepEqual(pc.npu().vision, { model: 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0', pictureTokens: 1024 });
   assert.deepEqual(pc.npu().embed, now.embed, 'its embeddings as they were');
   assert.deepEqual(pc.npu().timeouts, MEASURED);
-  assert.match(pc.log.join('\n'), /now start with this kit's command \(2\.75\.0\): --nctx 2560 added; GENIEX_IMAGE_MAX_TOKENS=1024 added; pictures: at most 1024 tokens/);
-  // Set up by kit 2.80.2: GenieX given the same cap as the kit's pictures (its patched plugin reads it), after the same test.
+  assert.match(pc.log.join('\n'), /now start with this kit's command \(2\.75\.0\): --nctx 2560 added; GENIEX_CLOCK_KEEPER_THREADS=0 added; GENIEX_IMAGE_MAX_TOKENS=1024 added; pictures: at most 1024 tokens/);
+  // Set up by kit 2.80.1: GenieX given the same cap as the kit's pictures (kit 2.80.2: its patched plugin reads it), and
+  // its QAIRT clock keeper off (kit 2.136.5), after the same test.
   const lastKit = structuredClone(now) as Record<string, any>;
   delete lastKit.chat.env;
   const capped = x2Pc(lastKit);
-  assert.deepEqual(await refreshNpu(capped.deps), { did: 'refreshed', changes: ['GENIEX_IMAGE_MAX_TOKENS=1024 added'] });
-  assert.deepEqual(capped.npu().chat.env, { GENIEX_IMAGE_MAX_TOKENS: '1024' });
+  assert.deepEqual(await refreshNpu(capped.deps), { did: 'refreshed', changes: ['GENIEX_CLOCK_KEEPER_THREADS=0 added', 'GENIEX_IMAGE_MAX_TOKENS=1024 added'] });
+  assert.deepEqual(capped.npu().chat.env, { GENIEX_CLOCK_KEEPER_THREADS: '0', GENIEX_IMAGE_MAX_TOKENS: '1024' });
   assert.ok(capped.did.includes('stop geniex.exe http://127.0.0.1:18181'), capped.did.join(', '));
   // Set up by this kit: current.
   assert.deepEqual(await refreshNpu(x2Pc(now).deps), { did: 'current' });
@@ -784,7 +785,7 @@ test("an X2 whose NPU reranks (kit 2.100.0): its reranker stopped with the other
   const before = structuredClone(now) as Record<string, any>;
   delete before.chat.env;
   const pc = x2Pc(before);
-  assert.deepEqual(await refreshNpu(pc.deps), { did: 'refreshed', changes: ['GENIEX_IMAGE_MAX_TOKENS=1024 added'] });
+  assert.deepEqual(await refreshNpu(pc.deps), { did: 'refreshed', changes: ['GENIEX_CLOCK_KEEPER_THREADS=0 added', 'GENIEX_IMAGE_MAX_TOKENS=1024 added'] });
   assert.ok(pc.did.includes('stop llama-server.exe http://127.0.0.1:18186'), pc.did.join(', '));
   assert.deepEqual(pc.npu().rerank, now.rerank);
   // A reranker command an older kit wrote: brought to this one's, and said.
@@ -798,6 +799,54 @@ test("an X2 whose NPU reranks (kit 2.100.0): its reranker stopped with the other
   const own = x2Pc(theirs);
   assert.deepEqual(await refreshNpu(own.deps), { did: 'current' });
   assert.deepEqual(own.npu().rerank, theirs.rerank);
+});
+
+test("a Snapdragon set up before kit 2.136.5: GenieX's QAIRT clock keeper turned off (GENIEX_CLOCK_KEEPER_THREADS 0) after the same test, an X Elite on its 4B fallback kept on it, and nothing else of the entry changed", async () => {
+  const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
+  const X1 = 'npu2|30.0.140.1000|2025-03-01|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0D0A&SUBSYS_CRD08380&REV_0001\\2&DABA3FF&0|Snapdragon(R) X Elite - X1E78100 - Qualcomm(R) Hexagon(TM) NPU';
+  const on = (npu: ReturnType<typeof parseNpus>[0], entry: Record<string, any>, o: { idle?: boolean; answers?: string[] } = {}) => {
+    const pc = fakePc(entry, o);
+    pc.deps.detect = async () => (pc.did.push('detect'), { npu, ramBytes: 47.6 * 1024 ** 3 } as any);
+    pc.deps.serverVersion = async () => GENIEX_PIN;
+    return pc;
+  };
+  // An X2 on the 2B, its reranker too, as kits 2.80.2 to 2.136.4 wrote it: GenieX's picture cap alone in its environment.
+  const x2 = parseNpus(X2, 'arm64')[0];
+  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, serverVersion: GENIEX_PIN })!;
+  const file = '%USERPROFILE%\\.manor\\accelerators\\models\\qwen3-reranker-0.6b-q8_0.gguf';
+  const now = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model }, rerank: { file, model: 'qwen3-reranker-0.6b', port: 18186 } }), timeouts: { ...MEASURED } };
+  assert.deepEqual(now.chat!.env, { GENIEX_CLOCK_KEEPER_THREADS: '0', GENIEX_IMAGE_MAX_TOKENS: '1024' });
+  const before = structuredClone(now) as Record<string, any>;
+  delete before.chat.env.GENIEX_CLOCK_KEEPER_THREADS;
+  const pc = on(x2, before);
+  assert.deepEqual(await refreshNpu(pc.deps), { did: 'refreshed', changes: ['GENIEX_CLOCK_KEEPER_THREADS=0 added'] });
+  assert.ok(pc.did.includes('turn') && pc.did.includes('stop geniex.exe http://127.0.0.1:18181'), pc.did.join(', '));
+  assert.deepEqual(pc.npu().chat, now.chat, "GenieX's own command, its environment with the variable");
+  assert.deepEqual(pc.npu().embed, before.embed, 'its embedding server as it was: llama.cpp never reads it');
+  assert.deepEqual(pc.npu().rerank, before.rerank);
+  assert.deepEqual(pc.npu().timeouts, MEASURED, "the PC's own timeouts kept");
+  assert.match(pc.log.join('\n'), /now start with this kit's command \(2\.75\.0\): GENIEX_CLOCK_KEEPER_THREADS=0 added/);
+  assert.deepEqual(await refreshNpu(on(x2, now).deps), { did: 'current' }, 'set up by this kit');
+  // Someone using the NPU: nothing stopped, so a later look tries again; a test that fails keeps the old command.
+  const busy = on(x2, before, { idle: false });
+  assert.deepEqual(await refreshNpu(busy.deps), { did: 'busy' });
+  assert.ok(!busy.did.includes('turn'), busy.did.join(', '));
+  assert.deepEqual(busy.npu().chat, before.chat);
+  const failed = on(x2, before, { answers: ['chat answered nonsense'] });
+  assert.equal((await refreshNpu(failed.deps)).did, 'failed');
+  assert.deepEqual(failed.npu().chat, before.chat, 'the old command stays');
+  // An X Elite on its fallback, Qualcomm's QAIRT 4B, whose clock keeper this is: the variable, the 4B kept.
+  const x1 = parseNpus(X1, 'arm64')[0];
+  const plan1 = V.planNpu({ support: x1, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, fallback: true, serverVersion: GENIEX_PIN })!;
+  const fourB = { ...V.npuEntry(plan1.route, { tools, exe: plan1.exe, port: plan1.port, portable: (p) => portablePath(p, home), embed: { exe: plan1.embed!.exe, model: plan1.embed!.model } }), timeouts: { ...MEASURED } };
+  assert.equal(fourB.chat!.model, 'qualcomm/Qwen3-VL-4B-Instruct:W4A16');
+  const older = structuredClone(fourB) as Record<string, any>;
+  delete older.chat.env;
+  const x1Pc = on(x1, older);
+  assert.deepEqual(await refreshNpu(x1Pc.deps), { did: 'refreshed', changes: ['GENIEX_CLOCK_KEEPER_THREADS=0 added'] });
+  assert.equal(x1Pc.npu().chat.model, 'qualcomm/Qwen3-VL-4B-Instruct:W4A16');
+  assert.deepEqual(x1Pc.npu().chat.env, { GENIEX_CLOCK_KEEPER_THREADS: '0' });
+  assert.deepEqual(x1Pc.npu().embed, older.embed);
 });
 
 test("the changed arguments, as the keeper's log says them", () => {

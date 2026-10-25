@@ -2,6 +2,41 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.136.5
+
+**GenieX's QAIRT clock keeper is off: GENIEX_CLOCK_KEEPER_THREADS 0 goes in the environment of every GenieX the kit starts, so AI Hub's 4B no longer keeps a processor core spinning through every answer (qualcomm/GenieX#1330). Speed, memory and answers are unchanged. A PC set up before gets it from npu-refresh, after its test. The 4B's X2 pins are AI Hub's v0.65.0 build, with the earlier build kept.**
+
+### What changed
+
+- **npu-vendors.json:** the qualcomm route's `env` is `{ "GENIEX_CLOCK_KEEPER_THREADS": "0" }`.
+  - `npuEntry` puts it in the chat entry's `env`, beside GENIEX_IMAGE_MAX_TOKENS, and `playedRoute` keeps it.
+  - The embedding server and the reranker (llama-server) don't get it. Nor do the Intel and AMD entries.
+  - `serverEnv` replaces a variable of that name in any case, so one set on the PC doesn't turn the clock keeper back on.
+- **Measured on the X2 Elite with the 4B,** npu-bench quick, three runs each way, interleaved (spec/NPU-VENDORS.md, GenieX's QAIRT clock keeper):
+
+  | | On (before) | Off (now) |
+  |---|---|---|
+  | GenieX's processor while it writes | 1.04 cores, 26.1 ms a token | 0.05 cores, 1.2 ms a token |
+  | GenieX's processor over the whole run | 0.83 cores | 0.23 cores |
+  | Writing | 40.7 tokens a second | 40.5 tokens a second |
+  | First token after 512, 1,024 and ~2,050 tokens | 247, 398, 933 ms | 243, 398, 924 ms |
+  | Working set / private memory | 6.12 / 1.69 GB | 6.12 / 1.69 GB |
+
+  - The answers that differed, asked 30 more times each way: 59 of 90 with it on, 56 of 90 with it off, missed the same ways in both.
+  - Energy isn't measured yet.
+  - GenieX's llama.cpp plugin, which runs the 2B, has no clock keeper, so there the variable changes nothing.
+- **A PC set up before gets it from npu-refresh,** with no new setup.
+  - Its keeper sees `GENIEX_CLOCK_KEEPER_THREADS=0 added`. Once the NPU is idle, it stops GenieX in the NPU's turn, tests the new entry and writes it. If the test fails, it keeps the old entry.
+  - An X Elite on its 4B fallback keeps the 4B.
+- **The 4B's X2 pins** (`pinned["snapdragon-x2"]`) are now AI Hub's current build: models release v0.65.0, QAIRT 2.50.0, pulled 2026-10-25.
+  - It replaced the 2026-10-04 build the kit had pinned. That build is kept in `earlier`, so an X2 that pulled it still passes `checkPinned`.
+  - On an X2, only npu-bench's `--model qualcomm/Qwen3-VL-4B-Instruct:W4A16` pulls the 4B.
+- **Agents need nothing of their own.** Reeve and the Smith start GenieX from its config.json entry, whose `env` `serverEnv` already applies.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The first time the manor's keeper (the Smith, else Reeve) runs this kit with the NPU idle, it restarts GenieX once to test the new entry.
+
 ## 2.136.4
 
 **A kit entry marked urgent makes every agent's kit bump an urgent fix too: the Steward rolls that kit out in its own urgent build and builds each agent as its bump merges, in minutes rather than at the next build. spec/RELEASE-NOTES.md says so.**

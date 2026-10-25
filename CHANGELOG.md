@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.235
+
+**It hands out the kit 2.136.5: on Snapdragon PCs, Qualcomm's 4B model on the NPU no longer keeps a processor core busy while it answers.**
+
+### What changed
+
+- On Snapdragon PCs that run Qualcomm's 4B model on the NPU (a first-generation X Elite where the 2B didn't set up), GenieX kept one processor core spinning through every answer, for no gain in speed. That's turned off now.
+  - On a Snapdragon X2 Elite, the processor is busy about a twentieth as much while it answers: 0.05 cores instead of 1.04.
+  - The speed, the memory and the answers are the same.
+  - So there's less heat and fan noise, and probably longer battery life (not measured yet).
+- PCs already set up get it on their own. Once the NPU is idle, the manor restarts its model once, tests it and keeps it. If the test fails, it leaves things as they were.
+- The 4B on the Snapdragon X2 is now checked against Qualcomm's current download, as well as the one before it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The NPU's model restarts once, at a quiet moment, for a few seconds.
+
 ## 0.36.234
 
 **It hands out the kit 2.136.4: an urgent fix to the kit now reaches every agent in about half an hour, instead of waiting for the next build.**
