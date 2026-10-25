@@ -184,8 +184,8 @@ test("the shipped catalog patches the X2 over GenieX 0.8.0, 0.9.1 and 0.9.3, and
   }
   assert.ok(existsSync(new URL('./fixture/src/kit/geniex/LICENSE', import.meta.url)), "GenieX's license travels with it");
   for (const [id, g] of Object.entries(route.generations)) if (id !== 'snapdragon-x2') assert.equal(g.pluginPatch, undefined, id);
-  // GenieX is given the vision model's picture cap, which the build reads.
-  assert.deepEqual(x2Entry().chat.env, { GENIEX_IMAGE_MAX_TOKENS: '1024' });
+  // GenieX is given the vision model's picture cap, which the build reads, and its QAIRT clock keeper off (kit 2.136.5).
+  assert.deepEqual(x2Entry().chat.env, { GENIEX_CLOCK_KEEPER_THREADS: '0', GENIEX_IMAGE_MAX_TOKENS: '1024' });
 });
 
 test("a build that doesn't answer its test: GenieX's own back, quietly, and this kit doesn't try again", async () => {

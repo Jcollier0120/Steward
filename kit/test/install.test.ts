@@ -629,6 +629,8 @@ test("--purge removes only a folder of the agent's own: never a drive, the profi
   mkdirSync(stuff, { recursive: true });
   assert.match(String(refused(stuff)), /isn't named for/, 'a folder of something else');
   mkdirSync(appFolder(stuff), { recursive: true });
+  assert.match(String(refused(stuff)), /isn't named for/, "an app folder that isn't a release of the agent's doesn't make it the agent's");
+  cpSync(path.join(p.release, 'release.json'), path.join(appFolder(stuff), 'release.json'));
   assert.equal(refused(stuff), null, 'unless it holds a copy of the agent');
   const clone = path.join(p.dir, `${APP.id}-clone`);
   mkdirSync(path.join(clone, '.git'), { recursive: true });
@@ -640,9 +642,80 @@ test("--purge removes only a folder of the agent's own: never a drive, the profi
   writeFileSync(path.join(projects, 'mine', 'work.txt'), 'mine');
   const f = fakes({ root: p.release, data: projects });
   assert.equal(await uninstall({ purge: true }, f.deps), 2);
-  assert.match(f.lines.join('\n'), /won't remove it/);
+  assert.match(f.lines.join('\n'), /isn't one uninstall may touch: it isn't named for/);
   assert.deepEqual(f.calls, []);
   assert.ok(existsSync(path.join(projects, 'mine', 'work.txt')));
+
+  // The profile, holding a copy of the agent: a plain uninstall would remove only that copy, but --purge nothing.
+  const pf = fakes({ root: p.release, data: profile });
+  pf.deps.home = profile;
+  mkdirSync(appFolder(profile), { recursive: true });
+  cpSync(path.join(p.release, 'release.json'), path.join(appFolder(profile), 'release.json'));
+  assert.equal(await uninstall({ purge: true }, pf.deps), 2);
+  assert.match(pf.lines.join('\n'), /--purge won't remove it/);
+  assert.deepEqual(pf.calls, []);
+  assert.ok(existsSync(appFolder(profile)));
+});
+
+test("an empty, relative or someone else's data folder: uninstall and install refuse, and touch nothing, not even a task (kit 2.136.6)", async (t) => {
+  const p = place();
+  // `.\app` in the folder the command runs from, where an empty or relative <ID>_HOME put the program: the person's own.
+  const cwd = path.join(p.dir, 'somewhere');
+  const theirs = appFolder(cwd);
+  mkdirSync(theirs, { recursive: true });
+  writeFileSync(path.join(theirs, 'mine.txt'), 'mine');
+  const was = process.cwd();
+  process.chdir(cwd);
+  t.after(() => process.chdir(was));
+  const untouched = (f: ReturnType<typeof fakes>, what: string) => {
+    assert.deepEqual(f.calls, [], `${what}: no task asked about, ended or deleted`);
+    assert.equal(f.state.shutdowns, 0, `${what}: no page ended`);
+    assert.ok(f.state.tasks.has(TASK_NAME), `${what}: the task stays`);
+    assert.deepEqual(readdirSync(cwd), ['app'], `${what}: no app.new or app.old beside it`);
+    assert.deepEqual(readdirSync(theirs), ['mine.txt'], `${what}: the folder that was .\\app is as it was`);
+  };
+  for (const data of ['', '  ', 'relative', '.', 'app\\..', '\\on-this-drive', 'C:on-this-drive']) {
+    for (const purge of [false, true]) {
+      const f = fakes({ root: p.release, data });
+      f.state.tasks.set(TASK_NAME, MY_SID);
+      assert.equal(await uninstall({ purge }, f.deps), 2, `uninstall${purge ? ' --purge' : ''} with ${JSON.stringify(data)}`);
+      assert.match(f.lines.join('\n'), /isn't one uninstall may touch: it (is empty|isn't a full path, such as C:\\Users\\you\\\.fixture)\. So nothing was removed, and no task deleted\. Set FIXTURE_HOME to the full path/);
+      untouched(f, `uninstall with ${JSON.stringify(data)}`);
+    }
+    const i = fakes({ root: p.release, data });
+    i.state.tasks.set(TASK_NAME, MY_SID);
+    assert.equal(await install({}, i.deps), 2, `install with ${JSON.stringify(data)}`);
+    assert.match(i.lines.join('\n'), /isn't one install may touch: .*So nothing was installed\./);
+    untouched(i, `install with ${JSON.stringify(data)}`);
+  }
+
+  // A full path that isn't the agent's: a folder of the person's whose app is theirs.
+  const f = fakes({ root: p.release, data: cwd });
+  f.state.tasks.set(TASK_NAME, MY_SID);
+  assert.equal(await uninstall({}, f.deps), 2);
+  assert.match(f.lines.join('\n'), /isn't one uninstall may touch: its .*app isn't Fixture's: it holds no release\.json of Fixture's/);
+  untouched(f, "someone else's app");
+  const i = fakes({ root: p.release, data: cwd });
+  i.state.tasks.set(TASK_NAME, MY_SID);
+  assert.equal(await install({}, i.deps), 2);
+  untouched(i, "install over someone else's app");
+  // Nor one with no app at all, but not the agent's either: nothing to uninstall there.
+  const empty = path.join(p.dir, 'empty');
+  mkdirSync(empty);
+  const e = fakes({ root: p.release, data: empty });
+  assert.equal(await uninstall({}, e.deps), 2);
+  assert.match(e.lines.join('\n'), /it isn't named for Fixture, and holds no copy of it/);
+  assert.deepEqual(e.calls, []);
+
+  // The agent installed into a folder not named for it (a <ID>_HOME of D:\data, say): its copy says it's the agent's.
+  const elsewhere = path.join(p.dir, 'data');
+  const g = fakes({ root: p.release, data: elsewhere });
+  assert.equal(await install({ noStart: true }, g.deps), 0, g.lines.join('\n'));
+  assert.equal(await install({ noStart: true }, g.deps), 0, 'and updated there');
+  writeFileSync(path.join(elsewhere, 'state.json'), '{}');
+  assert.equal(await uninstall({}, g.deps), 0, g.lines.join('\n'));
+  assert.ok(!existsSync(appFolder(elsewhere)));
+  assert.ok(existsSync(path.join(elsewhere, 'state.json')), 'the data stays');
 });
 
 test('a mistyped option is refused before anything is done', async () => {

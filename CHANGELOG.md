@@ -2,6 +2,43 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.236
+
+**It hands out the kit 2.136.6: safer uninstalls, the staff's own signed FFmpeg first, and local AI setup that fits your graphics driver and your PC's memory.**
+
+### What changed
+
+- **Uninstall and install check the staff member's folder first.** If its home folder setting is empty, isn't a full path such as `C:\Users\you\.miller`, or points at a folder that isn't that staff member's, they stop and say how to fix it. They delete nothing and leave its scheduled task alone. Before, an empty setting could make an uninstall delete a folder named `app` in whatever folder it ran from.
+- **Video uses the staff's own FFmpeg.** It is signed and LGPL. It now comes before another FFmpeg on the PC. Heiward's FFmpeg is used only while the staff's own can't be downloaded, and the page says so.
+- **Setting up local AI fits your PC better:**
+  - An NVIDIA card whose driver is older than the CUDA build needs (551.61) gets the Vulkan build instead, which works with it. The plan says so and suggests updating the driver.
+  - A graphics card that already runs the CUDA build keeps it.
+  - Graphics built into the processor share the PC's memory. They are set up only when there's no graphics card with memory of its own, and the plan names each one left out.
+  - Built-in graphics and the processor now get only what fits in 40% of the PC's memory. An 8 GB PC chats, without pictures or search. A PC with 12 GB or more gets chat, pictures and search, as before. On a PC with too little memory even for chat, nothing is set up, and the plan says why.
+  - A PC whose only graphics card can't run the models now uses its processor instead.
+  - What you choose to serve yourself is set up as you ask.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Local AI that's already set up stays as it is. The new choices apply the next time you set it up.
+
+## 0.36.235
+
+**It hands out the kit 2.136.5: on Snapdragon PCs, Qualcomm's 4B model on the NPU no longer keeps a processor core busy while it answers.**
+
+### What changed
+
+- On Snapdragon PCs that run Qualcomm's 4B model on the NPU (a first-generation X Elite where the 2B didn't set up), GenieX kept one processor core spinning through every answer, for no gain in speed. That's turned off now.
+  - On a Snapdragon X2 Elite, the processor is busy about a twentieth as much while it answers: 0.05 cores instead of 1.04.
+  - The speed, the memory and the answers are the same.
+  - So there's less heat and fan noise, and probably longer battery life (not measured yet).
+- PCs already set up get it on their own. Once the NPU is idle, the manor restarts its model once, tests it and keeps it. If the test fails, it leaves things as they were.
+- The 4B on the Snapdragon X2 is now checked against Qualcomm's current download, as well as the one before it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The NPU's model restarts once, at a quiet moment, for a few seconds.
+
 ## 0.36.234
 
 **It hands out the kit 2.136.4: an urgent fix to the kit now reaches every agent in about half an hour, instead of waiting for the next build.**

@@ -333,9 +333,55 @@ export function purgeRefusal(dataDir: string, home: string, env: NodeJS.ProcessE
     ...['Desktop', 'Documents', 'Downloads', 'Pictures', 'Videos', 'Music', 'OneDrive', 'source', 'Projects'].map((f) => (profile ? path.join(profile, f) : ''))];
   for (const s of shared) if (s && inside(s, dir)) return samePath(s, dir) ? `it is ${s}` : `it holds ${s}`;
   if (existsSync(path.join(dir, '.git'))) return 'it is a git repository';
-  const name = path.basename(dir).replace(/^\./, '').toLowerCase();
-  if (!name.includes(APP.id.toLowerCase()) && !existsSync(appFolder(dir))) return `it isn't named for ${APP.name}, and holds no copy of it`;
+  if (!namedForApp(dir) && !holdsOwnCopy(dir)) return `it isn't named for ${APP.name}, and holds no copy of it`;
   return null;
+}
+
+/** The environment variable that names the data folder: FIXTURE_HOME, STEWARD_HOME (each agent's placeFor). */
+const homeVariable = () => `${APP.id.toUpperCase().replace(/-/g, '_')}_HOME`;
+
+/** Whether a folder's name is the agent's (`.<id>`, `.<id>-dev`, or a `<ID>_HOME` such as `D:\data\<id>`). */
+const namedForApp = (dir: string) => path.basename(dir).replace(/^\./, '').toLowerCase().includes(APP.id.toLowerCase());
+
+/**
+ * Whether a folder holds a copy of this agent: its app\release.json names it, or the release.json of the copy an
+ * update keeps beside it (app.old, where a swap never finished; app.prev, during a probation). Manor's own uninstall asks
+ * the same of Manor's folder (Manor's src/purge.ts).
+ */
+function holdsOwnCopy(dir: string): boolean {
+  const app = appFolder(dir);
+  return [app, `${app}.old`, `${app}.prev`].some((a) => readRelease(a)?.id === APP.id);
+}
+
+/**
+ * Why install and uninstall won't touch `dataDir` at all, or null when they may (kit 2.136.6). `<ID>_HOME` can be set to
+ * anything, and an empty or relative one made the program's folder `.\app` in whatever folder the command ran from: a
+ * plain uninstall deleted it, and an install moved it aside and deleted it. So the data folder must be a full path
+ * (`C:\…`, or `\\server\share\…`), and one that holds an `app` must be the agent's: named for it, or that app (or a copy
+ * an update keeps beside it) is a release of it. A first install into a folder with no `app` is any full path's.
+ * Uninstall asks more (uninstallRefusal).
+ */
+export function homeRefusal(dataDir: string): string | null {
+  if (!dataDir.trim()) return 'it is empty';
+  if (!/^([a-z]:[\\/]|[\\/]{2}[^\\/])/i.test(dataDir)) return "it isn't a full path, such as C:\\Users\\you\\." + APP.id;
+  const app = appFolder(dataDir);
+  if (existsSync(app) && !namedForApp(dataDir) && !holdsOwnCopy(dataDir)) return `its ${app} isn't ${APP.name}'s: it holds no release.json of ${APP.name}'s, and the folder isn't named for it`;
+  return null;
+}
+
+/**
+ * Why uninstall won't touch `dataDir` at all, or null when it may (kit 2.136.6): homeRefusal's, and a folder that isn't
+ * the agent's (neither named for it nor holding a copy of it), since uninstall deletes what it finds there. --purge asks
+ * purgeRefusal's too.
+ */
+export function uninstallRefusal(dataDir: string): string | null {
+  return homeRefusal(dataDir) ?? (namedForApp(dataDir) || holdsOwnCopy(dataDir) ? null : `it isn't named for ${APP.name}, and holds no copy of it`);
+}
+
+/** What install and uninstall say when they won't touch the data folder (homeRefusal, uninstallRefusal), and what to do. */
+export function refusedHomeLine(dataDir: string, why: string, cmd: 'install' | 'uninstall'): string {
+  const v = homeVariable();
+  return `${APP.name}'s data folder${dataDir.trim() ? `, ${dataDir},` : ''} isn't one ${cmd} may touch: ${why}. So nothing was ${cmd === 'install' ? 'installed' : 'removed, and no task deleted'}. Set ${v} to the full path of ${APP.name}'s own folder, or remove ${v} to use %USERPROFILE%\\.${APP.id}, and ${cmd} again.`;
 }
 
 const quoted = (args: string[]) => args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ');
@@ -493,6 +539,12 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     out(`${d.root} isn't a release: it has no release.json. Build one in a checkout with: npm run release`);
     return 2;
   }
+  // An empty or relative data folder, or one whose app isn't this agent's: an update would move that app aside and delete it.
+  const badHome = homeRefusal(d.dataDir);
+  if (badHome) {
+    out(refusedHomeLine(d.dataDir, badHome, 'install'));
+    return 2;
+  }
   const app = appFolder(d.dataDir);
   if (samePath(d.root, app)) {
     out(`This is the installed copy (${app}). To update it, install a newer release: npm run release -- --install in a checkout, or node src\\cli.ts install in an unpacked release.`);
@@ -644,6 +696,12 @@ export async function uninstall(opts: { purge?: boolean; dryRun?: boolean } = {}
     return 2;
   }
   const app = appFolder(d.dataDir);
+  // An empty, relative or someone else's data folder: nothing is touched, its tasks neither (kit 2.136.6).
+  const notOurs = uninstallRefusal(d.dataDir);
+  if (notOurs) {
+    out(refusedHomeLine(d.dataDir, notOurs, 'uninstall'));
+    return 2;
+  }
   const refused = opts.purge ? purgeRefusal(d.dataDir, d.home) : null;
   if (refused) {
     out(`${d.dataDir} is not a folder of ${APP.name}'s own (${refused}), so --purge won't remove it, nor anything else. Uninstall without --purge, and remove what you no longer want from it yourself.`);

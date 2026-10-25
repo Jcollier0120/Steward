@@ -562,6 +562,9 @@
         "--keepalive",
         "3600"
       ],
+      "env": {
+        "GENIEX_CLOCK_KEEPER_THREADS": "0"
+      },
       "pictureTokensEnv": "GENIEX_IMAGE_MAX_TOKENS",
       "models": [
         {
@@ -664,26 +667,54 @@
                   "sha256": "ef223ee4c21e85d8387871bdfc0164979abe34a6d30dcc7b43abbde05904d750"
                 },
                 "part1_of_4.bin": {
-                  "size": 491425792,
-                  "sha256": "5514e142d35de813420c2563053670438b2fa45862c2af116e6e30a9037f2fa3"
+                  "size": 490795008,
+                  "sha256": "833c7697e3451071105c124e4e54467e4062324cd878e49073c9c92022e815f0"
                 },
                 "part2_of_4.bin": {
-                  "size": 490844160,
-                  "sha256": "d021d7bcf00a8d17dce4c7037ab9979d0b190bdf6c1df7308e48d33e7b798a0a"
+                  "size": 490332160,
+                  "sha256": "cafbb49158566d1a8730d20d9608ad30f883141fab6dabbef25f3cf334429d05"
                 },
                 "part3_of_4.bin": {
-                  "size": 490848256,
-                  "sha256": "104a5c6ffeca528bdc60a5263f514d4a14f4969e0f3c80bef5132351ad6ee98a"
+                  "size": 490340352,
+                  "sha256": "57fc416723d7f6439e71b0f51c7939af633d82423ac3bfa1fab0c8c180937b44"
                 },
                 "part4_of_4.bin": {
-                  "size": 890478592,
-                  "sha256": "f67d5933b15a369896274783f11748c9047db7fe34bc36cb4c3b481d71b916d5"
+                  "size": 888221696,
+                  "sha256": "6d45a5fe0218f19d385703a378262d46b4dc1fe967dfa93b33b95e41689761d4"
                 },
                 "vision_encoder.bin": {
-                  "size": 429076480,
-                  "sha256": "390d254158c04eddad53c7bd1e9b29b6bca947f758888f46afb93b65ab12daf8"
+                  "size": 430364072,
+                  "sha256": "d87804c9707c26efe7b920061ab4c4e788fc7180a83d9852b7f39cd754ef6520"
                 }
-              }
+              },
+              "earlier": [
+                {
+                  "embedding_weights.raw": {
+                    "size": 1555824640,
+                    "sha256": "ef223ee4c21e85d8387871bdfc0164979abe34a6d30dcc7b43abbde05904d750"
+                  },
+                  "part1_of_4.bin": {
+                    "size": 491425792,
+                    "sha256": "5514e142d35de813420c2563053670438b2fa45862c2af116e6e30a9037f2fa3"
+                  },
+                  "part2_of_4.bin": {
+                    "size": 490844160,
+                    "sha256": "d021d7bcf00a8d17dce4c7037ab9979d0b190bdf6c1df7308e48d33e7b798a0a"
+                  },
+                  "part3_of_4.bin": {
+                    "size": 490848256,
+                    "sha256": "104a5c6ffeca528bdc60a5263f514d4a14f4969e0f3c80bef5132351ad6ee98a"
+                  },
+                  "part4_of_4.bin": {
+                    "size": 890478592,
+                    "sha256": "f67d5933b15a369896274783f11748c9047db7fe34bc36cb4c3b481d71b916d5"
+                  },
+                  "vision_encoder.bin": {
+                    "size": 429076480,
+                    "sha256": "390d254158c04eddad53c7bd1e9b29b6bca947f758888f46afb93b65ab12daf8"
+                  }
+                }
+              ]
             }
           },
           "present": "%USERPROFILE%\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json"

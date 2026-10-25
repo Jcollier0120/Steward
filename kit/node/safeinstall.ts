@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { APP, port } from '../app.ts';
 import { flushTree } from './flush.ts';
-import { appFolder, defaultDeps, finishSwap, install, OLD_TASK_NAME, readRelease, replaceContents, runOwnTask, TASK_NAME, waitForPage, type InstallDeps } from './install.ts';
+import { appFolder, defaultDeps, finishSwap, homeRefusal, install, OLD_TASK_NAME, readRelease, refusedHomeLine, replaceContents, runOwnTask, TASK_NAME, waitForPage, type InstallDeps } from './install.ts';
 import { endProcesses, pagesFrom } from './native.ts';
 import { compareVersions } from './update-hold.ts';
 import { ping } from './service.ts';
@@ -304,6 +304,12 @@ export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean; a
   const release = d.dev ? null : readRelease(d.root);
   // A checkout, not a release, or a dry run: the kit's install says what it says, and changes nothing.
   if (!release || opts.dryRun) return install(opts, d);
+  // A data folder install won't touch (kit 2.136.6) is refused before the swap below is finished or app kept in app.prev.
+  const badHome = homeRefusal(d.dataDir);
+  if (badHome) {
+    out(refusedHomeLine(d.dataDir, badHome, 'install'));
+    return 2;
+  }
   const app = appFolder(d.dataDir);
   // An earlier install's swap that never finished (any kit's) left the installed copy in app.old: back in app first, so
   // this is the update it is, guarded as any other (kit 2.96.2). Before the flag's refusal too: it mends the agent.

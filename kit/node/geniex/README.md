@@ -84,6 +84,8 @@ GenieX's plugin starts one thread for each of the processor's math cores (18 on 
 
 Fewer threads did as well with poll 0 (1 to 8: 0.03 to 0.05 cores) and not with poll 50 (4 threads: 0.83 cores), so the build keeps GenieX's thread count and only changes the poll.
 
+GenieX's other plugin, QAIRT's (AI Hub's builds, such as the 4B), spins a thread of its own through every answer, its "clock keeper" (qualcomm/GenieX#1330). No build is needed for that one: the kit sets GENIEX_CLOCK_KEEPER_THREADS to 0 in GenieX's environment (kit 2.136.5), which took the 4B from 1.04 cores busy while it writes to 0.05 at the same speed (`spec/NPU-VENDORS.md`, GenieX's QAIRT clock keeper).
+
 Built with `0.9.1/build-geniex-plugin.bat`, the same way as 0.8.0's (set its SRC and OUT to a clone of v0.9.1 with the patch applied, and its llama.cpp submodule at e467e5b). Signed with Castellan's certificate (Certum, timestamped). SHA-256 `8205873dbd59823b6d20698d8072f9e1eaabb8c4c04b806df095cc221340eb0a`, 370,768 bytes.
 
 ## GenieX 0.9.3
