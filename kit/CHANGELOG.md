@@ -2,6 +2,47 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.135.5
+
+**On Intel, a ticked reranker runs on the graphics card beside the NPU with "Use the graphics card for models when there's an NPU" off, Manor's default: started by the first rerank, stopped once unused. The same ranks as the processor's, in about half the time and a hundredth of its processor time. Chat stays on the NPU.**
+
+### What changed
+
+- **The owner's ruling (2026-10-24):** "Yes: on Intel, a ticked reranker goes to the graphics card on demand even with the switch off, like AMD's pictures; it stops when idle."
+- **Before this, with the switch off, a ticked reranker didn't run on Intel.** The Smith's Set up names the kinds, so the card was set up with the reranker, the switch on or off. Then the core's rule beside the NPU (`withoutGpuBesideNpu`) took the card's reranker away from every request, and no Intel NPU reranks. Unless the processor had been set up for it, Reeve searched without it.
+- **The rule is data:** Intel's route in npu-vendors.json has an `order` of its own (`routes.intel.order`, NpuRoute's new `order`): `rerank`, the graphics card, then the processor, for every generation, an unknown one too. `workOrderFor` puts a generation's own order over its route's, work by work.
+  - AMD's route has none: its reranker waits for its own VitisAI trial. The Snapdragons' have none: an X2's NPU reranks.
+  - Another vendor joins by data alone: an `order.rerank` with the card first.
+- **The core:** a work order may order a reranker (`OrderedWork`, `ORDERED_WORKS`). `cardWorkBesideNpu` keeps a card's reranker where the order puts the card first for it, and `withoutGpuBesideNpu` keeps it on the card's copy. Never chat, as before.
+- **config.json's `rerankOrder`:** the reranker's order is written apart from `workOrder`. A kit before 2.135.5 refuses a `workOrder` with any work but chat, vision and embed, and would then refuse every later write of config.json (the Smith's Settings, the keeper's look).
+  - The core's `workOrderIn(raw)` reads the two as one work order. `readWorkOrder` reads `workOrder` alone, as before.
+  - setup.ts' `withWorkOrder` writes both, each taken out when the order has none.
+  - `validateAccelerators` checks `rerankOrder` as one work's order, and still names a `rerank` in `workOrder`.
+  - `rerankOrder` is in `KEEPER_KEYS` and `ACCELERATOR_KEYS`, so it moves and is mirrored with the rest.
+- **Every caller follows it:**
+  - npu.ts' requests: a rerank goes to the card and starts its server.
+  - keeper.ts' `gpuKeptOut`, `cardOnDemand` and `reapedServers`: the keeper stops the card's rerank server after `gpuIdleStopMinutes` unused (5 on a PC under 20 GB) and never starts it.
+  - setup.ts: a ticked reranker goes on the card, not the processor, the switch on or off, and `rerankOrder` is written.
+  - npu-refresh.ts' `orderNow`: the keeper's look writes `rerankOrder` once for this kit, so a PC set up before gets it without being set up again.
+- **A PC set up before:** one whose card has the reranker uses it as soon as the keeper's look has written the order. One whose processor took it gains the card's at set-up-again (`orderAdds`, as AMD's pictures in kit 2.135.3), and the processor's stays, next in the order. One with no reranker gains none.
+- **What was measured** (Reeve's 23 search questions, each one's first ten files from its keyword search, about 500 tokens a file; a Core Ultra 5 225U's Intel Graphics, 16 GB; Qwen3-Reranker-0.6B Q8_0 on llama.cpp b11734 with the kit's flags; 2026-10-24):
+  - Blended as Reeve's search blends: the right file first for 12 of 23, in the top five for 18, mean reciprocal rank 0.621, on the card and the processor alike. Keyword search alone: 8, 17, 0.502.
+  - Ten files: 7.9 s median (p90 8.6) on the card, 16.2 s (p90 17.7) on the processor.
+  - The processor's time a question: 1.67 s with the card, 193 s on the processor.
+  - Memory while it runs: about 1.9 GB on the card (it shares the PC's), 0.66 GB on the processor, freed when the server stops.
+  - Batching the ten files otherwise moved the card's times by under 5%. Energy isn't measured yet.
+- **Tests:**
+  - Intel with the switch off: the card keeps its reranker alone beside the NPU, its server started by the first rerank and stopped by the keeper once unused, never started by it. A person's `acceleratorOrder` keeps it out. The switch on is unchanged.
+  - The X2 keeps its NPU reranker, the card's staying out. AMD's card reranker stays out for now.
+  - Setup on Intel: a ticked reranker on the card, not the processor, `rerankOrder` written and no `workOrder`; nothing ticked, as before.
+  - The update path: the keeper's look writes `rerankOrder` to an Intel PC set up before, and takes both orders out where the generation has none. A processor's reranker gains the card's at set-up-again; a card that has one, or a PC with none, gains nothing.
+  - config.json: `rerankOrder` checked and read, `withWorkOrder` writing the two apart; new accelerator vectors.
+- **Docs:** NPU-VENDORS.md (a new The reranker on Intel's graphics card; No reranker on Intel's NPU; Each work's order on a generation) and ACCELERATORS.md (`workOrder`, `rerankOrder`, set up again, The graphics card beside the NPU).
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent that routes its own requests with `withoutGpuBesideNpu` (Reeve's router) should read the order with `workOrderIn(raw)`, not `readWorkOrder(raw.workOrder)`, so it sees `rerankOrder` too.
+
 ## 2.135.4
 
 **A 16 GB Snapdragon X2 reranks on its NPU, beside chat and embeddings, as a bigger PC does. Measured there with a 16 GB PC's memory: nothing failed, chat wasn't slowed, and the NPU held 4.7 GB against its 6.2 GB share.**

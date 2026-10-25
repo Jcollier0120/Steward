@@ -417,7 +417,7 @@ const isHttpUrl = (s: unknown) => {
   }
 };
 
-/** What's wrong with config.json's accelerators, acceleratorOrder and workOrder, one line each; empty when nothing is. */
+/** What's wrong with config.json's accelerators, acceleratorOrder, workOrder and rerankOrder, one line each; empty when nothing is. */
 export function validateAccelerators(raw: Record<string, any> | null | undefined): string[] {
   const problems: string[] = [];
   const r = raw && typeof raw === 'object' ? raw : {};
@@ -496,15 +496,29 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
     if (!wo || typeof wo !== 'object' || Array.isArray(wo)) problems.push('workOrder must be an object of chat, vision and embed, each its devices in order');
     else
       for (const [w, o] of Object.entries(wo as Record<string, any>)) {
-        const devices = o && typeof o === 'object' ? o.devices : undefined;
         if (!(core.WORKS as readonly string[]).includes(w)) problems.push(`workOrder.${w}: only chat, vision and embed have an order`);
-        else if (!Array.isArray(devices) || !devices.length || devices.some((d: unknown) => d !== 'npu' && d !== 'gpu' && d !== 'cpu') || new Set(devices).size !== devices.length)
-          problems.push(`workOrder.${w}.devices must list npu, gpu and cpu, each at most once, first preferred`);
-        else if (o.runningFirst !== undefined && typeof o.runningFirst !== 'boolean') problems.push(`workOrder.${w}.runningFirst must be true or false`);
-        else if (o.batchAt !== undefined && !(Number.isInteger(o.batchAt) && o.batchAt >= 2)) problems.push(`workOrder.${w}.batchAt must be a whole number, 2 or more`);
+        else {
+          const problem = orderProblem(`workOrder.${w}`, o);
+          if (problem) problems.push(problem);
+        }
       }
   }
+  // A reranker's order (kit 2.135.5), apart from workOrder: a kit before refuses any work there but those three.
+  if (r.rerankOrder !== undefined) {
+    const problem = orderProblem('rerankOrder', r.rerankOrder);
+    if (problem) problems.push(problem);
+  }
   return problems;
+}
+
+/** What's wrong with one work's order as written (`at` saying where), or null. */
+function orderProblem(at: string, o: any): string | null {
+  const devices = o && typeof o === 'object' ? o.devices : undefined;
+  if (!Array.isArray(devices) || !devices.length || devices.some((d: unknown) => d !== 'npu' && d !== 'gpu' && d !== 'cpu') || new Set(devices).size !== devices.length)
+    return `${at}.devices must list npu, gpu and cpu, each at most once, first preferred`;
+  if (o.runningFirst !== undefined && typeof o.runningFirst !== 'boolean') return `${at}.runningFirst must be true or false`;
+  if (o.batchAt !== undefined && !(Number.isInteger(o.batchAt) && o.batchAt >= 2)) return `${at}.batchAt must be a whole number, 2 or more`;
+  return null;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -597,7 +611,7 @@ function reeveHoldsTools(reeve: string): boolean {
  * The keys that are the accelerators' and move with them to their own config.json: the keeper's (KEEPER_KEYS), an
  * older config's single endpoint and its cap, and the request timeout every agent reads.
  */
-export const ACCELERATOR_KEYS = ['accelerators', 'acceleratorOrder', 'workOrder', 'npuIdleStopMinutes', 'gpuIdleStopMinutes', 'chatEndpoint', 'visionModel', 'embedEndpoint', 'npuMaxContextTokens', 'requestTimeoutMs'] as const;
+export const ACCELERATOR_KEYS = ['accelerators', 'acceleratorOrder', 'workOrder', 'rerankOrder', 'npuIdleStopMinutes', 'gpuIdleStopMinutes', 'chatEndpoint', 'visionModel', 'embedEndpoint', 'npuMaxContextTokens', 'requestTimeoutMs'] as const;
 
 /**
  * Moves the accelerators to their own config.json (kit 2.31.0), once: when it doesn't exist yet and Reeve's older
@@ -691,9 +705,10 @@ export interface KeeperSettings {
 
 /**
  * The keys the keeper owns in config.json: its Settings page writes these and no others. `workOrder` (kit 2.111.0) is
- * setup's, from the NPU's generation (npu-vendors.ts' workOrderFor), and moves and is mirrored with the rest.
+ * setup's, from the NPU's generation (npu-vendors.ts' workOrderFor), and moves and is mirrored with the rest, as is
+ * `rerankOrder`, a reranker's (kit 2.135.5).
  */
-export const KEEPER_KEYS = ['accelerators', 'acceleratorOrder', 'workOrder', 'npuIdleStopMinutes', 'gpuIdleStopMinutes'] as const;
+export const KEEPER_KEYS = ['accelerators', 'acceleratorOrder', 'workOrder', 'rerankOrder', 'npuIdleStopMinutes', 'gpuIdleStopMinutes'] as const;
 
 /** The keeper's numbers, with what each may be. */
 export const KEEPER_NUMBERS: Record<keyof KeeperSettings, { min: number; max: number; what: string }> = {

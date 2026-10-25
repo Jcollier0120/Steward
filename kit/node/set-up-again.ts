@@ -30,7 +30,9 @@ import { download, type HfFile, installSignedBuild, type NpuRefreshRecord, pinne
  *   behind too, and gains that work the same way, when a plan from the pins gives the card it (orderAdds). The person's
  *   choices stand: a card they turned off and an acceleratorOrder of their own add nothing. With Manor's gpuWithNpu off
  *   it gains only what the core's rule leaves the card beside the NPU: from kit 2.135.3, that includes the work its order
- *   puts it first for (AMD's pictures, run on demand), never chat.
+ *   puts it first for (AMD's pictures, run on demand), never chat. A reranker, an add-on, only on a PC that reranks
+ *   already: from kit 2.135.5, an Intel PC whose processor took the reranker the person ticked gains the card's too,
+ *   which its route's order puts first (the processor's stays, the next in that order).
  * - **Gently.** One accelerator a look, once nobody has used it for AGAIN_QUIET_MS, never while the manor is stopped, in
  *   the background (the Smith's own pace). At the manor's gentle pace, downloads go at GENTLE_BYTES_PER_SECOND at most
  *   (pacedFetch); a model the NPU's own server pulls (GenieX's, FastFlowLM's) comes at that server's pace. Setup runs as
@@ -133,7 +135,9 @@ const lower = (p: string) => p.toLowerCase();
  * the first enabled card in the core's order (the one its requests would go to). The order as the core reads it, so none
  * with an acceleratorOrder of the person's own; none for a work Manor's gpuWithNpu (off) keeps the card out of (the core's
  * cardWorkBesideNpu, the one rule requests follow). That rule keeps a card the work its order puts it first for (kit
- * 2.135.3), so with the switch off too, an AMD PC set up before gains the Radeon's vision, run on demand.
+ * 2.135.3), so with the switch off too, an AMD PC set up before gains the Radeon's vision, run on demand. A reranker,
+ * an add-on set up only when asked for, is gained only where something else here reranks already (kit 2.135.5: Intel's
+ * processor, which took the one the person ticked).
  */
 export function orderAdds(raw: Record<string, any>, accs: Accelerator[], withNpu: boolean): Map<string, EndpointKind[]> {
   const out = new Map<string, EndpointKind[]>();
@@ -141,8 +145,10 @@ export function orderAdds(raw: Record<string, any>, accs: Accelerator[], withNpu
   const cards = accs.filter((a) => a.kind === 'gpu' && a.enabled !== false);
   if (!order || !cards.length) return out;
   const npu = core.npuServes(accs);
-  for (const w of core.WORKS) {
+  const reranks = accs.some((a) => a.enabled !== false && serves(a, 'rerank'));
+  for (const w of core.ORDERED_WORKS) {
     if (order[w]?.devices[0] !== 'gpu' || cards.some((c) => serves(c, w))) continue;
+    if (w === 'rerank' && !reranks) continue;
     if (!withNpu && !core.cardWorkBesideNpu([w], npu, order).length) continue;
     out.set(cards[0].id, [...(out.get(cards[0].id) ?? []), w]);
   }

@@ -415,7 +415,7 @@ So only the check pictures, and frames of videos 640 px wide or less, fit in 1,6
 
 ### No reranker on Intel's NPU (2026-10-24)
 
-Reeve's reranker (`rerank`) goes to the graphics card or the processor on Intel, as before. OpenVINO Model Server 2026.4.1 doesn't compile one for the NPU 3720. Asked `--task rerank --target_device NPU` with OpenVINO's export of the same reranker, `OpenVINO/Qwen3-Reranker-0.6B-seq-cls-fp16-ov`, it logs:
+Reeve's reranker (`rerank`) goes to the graphics card on Intel, then the processor, with Manor's switch off too from kit 2.135.5 (The reranker on Intel's graphics card, below). OpenVINO Model Server 2026.4.1 doesn't compile one for the NPU 3720. Asked `--task rerank --target_device NPU` with OpenVINO's export of the same reranker, `OpenVINO/Qwen3-Reranker-0.6B-seq-cls-fp16-ov`, it logs:
 
 ```
 [IE::FrontEnd::importNetwork] Upper bounds are not specified for node '__module.model.embed_tokens/aten::embedding/Convert' (type 'Convert'): input '0' bounds are '[9223372036854775807, 9223372036854775807]'
@@ -449,6 +449,28 @@ Then it exits (0xC0000409) after 3 s, without listing its model. OpenVINO Model 
   The ten slots ran together, but the 225U's Intel Graphics is compute-bound at about 500–570 prompt tokens a second whether it reads one document at a time or ten. Each document (about 500 tokens) is already one batch. So 4 or 10 slots save 3–5%, about the noise between runs. `--kv-unified` (also with 4 slots, or with `-b`/`-ub` 4096) moves the scores slightly and reorders near-ties, though no question's rank changed. `-fa on` gave the kit's flags' scores and speed exactly, so it gains nothing. So the route keeps the kit's flags. Only fewer or shorter documents would make it quicker, and Reeve's ten files of 1,600 characters stay, since accuracy comes first.
 
 **When to look again:** when an OpenVINO Model Server release reranks on the NPU at a fixed length, or a server runs GenAI's `TextRerankPipeline` on it. And only if OpenVINO's export then scores as llama.cpp's GGUF does.
+
+### The reranker on Intel's graphics card (kit 2.135.5)
+
+The owner's ruling (2026-10-24): "Yes: on Intel, a ticked reranker goes to the graphics card on demand even with the switch off, like AMD's pictures; it stops when idle."
+
+Until kit 2.135.5 a card's reranker was never kept beside an NPU with Manor's switch off. The Smith's Set up names the kinds, so a ticked reranker was set up on the card, and then nothing asked it: no NPU of Intel's reranks, and the processor reranked only where it had been set up for it by name. From kit 2.135.5:
+
+- **The rule is data.** Intel's route records an `order` of its own (`npu-vendors.json`'s `routes.intel.order`, NpuRoute's `order`), for every generation, an unknown one too: `rerank`, the graphics card, then the processor. A generation's own `order` goes over its route's, work by work (`workOrderFor`). Setup writes it into config.json apart from `workOrder`, as `rerankOrder` (`withWorkOrder`): a kit before refuses a `workOrder` with any work but chat, vision and embed, and its keeper and the Smith would then write config.json no more. The keeper's look brings it to PCs already set up (npu-refresh.ts' `orderNow`). The core reads the two as one work order (`workOrderIn`, `ORDERED_WORKS`; a kit before reads `workOrder` alone, so an older agent ignores the reranker's), and `cardWorkBesideNpu` keeps a card the reranker its order puts it first for, as it keeps AMD's pictures. Never chat. AMD's route has none yet: its reranker waits for its own VitisAI trial. The Snapdragons' have none: an X2's NPU reranks (Reranking on the Hexagon, above).
+- **On demand.** With the switch off, the card's reranker is all of the card a request may use beside Intel's NPU, which chats, sees and embeds (and its embeddings too, where a 16 GB PC's NPU leaves them to the card). Its server is started by the first rerank and stopped by the keeper once unused (`gpuIdleStopMinutes`, 5 on a PC under 20 GB), as the card's pictures were before kit 2.103.0. The keeper never starts it. Chat stays off the card, the switch off.
+- **Setup.** A reranker ticked in the Smith's Set up (or asked for with `--serve rerank`) goes on the card, not the processor, the switch on or off: kinds asked for by name are set up on the card whole. A PC set up before needs nothing: once the keeper's look has written the order, its card's reranker is used. One whose processor took the reranker gains the card's at the keeper's set-up-again (`orderAdds`, the same way as AMD's pictures), and the processor's stays, next in the order. A PC whose person ticked no reranker gains none.
+- **Why** (Reeve's 23 search questions, each one's first ten files from its keyword search, about 500 tokens a file, on a Core Ultra 5 225U's Intel Graphics, 16 GB, Qwen3-Reranker-0.6B Q8_0 on llama.cpp b11734 with the kit's flags, 2026-10-24; No reranker on Intel's NPU, above):
+
+  | | The card | The processor |
+  |---|---|---|
+  | Blended, as Reeve's search blends: right file first / in the top five, mean reciprocal rank | 12 / 18, 0.621 | 12 / 18, 0.621 |
+  | Ten files, median (p90) | 7.9 s (8.6) | 16.2 s (17.7) |
+  | Processor time a question | 1.67 s | 193 s |
+  | The PC's memory taken while it runs | about 1.9 GB (the card shares the PC's) | 0.66 GB |
+
+  The same ranks, in half the time, at a hundredth of the processor's time. The card's 1.9 GB is freed when the keeper stops its server. Energy isn't measured yet.
+
+**When to look again:** when a reranker runs on Intel's NPU (above), and when the energy of a search's rerank is measured on the card and the processor.
 
 ### FastFlowLM's pictures with sides of 32 px (AMD)
 
@@ -555,7 +577,7 @@ Machine-wide installers don't come into it. Nothing a route installs needs an ad
 
 The NPU first was the rule for every work (ACCELERATORS.md, Choosing an accelerator). A generation may now record, as `order` in `npu-vendors.json`, the device each work spends least energy on, then the next, with the figures behind it (`basis`, the device named beside each figure). Setup writes it into config.json as `workOrder` (the devices, and any `runningFirst` and `batchAt`, without the figures: npu-vendors.ts' `workOrderFor`), whether or not the NPU could be set up. Requests follow it (the core's `candidates`), and so does setup's fallback when the NPU can't take a work (Smart App Control blocked FastFlowLM, or its test failed): the work goes to the devices after the NPU in its order (`fallbackDevices`), a graphics card and then the processor unless the order puts the processor first. A work the order leaves out goes to the NPU first, as before, and a generation with none writes none. Each field is optional, so an older kit (the Smith pins 2.99.1) reads the catalog and config.json as before, without it. A PC set up before kit 2.111.0 got it the next time setup ran (on AMD, setting FastFlowLM 1.0.10 up was that time: the keeper's look leaves it for setup). **A later order reaches PCs already set up** (kit 2.135.1): the keeper's look (npu-refresh.ts' `orderNow`), once for each kit version, writes this kit's `workOrderFor` over config.json's `workOrder` when they differ, whatever comes of the NPU's servers, and on a PC whose NPU has no entry but whose setup wrote an order. Only setup and this look write it, so nothing of a person's is lost. A PC set up before kit 2.111.0 whose card has no vision model still needs Set up local AI for its pictures to go to the card: the look plans no card.
 
-Only AMD's Ryzen AI 300 (XDNA 2) records one. The Snapdragon's NPU spends least on every work. Intel's records none. On the NPU 3720 (a Core Ultra 5 225U, NPU-BENCHMARK.md) the NPU spends least on chat, its embeddings already run on its graphics (`embedArgs`), and its pictures stay on the NPU (Intel's pictures stay on the NPU, below). Intel's other generations aren't measured.
+Only AMD's Ryzen AI 300 (XDNA 2) records one for a generation. The Snapdragon's NPU spends least on every work. Intel's generations record none, but its route records one for every generation, for a reranker alone (kit 2.135.5: a route's `order`, which a generation's own goes over work by work; The reranker on Intel's graphics card, above). On the NPU 3720 (a Core Ultra 5 225U, NPU-BENCHMARK.md) the NPU spends least on chat, its embeddings already run on its graphics (`embedArgs`), and its pictures stay on the NPU (Intel's pictures stay on the NPU, below). Intel's other generations aren't measured.
 
 **AMD's figures.** A Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), the package meter (Windows' Energy Meter, `rapl_package0_pkg`: the chip's energy, there being no whole-PC part), each job over the PC at rest. npu-bench's quick profile, three runs on each device, medians, kit 2.99.1, 2026-10-23 (NPU-BENCHMARK.md):
 

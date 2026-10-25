@@ -784,13 +784,19 @@ export function withoutNpu(raw: Record<string, any>, localAppData: string): Reco
 
 /**
  * config.json with this PC's `workOrder` (kit 2.111.0): its NPU generation's order for each work (workOrderFor), or
- * none when it records none. Nothing else changes, and nothing at all when it's the same.
+ * none when it records none. A reranker's goes apart, as `rerankOrder` (kit 2.135.5: Intel's): a kit before refuses
+ * a `workOrder` with any work but chat, vision and embed, and would then write config.json no more (core's
+ * workOrderIn reads the two as one). Nothing else changes, and nothing at all when it's the same.
  */
 export function withWorkOrder(raw: Record<string, any>, order: WorkOrder | null): Record<string, any> {
-  if (JSON.stringify(raw.workOrder ?? null) === JSON.stringify(order)) return raw;
+  const { rerank, ...works } = order ?? {};
+  const workOrder = Object.keys(works).length ? works : null;
+  if (JSON.stringify(raw.workOrder ?? null) === JSON.stringify(workOrder) && JSON.stringify(raw.rerankOrder ?? null) === JSON.stringify(rerank ?? null)) return raw;
   const out = { ...raw };
-  if (order) out.workOrder = order;
+  if (workOrder) out.workOrder = workOrder;
   else delete out.workOrder;
+  if (rerank) out.rerankOrder = rerank;
+  else delete out.rerankOrder;
   return out;
 }
 
@@ -1006,7 +1012,9 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   const cpuDefault: EndpointKind[] = !npuServes.has('chat') ? ['chat', ...(npuServes.has('vision') ? [] : ['vision' as const])] : !npuServes.has('embed') ? ['embed'] : [];
   // Beside an NPU, with Manor's switch off, a card is never asked for the NPU's work (the keeper keeps it out): none of it is set up on the card,
   // but the work the PC's work order puts the card first for (kit 2.135.3: AMD's pictures, run on demand), the order setup writes for
-  // this NPU's generation (setupCommand's withWorkOrder), none when a list of the person's own takes its place.
+  // this NPU's generation (setupCommand's withWorkOrder), none when a list of the person's own takes its place. Kinds
+  // asked for by name (the Smith's Set up, --serve) are set up on the card whole: a reranker ticked there goes on the
+  // card, which Intel's order keeps reranking beside the NPU, on demand (kit 2.135.5), and other routes keep out.
   const besideNpu = o.gpuWithNpu === false && npuServes.size > 0 && !o.kinds?.length;
   const besideOrder = besideNpu && !Array.isArray(o.raw?.acceleratorOrder) && det?.supported && det.vendor ? (workOrderFor(NPU_CATALOG.routes[det.vendor], det.generation) ?? undefined) : undefined;
   const leftToNpu: NonNullable<SetupPlan['leftToNpu']> = [];
@@ -3122,7 +3130,8 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     } else log(`Not downloading for the graphics card: the NPU's ${taken.join(' and ')} stay unserved until setup runs again.`);
   }
   // With no card to take it, what the NPU couldn't do goes to the processor: set up now, beside what it had. Its
-  // reranker always does: a card beside the NPU reranks only while Manor's gpuWithNpu is on. So does what a card
+  // reranker always does (a Snapdragon X2's: its route's order puts no card first for one, so a card beside the NPU
+  // reranks only while Manor's gpuWithNpu is on). So does what a card
   // Windows blocked couldn't take, and what its order sends to the processor first.
   const cardsCant = toCards.length > 0 && (!cardsFor.length || cardBlocked) && (cardBlocked || !entries.some((e) => e.kind === 'gpu') || toCards.every((k) => k === 'rerank'));
   const toCpu = [...cpuFirst, ...(cardsCant ? toCards : [])];

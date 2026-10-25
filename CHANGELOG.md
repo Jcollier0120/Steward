@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.229
+
+**It hands out the kit 2.135.5: on Intel PCs, sharper search now runs on the graphics card when it's needed, about twice as fast, without keeping the processor busy.**
+
+### What changed
+
+- On Intel Core Ultra PCs, Reeve's sharper search (its reranker) now runs on the graphics card, also when "Use the graphics card for models when there's an NPU" is off, Manor's default. Intel's NPU can't rerank. Until now, with the switch off, the reranker ran only where it had been set up on the processor, and otherwise Reeve searched without it.
+  - Measured on a Core Ultra 5 225U with Reeve's 23 search questions: the same results as on the processor, ten files in 7.9 s against 16.2 s, and 1.7 s of the processor's time against 193 s.
+  - The graphics card's reranker starts with the first search that needs it, and stops again after a few minutes unused. It takes about 1.9 GB of the PC's memory while it runs, and gives it back when it stops.
+  - Chat stays on the NPU. It never moves to the graphics card with the switch off.
+  - A PC set up before needs nothing: its next update moves the reranker to the graphics card by itself. Where the processor had it, the graphics card's is downloaded gently in the background, and the processor's stays behind it.
+- Nothing changes when sharper search isn't ticked, on AMD or Snapdragon PCs, or for an order of accelerators of your own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.228
 
 **It hands out the kit 2.135.4: a 16 GB Snapdragon X2 reranks Reeve's search results on its NPU, beside chat and embeddings.**

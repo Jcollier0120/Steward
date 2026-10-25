@@ -240,7 +240,7 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   const entry = list.find((a) => a && typeof a === 'object' && a.id === 'npu' && a.kind === 'npu');
   const hasServer = !!entry?.chat?.startCommand?.length;
   // Without the NPU's server, only the work order setup wrote is looked at (orderNow).
-  if (!hasServer && file.raw.workOrder === undefined) return done('no-npu');
+  if (!hasServer && file.raw.workOrder === undefined && file.raw.rerankOrder === undefined) return done('no-npu');
   const detected = await d.detect();
   const npu = detected.npu;
   const cards = detected.cards ?? [];

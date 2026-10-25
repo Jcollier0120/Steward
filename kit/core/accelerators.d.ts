@@ -5,6 +5,7 @@ import type { AcceleratorRef } from './ids.js';
 import type { DxgiAdapter } from './ids.js';
 import type { Lane } from './queue.js';
 export type Work = 'chat' | 'vision' | 'embed';
+export type OrderedWork = Work | 'rerank';
 export type Endpoint = {
     baseUrl: string;
     model: string;
@@ -102,7 +103,7 @@ export type WorkOrderOf = {
      */
     batchAt?: number;
 };
-export type WorkOrder = Partial<Record<Work, WorkOrderOf>>;
+export type WorkOrder = Partial<Record<OrderedWork, WorkOrderOf>>;
 export type AcceleratorConfig = {
     /**
      * In the order requests try them: acceleratorOrder's, or auto's.
@@ -110,8 +111,8 @@ export type AcceleratorConfig = {
     accelerators: Accelerator[];
     order: 'auto' | string[];
     /**
-     * The config's `workOrder`, each work's own order over the auto order: only with
-     * acceleratorOrder "auto" (a person's list is kept).
+     * The config's `workOrder` (and `rerankOrder`: workOrderIn), each work's own order over
+     * the auto order: only with acceleratorOrder "auto" (a person's list is kept).
      */
     workOrder?: WorkOrder;
     requestTimeoutMs: number;
@@ -165,6 +166,10 @@ export type Look = {
 /** @import { Lane } from './queue.js' */
 /** @typedef {'chat' | 'vision' | 'embed'} Work */
 /**
+ * @typedef {Work | 'rerank'} OrderedWork The work the PC's work order may order: the routed work, and a reranker (kit
+ * 2.135.5: Intel's, on the graphics card first).
+ */
+/**
  * @typedef {object} Endpoint One OpenAI-compatible server: where it is, its model, and how to start it when it isn't running.
  * @property {string} baseUrl
  * @property {string} model
@@ -216,13 +221,13 @@ export type Look = {
  * the order is kept whoever's server is up, so a batch starts the first device's server (AMD's pictures had 4 until kit
  * 2.135.1).
  */
-/** @typedef {Partial<Record<Work, WorkOrderOf>>} WorkOrder */
+/** @typedef {Partial<Record<OrderedWork, WorkOrderOf>>} WorkOrder */
 /**
  * @typedef {object} AcceleratorConfig
  * @property {Accelerator[]} accelerators In the order requests try them: acceleratorOrder's, or auto's.
  * @property {'auto' | string[]} order
- * @property {WorkOrder} [workOrder] The config's `workOrder`, each work's own order over the auto order: only with
- * acceleratorOrder "auto" (a person's list is kept).
+ * @property {WorkOrder} [workOrder] The config's `workOrder` (and `rerankOrder`: workOrderIn), each work's own order over
+ * the auto order: only with acceleratorOrder "auto" (a person's list is kept).
  * @property {number} requestTimeoutMs
  * @property {boolean} legacy Read from an older config's chatEndpoint and embedEndpoint.
  * @property {string[]} problems Entries that couldn't be read, in words.
@@ -270,6 +275,13 @@ export type Look = {
  */
 /** @type {readonly Work[]} */
 export declare const WORKS: readonly Work[];
+/**
+ * The work a work order may order (OrderedWork): the routed work, then a reranker (kit 2.135.5). config.json keeps a
+ * reranker's order apart, in `rerankOrder` (workOrderIn), so a kit before, whose check refuses any work but the
+ * routed work's in `workOrder`, reads config.json as it did and leaves it out.
+ * @type {readonly OrderedWork[]}
+ */
+export declare const ORDERED_WORKS: readonly OrderedWork[];
 /**
  * `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path.
  * `sides-of-32`: a picture's side of a whole number of 32 px, on a picture the server doesn't shrink, is made a pixel
@@ -326,7 +338,9 @@ export type Written = {
 export declare function readWorkOrder(v: any): WorkOrder | undefined;
 /**
  * config.json's `workOrder` as the core reads it (parseAccelerators): only with `acceleratorOrder` "auto" (or none), so
- * a person's own list of accelerators is kept for every work.
+ * a person's own list of accelerators is kept for every work. With a reranker's, config.json's `rerankOrder` (kit
+ * 2.135.5, written as one work's order is), as its `rerank`: kept out of `workOrder` so a kit before reads config.json
+ * as it did (ORDERED_WORKS).
  * @param {any} raw config.json, parsed.
  * @returns {WorkOrder | undefined}
  */
@@ -478,13 +492,16 @@ export declare function npuServes(list: ReadonlyArray<{
  * (kit 2.69.0: the card on demand), so it is never a candidate for the NPU's own work, not even the fallback when the
  * NPU fails or is busy. With the PC's work order (`order`, config.json's `workOrder` as workOrderIn reads it), it also
  * keeps the work the order puts a graphics card first for, though the NPU serves it, on demand like the rest (kit
- * 2.135.3, cardWorkBesideNpu): AMD XDNA 2's pictures on the Radeon. Never chat. On a PC whose NPU serves chat, vision and embeddings (a Snapdragon) every card is left out, as
- * before; on one whose NPU can't see (Intel's), the card keeps vision alone: its server is started by the first vision
- * request and stopped by the keeper once unused (gpuIdleStopMinutes). A card's reranker, an add-on, is left out with
- * the rest, as before: the NPU reranks where it can (a Snapdragon X2's, kit 2.100.0), else the processor. The processor stays. A card left with nothing is dropped; one
- * left with part of its work is a copy (a vision endpoint on its chat endpoint's server keeps that server). With the
- * switch true, or no NPU serving anything, the list is unchanged: on a PC without an NPU the switch means nothing.
- * @template {{ kind: AcceleratorKind, enabled?: boolean, chat?: unknown, vision?: unknown, embed?: unknown }} A
+ * 2.135.3, cardWorkBesideNpu): AMD XDNA 2's pictures on the Radeon. Never chat. On a PC whose NPU serves chat, vision
+ * and embeddings (a Snapdragon) every card is left out, as before; on one whose NPU can't see (Intel's), the card keeps
+ * vision: its server is started by the first vision request and stopped by the keeper once unused (gpuIdleStopMinutes).
+ * A card's reranker, an add-on, is kept only where the order puts the card first for it (kit 2.135.5: Intel's, whose
+ * NPU reranks nowhere), on demand as vision is; elsewhere it's left out with the rest, as before: the NPU reranks where
+ * it can (a Snapdragon X2's, kit 2.100.0), else the processor. The processor stays. A card left with nothing is
+ * dropped; one left with part of its work is a copy (a vision endpoint on its chat endpoint's server keeps that
+ * server). With the switch true, or no NPU serving anything, the list is unchanged: on a PC without an NPU the switch
+ * means nothing.
+ * @template {{ kind: AcceleratorKind, enabled?: boolean, chat?: unknown, vision?: unknown, embed?: unknown, rerank?: unknown }} A
  * @param {A[]} list
  * @param {boolean} gpuWithNpu
  * @param {WorkOrder} [order] The PC's work order: without it, as before kit 2.135.3.
@@ -496,14 +513,17 @@ export declare function withoutGpuBesideNpu<A extends {
     chat?: unknown;
     vision?: unknown;
     embed?: unknown;
+    rerank?: unknown;
 }>(list: A[], gpuWithNpu: boolean, order?: WorkOrder): A[];
 /**
  * Of a graphics card's kinds, those it does beside an NPU that serves `npu`, with Manor's gpuWithNpu off: the routed
  * work (chat, vision, embeddings) no NPU serves, and, with the PC's work order, the work it puts a graphics card first
  * for, though the NPU serves it (kit 2.135.3: AMD XDNA 2's pictures). The owner's ruling (2026-10-24): "Yes: on AMD,
  * pictures go to the Radeon on demand even with the graphics-card switch off; chat stays off the card." So chat never
- * is, whatever an order says. The one rule requests (withoutGpuBesideNpu), the keeper and setup follow; a reranker is
- * never among them.
+ * is, whatever an order says. A reranker, an add-on, only where the order puts the card first for it (kit 2.135.5),
+ * the owner's ruling the same day: "Yes: on Intel, a ticked reranker goes to the graphics card on demand even with the
+ * switch off, like AMD's pictures; it stops when idle." The one rule requests (withoutGpuBesideNpu), the keeper and
+ * setup follow.
  * @template {string} K
  * @param {readonly K[]} kinds
  * @param {readonly string[]} npu

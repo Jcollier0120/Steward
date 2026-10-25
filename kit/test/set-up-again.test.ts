@@ -491,7 +491,7 @@ test("an AMD Radeon set up before kit 2.111.0, for embeddings only, is behind it
   assert.match(both.why[1], /^llama\.cpp-b\d+-vulkan-x64 in place of b11669-vulkan-x64$/);
 });
 
-test("Manor's switch off adds the pictures too (kit 2.135.3), never chat; the person's choices stand: their own acceleratorOrder, a card turned off or a model file of theirs add nothing; a card that serves the work already, or a PC with no order (Intel's, a Snapdragon's), is as it was", async () => {
+test("Manor's switch off adds the pictures too (kit 2.135.3), never chat; the person's choices stand: their own acceleratorOrder, a card turned off or a model file of theirs add nothing; a card that serves the work already, or a PC with no order (a Snapdragon's), is as it was", async () => {
   const { tools, entry } = await cardFor(AMD_PC, RADEON_ID, ['embed'], RADEON_LIST);
   const behind = (raw: Record<string, any>, gpuWithNpu = true) => A.behindPins({ raw, detection: AMD_PC, kit: KIT, tools, gpuWithNpu });
   // Manor's "Use the graphics card for models when there's an NPU" off: the card still gains the pictures its work order
@@ -520,11 +520,72 @@ test("Manor's switch off adds the pictures too (kit 2.135.3), never chat; the pe
   // A Radeon set up with pictures already isn't behind.
   const seen = await cardFor(AMD_PC, RADEON_ID, ['vision', 'embed'], RADEON_LIST);
   assert.deepEqual(await A.behindPins({ raw: amdConfig(seen.entry), detection: AMD_PC, kit: KIT, tools: seen.tools, gpuWithNpu: true }), []);
-  // Intel's and Snapdragon's routes have no order, so their config.json has none: nothing added there.
-  for (const [vendor, generation] of [['intel', 'lunar-lake'], ['intel', 'panther-lake'], ['qualcomm', 'snapdragon-x'], ['qualcomm', 'snapdragon-x2'], ['amd', 'xdna']] as const) {
+  // Snapdragon's routes have no order, so their config.json has none: nothing added there. Intel's orders only a
+  // reranker (kit 2.135.5: the next test).
+  for (const [vendor, generation] of [['qualcomm', 'snapdragon-x'], ['qualcomm', 'snapdragon-x2'], ['amd', 'xdna']] as const) {
     assert.equal(workOrderFor(NPU_CATALOG.routes[vendor], generation), null, `${vendor} ${generation}`);
   }
+  for (const generation of ['lunar-lake', 'panther-lake']) assert.deepEqual(workOrderFor(NPU_CATALOG.routes.intel, generation), { rerank: { devices: ['gpu', 'cpu'] } }, `intel ${generation}`);
   assert.deepEqual(await behind(configOf(FLM, entry)), []);
+});
+
+// Intel's reranker on the card (kit 2.135.5): its route's order puts the card first for one. A PC whose card was set up
+// with the reranker ticked (the Smith's Set up names the kinds, so the card got it) needs nothing: once the keeper's look
+// writes the order, requests use it. One whose processor took it gains the card's, the same way as AMD's pictures.
+const INTEL_PC = parseDetection(`adapter|0|32902|134217728|8303607808|0x00000000_0x0000a3a3|0|Intel(R) Graphics
+npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost
+cpu|9|12|Intel(R) Core(TM) Ultra 5 225U
+ram|16572665856
+`);
+const INTEL_CARD_ID = INTEL_PC.cards[0].id;
+const INTEL_LIST = '  Vulkan0: Intel(R) Graphics (7919 MiB, 7600 MiB free)\n';
+const INTEL_ORDER = workOrderFor(NPU_CATALOG.routes.intel, INTEL_PC.npu!.generation)!;
+/** Intel's NPU as OpenVINO Model Server serves it: chat and pictures on one server, embeddings on another. */
+const OVMS = { id: 'npu', kind: 'npu', chat: { baseUrl: 'http://127.0.0.1:18191', model: 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov', startCommand: ['C:\\t\\ovms.exe', '--rest_port', '18191'] }, vision: { model: 'Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov' }, embed: { baseUrl: 'http://127.0.0.1:18186', model: 'OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov', startCommand: ['C:\\t\\ovms.exe', '--rest_port', '18186'] } };
+
+/** The processor's entry as this kit's setup writes it for `kinds`, in the tools home given. */
+async function cpuFor(det: ReturnType<typeof parseDetection>, tools: string, kinds: ('chat' | 'vision' | 'rerank')[]) {
+  const plan = await planSetup({ detection: det, ids: ['cpu'], kinds, cpuKinds: kinds, raw: {}, releases: [pinnedRelease()], hfFiles: pinnedHfFiles, home: tools, skipNpu: true });
+  const r = await runSetup(plan, {}, ioOf());
+  const e = r.entries.find((x) => x.id === 'cpu')! as Record<string, any>;
+  assert.ok(e, 'the processor set up');
+  return JSON.parse(JSON.stringify(e)) as Record<string, any>;
+}
+
+test("Intel, a reranker the processor took (kit 2.135.5): the card gains it, its route's order putting the card first, the switch off or on; the processor's stays; a PC with no reranker, or whose card has one, gains nothing; AMD's and an X2's order none", async () => {
+  assert.equal(INTEL_PC.npu?.vendor, 'intel');
+  assert.deepEqual(INTEL_ORDER, { rerank: { devices: ['gpu', 'cpu'] } });
+  const { tools, entry } = await cardFor(INTEL_PC, INTEL_CARD_ID, ['chat', 'vision', 'embed'], INTEL_LIST);
+  assert.equal(entry.rerank, undefined);
+  const cpu = await cpuFor(INTEL_PC, tools, ['rerank']);
+  assert.ok(cpu.rerank?.startCommand?.length && !cpu.chat, 'the processor reranks, and does nothing else');
+  // config.json as setup writes Intel's order: a reranker's apart, as rerankOrder.
+  const intelConfig = (...accs: Record<string, any>[]) => ({ ...configOf(OVMS, ...accs), rerankOrder: INTEL_ORDER.rerank });
+  const behind = (raw: Record<string, any>, gpuWithNpu: boolean) => A.behindPins({ raw, detection: INTEL_PC, kit: KIT, tools, gpuWithNpu });
+
+  const [off, ...rest] = await behind(intelConfig(entry, cpu), false);
+  assert.deepEqual(rest, [], 'the processor itself is as the pins make it');
+  assert.equal(off.id, INTEL_CARD_ID);
+  assert.deepEqual(off.kinds, ['chat', 'vision', 'embed', 'rerank'], 'set up again for all it serves, and the reranker');
+  assert.equal(off.why[0], "rerank added: this PC's work order puts the graphics card first for it");
+  assert.match(off.why[1], /qwen3-reranker-0\.6b-q8_0\.gguf in place of none$/);
+  assert.equal(off.key, (await behind(intelConfig(entry, cpu), true))[0].key, 'the switch on: the same');
+  // A plan from the pins for the card and its reranker: the processor's stays, the next in the reranker's order.
+  const plan = await planSetup({ detection: INTEL_PC, ids: [INTEL_CARD_ID], kinds: off.kinds, raw: intelConfig(entry, cpu), releases: [pinnedRelease()], hfFiles: pinnedHfFiles, home: tools, skipNpu: true });
+  assert.deepEqual(plan.targets.map((t) => [t.id, t.kinds]), [[INTEL_CARD_ID, ['chat', 'vision', 'embed', 'rerank']]]);
+
+  // No reranker anywhere: none added, it's an add-on the person ticks.
+  assert.deepEqual(await behind(intelConfig(entry), false), []);
+  // The card reranks already (the Smith's Set up, the reranker ticked): nothing to do.
+  const both = await cardFor(INTEL_PC, INTEL_CARD_ID, ['chat', 'vision', 'embed', 'rerank' as never], INTEL_LIST);
+  assert.ok(both.entry.rerank?.startCommand?.length);
+  assert.deepEqual(await A.behindPins({ raw: intelConfig(both.entry, await cpuFor(INTEL_PC, both.tools, ['rerank'])), detection: INTEL_PC, kit: KIT, tools: both.tools, gpuWithNpu: false }), []);
+  // An order of their own: nothing read, nothing added.
+  assert.deepEqual(await behind({ ...intelConfig(entry, cpu), acceleratorOrder: [INTEL_CARD_ID, 'npu', 'cpu'] }, false), []);
+  // AMD's order (for now) and a Snapdragon's (none) put no card first for a reranker.
+  assert.equal(AMD_ORDER.rerank, undefined);
+  assert.deepEqual(A.orderAdds(amdConfig({ ...entry, id: RADEON_ID }, { accelerators: [FLM, { ...entry, id: RADEON_ID }, cpu] }), [], false).size, 0);
+  assert.equal(workOrderFor(NPU_CATALOG.routes.qualcomm, 'snapdragon-x2'), null);
 });
 
 test('a card the work would not fit on beside the rest (setup leaves pictures off it) gains nothing: a plan that would not give it the work leaves it as it is', async () => {

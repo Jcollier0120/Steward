@@ -134,6 +134,12 @@ export interface NpuRoute {
   embedServer?: NpuEmbedServer;
   /** Its reranker (kit 2.100.0), when asked for: its embedding server's program started a third time (NpuRerankServer). */
   rerankServer?: NpuRerankServer;
+  /**
+   * Each work's order on every generation of this maker's NPU, unknown ones too, as a generation's `order` is: a
+   * generation's own, for a work it orders, goes over it (workOrderFor). Intel's puts a ticked reranker on the graphics
+   * card first (kit 2.135.5): its NPU reranks nowhere, and with Manor's switch off the card then still reranks, on demand.
+   */
+  order?: Partial<Record<OrderedWork, NpuWorkOrder>>;
   /** Its models off the NPU, for the benchmark's graphics and processor runs where its server runs on the NPU only (NpuOffNpu). */
   offNpu?: NpuOffNpu;
   /**
@@ -172,8 +178,11 @@ export interface NpuMeasuredSpeeds {
   at: string;
 }
 
-/** The work a generation's `order` may order: what requests are routed for (a reranker isn't). */
-export type OrderedWork = 'chat' | 'vision' | 'embed';
+/**
+ * The work a route's or a generation's `order` may order: what requests are routed for, and a reranker (kit 2.135.5),
+ * the core's ORDERED_WORKS.
+ */
+export type OrderedWork = 'chat' | 'vision' | 'embed' | 'rerank';
 
 /** One work's order on a generation (its `order`), and the figures behind it. */
 export interface NpuWorkOrder {
@@ -241,8 +250,8 @@ export interface NpuGeneration {
   testedUpTo?: { params: number; basis: string };
   /**
    * Where each work runs best on PCs of this generation, by its measured energy (kit 2.111.0): the kinds of device, first
-   * preferred, and the figures behind them (`basis`, the device named beside each figure). A work it leaves out goes to
-   * the NPU first (the auto order). Setup writes it into config.json as `workOrder` (workOrderFor), which requests follow
+   * preferred, and the figures behind them (`basis`, the device named beside each figure). A work it leaves out follows
+   * its route's `order` (kit 2.135.5: Intel's reranker), else goes to the NPU first (the auto order). Setup writes it into config.json as `workOrder` (workOrderFor), which requests follow
    * (the core's candidates), and its fallback when the NPU can't be set up follows it too (fallbackDevices); the keeper's
    * look brings it to this kit's on PCs already set up (npu-refresh.ts' orderNow, kit 2.135.1). AMD's Ryzen AI 300 sends
    * every picture to the Radeon, whoever's server is up (the owner's ruling, 2026-10-24); until kit 2.135.1 a picture went
@@ -694,12 +703,12 @@ export function generationOf(route: NpuRoute, id: string | null | undefined): Np
 export const NPU_FIRST: readonly ('npu' | 'gpu' | 'cpu')[] = Object.freeze(['npu', 'gpu', 'cpu']);
 
 /**
- * config.json's `workOrder` for PCs of this generation (kit 2.111.0): its `order`, each work's devices, runningFirst and
- * batchAt, without the figures; null when it records none, and every work goes to the NPU first.
+ * config.json's `workOrder` for PCs of this generation (kit 2.111.0): its `order` over its route's (kit 2.135.5), each
+ * work's devices, runningFirst and batchAt, without the figures; null when they record none, and every work goes to the
+ * NPU first.
  */
 export function workOrderFor(route: NpuRoute, generation: string | null | undefined): WorkOrder | null {
-  const order = generationOf(route, generation)?.order;
-  if (!order) return null;
+  const order = { ...route.order, ...generationOf(route, generation)?.order };
   const out: WorkOrder = {};
   for (const [w, o] of Object.entries(order) as [OrderedWork, NpuWorkOrder][]) out[w] = { devices: [...o.devices], ...(o.runningFirst ? { runningFirst: true } : {}), ...(o.batchAt ? { batchAt: o.batchAt } : {}) };
   return Object.keys(out).length ? out : null;
@@ -707,10 +716,11 @@ export function workOrderFor(route: NpuRoute, generation: string | null | undefi
 
 /**
  * Where a work goes when the NPU can't take it (setup's fallback: Smart App Control blocked its server, or its test
- * failed): the devices after the NPU in its generation's order for it, else a graphics card, then the processor.
+ * failed): the devices after the NPU in its generation's order for it (or its route's), else a graphics card, then the
+ * processor.
  */
 export function fallbackDevices(route: NpuRoute | null | undefined, generation: string | null | undefined, work: OrderedWork): ('gpu' | 'cpu')[] {
-  const devices = (route && generationOf(route, generation)?.order?.[work]?.devices) || NPU_FIRST;
+  const devices = (route && workOrderFor(route, generation)?.[work]?.devices) || NPU_FIRST;
   const rest = devices.filter((d): d is 'gpu' | 'cpu' => d !== 'npu');
   return [...rest, ...(['gpu', 'cpu'] as const).filter((d) => !rest.includes(d))];
 }

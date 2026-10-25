@@ -9,7 +9,8 @@ import { paced, stillFor, until } from './until.ts';
 
 // The graphics card on demand (kit 2.69.0): with Manor's gpuWithNpu off, beside an NPU, a card does only the work no
 // NPU here serves (vision beside Intel's NPU), and the work the PC's work order puts it first for (AMD's pictures, kit
-// 2.135.3), its server started by a request and stopped by the keeper once unused; the NPU's chat never goes to it. Fake model servers throughout, one a real process the kit starts.
+// 2.135.3; Intel's reranker, kit 2.135.5), its server started by a request and stopped by the keeper once unused; the
+// NPU's chat never goes to it. Fake model servers throughout, one a real process the kit starts.
 const home = mkdtempSync(path.join(os.tmpdir(), 'card-demand-'));
 const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.meta.url), 'utf8'));
 process.env[`${String(pkg.name).toUpperCase().replace(/-/g, '_')}_HOME`] = path.join(home, 'agent');
@@ -25,7 +26,7 @@ const { Npu, NpuError, resetNpuManners } = await import('./fixture/src/kit/npu.t
 const { acceleratorsDir } = await import('./fixture/src/kit/lock.ts');
 const { Reaper, serversToReap, cardOnDemand, gpuKeptOut } = await import('./fixture/src/kit/keeper.ts');
 const { NPU_CATALOG, testImage, workOrderFor } = await import('./fixture/src/kit/npu-vendors.ts');
-const { configuredAccelerators } = await import('./fixture/src/kit/accelerator-config.ts');
+const { configuredAccelerators, endpointFor, serves: servesKind } = await import('./fixture/src/kit/accelerator-config.ts');
 const { longFetch, serverClient } = await import('./fixture/src/kit/npu-server.ts');
 const { cardCheck } = await import('./fixture/src/kit/card-check.ts');
 
@@ -150,6 +151,9 @@ const NEVER = [NODE, '-e', 'process.exit(3)'];
 
 /** Each accelerator with the work it serves, as `id: kinds`. */
 const serving = (l: Accelerator[]) => l.map((a) => `${a.id}: ${(['chat', 'vision', 'embed'] as const).filter((k) => A.serves(a, k)).join(' ')}`);
+
+/** The same, its reranker too. */
+const servingAll = (l: readonly { id: string }[]) => l.map((a) => `${a.id}: ${(['chat', 'vision', 'embed', 'rerank'] as const).filter((k) => servesKind(a as never, k)).join(' ')}`);
 
 // ---------------------------------------------------------------- the rule
 
@@ -335,6 +339,75 @@ test("AMD-like, the switch off: a picture starts the Radeon's vision server (its
   }
 });
 
+// ---------------------------------------------------------------- Intel: a ticked reranker on the card, on demand (kit 2.135.5)
+
+test("Intel-like, the switch off, a reranker ticked: the card keeps only its reranker beside the NPU (Intel's route's order puts the card first); its server starts with the first rerank and the keeper stops it once unused, never starting it again; without the order, as before", async () => {
+  fresh();
+  const ORDER = workOrderFor(NPU_CATALOG.routes.intel, 'meteor-lake')!;
+  assert.deepEqual(ORDER, { rerank: { devices: ['gpu', 'cpu'] } });
+  const B = 'http://127.0.0.1:1';
+  const port = await closedPort();
+  const stop = path.join(home, `card-rerank-${port}.stop`);
+  const rerankBase = `http://127.0.0.1:${port}`;
+  // Intel's NPU chats, sees (Qwen3-VL-2B, kit 2.103.0) and embeds: before kit 2.135.5 the card was kept out whole.
+  // config.json as setup writes the order: a reranker's apart, as rerankOrder.
+  const raw = {
+    gpuIdleStopMinutes: 5,
+    rerankOrder: ORDER.rerank,
+    accelerators: [
+      npu({ chat: ep(B, 'c'), vision: { model: 'c' }, embed: ep(B + '7', 'e') }),
+      card({ chat: ep(B + '1', 'c', NEVER), vision: { model: 'c' }, embed: ep(B + '3', 'e', NEVER), rerank: ep(rerankBase, 'r', [NODE, SCRIPT, String(port), String(process.pid), stop]) }),
+    ],
+  };
+  try {
+    const accs = configuredAccelerators(raw);
+    const order = core.workOrderIn(raw);
+    assert.deepEqual(order, ORDER, 'config.json reads it back whole');
+    assert.deepEqual(servingAll(core.withoutGpuBesideNpu(accs, false, order)), ['npu: chat vision embed', 'gpu-arc: rerank'], 'the reranker alone on the card');
+    // The older calls, with no order: as before, nothing of the card.
+    assert.deepEqual(servingAll(core.withoutGpuBesideNpu(accs, false)), ['npu: chat vision embed']);
+    assert.deepEqual(cardOnDemand(accs, false), []);
+
+    // The keeper: the reranker is the card's on demand; its chat and embeddings are kept out.
+    const servers = serversToReap(raw, { withNpu: false });
+    const rerank = servers.find((s: ReapedServer) => s.base === rerankBase)!;
+    assert.deepEqual(servers.filter((s: ReapedServer) => s.acc.id === 'gpu-arc').map((s: ReapedServer) => [s.base, !!s.keptOut]), [[B + '1', true], [B + '3', true], [rerankBase, false]]);
+    assert.equal(rerank.idleMs, 5 * MIN);
+    assert.equal(gpuKeptOut(accs, false, order), true);
+    assert.deepEqual(cardOnDemand(accs, false, order), [{ id: 'gpu-arc', kinds: ['rerank'] }]);
+
+    // The first rerank starts its server (as an agent's request does, from its startCommand).
+    assert.equal(await A.probe(rerankBase, 500), 'down', 'nothing on the card yet');
+    const arc = core.withoutGpuBesideNpu(accs, false, order).find((a) => a.id === 'gpu-arc')!;
+    assert.equal((await A.ensureServer(endpointFor(arc, 'rerank'))).started, true);
+    assert.equal(await A.probe(rerankBase, 500), 'ready', 'started for the request');
+
+    const { pc, reaper } = keeperOn(new Map([[rerankBase, stop]]));
+    pc.clock = 5 * MIN - 1;
+    assert.equal((await reaper.look([rerank]))[0].did, 'answering', 'not before gpuIdleStopMinutes');
+    pc.clock = 5 * MIN;
+    assert.equal((await reaper.look([rerank]))[0].did, 'stopped');
+    assert.equal(pc.stoppedOutsideTurn, false);
+    await until(async () => (await A.probe(rerankBase, 300)) === 'down', 10_000, 'the reranker to end');
+    for (const t of [6, 30, 600]) {
+      pc.clock = t * MIN;
+      assert.equal((await reaper.look([rerank]))[0].did, 'not-running');
+    }
+    assert.equal(pc.started, 0, 'never started by the keeper');
+
+    // A person's own list of accelerators: no work order, so the reranker is kept out, as before.
+    const theirs = { ...raw, acceleratorOrder: ['npu', 'gpu-arc'] };
+    assert.equal(serversToReap(theirs, { withNpu: false }).find((s: ReapedServer) => s.base === rerankBase)?.keptOut, true);
+    // The switch on: unchanged, the card does all it's set up for.
+    assert.deepEqual(serversToReap(raw, { withNpu: true }).filter((s: ReapedServer) => s.acc.id === 'gpu-arc').map((s: ReapedServer) => !!s.keptOut), [false, false, false]);
+    assert.deepEqual(servingAll(core.withoutGpuBesideNpu(accs, true, order)), ['npu: chat vision embed', 'gpu-arc: chat vision embed rerank']);
+  } finally {
+    writeFileSync(stop, '');
+    await until(async () => (await A.probe(rerankBase, 300)) === 'down', 10_000, 'the reranker to end');
+    fresh();
+  }
+});
+
 test('Snapdragon-like: the NPU chats, sees and embeds; the card is never asked, and the keeper keeps all of it out', async () => {
   fresh();
   const n = await fakeServer('ready');
@@ -345,6 +418,12 @@ test('Snapdragon-like: the NPU chats, sees and embeds; the card is never asked, 
       card({ id: 'gpu-adreno', chat: ep(c.baseUrl, 'c', NEVER), vision: ep(c.baseUrl, 'v', NEVER), embed: ep(c.baseUrl, 'e', NEVER) }),
     ],
   };
+  // An X2's NPU reranks (kit 2.100.0), and its route orders nothing: a card's reranker stays out (kit 2.135.5 too).
+  const x2 = workOrderFor(NPU_CATALOG.routes.qualcomm, 'snapdragon-x2');
+  assert.equal(x2, null);
+  const withRerank = { accelerators: [npu({ chat: ep(n.baseUrl, 'c'), vision: { model: 'v' }, embed: ep(n.baseUrl, 'e'), rerank: ep('http://127.0.0.1:18183', 'r', NEVER) }), card({ id: 'gpu-adreno', chat: ep(c.baseUrl, 'c', NEVER), rerank: ep('http://127.0.0.1:18197', 'r', NEVER) })] };
+  assert.deepEqual(servingAll(core.withoutGpuBesideNpu(configuredAccelerators(withRerank), false, x2 ?? undefined)), ['npu: chat vision embed rerank']);
+  assert.deepEqual(serversToReap(withRerank, { withNpu: false }).filter((s: ReapedServer) => s.acc.kind === 'gpu').map((s: ReapedServer) => !!s.keptOut), [true, true]);
   try {
     const model = new Npu(config(raw), { gpuWithNpu: () => false });
     assert.deepEqual(serving(model.accelerators), ['npu: chat vision embed']);
