@@ -14,7 +14,10 @@ import torch.nn as nn
 from onnx import helper
 from onnx2torch import convert
 
-ACTS = {'relu': 'Relu', 'hardswish': 'HardSwish'}
+ACTS = {'relu': 'Relu', 'hardswish': 'HardSwish', 'hardgelu': 'HardSigmoid'}
+# hardgelu: x times HardSigmoid(x) at this slope, x * clip(0.304 x + 0.5, 0, 1): the slope nearest a GELU over inputs
+# spread as N(0, 2) (root-mean-square error 0.031, a ReLU's 0.105; HardSwish's slope, 1/6, gives 0.176).
+HARDGELU_ALPHA = 0.304
 
 
 def gelus(model: onnx.ModelProto):
@@ -39,7 +42,8 @@ def gelus(model: onnx.ModelProto):
 
 
 def swap_gelus(model: onnx.ModelProto, act: str) -> int:
-    """Every GELU of `model` replaced, in place, by one node of `act` (relu or hardswish); how many there were."""
+    """Every GELU of `model` replaced, in place, by `act` (relu, hardswish: one node; hardgelu: a HardSigmoid and a
+    Mul); how many there were."""
     found = gelus(model)
     g = model.graph
     first = {id(parts[0]): (x, y, i) for i, (x, y, parts) in enumerate(found)}
@@ -48,7 +52,12 @@ def swap_gelus(model: onnx.ModelProto, act: str) -> int:
     for n in g.node:
         if id(n) in first:
             x, y, i = first[id(n)]
-            nodes.append(helper.make_node(ACTS[act], [x], [y], name=f'gelu_free_{i}'))
+            if act == 'hardgelu':
+                nodes.append(helper.make_node('HardSigmoid', [x], [f'gelu_free_{i}/gate'], name=f'gelu_free_{i}/gate',
+                                              alpha=HARDGELU_ALPHA, beta=0.5))
+                nodes.append(helper.make_node('Mul', [x, f'gelu_free_{i}/gate'], [y], name=f'gelu_free_{i}'))
+            else:
+                nodes.append(helper.make_node(ACTS[act], [x], [y], name=f'gelu_free_{i}'))
         if id(n) not in drop:
             nodes.append(n)
     del g.node[:]
