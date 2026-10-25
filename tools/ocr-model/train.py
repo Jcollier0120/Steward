@@ -3,13 +3,14 @@ pictures (fixtures.ts) as it goes.
 
     python train.py <models> <train dir>[,<train dir>...] <val dir>[,<val dir>...] <fixtures dir> <out dir> [--steps N] [--lr X]
         [--from ckpt.pt] [--resume ckpt.pt] [--stride 8|4] [--threads N] [--workers N]
-        [--onnx rec.onnx [--act relu|hardswish] [--teacher rec.onnx --kd W]]
+        [--onnx rec.onnx [--act relu|hardgelu|hardswish] [--teacher rec.onnx --kd W [--feat W]]]
 
 <models> has v6-tiny-rec and v6-tiny-det (fetch.py). --stride 4 gives the recognizer a step every 4 columns
 (recnet.halve_stride); a checkpoint at 8 starts one at 4, as their weights are the same. --onnx starts from an exported
 recognizer instead (a release's rec.onnx, at its own stride: give it as --stride), --act swaps its GELUs for an
 activation AMD's NPU computes exactly (gelu_free.py), and --teacher adds to the loss W times each step's KL divergence
-from that recognizer's answer, so the student learns what the teacher read as well as the label. --resume goes on with a run
+from that recognizer's answer, so the student learns what the teacher read as well as the label; --feat adds W times how
+far each of the student's GELU stand-ins is from the teacher's GELU at the same place (gelu_free.tap_loss). --resume goes on with a run
 from its last.pt, at the step and rate it had reached (its optimizer starts again, so the rate warms up again). Its
 threads and workers (5 and 3) keep it to 8 of a PC's cores. Each crop is cut from its drawing with random room around
 the ink, as the detector's boxes leave it (0 to 0.6 of the ink's height each side), sometimes blurred, compressed or faded, then
@@ -266,16 +267,18 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(0)
     torch.set_num_threads(arg('--threads', 5))
-    start_onnx, act, kd = arg('--onnx', ''), arg('--act', 'gelu'), arg('--kd', 1.0)
+    start_onnx, act, kd, feat = arg('--onnx', ''), arg('--act', 'gelu'), arg('--kd', 1.0), arg('--feat', 0.0)
+    if feat > 0 and not (start_onnx and '--teacher' in sys.argv):
+        sys.exit('--feat: with --onnx and --teacher')
     if start_onnx:
-        from gelu_free import load
-        net = load(Path(start_onnx), act)
+        from gelu_free import load, tap_loss
+        net = load(Path(start_onnx), act, taps=feat > 0)
     else:
         net = from_onnx(models / 'v6-tiny-rec', stride=stride)
     teacher = None
     if '--teacher' in sys.argv:
         from gelu_free import load
-        teacher = load(Path(arg('--teacher', ''))).eval()
+        teacher = load(Path(arg('--teacher', '')), taps=feat > 0).eval()
         for p in teacher.parameters():
             p.requires_grad_(False)
     if start:
@@ -315,14 +318,18 @@ def main():
     step, seen, t0, run_loss = first, 0, time.time(), None
     while step < steps:
         for xs, targets, lengths, _ in loader:
-            logits = net(xs)
+            got = net(xs, taps=True) if feat > 0 else net(xs)
+            logits = got[0] if feat > 0 else got
             lp = logits.log_softmax(-1).permute(1, 0, 2)
             T = torch.full((xs.shape[0],), lp.shape[0], dtype=torch.long)
             loss = F.ctc_loss(lp, targets, T, lengths, blank=0, zero_infinity=True)
             if teacher is not None:
                 with torch.no_grad():
-                    want = teacher(xs).log_softmax(-1)
+                    said = teacher(xs, taps=True) if feat > 0 else teacher(xs)
+                    want = (said[0] if feat > 0 else said).log_softmax(-1)
                 loss = loss + kd * F.kl_div(logits.log_softmax(-1), want, log_target=True, reduction='none').sum(-1).mean()
+                if feat > 0:
+                    loss = loss + feat * tap_loss(got, said)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 5.0)

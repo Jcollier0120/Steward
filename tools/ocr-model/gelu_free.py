@@ -98,9 +98,10 @@ def explicit_pads(model: onnx.ModelProto) -> int:
 class Net(nn.Module):
     """A converted graph whose float constants of more than one value (weights, biases, scales) learn."""
 
-    def __init__(self, gm: nn.Module):
+    def __init__(self, gm: nn.Module, tapped: bool = False):
         super().__init__()
         self.body = gm
+        self.tapped = tapped
         used = {str(n.target).split('.')[-1] for n in gm.graph.nodes if n.op == 'get_attr'}
         if hasattr(gm, 'initializers'):
             for name, buf in list(gm.initializers.named_buffers(recurse=False)):
@@ -108,8 +109,10 @@ class Net(nn.Module):
                     delattr(gm.initializers, name)
                     gm.initializers.register_parameter(name, nn.Parameter(buf.detach().clone()))
 
-    def forward(self, x):
-        return self.body(x)
+    def forward(self, x, taps: bool = False):
+        """The model's output; with `taps` (a model loaded with them), (the output, tap, tap, ...)."""
+        out = self.body(x)
+        return out if taps or not self.tapped else out[0]
 
     def train(self, mode=True):
         # Batch norms keep their running statistics, as recnet.RecNet's: crops come in small batches of one width each.
@@ -120,11 +123,16 @@ class Net(nn.Module):
         return self
 
 
-def load(path: Path, act: str = 'gelu', logits: bool = False) -> nn.Module:
+def load(path: Path, act: str = 'gelu', logits: bool = False, taps: bool = False) -> nn.Module:
     """The ONNX model at `path` as a module to train, its GELUs swapped for `act` (gelu: as it is). `logits`: the
-    detector's last Sigmoid left off, so it gives the logits its probability map is made of."""
+    detector's last Sigmoid left off, so it gives the logits its probability map is made of. `taps`: each GELU's (or its
+    stand-in's) output given too, after the model's own, in the graph's order: a teacher's and a student's taps line up,
+    to be matched one by one (distill_det.py --feat). The same weights load with or without taps."""
     m = onnx.load(str(path))
     explicit_pads(m)
+    if taps:
+        for _, y, _ in gelus(m):
+            m.graph.output.append(helper.make_empty_tensor_value_info(y))
     if act != 'gelu':
         swap_gelus(m, act)
     if logits:
@@ -136,4 +144,10 @@ def load(path: Path, act: str = 'gelu', logits: bool = False) -> nn.Module:
         for n in m.graph.node:
             if sig.input[0] in n.output:
                 n.output[list(n.output).index(sig.input[0])] = out
-    return Net(convert(m))
+    return Net(convert(m), tapped=taps)
+
+
+def tap_loss(got, want):
+    """How far a student's taps are from its teacher's (each from Net(x, taps=True)): the squared difference over the
+    teacher's variance, averaged over the taps."""
+    return sum(((a - b) ** 2).mean() / (b.var() + 1e-6) for a, b in zip(got[1:], want[1:])) / (len(want) - 1)

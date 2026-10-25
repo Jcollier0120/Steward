@@ -1,15 +1,16 @@
 """Teaches a detector with its GELUs swapped (gelu_free.py) to draw the probability map its teacher draws: the reader's
 detector, PP-OCRv6 tiny's as published. No boxes are labelled; the teacher's map is the answer.
 
-    python distill_det.py <teacher det.onnx> <screens dir> <val screens dir> <out dir> [--act relu|hardswish]
-        [--steps N] [--lr X] [--batch N] [--every N] [--threads N] [--workers N] [--resume <out>/last.pt]
+    python distill_det.py <teacher det.onnx> <screens dir> <val screens dir> <out dir> [--act relu|hardgelu|hardswish]
+        [--steps N] [--lr X] [--batch N] [--every N] [--feat W] [--threads N] [--workers N] [--resume <out>/last.pt]
 
 The screens are screens.py's. Each step reads tiles as the reader cuts them (kit/node/ocr-npu.cs, Reader.Tile: 640 by
 640, a picture smaller than a tile left 0 beyond it), now and then a little blurred, compressed or faded. The loss is
-the binary cross-entropy of the student's map against the teacher's. Every --every steps it scores the held-back
-screens: how many of the teacher's boxes (pipeline.Det's, thresholds as the reader's) the student finds, and how many
-it adds, by the boxes' overlap; best.pt is the step whose boxes agree most. Writes <out>\\last.pt, <out>\\best.pt and
-<out>\\log.jsonl.
+the binary cross-entropy of the student's map against the teacher's; with --feat, plus W times how far each of the
+student's GELU stand-ins is from the teacher's GELU at the same place (gelu_free.tap_loss), so every layer keeps the
+teacher's inputs. Every --every steps it scores the held-back screens: how many of the teacher's boxes (pipeline.Det's,
+thresholds as the reader's) the student finds, and how many it adds, by the boxes' overlap; best.pt is the step whose
+boxes agree most. Writes <out>\\last.pt, <out>\\best.pt and <out>\\log.jsonl.
 """
 import io
 import json
@@ -26,7 +27,7 @@ from PIL import Image, ImageFilter
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
-from gelu_free import load  # noqa: E402
+from gelu_free import load, tap_loss  # noqa: E402
 from pipeline import MEAN, STD, Det  # noqa: E402
 
 TILE = 640
@@ -121,19 +122,19 @@ def main():
     teacher_path, train_dir, val_dir, out = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4])
     arg = lambda k, d: type(d)(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d
     act, steps, lr, batch = arg('--act', 'relu'), arg('--steps', 4000), arg('--lr', 3e-4), arg('--batch', 8)
-    every, resume, val_n = arg('--every', 250), arg('--resume', ''), arg('--val', 200)
+    every, resume, val_n, feat = arg('--every', 250), arg('--resume', ''), arg('--val', 200), arg('--feat', 0.0)
     out.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(0)
     torch.set_num_threads(arg('--threads', 5))
-    teacher = load(teacher_path).eval()
+    teacher = load(teacher_path, taps=feat > 0).eval()
     for p in teacher.parameters():
         p.requires_grad_(False)
-    student = load(teacher_path, act, logits=True)
-    first = 0
+    student = load(teacher_path, act, logits=True, taps=feat > 0)
+    begun = 0
     if resume:
         saved = torch.load(resume, map_location='cpu')
         student.load_state_dict(saved['model'])
-        first = saved['step']
+        begun = saved['step']
     student.train()
     train, val = Tiles(train_dir, True), Tiles(val_dir, False)
     loader = torch.utils.data.DataLoader(train, batch_size=batch, shuffle=True, num_workers=arg('--workers', 3),
@@ -141,7 +142,7 @@ def main():
     opt = torch.optim.AdamW(student.parameters(), lr=lr, weight_decay=1e-4)
     warm = 100
     cosine = lambda s: 0.5 * (1 + math.cos(math.pi * min(1.0, s / steps)))
-    sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / warm) * cosine(s + first))
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / warm) * cosine(s + begun))
     log = (out / 'log.jsonl').open('a', encoding='utf-8')
     keep = lambda step, name: torch.save(dict(model=student.state_dict(), step=step, onnx=str(teacher_path.resolve()), act=act), out / name)
 
@@ -156,12 +157,17 @@ def main():
                default=-1.0) if resume else evaluate(0)
     if not resume:
         keep(0, 'best.pt')
-    step, t0, run_loss = first, time.time(), None
+    step, t0, run_loss, run_feat = begun, time.time(), None, 0.0
     while step < steps:
         for x in loader:
             with torch.no_grad():
-                want = teacher(x)
-            loss = F.binary_cross_entropy_with_logits(student(x), want)
+                want = teacher(x, taps=True)
+            got = student(x, taps=True)
+            loss = F.binary_cross_entropy_with_logits(got[0], want[0]) if feat > 0 else F.binary_cross_entropy_with_logits(got, want)
+            if feat > 0:
+                taps = tap_loss(got, want)
+                run_feat = 0.95 * run_feat + 0.05 * taps.item()
+                loss = loss + feat * taps
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(student.parameters(), 5.0)
@@ -170,7 +176,7 @@ def main():
             step += 1
             run_loss = loss.item() if run_loss is None else 0.95 * run_loss + 0.05 * loss.item()
             if step % 25 == 0:
-                print(f'step {step} loss {run_loss:.5f} lr {sched.get_last_lr()[0]:.2e} {(step - first) * batch / (time.time() - t0):.1f} tiles/s', flush=True)
+                print(f'step {step} loss {run_loss:.5f} (taps {run_feat:.5f}) lr {sched.get_last_lr()[0]:.2e} {(step - begun) * batch / (time.time() - t0):.1f} tiles/s', flush=True)
             if step % every == 0 or step == steps:
                 s = evaluate(step)
                 keep(step, 'last.pt')
