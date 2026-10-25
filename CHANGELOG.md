@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.237
+
+**It hands out the kit 2.137.0: on AMD Ryzen AI 300 PCs and later, the staff read text in pictures on the NPU, with a version of our model made for it, for about a quarter less energy.**
+
+### What changed
+
+- **AMD's NPU reads text in pictures.** On a PC with an AMD Ryzen AI 300 processor or later, the staff's text reader now runs on its NPU instead of the processor. It uses a copy of our model 2 made for AMD's NPU, which computes it exactly.
+  - On a Ryzen AI 7 350, a picture costs 27% less energy than on the processor.
+  - It reads 1,221 of our check's 1,253 lines exactly, against 1,224 on the processor and 736 with Windows' own OCR. Each line it reads differently is off by a space, a letter or a quote mark. The owner accepted the three lines.
+  - The first time, the PC downloads the copy and Windows ML's part (about 54 MB, 3 MB kept) and prepares it for the NPU in the background, in a few minutes. Until then the processor reads, as before.
+  - Older AMD processors with an NPU (Ryzen 7040 and 8040) keep reading on the processor.
+- **The text reader's helper program isn't signed for now.** Its source changed, so each PC builds it itself until the owner signs it again.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.236
 
 **It hands out the kit 2.136.6: safer uninstalls, the staff's own signed FFmpeg first, and local AI setup that fits your graphics driver and your PC's memory.**

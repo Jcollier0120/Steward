@@ -2,6 +2,47 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.137.0
+
+**AMD's XDNA 2 NPU (Ryzen AI 300 and later) reads with the text reader's model by default, with a copy of model 2 made for it (`ocr-model-v2-amd`). Measured on a Ryzen AI 7 350, a picture costs 27% less energy there than on its processor (3,492 mJ against 4,757), and it reads 1,221 of the check's 1,253 lines, against the processor's 1,224 and Windows OCR's 736. The three lines are the owner's call.**
+
+### What changed
+
+- **ocr-npu.ts: AMD's NPU reads by default.**
+  - `VITISAI_GENERATIONS` (`['xdna2']`): `packFor` gives an AMD chip of that generation `VITISAI_PACK` (npu-vendors.json's 17F0). The first XDNA (1502), and an AMD PC whose NPU isn't known, read on the processor as before.
+  - `AMD_MODEL_FILES` pins the release `ocr-model-v2-amd`: its `det.onnx` and `rec.onnx` (int8, 1.6 MB in all), `LICENSE.txt` and `NOTICE.txt`, each by size and SHA-256. They go in `model-2-amd` beside model 2's folder and read with model 2's `charset.txt`. The processor's reader, the self-check's yardstick, reads model 2.
+  - `KIT_OCR_NPU=vitisai` stays a test, where the NPU isn't an XDNA 2. `none` still reads on the processor.
+  - A PC's first start compiles the copy's nine graphs in the background, as before: 97 s, three at once, on an idle Ryzen AI 7 350, or three to seven minutes each beside a busy processor. Compiled, they keep 35 MB. The FP32 model's took half an hour.
+- **ocr-npu.cs:**
+  - `--npu-models <folder>`: the NPU's reader reads that folder's models, while the processor's reads `--models`.
+  - `enable_cache_file_io_in_mem=0` in VitisAI's options. Without it an int8 compile stays in memory, so every start compiled again and the program, finding no compiled graphs, read on the processor.
+  - `AmdWidths` is gone: the int8 recognizer compiles at all of `Reader.Buckets`' eight widths, to 2,048, where the FP32 model's stopped at 1,024.
+- **prebuilt/:** `ocr-npu-8d1348367dd3.exe` is removed, as `ocr-npu.cs` changed. Each PC compiles the helper itself, unsigned, until `tools/sign-helpers.ts` signs it again.
+- **tools/ocr-model/** makes the copy (its README's "AMD's NPU's copy"):
+  - `gelu_free.py` swaps each of model 2's GELUs (13 in the detector, 10 in the recognizer) for `polygelu`, x times a polynomial gate of clips, products and sums, within 0.0054 of the GELU. AMD's NPU computes those exactly, where its own GELU is coarse and its sigmoid a table.
+  - `train.py --onnx --act polygelu --teacher` fine-tunes the swapped recognizer a little toward model 2's own, and `export.py --rec-only` writes it.
+  - `screens.py` draws whole screens and pages, to calibrate the detector.
+  - `amd_int8.py` rewrites both models as AMD's compiler takes them and quantizes them: 8-bit weights per channel, 16-bit activations. It writes the release's four files, its notice from `NOTICE-amd.txt`.
+  - `distill_det.py` is what was tried for the detector, kept with its result: it only lost boxes.
+- **spec/OCR.md** ("Intel and AMD") has the measurements, what reads differently, and what was tried before. "The exceptions (the owner's calls)" names the lines given up on Intel's NPU and the X2 (2026-10-24) and on AMD's (2026-10-25).
+
+### Measured (spec/OCR.md, "Intel and AMD")
+
+On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), with the manor stopped and the display held on: the check's three runs, and the energy the median of three interleaved rounds of its 32 GDI pictures:
+
+| Model 2 on the Ryzen AI 7 350 | Lines read exactly | A picture beyond the start | Its processor time | Its energy over rest | A start |
+|---|---|---|---|---|---|
+| FP32 on the processor | 1,224/1,253 | 255 ms | 754 ms | 4,757 mJ | 13.6 J |
+| AMD's copy, int8, on the NPU | 1,221/1,253 | 540 ms | 56 ms | 3,492 mJ | 57.3 J |
+
+- A start on the NPU costs 44 J more, saved back after about 35 pictures. At the agent's gentle pace the processor costs 5.2 J a picture, so the NPU saves a third there.
+- The NPU reads six lines worse than the processor and three better, each by a space, a letter or a quote mark. Every group still reads far better than with Windows OCR.
+
+### Before you update
+
+- Nothing to do. On a Ryzen AI 300 or later, after the update the PC fetches AMD's copy (1.6 MB) and Windows ML (52 MB fetched, 1 MB kept) once, in the background, compiles the copy's graphs, and reads on the processor until they're in place. The program's self-check still compares the NPU's read with the processor's before it reads there.
+- A new model needs a new AMD copy, made and measured again, before it ships, or `VITISAI_GENERATIONS` emptied, since the copy's release is named after `MODEL_VERSION`.
+
 ## 2.136.6
 
 **Three fixes before launch. Install and uninstall refuse an empty, relative or someone else's data folder. FFmpeg prefers the manor's signed build, and borrows Heiward's only while it can't be fetched. Model setup weighs the NVIDIA driver and the PC's memory, and by default sets up only the cards with memory of their own.**

@@ -96,12 +96,49 @@ so its lines come up twice as often as the first rounds'. Both rounds' held-back
 of 8,000 (93.46% exact, from r3's 91.84% without its bias), and `space_bias.py` found 0 best, so it's exported with
 none. On a Snapdragon X2's processor, held to 8 cores, it took about three hours.
 
+## AMD's NPU's copy
+
+AMD's NPU (VitisAI) computes a GELU coarsely, and a sigmoid from a table, but clips, products and sums exactly. So its
+copy of model 2 (the release `ocr-model-v2-amd`, `AMD_MODEL_FILES`) has no GELU: each is x times a polynomial gate,
+`polygelu`, within 0.0054 of the GELU everywhere. Then it's int8, which VitisAI runs wholly on the NPU. From model 2's
+release files (`m2`: its det.onnx, rec.onnx and charset.txt) and the lines above:
+
+```
+python -I -X utf8 gelu_free.py m2 out/amd-raw polygelu
+python -I -X utf8 train.py models data/train,data/extra,data/r4,data/r4 data/val,data/val2 fx runs/amd-rec --onnx m2/rec.onnx --act polygelu --stride 4 --teacher m2/rec.onnx --kd 1.0 --feat 1.0 --steps 1500 --lr 1e-5 --every 250 --threads 8 --workers 4
+python -I -X utf8 export.py - runs/amd-rec/best.pt out/amd-raw --rec-only
+python -I -X utf8 screens.py <repository> data/train.jsonl data/train/fonts.json screens 3000 --workers 4
+python -I -X utf8 amd_int8.py out/amd-raw screens data/train out/amd
+```
+
+- **`gelu_free.py`** swaps every GELU of both models (13 in the detector, 10 in the recognizer), untrained. The
+  detector is used as it comes: distilling it (`distill_det.py`, with this or another stand-in) only lost boxes.
+- **`train.py --onnx --act polygelu`** fine-tunes the swapped recognizer a little toward model 2's own (`--teacher`):
+  its outputs (`--kd`) and each stand-in's output against the GELU's at the same place (`--feat`). The copy's is step
+  1,000 (93.12% of the held-back lines exact, against 93.06% untrained).
+- **`export.py --rec-only`** writes its rec.onnx into the swapped folder.
+- **`screens.py`** draws whole screens and pages, to calibrate the detector.
+- **`amd_int8.py`** rewrites both models, exactly, as AMD's compiler takes them, and quantizes them: 16-bit
+  activations and 8-bit weights per channel. It calibrates on 96 tiles of the screens and 24 lines at each of the
+  reader's widths, then writes the release's four files, its notice from `NOTICE-amd.txt`.
+
+On a Ryzen AI 7 350's processor the fine-tune read about 7 lines a second, and `amd_int8.py` takes a few minutes. Then
+check it on AMD's NPU with the reader's own program, the copy in the reader's `model-2-amd` folder:
+
+```
+KIT_OCR_NPU=vitisai node src/kit/ocr-check.ts --engine model-npu,model-cpu --runs 3
+```
+
+On the processor the same files read within a line or two of the NPU, so a check there first, the copy in model 2's
+place (`--engine model-cpu`), saves the compile. What was measured, and what was tried before, is in `kit/spec/OCR.md` ("Intel and AMD").
+
 ## Publishing
 
 The five files are the assets of the release `ocr-model-v<version>` in the manor's public releases, where the reader
 fetches them (`kit/node/ocr-npu.ts`, `MODEL_VERSION` and `MODEL_FILES`, each pinned by size and SHA-256). A model that
 reads differently is a new version: a new release, never a changed asset, so a reader with the old pins never fetches
-files that don't match them.
+files that don't match them. AMD's copy is the release `ocr-model-v<version>-amd`: its own four files
+(`AMD_MODEL_FILES`), which read with the model's `charset.txt`.
 
 ## Scoring outside the kit
 

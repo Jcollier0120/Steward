@@ -1,0 +1,23 @@
+The text reader's model, AMD's NPU's copy (ocr-model-v2-amd)
+
+These files are the text reader's model 2 (ocr-model-v2: PaddleOCR's PP-OCRv6
+tiny models, by the PaddlePaddle Authors, https://github.com/PaddlePaddle/PaddleOCR,
+licensed under the Apache License, Version 2.0, LICENSE.txt, with Castellan's
+changes, as ocr-model-v2's NOTICE.txt describes them), changed again by
+Castellan under the same license, for AMD's NPU:
+
+- Each GELU in det.onnx and rec.onnx replaced by x times a polynomial gate,
+  0.5 + t (a1 + a3 t^2 + a5 t^4 + a7 t^6) with t = x / 2.9226 clipped to -1..1,
+  within 0.0054 of the GELU everywhere.
+
+- rec.onnx then fine-tuned a little on drawn text, taught by model 2's own
+  recognizer.
+
+- Both rewritten, with the same results, as AMD's compiler takes them (padding
+  written out, a dilated convolution undilated, batch-norms and HardSigmoids
+  folded into the convolutions before them, the recognizer's last two linear
+  layers made one convolution), then quantized to 8-bit weights and 16-bit
+  activations, calibrated on drawn screens and lines.
+
+No training data is included. The training lines and screens were generated,
+and drawn with the fonts installed on Windows; none of them is shipped here.
