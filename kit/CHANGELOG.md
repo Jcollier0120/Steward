@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.137.1
+
+**The text reader's helper is prebuilt and signed again: `kit/node/prebuilt/ocr-npu-87e019a2736d.exe`, for `ocr-npu.cs` as it is since 2.137.0.**
+
+### What changed
+
+- **prebuilt/:** `ocr-npu-87e019a2736d.exe`, compiled and signed by `tools/sign-helpers.ts` (Certum, SHA-256, timestamped). 2.137.0 changed `ocr-npu.cs` and removed `ocr-npu-8d1348367dd3.exe`, so since then each PC compiled the helper itself, unsigned, which Smart App Control may block.
+- The other five helpers are unchanged.
+- 2.137.0 was never released on its own; this release brings it too.
+
+### Before you update
+
+- Nothing to do. An agent that pins this kit uses the signed helper (`signedHelper`), even on a PC where it compiled its own before.
+
 ## 2.137.0
 
 **AMD's XDNA 2 NPU (Ryzen AI 300 and later) reads with the text reader's model by default, with a copy of model 2 made for it (`ocr-model-v2-amd`). Measured on a Ryzen AI 7 350, a picture costs 27% less energy there than on its processor (3,492 mJ against 4,757), and it reads 1,221 of the check's 1,253 lines, against the processor's 1,224 and Windows OCR's 736. The three lines are the owner's call.**
