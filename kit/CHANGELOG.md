@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.136.1
+
+**Urgent fix: the PowerShell worker starts in a signed release. Since kit 2.123.0 signed ps-worker.ps1, it was too long for a command line: no agent released since could start its worker (spawn ENAMETOOLONG), and every `powershell()` call failed.**
+
+### What changed
+
+- **What broke:** a release signs its scripts (kit 2.123.0), and the signature block took ps-worker.ps1 from 3.4 KB to 18 KB. ps.ts started the worker as `-EncodedCommand`, its text as UTF-16 in base64: about 48,000 characters, over the 32,767 a Windows command line holds. `spawn` threw ENAMETOOLONG at every start. It threw out of `powershell()` itself, not as a rejection, so the script never fell back to a powershell.exe of its own.
+  - Seen on the owner's laptop from 2026-10-24 21:34Z, in each agent released signed (Chamberlain, Clerk, Envoy, Manor, Reeve, the Steward, the Surveyor). Clerk's rounds failed in OCR's `runScript` and `otherAlphabetLanguages`. Every one's pace was set by priority alone ("the full pace couldn't be set beyond priority"). Manor couldn't look at the accelerators.
+- **ps.ts' worker runs from its file** (`-File`, with `-ExecutionPolicy Bypass` as before): its length no longer matters, and its signature counts where Windows checks one (Smart App Control).
+- **A worker Windows won't start at all** (spawn throwing, for any reason) no longer fails the script. It runs on its own (`oneShot`), and so does every later script in that process, as when powershell.exe can't start.
+- Unchanged: a script sent to the worker goes on its standard input, and a long one on its own goes in as a temporary file.
+- **Tests:** kit/test/ps-worker.test.ts runs ps.ts with a worker signed as a release signs it (a signature block of the same size).
+  - As `-EncodedCommand`, Windows refuses it (ENAMETOOLONG).
+  - Through ps.ts it starts, and a 40,000-character script runs in it, and on its own from a temporary file that is removed after.
+  - Where the worker's spawn throws, scripts run on their own, and the start is tried once.
+
+### Before you update
+
+- Nothing in an agent's code: take the kit and release. An agent released on kit 2.123.0 or later needs this kit for its PowerShell to work.
+
 ## 2.135.5
 
 **On Intel, a ticked reranker runs on the graphics card beside the NPU with "Use the graphics card for models when there's an NPU" off, Manor's default: started by the first rerank, stopped once unused. The same ranks as the processor's, in about half the time and a hundredth of its processor time. Chat stays on the NPU.**
