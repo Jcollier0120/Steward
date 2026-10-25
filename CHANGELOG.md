@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.238
+
+**It hands out the kit 2.137.1: the small program that runs our own text-reading model comes signed again, so a PC doesn't build its own copy.**
+
+### What changed
+
+- **Reading text in pictures with our own model** uses the signed helper again. Since 2.137.0 each PC built an unsigned one itself the first time, and with Smart App Control on, Windows may block a program a PC built itself.
+- This release also brings 0.36.237 and the kit 2.137.0, never released on their own: on a PC with AMD's Ryzen AI 300 series or newer, our own text reader runs on the NPU, with its own copy of the model made for it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.237
 
 **It hands out the kit 2.137.0: on AMD Ryzen AI 300 PCs and later, the staff read text in pictures on the NPU, with a version of our model made for it, for about a quarter less energy.**
