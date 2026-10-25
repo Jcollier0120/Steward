@@ -229,15 +229,20 @@ function amdNpuEntry(raw: Record<string, any>, tools: string): Record<string, an
 }
 
 /**
- * What the look does for the NPU's reranker, from config.json as it is: `none` (no AMD NPU here, or no reranker ticked:
- * no accelerator in config.json reranks), `prepare` (none yet: set it up), `keep` (it's the NPU's already).
+ * What the look does for the NPU's reranker, from config.json as it is: `none` (no AMD NPU here, no reranker ticked —
+ * no other accelerator in config.json reranks — or the NPU's entry has a reranker of the person's own), `prepare` (none
+ * yet: set it up), `keep` (it's the NPU's already), `drop` (it's the NPU's, but the reranker the person ticked is gone:
+ * taken out of config.json, its files kept for when one is ticked again).
  */
-export function rerankNpuWanted(raw: Record<string, any>, tools = toolsHome()): 'none' | 'prepare' | 'keep' {
+export function rerankNpuWanted(raw: Record<string, any>, tools = toolsHome()): 'none' | 'prepare' | 'keep' | 'drop' {
   const npu = amdNpuEntry(raw, tools);
   if (!npu) return 'none';
-  if (isNpuRerank(npu.rerank)) return 'keep';
+  const kits = isNpuRerank(npu.rerank);
+  if (npu.rerank && !kits) return 'none';
   const list: any[] = Array.isArray(raw.accelerators) ? raw.accelerators : [];
-  return list.some((a) => a && typeof a === 'object' && a.enabled !== false && a.rerank?.model) ? 'prepare' : 'none';
+  const ticked = list.some((a) => a && typeof a === 'object' && a !== npu && a.enabled !== false && a.rerank?.model);
+  if (kits) return ticked ? 'keep' : 'drop';
+  return ticked ? 'prepare' : 'none';
 }
 
 /** config.json with the NPU's entry's reranker set to `ep` (or taken out, null); null when its NPU entry isn't AMD's any more. */
@@ -303,6 +308,12 @@ export async function lookRerankNpu(d: RerankLookDeps): Promise<RerankLook> {
   const wanted = rerankNpuWanted(raw, d.tools);
   if (wanted === 'none') return { did: 'none' };
   try {
+    if (wanted === 'drop') {
+      const out = withNpuRerank(raw, null, d.tools);
+      if (out) writeConfigFile(d.configFile, out, validateKeeperConfig);
+      d.log("the NPU's reranker is taken out of config.json, as no reranker is ticked now: its files stay, for when one is");
+      return { did: 'taken-out' };
+    }
     const exe = await d.exe();
     if (wanted === 'keep') {
       const ep = rerankEndpoint(d.place, exe);
