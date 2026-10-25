@@ -36,14 +36,19 @@ function makeZip(file: string, files: Record<string, string>): void {
   rmSync(src, { recursive: true, force: true });
 }
 
-test("the plugin a PC takes: Qualcomm's on Arm, Intel's on a generation measured for it or when tried, none at all when told", () => {
+test("the plugin a PC takes: Qualcomm's on Arm, Intel's or AMD's on a generation measured for it or when tried, none at all when told", () => {
   const intel = (generation: string | null) => () => ({ vendor: 'intel' as const, generation });
+  const amd = (generation: string | null) => () => ({ vendor: 'amd' as const, generation });
   assert.equal(m.packFor('arm64', {}), m.QNN_PACK);
   assert.equal(m.packFor('x64', {}), null, 'no NPU report in a test run');
   assert.equal(m.packFor('x64', {}, intel('meteor-lake')), m.OPENVINO_PACK, "Intel's NPU 3720 was measured");
   assert.equal(m.packFor('x64', {}, intel('lunar-lake')), null, 'a generation not measured yet: no plugin, the processor reads');
   assert.equal(m.packFor('x64', {}, intel(null)), null);
-  assert.equal(m.packFor('x64', {}, () => ({ vendor: 'amd' as const, generation: 'xdna2' })), null, "AMD's NPU is still to be measured");
+  assert.equal(m.packFor('x64', {}, amd('xdna2')), m.VITISAI_PACK, "AMD's XDNA 2 was measured, with its own copy of the model");
+  assert.equal(m.packFor('x64', {}, amd('xdna')), null, 'the first XDNA, not measured: the processor reads');
+  assert.equal(m.packFor('x64', {}, amd(null)), null);
+  assert.equal(m.packFor('x64', {}, () => ({ vendor: 'intel' as const, generation: 'xdna2' })), null, "a generation is its maker's");
+  assert.equal(m.packFor('x64', { KIT_OCR_NPU: 'none' }, amd('xdna2')), null);
   assert.equal(m.packFor('x64', {}, () => null), null, 'no NPU, or no setup yet');
   assert.equal(m.packFor('x64', { KIT_OCR_NPU: 'openvino' }), m.OPENVINO_PACK);
   assert.equal(m.packFor('x64', { KIT_OCR_NPU: ' VitisAI' }), m.VITISAI_PACK);

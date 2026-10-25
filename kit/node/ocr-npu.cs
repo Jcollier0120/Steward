@@ -19,7 +19,7 @@
 // by a program of its own, as many at once as the PC's cores and memory allow (--prepare does only that, and exits;
 // --export then copies them out for a release). --graphs gives graphs compiled ahead, used when this PC's plugin is the
 // one that compiled them; --compiled-only reads on the processor rather than compile, its hello saying "prepare":true.
-// As plugin 1.8.75 compiles the FP32 model (run as BF16) it reads worse than the processor (spec/OCR.md, "Intel and AMD").
+// The FP32 model, as plugin 1.8.75 compiles it (run as BF16), read worse than the processor (spec/OCR.md, "Intel and AMD").
 //
 // It says hello once, on one line of JSON: {"hello":1,"on":"npu"|"cpu","ep":"qnn"|...,"why":...,"loadMs":n,"compiled":n,...}
 // (compiled: the graphs it compiled rather than loaded; Qualcomm's compiler holds 2 GB until the program ends). What
