@@ -2,6 +2,44 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.136.3
+
+**On AMD, a ticked reranker runs on the Radeon beside the NPU with "Use the graphics card for models when there's an NPU" off, Manor's default, as on Intel since kit 2.135.5: started by the first rerank, stopped once unused. Nearly the same ranks as the processor's, in a third of the time and a hundredth of its processor time. Chat stays on the NPU. AMD's own NPU reranker was tried and is parked.**
+
+### What changed
+
+- **The owner's ruling (2026-10-25):** "Yes: on AMD too, a ticked reranker goes to the Radeon on demand even with the switch off, like Intel's; it stops when idle."
+- **Before this, with the switch off, a ticked reranker didn't run on AMD.** The Smith's Set up names the kinds, so the Radeon was set up with the reranker. Then the core's rule beside the NPU took the card's reranker away from every request, and AMD's NPU doesn't rerank. Unless the processor had been set up for it, Reeve searched without it.
+- **Data only:** AMD XDNA 2's generation in npu-vendors.json adds `rerank` to its `order` (`routes.amd.generations.xdna2.order.rerank`): the Radeon, then the processor. Its `basis` gives the figures below and the ruling. The rest is kit 2.135.5's, unchanged:
+  - setup writes the order apart from `workOrder`, as `rerankOrder` (a kit before refuses a `rerank` in `workOrder`), and puts a ticked reranker on the Radeon, not the processor, the switch on or off;
+  - the core's `cardWorkBesideNpu` and `withoutGpuBesideNpu` keep the Radeon its reranker beside the NPU, with its pictures and embeddings; never chat;
+  - the keeper stops the reranker's server after `gpuIdleStopMinutes` unused (5 on a PC under 20 GB) and never starts it;
+  - the keeper's look (npu-refresh.ts' `orderNow`) writes `rerankOrder` once to a PC set up before;
+  - set-up-again (`orderAdds`) gives the Radeon a reranker where the processor took the one the person ticked; the processor's stays, next in the order.
+  - AMD's other generations, Intel's and the Snapdragons' are unchanged.
+- **What was measured** (Reeve's 24 captured reranks, each a search's first ten files from its keyword search, about 1,600 characters a file; the Dell 14, Ryzen AI 7 350 with the Radeon 860M, 16 GB; Qwen3-Reranker-0.6B Q8_0 on llama.cpp b11734 with the kit's flags; three interleaved runs each, the manor stopped, 2026-10-25):
+  - Blended as Reeve's search blends: the right file first for 12 of 24 on both; in the top five for 19 on the Radeon and 20 on the processor; mean reciprocal rank 0.638 on the Radeon and 0.629 on the processor. The same first file for all 24.
+  - Ten files: 3.08 s median (p90 3.49) on the Radeon, 9.09 s (p90 10.04) on the processor.
+  - The processor's time a rerank: 0.70 s with the Radeon, 73.8 s on the processor.
+  - Memory while it runs: about 2.0 GB on the Radeon (it shares the PC's), 1.2 GB on the processor (1.4 GB at its peak), freed when the server stops. Energy isn't measured yet.
+- **AMD's NPU reranker, tried and parked** (NPU-VENDORS.md, Reranking on AMD's NPU). The build ran Qwen3-Reranker-0.6B on the XDNA 2 through VitisAI in BF16, and stopped at its accuracy gate:
+  - it ranked a little worse than the Radeon, by an amount that moved from compile to compile, and was slower on every set;
+  - it needed a 36-minute compile of up to 6.3 GB, and an unsigned helper.
+  - Its code stays on the `claude/amd-npu-reranker` branches (Steward's 6acfe36, Reeve's c7a7fa7). The versions they carry (kit 2.137.0, Steward 0.36.233, Reeve 0.18.77) are no longer theirs: a reopened build takes new ones.
+  - **What would reopen it:** a later VitisAI plugin that compiles a16w8, or a BF16 compile within the Radeon's error of FP32. The last layers or the score head on the processor is untried.
+  - Clerk and Chamberlain rerank by embeddings; Reeve's search is the only caller of `/v1/rerank`.
+- **Tests:**
+  - npu-vendors: AMD XDNA 2's order has the Radeon first for a reranker, with its basis. Setup beside AMD's NPU with the switch off or on puts a ticked reranker on the Radeon, not the processor, writes `rerankOrder` apart, and leaves the Radeon its pictures, embeddings and reranker beside the NPU. Nothing ticked: no reranker, as before.
+  - card-on-demand: AMD with the switch off keeps the Radeon's reranker on demand. Its server is started by the first rerank, stopped by the keeper once unused, never restarted. Chat never goes to the card, the NPU failed or not.
+  - npu-refresh: the keeper's look writes AMD's `rerankOrder` to a PC set up before, nothing else changed.
+  - set-up-again: an AMD PC whose processor took the reranker gains the Radeon's, gently, with no errors in its log. A PC with no reranker, one whose Radeon has one, or one with an order of its own gains nothing.
+  - accelerators: the core keeps the Radeon's reranker by AMD's order, and never by an order without one.
+- **Docs:** NPU-VENDORS.md (a new The reranker on AMD's Radeon; Reranking on AMD's NPU, tried and parked; Each work's order on a generation) and ACCELERATORS.md (`rerankOrder`, set up again, The graphics card beside the NPU).
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent that routes its own requests with `withoutGpuBesideNpu` should read the order with `workOrderIn(raw)`, as Reeve does from 0.18.79.
+
 ## 2.136.2
 
 **A schedule stops its rounds after three failed in a row, until the agent is updated or Run now goes through. An error no round can get past is met three times, not every interval all day.**

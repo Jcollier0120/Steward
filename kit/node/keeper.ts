@@ -104,7 +104,8 @@ export const gpuKeptOut = (accs: Accelerator[], withNpu: boolean, order?: core.W
  * and the work the PC's work order (`order`) puts the card first for (kit 2.135.3), never chat, each card's server
  * started by a request and stopped once unused (kit 2.69.0). Vision beside Intel's NPU, and its reranker when one was
  * ticked (kit 2.135.5: its route's order puts the card first for it); vision beside AMD's XDNA 2 (its order puts the
- * Radeon first for pictures); none beside a Snapdragon's. Empty when the cards aren't kept out (they do everything
+ * Radeon first for pictures), and its reranker when one was ticked (kit 2.136.3, the same ruling as Intel's); none
+ * beside a Snapdragon's. Empty when the cards aren't kept out (they do everything
  * they're set up for).
  */
 export function cardOnDemand(accs: Accelerator[], withNpu: boolean, order?: core.WorkOrder): { id: string; kinds: EndpointKind[] }[] {

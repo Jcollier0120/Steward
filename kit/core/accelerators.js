@@ -562,7 +562,7 @@ export function npuServes(list) {
  * and embeddings (a Snapdragon) every card is left out, as before; on one whose NPU can't see (Intel's), the card keeps
  * vision: its server is started by the first vision request and stopped by the keeper once unused (gpuIdleStopMinutes).
  * A card's reranker, an add-on, is kept only where the order puts the card first for it (kit 2.135.5: Intel's, whose
- * NPU reranks nowhere), on demand as vision is; elsewhere it's left out with the rest, as before: the NPU reranks where
+ * NPU reranks nowhere; kit 2.136.3: AMD XDNA 2's, whose NPU reranker was parked), on demand as vision is; elsewhere it's left out with the rest, as before: the NPU reranks where
  * it can (a Snapdragon X2's, kit 2.100.0), else the processor. The processor stays. A card left with nothing is
  * dropped; one left with part of its work is a copy (a vision endpoint on its chat endpoint's server keeps that
  * server). With the switch true, or no NPU serving anything, the list is unchanged: on a PC without an NPU the switch

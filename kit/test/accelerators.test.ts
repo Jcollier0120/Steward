@@ -1338,14 +1338,15 @@ test("the core's withoutGpuBesideNpu: off with an NPU leaves the card only what 
   assert.deepEqual(list[1].chat, { baseUrl: 'http://127.0.0.1:1', model: 'm' }, 'the config itself is left as it is');
 });
 
-test("the core's rule with the PC's work order (kit 2.135.3, the owner's ruling): off beside AMD's NPU, the Radeon also keeps the pictures its order puts it first for; never chat, never the reranker; no order, or a person's own list, as before", () => {
+test("the core's rule with the PC's work order (kit 2.135.3, the owner's ruling): off beside AMD's NPU, the Radeon also keeps the pictures its order puts it first for, and its reranker (kit 2.136.3); never chat; an order with no reranker's never keeps it; no order, or a person's own list, as before", () => {
   const { NPU_CATALOG, workOrderFor } = V;
-  const ORDER = workOrderFor(NPU_CATALOG.routes.amd, 'xdna2')!;
-  assert.deepEqual([ORDER.chat?.devices, ORDER.vision?.devices, ORDER.embed?.devices], [['npu', 'gpu', 'cpu'], ['gpu', 'npu', 'cpu'], ['gpu', 'cpu']]);
+  const { rerank: RERANK, ...ORDER } = workOrderFor(NPU_CATALOG.routes.amd, 'xdna2')!;
+  assert.deepEqual([ORDER.chat?.devices, ORDER.vision?.devices, ORDER.embed?.devices, RERANK?.devices], [['npu', 'gpu', 'cpu'], ['gpu', 'npu', 'cpu'], ['gpu', 'cpu'], ['gpu', 'cpu']]);
   const B = 'http://127.0.0.1:1';
   // AMD's XDNA 2: FastFlowLM chats and sees; the Radeon was set up whole (the switch on then), the processor chats.
   const raw = {
     workOrder: ORDER,
+    rerankOrder: RERANK,
     accelerators: [
       { id: 'npu', kind: 'npu', maxContextTokens: 4096, chat: { baseUrl: B, model: 'qwen3.5:2b' }, vision: { model: 'qwen3.5:2b' } },
       gpu('gpu-radeon', { memoryGb: null, chat: { baseUrl: B + '1', model: 'c' }, vision: { baseUrl: B + '2', model: 'v' }, embed: { baseUrl: B + '3', model: 'e' }, rerank: { baseUrl: B + '4', model: 'r' } } as any),
@@ -1353,20 +1354,24 @@ test("the core's rule with the PC's work order (kit 2.135.3, the owner's ruling)
     ],
   };
   const amd = config(raw);
-  assert.deepEqual(amd.workOrder, core.readWorkOrder(ORDER));
+  assert.deepEqual(amd.workOrder, { ...core.readWorkOrder(ORDER), rerank: { devices: ['gpu', 'cpu'] } });
   const kept = core.withoutGpuBesideNpu(amd.accelerators, false, amd.workOrder);
   assert.deepEqual(serving(kept), ['npu: chat vision', 'gpu-radeon: vision embed', 'cpu: chat'], 'pictures on the card first, its embeddings as before, chat on the NPU and the processor');
   assert.equal(kept[1].chat, undefined, 'never chat');
-  // The reranker, as config.json has it (the keeper's list; the agents' requests don't read it): never kept.
+  // The reranker, as config.json has it (the keeper's list; the agents' requests don't read it): kept, as AMD's order
+  // puts the card first for it (kit 2.136.3); an order with none for it (a PC before its look with kit 2.136.3) never.
   const asWritten = core.withoutGpuBesideNpu(raw.accelerators as unknown as Accelerator[], false, amd.workOrder);
   assert.ok((raw.accelerators[1] as Record<string, unknown>).rerank);
-  assert.equal((asWritten[1] as Record<string, unknown>).rerank, undefined, 'never the reranker');
+  assert.deepEqual((asWritten[1] as Record<string, unknown>).rerank, (raw.accelerators[1] as Record<string, unknown>).rerank, 'its reranker, on demand');
   assert.ok(asWritten[1].vision && asWritten[1].embed && !asWritten[1].chat);
+  const noRerankOrder = core.withoutGpuBesideNpu(raw.accelerators as unknown as Accelerator[], false, core.readWorkOrder(ORDER));
+  assert.equal((noRerankOrder[1] as Record<string, unknown>).rerank, undefined, 'never the reranker');
   assert.deepEqual(kept[1].vision, amd.accelerators[1].vision, 'its own pictures server');
   // The older call, with no order: as before, the card keeps only what no NPU serves.
   assert.deepEqual(serving(core.withoutGpuBesideNpu(amd.accelerators, false)), ['npu: chat vision', 'gpu-radeon: embed', 'cpu: chat']);
   assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'vision']), ['embed']);
-  assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'vision'], amd.workOrder), ['vision', 'embed']);
+  assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'vision'], amd.workOrder), ['vision', 'embed', 'rerank']);
+  assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'vision'], core.readWorkOrder(ORDER)), ['vision', 'embed']);
   // Intel's route puts the card first for a reranker (kit 2.135.5, the owner's ruling): beside its NPU, which chats,
   // sees and embeds, the card keeps its reranker alone; an order that puts the processor first for it keeps none.
   const intelOrder = workOrderFor(NPU_CATALOG.routes.intel, 'meteor-lake')!;
@@ -1374,9 +1379,6 @@ test("the core's rule with the PC's work order (kit 2.135.3, the owner's ruling)
   assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'embed'], intelOrder), ['vision', 'rerank']);
   assert.deepEqual(core.cardWorkBesideNpu(['rerank'], ['chat'], { rerank: { devices: ['cpu', 'gpu'] } }), []);
   assert.deepEqual(core.cardWorkBesideNpu(['rerank'], ['chat']), [], 'no order: never the reranker, as before');
-  // AMD's order puts the Radeon first for pictures and embeddings, not a reranker: it waits for its own VitisAI trial.
-  const amdOrder = workOrderFor(NPU_CATALOG.routes.amd, 'xdna2')!;
-  assert.deepEqual(core.cardWorkBesideNpu(['chat', 'vision', 'embed', 'rerank'], ['chat', 'vision'], amdOrder), ['vision', 'embed']);
   const onIntel = [raw.accelerators[0], raw.accelerators[1], raw.accelerators[2]] as unknown as Accelerator[];
   assert.deepEqual(core.withoutGpuBesideNpu(onIntel, false, intelOrder).map((a) => [a.id, Object.keys(a).filter((k) => ['chat', 'vision', 'embed', 'rerank'].includes(k))]), [['npu', ['chat', 'vision']], ['gpu-radeon', ['embed', 'rerank']], ['cpu', ['chat']]]);
   // The switch on: unchanged, the order or not.
@@ -1391,7 +1393,7 @@ test("the core's rule with the PC's work order (kit 2.135.3, the owner's ruling)
   const own = config(theirs);
   assert.equal(own.workOrder, undefined);
   assert.deepEqual(serving(core.withoutGpuBesideNpu(own.accelerators, false, own.workOrder)), ['npu: chat vision', 'gpu-radeon: embed', 'cpu: chat']);
-  assert.deepEqual(core.workOrderIn(raw), core.readWorkOrder(ORDER));
+  assert.deepEqual(core.workOrderIn(raw), { ...core.readWorkOrder(ORDER), rerank: { devices: ['gpu', 'cpu'] } });
   // Snapdragon's routes write no order: their lists are as before. Intel's orders a reranker alone (kit 2.135.5), which
   // the agents' requests don't read (the keeper's list, above): theirs are as before too.
   for (const [vendor, generation] of [['qualcomm', 'snapdragon-x'], ['qualcomm', 'snapdragon-x2']] as const) {
