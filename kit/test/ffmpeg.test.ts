@@ -15,7 +15,7 @@ process.env.MANOR_HOME = path.join(home, 'manor');
 process.env.LOCALAPPDATA = path.join(home, 'local');
 
 const F = await import('./fixture/src/kit/ffmpeg.ts');
-const { BUILDS, findTools, getFfmpeg, grindArgs, HEIWARD_BIN, lastError, olderBuild, ownBin, SHARED_SOURCE, toolDirs, _resetFfmpegFetch } = F;
+const { BUILDS, findTools, getFfmpeg, grindArgs, HEIWARD_BIN, HEIWARD_SOURCE, lastError, olderBuild, ownBin, SHARED_SOURCE, toolDirs, _resetFfmpegFetch } = F;
 const { RANKED } = await import('./fixture/src/kit/video-encoders.ts');
 const { dataDir } = await import('./fixture/src/app.ts');
 type Run = typeof F.run;
@@ -175,7 +175,7 @@ test("offline, it says it couldn't reach GitHub and tries again later; a zip wit
   assert.deepEqual(await getFfmpeg({ arch: 'ia32', agent: 'Miller' }), { error: "there's no FFmpeg build of the Miller's for a ia32 processor" });
 });
 
-test("FFmpeg is looked for in the setting, PATH, where it was found last time, the staff's, the agent's own, then Heiward's: no folder of anyone's PC built in", () => {
+test("FFmpeg is looked for in the setting, the staff's, the agent's own, PATH, where it was found last time, then Heiward's: no folder of anyone's PC built in", () => {
   const dirs = toolDirs({
     setting: 'D:\\tools\\ffmpeg\\bin\\ffmpeg.exe',
     pathDirs: ['C:\\Windows', 'D:\\tools\\ffmpeg\\bin'],
@@ -190,9 +190,10 @@ test("FFmpeg is looked for in the setting, PATH, where it was found last time, t
   assert.equal(dirs[2].source, 'the FFmpeg it used last');
   assert.deepEqual(toolDirs({ setting: '', pathDirs: [], env: { LOCALAPPDATA: 'C:\\L' } }).map((d) => d.dir), ['C:\\L\\Programs\\Heiward\\bin'], "nothing found yet: only Heiward's");
 
+  // The manor's signed build before one on PATH or the one used last (kit 2.136.6).
   const all = toolDirs({
     setting: '',
-    pathDirs: [],
+    pathDirs: ['D:\\tools\\bin'],
     remembered: 'E:\\mine\\bin',
     shared: 'C:\\Users\\me\\.manor\\ffmpeg\\n8.1.3-5\\x\\bin',
     own: 'C:\\Users\\me\\.miller\\ffmpeg\\n8.1.3-5\\x\\bin',
@@ -200,7 +201,14 @@ test("FFmpeg is looked for in the setting, PATH, where it was found last time, t
     env: { LOCALAPPDATA: 'C:\\L' },
     agent: 'Miller',
   });
-  assert.deepEqual(all.map((d) => d.source), ['the FFmpeg it used last', SHARED_SOURCE, "the Miller's own FFmpeg", "the Chronicler's FFmpeg", "Heiward's FFmpeg"]);
+  assert.deepEqual(all.map((d) => d.source), [SHARED_SOURCE, "the Miller's own FFmpeg", 'PATH', 'the FFmpeg it used last', "the Chronicler's FFmpeg", HEIWARD_SOURCE]);
+  // Heiward's is Heiward's however it's reached, on PATH or as the one used last, and listed once; but the setting's is the person's.
+  const heiward = 'C:\\L\\Programs\\Heiward\\bin';
+  const onPath = toolDirs({ setting: '', pathDirs: ['c:\\l\\programs\\heiward\\bin\\'], own: 'C:\\o', env: { LOCALAPPDATA: 'C:\\L' } });
+  assert.deepEqual(onPath.map((d) => d.source), ["the Fixture's own FFmpeg", HEIWARD_SOURCE]);
+  const usedLast = toolDirs({ setting: '', pathDirs: [], remembered: heiward, env: { LOCALAPPDATA: 'C:\\L' } });
+  assert.deepEqual(usedLast, [{ dir: heiward, source: HEIWARD_SOURCE }]);
+  assert.deepEqual(toolDirs({ setting: `${heiward}\\ffmpeg.exe`, pathDirs: [], env: { LOCALAPPDATA: 'C:\\L' } }), [{ dir: heiward, source: 'the FFmpeg setting' }]);
   // The Chronicler's, as its copy looked: its own, then the Miller's, then Heiward's.
   const chronicler = toolDirs({ setting: '', pathDirs: [], own: 'C:\\c', also: [{ dir: 'C:\\m', source: "the Miller's FFmpeg" }], env: { LOCALAPPDATA: 'C:\\L' }, agent: 'Chronicler' });
   assert.deepEqual(chronicler.map((d) => d.source), ["the Chronicler's own FFmpeg", "the Miller's FFmpeg", "Heiward's FFmpeg"]);

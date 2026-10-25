@@ -96,17 +96,23 @@ test('videos that are small, HDR or unreadable are left as they are', () => {
 
 // ---------------------------------------------------------------- choosing the encoder
 
-/** A made-up PC's FFmpegs, in the order findTools would look; the agent's own appears once fetched. */
+/**
+ * A made-up PC's FFmpegs, in the order findTools would look: the setting's, the agent's own once fetched, then the
+ * rest. Each keeps its stamp whether the agent's own is there or not. `o.own` may change between rounds.
+ */
 function ffmpegs(o: { builds: { source: string; encodes: boolean }[]; own?: 'fetches' | 'fails' | 'there'; ownSource?: string }) {
   const tools = (b: { source: string }, i: number): Tools => ({ ffmpeg: `C:\\f${i}\\ffmpeg.exe`, ffprobe: `C:\\f${i}\\ffprobe.exe`, dir: `C:\\f${i}`, source: b.source, version: 'n8.1.3-lean', stamp: `f${i}|1|1` });
   const own = { source: o.ownSource ?? "the Miller's own FFmpeg", encodes: true };
   let ownThere = o.own === 'there';
   const picked: string[] = [];
   const passOvers: string[][] = [];
+  let fetches = 0;
   const deps: EncoderDeps = {
     find: async (_setting, _remembered, passOver = []) => {
       passOvers.push([...passOver]);
-      const all = [...o.builds, ...(ownThere ? [own] : [])].map((b, i) => tools(b, i));
+      const found = o.builds.map((b, i) => tools(b, i));
+      const setting = found.filter((t) => t.source === 'the FFmpeg setting');
+      const all = [...setting, ...(ownThere ? [tools(own, o.builds.length)] : []), ...found.filter((t) => !setting.includes(t))];
       const looked: { dir: string; source: string; problem: string | null }[] = [];
       for (const t of all) {
         if (passOver.includes(t.stamp)) looked.push({ dir: t.dir, source: t.source, problem: PASSED_OVER });
@@ -115,6 +121,7 @@ function ffmpegs(o: { builds: { source: string; encodes: boolean }[]; own?: 'fet
       return { tools: null, looked };
     },
     fetchOwn: async () => {
+      fetches++;
       if (o.own === 'fails') return { error: "couldn't reach GitHub" };
       ownThere = true;
       return { dir: 'C:\\own' };
@@ -127,20 +134,20 @@ function ffmpegs(o: { builds: { source: string; encodes: boolean }[]; own?: 'fet
         : { chosen: null, why: 'No encoder available. hevc_d3d12va: Driver does not support VBR RC mode.', need: 'An FFmpeg with Media Foundation.', trials: [], listed: ['hevc_d3d12va'] };
     },
   };
-  return { deps, picked, passOvers };
+  return { deps, picked, passOvers, fetches: () => fetches };
 }
 
 const MILLER = { agent: 'Miller' };
 
 test("an FFmpeg on the PC that can't encode here is passed over for the agent's own, until that build changes", async () => {
-  const pc = ffmpegs({ builds: [{ source: "Heiward's FFmpeg", encodes: false }], own: 'fetches' });
+  const pc = ffmpegs({ builds: [{ source: 'PATH', encodes: false }], own: 'fetches' });
   const r = await decideEncoder(SETTINGS, null, { deps: pc.deps, words: MILLER });
   assert.equal(r.t?.source, "the Miller's own FFmpeg");
   assert.equal(r.encoder?.chosen?.name, 'hevc_mf');
   assert.deepEqual(r.encoder?.passedOver, ['f0|1|1']);
-  assert.deepEqual(r.encoder?.looked.map((l) => l.problem), [PASSED_OVER, null], "the page says why Heiward's was passed over");
-  assert.deepEqual(pc.picked, ["Heiward's FFmpeg", "the Miller's own FFmpeg"]);
-  // Next round, Heiward's isn't tested again: the decision stands.
+  assert.deepEqual(r.encoder?.looked.map((l) => l.problem), [null], 'its own, found first once fetched');
+  assert.deepEqual(pc.picked, ['PATH', "the Miller's own FFmpeg"]);
+  // Next round, PATH's isn't tested again: the decision stands.
   const again = await decideEncoder(SETTINGS, r.encoder!, { deps: pc.deps, words: MILLER });
   assert.equal(again.t?.source, "the Miller's own FFmpeg");
   assert.equal(again.encoder, undefined);
@@ -150,7 +157,7 @@ test("an FFmpeg on the PC that can't encode here is passed over for the agent's 
   const forced = await decideEncoder(SETTINGS, r.encoder!, { deps: pc.deps, words: MILLER, force: true });
   assert.equal(forced.encoder?.chosen?.name, 'hevc_mf');
   assert.equal(pc.picked.length, 3);
-  // A day later the encoder is checked again, but Heiward's same build stays passed over.
+  // A day later the encoder is checked again, but PATH's same build stays passed over.
   const dayOld = { ...r.encoder!, checkedAt: new Date(Date.now() - 2 * 86_400_000).toISOString() };
   await decideEncoder(SETTINGS, dayOld, { deps: pc.deps, words: MILLER });
   assert.deepEqual(pc.picked.slice(3), ["the Miller's own FFmpeg"]);
@@ -179,6 +186,34 @@ test("when its own can't be fetched, the one found stays, says why, and the fetc
   assert.equal(r.encoder?.ownFailed, "couldn't reach GitHub");
   await decideEncoder(SETTINGS, r.encoder!, { deps: pc.deps, words: MILLER });
   assert.equal(pc.picked.length, 2, 'tried again, not held for a day');
+});
+
+test("Heiward's FFmpeg, though it encodes, is borrowed only while the agent's own can't be fetched (kit 2.136.6)", async () => {
+  const opts: Parameters<typeof ffmpegs>[0] = { builds: [{ source: "Heiward's FFmpeg", encodes: true }], own: 'fetches' };
+  const fetched = ffmpegs(opts);
+  const r = await decideEncoder(SETTINGS, null, { deps: fetched.deps, words: MILLER });
+  assert.equal(r.t?.source, "the Miller's own FFmpeg");
+  assert.deepEqual(fetched.picked, ["the Miller's own FFmpeg"], "Heiward's isn't even tried");
+  assert.equal(fetched.fetches(), 1);
+
+  opts.own = 'fails';
+  const offline = ffmpegs(opts);
+  const b = await decideEncoder(SETTINGS, null, { deps: offline.deps, words: MILLER });
+  assert.equal(b.t?.source, "Heiward's FFmpeg");
+  assert.equal(b.encoder?.chosen?.name, 'hevc_mf');
+  assert.equal(b.encoder?.why, "hevc_mf works. It's Heiward's FFmpeg, borrowed until the Miller's own can be fetched: couldn't reach GitHub.");
+  assert.equal(b.encoder?.ownFailed, null, 'not a failure: its encoder works');
+  // Next round its own is asked for again (getFfmpeg waits between tries), but Heiward's isn't tested again.
+  const again = await decideEncoder(SETTINGS, b.encoder!, { deps: offline.deps, words: MILLER });
+  assert.equal(again.encoder, undefined);
+  assert.equal(offline.picked.length, 1);
+  assert.equal(offline.fetches(), 2);
+  // Once it can be fetched, its own takes over.
+  opts.own = 'fetches';
+  const back = await decideEncoder(SETTINGS, b.encoder!, { deps: offline.deps, words: MILLER });
+  assert.equal(back.t?.source, "the Miller's own FFmpeg");
+  assert.equal(back.encoder?.why, 'hevc_mf works.');
+  assert.deepEqual(offline.picked, ["Heiward's FFmpeg", "the Miller's own FFmpeg"]);
 });
 
 test('an FFmpeg that encodes is kept, and nothing is passed over', async () => {
