@@ -1,7 +1,7 @@
 """The models as the kit's reader takes them (kit/node/ocr-npu.cs): det.onnx, rec.onnx and charset.txt, with the
 license and notice that go with them (LICENSE.txt, NOTICE.txt): what the ocr-model-v<version> release holds.
 
-    python export.py <models> <checkpoint.pt | -> <out dir> [--space-bias X]
+    python export.py <models> <checkpoint.pt | -> <out dir> [--space-bias X] [--det <checkpoint.pt>] [--rec-only]
 
 - det.onnx: PP-OCRv6 tiny's detector as published, its input [1, 3, h, w] (the reader fixes h and w at its tile size).
 - rec.onnx: the fine-tuned recognizer (train.py's checkpoint; - for the published weights with our characters),
@@ -11,7 +11,8 @@ license and notice that go with them (LICENSE.txt, NOTICE.txt): what the ocr-mod
   every reader of the model gets it.
 - charset.txt: the recognizer's characters, class 1 onwards.
 - LICENSE.txt (Apache-2.0, as PaddleOCR's models are) and NOTICE.txt (what they are and how they were changed).
-Each is checked against the model it came from on random input before it's written.
+Each is checked against the model it came from on random input before it's written. --det takes a detector
+distill_det.py trained; --rec-only writes rec.onnx alone, into a folder that has the rest.
 """
 import sys
 from pathlib import Path
@@ -156,6 +157,9 @@ def main():
     space_bias = float(sys.argv[sys.argv.index('--space-bias') + 1]) if '--space-bias' in sys.argv else 0.0
     det = sys.argv[sys.argv.index('--det') + 1] if '--det' in sys.argv else ''
     out.mkdir(parents=True, exist_ok=True)
+    if '--rec-only' in sys.argv:
+        # Into a folder that has the rest (gelu_free.py's, for AMD's NPU's copy).
+        return export_rec(models, ckpt, out, space_bias)
     export_det(models, out, det)
     export_rec(models, ckpt, out, space_bias)
     (out / 'charset.txt').write_text(CHARSET, encoding='utf-8')

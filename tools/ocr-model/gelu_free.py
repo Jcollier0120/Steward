@@ -2,10 +2,17 @@
 fine-tune (the recognizer, train.py --onnx) or distill (the detector, distill_det.py).
 
 AMD's NPU computes a GELU of its own, coarsely (inside the recognizer its outputs were off by about 12% of their range,
-kit/spec/OCR.md), and a GELU built from exact ReLU pieces costs it as much energy as the processor spends. A ReLU it
-computes exactly, fused into the convolution before it; HardSwish is an option to try. Each GELU in the exported graphs
-is the pattern x / sqrt(2), Erf, + 1, times x, times 0.5 (or a Gelu node), and becomes one node of the new activation.
+kit/spec/OCR.md), and a GELU built from exact ReLU pieces costs it as much energy as the processor spends. A clip, a
+product and a sum it computes exactly; a sigmoid from a table, off by up to 0.02. Each GELU in the exported graphs is
+the pattern x / sqrt(2), Erf, + 1, times x, times 0.5 (or a Gelu node), and becomes the new activation: polygelu (x
+times a polynomial gate of clips, products and sums, within 0.0054 of a GELU everywhere) reads as the GELU did with no
+training, on AMD's NPU as on the processor, so AMD's NPU's copy uses it (amd_int8.py); sigmoidgelu reads as well on
+the processor but worse on AMD's NPU, its sigmoid's table; relu, hardgelu and hardswish need retraining, and read
+worse after it.
+
+    python gelu_free.py <models> <out dir> <act>    a release's det.onnx and rec.onnx swapped, untrained
 """
+import sys
 from pathlib import Path
 
 import onnx
@@ -14,9 +21,14 @@ import torch.nn as nn
 from onnx import helper
 from onnx2torch import convert
 
-ACTS = {'relu': 'Relu', 'hardswish': 'HardSwish', 'hardgelu': 'HardSigmoid', 'sigmoidgelu': 'Sigmoid'}
+ACTS = {'relu': 'Relu', 'hardswish': 'HardSwish', 'hardgelu': 'HardSigmoid', 'sigmoidgelu': 'Sigmoid', 'polygelu': 'Clip'}
 # sigmoidgelu: x * sigmoid(1.702 x), GELU's sigmoid form (at most 0.02 from it).
 SIGMOID_GELU = 1.702
+# polygelu: x * (0.5 + t p(t^2)), t = clip(x / c, -1, 1), p of degree 3 in t^2 (odd, degree 7 in t), fitted so the
+# gate is the normal CDF to within 0.0054 of GELU's output everywhere (sigmoidgelu: 0.02), its gate 0 and 1 beyond c.
+# Clips, Muls and Adds, which AMD's NPU computes as the processor does, where its Sigmoid is a table up to 0.02 off.
+POLY_C = 2.9226
+POLY_COEFFS = (1.142268, -1.387917, 1.09903, -0.353381)  # t, t^3, t^5, t^7
 # hardgelu: x times HardSigmoid(x) at this slope, x * clip(0.304 x + 0.5, 0, 1): the slope nearest a GELU over inputs
 # spread as N(0, 2) (root-mean-square error 0.031, a ReLU's 0.105; HardSwish's slope, 1/6, gives 0.176).
 HARDGELU_ALPHA = 0.304
@@ -45,7 +57,8 @@ def gelus(model: onnx.ModelProto):
 
 def swap_gelus(model: onnx.ModelProto, act: str) -> int:
     """Every GELU of `model` replaced, in place, by `act` (relu, hardswish: one node; hardgelu: a HardSigmoid and a
-    Mul); how many there were."""
+    Mul; sigmoidgelu: a Mul, a Sigmoid and a Mul; polygelu: a Mul, a Clip and the polynomial's Muls and Adds); how many
+    there were."""
     found = gelus(model)
     g = model.graph
     first = {id(parts[0]): (x, y, i) for i, (x, y, parts) in enumerate(found)}
@@ -64,6 +77,25 @@ def swap_gelus(model: onnx.ModelProto, act: str) -> int:
                 nodes.append(helper.make_node('Mul', [x, 'gelu_free/slope'], [f'gelu_free_{i}/scaled'], name=f'gelu_free_{i}/scaled'))
                 nodes.append(helper.make_node('Sigmoid', [f'gelu_free_{i}/scaled'], [f'gelu_free_{i}/gate'], name=f'gelu_free_{i}/gate'))
                 nodes.append(helper.make_node('Mul', [x, f'gelu_free_{i}/gate'], [y], name=f'gelu_free_{i}'))
+            elif act == 'polygelu':
+                if not any(t.name == 'gelu_free/inv_c' for t in g.initializer):
+                    k = [('inv_c', 1 / POLY_C), ('lo', -1.0), ('hi', 1.0), ('half', 0.5)] + [(f'a{2 * j + 1}', a) for j, a in enumerate(POLY_COEFFS)]
+                    g.initializer.extend(helper.make_tensor(f'gelu_free/{n}', onnx.TensorProto.FLOAT, [], [v]) for n, v in k)
+                p = f'gelu_free_{i}/'
+                step = lambda op, a, b, out: nodes.append(helper.make_node(op, [a, b], [p + out], name=p + out))
+                step('Mul', x, 'gelu_free/inv_c', 'u')
+                nodes.append(helper.make_node('Clip', [p + 'u', 'gelu_free/lo', 'gelu_free/hi'], [p + 't'], name=p + 't'))
+                step('Mul', p + 't', p + 't', 't2')
+                # Horner's rule in t^2, from the highest coefficient down.
+                step('Mul', p + 't2', 'gelu_free/a7', 'h3')
+                step('Add', p + 'h3', 'gelu_free/a5', 'h2')
+                step('Mul', p + 'h2', p + 't2', 'h2t')
+                step('Add', p + 'h2t', 'gelu_free/a3', 'h1')
+                step('Mul', p + 'h1', p + 't2', 'h1t')
+                step('Add', p + 'h1t', 'gelu_free/a1', 'h0')
+                step('Mul', p + 'h0', p + 't', 'odd')
+                step('Add', p + 'odd', 'gelu_free/half', 'gate')
+                nodes.append(helper.make_node('Mul', [x, p + 'gate'], [y], name=f'gelu_free_{i}'))
             else:
                 nodes.append(helper.make_node(ACTS[act], [x], [y], name=f'gelu_free_{i}'))
         if id(n) not in drop:
@@ -159,3 +191,21 @@ def tap_loss(got, want):
     """How far a student's taps are from its teacher's (each from Net(x, taps=True)): the squared difference over the
     teacher's variance, averaged over the taps."""
     return sum(((a - b) ** 2).mean() / (b.var() + 1e-6) for a, b in zip(got[1:], want[1:])) / (len(want) - 1)
+
+
+def main():
+    """python gelu_free.py <models> <out dir> <act>: a release's det.onnx and rec.onnx with every GELU swapped for
+    `act`, untrained (polygelu reads as the GELU does, so AMD's NPU's detector is this one), and its charset.txt."""
+    src, out, act = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+    out.mkdir(parents=True, exist_ok=True)
+    for name in ('det', 'rec'):
+        m = onnx.load(str(src / f'{name}.onnx'))
+        n = swap_gelus(m, act)
+        onnx.checker.check_model(m)
+        onnx.save(m, str(out / f'{name}.onnx'))
+        print(f'{name}.onnx: {n} GELUs -> {act}')
+    (out / 'charset.txt').write_bytes((src / 'charset.txt').read_bytes())
+
+
+if __name__ == '__main__':
+    main()

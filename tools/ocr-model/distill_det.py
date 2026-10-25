@@ -1,7 +1,7 @@
 """Teaches a detector with its GELUs swapped (gelu_free.py) to draw the probability map its teacher draws: the reader's
 detector, PP-OCRv6 tiny's as published. No boxes are labelled; the teacher's map is the answer.
 
-    python distill_det.py <teacher det.onnx> <screens dir> <val screens dir> <out dir> [--act relu|hardgelu|hardswish]
+    python distill_det.py <teacher det.onnx> <screens dir> <val screens dir> <out dir> [--act relu|hardgelu|sigmoidgelu|polygelu|hardswish]
         [--steps N] [--lr X] [--batch N] [--every N] [--feat W] [--threads N] [--workers N] [--resume <out>/last.pt]
 
 The screens are screens.py's. Each step reads tiles as the reader cuts them (kit/node/ocr-npu.cs, Reader.Tile: 640 by

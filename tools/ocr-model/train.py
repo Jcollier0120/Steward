@@ -3,7 +3,7 @@ pictures (fixtures.ts) as it goes.
 
     python train.py <models> <train dir>[,<train dir>...] <val dir>[,<val dir>...] <fixtures dir> <out dir> [--steps N] [--lr X]
         [--from ckpt.pt] [--resume ckpt.pt] [--stride 8|4] [--threads N] [--workers N]
-        [--onnx rec.onnx [--act relu|hardgelu|hardswish] [--teacher rec.onnx --kd W [--feat W]]]
+        [--onnx rec.onnx [--act relu|hardgelu|sigmoidgelu|polygelu|hardswish] [--teacher rec.onnx --kd W [--feat W]]]
 
 <models> has v6-tiny-rec and v6-tiny-det (fetch.py). --stride 4 gives the recognizer a step every 4 columns
 (recnet.halve_stride); a checkpoint at 8 starts one at 4, as their weights are the same. --onnx starts from an exported
