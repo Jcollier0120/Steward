@@ -135,7 +135,7 @@ Through kit 2.135.3 a PC under 20 GB got no NPU reranker: it went to the graphic
 - **Giving way (b) costs more than it frees.** Stopping the reranker in a chat's turn, as the embedding server is stopped, took 0.12–0.33 s (finding the process), so that chat took 0.18–0.39 s against 0.06; the next rerank then waited for the server's start (1.1–1.5 s) and took 1.8–2.2 s against 0.85. It would free 1.1 GB of the NPU's memory and about 1.4 GB of the PC's, which the measured levels didn't need.
 - **Off the NPU (c) holds more, slower.** The Adreno's reranker holds 2.08 GB of the PC's memory (the card has none of its own) and takes 1,558 ms for ten files; the processor's 1.6 GB and 2,286 ms ([above](#reranking-on-the-hexagon-kit-21000)).
 
-So a 16 GB X2 holds all three (a): the route's `rerankServer.smallPc` names `snapdragon-x2`, and `rerankFits` lets setup put the reranker on its NPU as on a bigger PC. The keeper stops it as it stops the embedding server, at the small PC's 5 minutes, and it doesn't give way to chat. **The first-generation X** keeps the rule as it was: it wasn't measured, its pictures are read on the Adreno (`--vit-compute GPUOpenCL`), and its fallback Qwen3-VL-4B holds 4,238 MB of the NPU's memory, which with both llama-servers (2,206 MB) is over the 6.2 GB share. **Intel's and AMD's routes** have no NPU reranker, so this changes nothing for them; one added later would be weighed the same way, its NPU memory against the share and the device limit under a ballast.
+So a 16 GB X2 holds all three (a): the route's `rerankServer.smallPc` names `snapdragon-x2`, and `rerankFits` lets setup put the reranker on its NPU as on a bigger PC. The keeper stops it as it stops the embedding server, at the small PC's 5 minutes, and it doesn't give way to chat. **The first-generation X** keeps the rule as it was: it wasn't measured, its pictures are read on the Adreno (`--vit-compute GPUOpenCL`), and its fallback Qwen3-VL-4B holds 4,238 MB of the NPU's memory, which with both llama-servers (2,206 MB) is over the 6.2 GB share. **Intel's and AMD's routes** have no NPU reranker (Intel's: No reranker on Intel's NPU, below), so this changes nothing for them; one added later would be weighed the same way, its NPU memory against the share and the device limit under a ballast.
 
 A PC set up before keeps its reranker on the card or the processor, since Set up local AI doesn't ask for one; once setup runs with the reranker asked for (Reeve's sharper search), the NPU's is added, and it answers first (`autoOrder` puts the NPU first) with the card's kept behind it, as on a bigger PC since kit 2.100.0.
 
@@ -343,7 +343,7 @@ From kit 2.103.0 Intel's NPU chats and reads pictures with one model: Qwen3-VL-2
 - **Its cap** stays 2,048 tokens (`--max_prompt_len`) on the NPU 3720, and Lunar Lake and Panther Lake keep the 4B's 4,096 in 512-token chunks. On the NPU 3720 the 2B at 4,096 in 512-token chunks answered the 1,805-token prompt and full-size screenshots too, and held 5.45 GB after them, 0.6 GB more than at 2,048. The route's `memoryGb` takes that for the Lunar Lake's chat (5.5).
 - **Its pictures.** Qwen3-VL reads a token for each 32 × 32 px. The export caps a picture at 1,048,576 px (`size.longest_edge` in its processor configs), about 1,024 tokens, so the NPU's compiled prompt holds one with its question. The model's `pictureTokens: 1024` has the kit fit a larger one the same way (`fitPicture`), as for the X2's 2B. A 1920 × 1080 screenshot (1,043 prompt tokens) read its invoice number and a line's count right in 11 to 15 s; a 448 × 448 picture (229 to 236 tokens) took 1.5 to 1.8 s.
 - **Large greyscale text on whole squares** reads wrong here too, the model's own doing (Qwen3-VL-2B on every Snapdragon X2, above): TALLY 4827 in greyscale on 448 × 448 read "487" on the NPU, the processor and the graphics, and in Qwen's own PyTorch model (bf16, transformers 5.0.0). On 448 × 449 it read right on all of them.
-- **Its picture encoder runs on the processor.** OpenVINO GenAI runs the encoder on `AUTO`, which beside an NPU it limits to the processor (`MULTI_DEVICE_PRIORITIES` CPU). The server keeps the memory the encoder took: after a full-size screenshot it holds 4.8 to 4.9 GB, 1.9 more than once loaded (5.0 at its peak). On the graphics (`"DEVICE_PROPERTIES":"{AUTO:{MULTI_DEVICE_PRIORITIES:GPU}}"` in `--plugin_config`) the encoder read the screenshot in 6 to 7 s, almost twice as fast, but it read the 896 × 896 picture's 4827 as "4877" three times in four, which the processor read right every time. At `INFERENCE_PRECISION_HINT` f32 the graphics answered nonsense, in 25 s. So the encoder stays on the processor.
+- **Its picture encoder runs on the processor.** OpenVINO GenAI runs the encoder on `AUTO`, which beside an NPU it limits to the processor (`MULTI_DEVICE_PRIORITIES` CPU). The server keeps the memory the encoder took: after a full-size screenshot it holds 4.8 to 4.9 GB, 1.9 more than once loaded (5.0 at its peak). On the graphics (`"DEVICE_PROPERTIES":"{AUTO:{MULTI_DEVICE_PRIORITIES:GPU}}"` in `--plugin_config`) the encoder read the screenshot in 6 to 7 s, almost twice as fast, but it read the 896 × 896 picture's 4827 as "4877" three times in four, which the processor read right every time. At `INFERENCE_PRECISION_HINT` f32 the graphics answered nonsense, in 25 s. So the encoder stays on the processor. Its merger on the NPU was tried too, and isn't carried (Qwen3-VL's picture merger on the NPU 3720, below).
 - **A PC set up with the 4B** keeps it until its local AI is set up again (Set up local AI). The keeper's look never downloads: it records `needs-setup` (`npu-refresh.json`). Until kit 2.103.0, setup with no ids left any configured NPU entry alone, so nothing acted on that record. Now `planSetup` reads it (`npuRefresh`), and sets up again an entry the look left for setup that runs the route's own server. One a person pointed at another server, or that no look has left for setup, is left as before. Setup downloads Castellan's build and the 2B (2.5 GB), puts the build in, and tests the 2B with a picture and a chat before it writes the NPU's entry. If the test fails, config.json keeps the 4B's entry, the record stays `needs-setup` (the next Set up local AI tries again), and the graphics card or the processor takes the pictures as before. Where the 2B doesn't fit (a 12 GB PC), the 4B's entry is left as it is. OpenVINO Model Server serves only the model it started with, so the test first stops the 4B's server, in the NPU's turn (`stopOtherModel`); otherwise the 4B's server would have answered the test with a 404. The 4B's folder is retired (Model files the routes no longer run, above): it goes three days after nothing names it.
 - **No fallback.** The 2B is the route's own model on every Intel generation, not a generation's own as on the first-generation X, so there's no `fallback` to the 4B. A new PC whose 2B fails setup's test leaves chat and pictures to its graphics card or processor, as any failed test does.
 
@@ -362,6 +362,83 @@ The NPU 3720's PC (a Core Ultra 5 225U with 16 GB) shows Windows 15.43 GB, and i
 - **The 2B takes more** (kit 2.103.0, Qwen3-VL-2B on Intel's NPU, above). Its chat is 4.9 GB, since the server keeps what its picture encoder took, and the NPU 3720's embeddings on the graphics are 1.3: 6.2 GB, the budget exactly. Measured together after full-size screenshots, the two took 5.8 GB. A 12 GB PC's 4.6 GB no longer holds the chat.
 - **Chat's working set peaks at 5.1 GB as it loads**, from its compile cache, and settles at 3.1 GB once loaded. A 16 GB PC has the room, and the budget counts what a server holds once loaded.
 - **The Lunar Lake** (the 4B's chat 4.3 GB at 4,096 tokens, measured with its prefix cache on, and embeddings 1.74) came to 6.04 GB against a 16 GB PC's budget of 6.1 to 6.4: it fit, with little to spare. With the cache off it should hold less, as the NPU 3720 held 0.4 to 0.6 GB less at 4,096, but it won't be measured again. The 2B's chat at 4,096 is 5.5 GB (measured on the NPU 3720), so from kit 2.103.0 a 16 GB Lunar Lake or Panther Lake has no room for embeddings beside it (5.5 + 1.74 = 7.24 GB): the graphics card or the processor makes them.
+
+### Qwen3-VL's picture merger on the NPU 3720, tried and not carried (2026-10-24)
+
+The route encodes pictures on the processor (Its picture encoder runs on the processor, above), and nearly all of that work is the encoder's second part, `vision_embeddings_merger`: the vision transformer's 24 blocks, the patch merger and the three DeepStack features. A second build of Castellan's GenAI, castellan.2, ran that part on the NPU. It isn't carried, because none of the staff's real pictures are small enough for it. Its patch is kept on the Steward's branch `reference/castellan.2-npu-merger`, never merged: GenAI 2026.4.1.0 with castellan.1's two changes and the merger's. Measured on the Core Ultra 5 225U (NPU 3720, driver 32.0.100.5540, 16 GB), 2026-10-24.
+
+**How it worked.** The NPU 3720 compiles only fixed shapes, and the merger's patch count changes with the picture. So the build compiled the merger at fixed counts (`CASTELLAN_NPU_MERGER_PATCHES`, "784,1600"). It padded each picture's patches, attention mask (the padding masked out) and rotary embeddings up to the next count. A picture past the largest went to the processor's merger, compiled when first needed, and freed after it had gone unused `CASTELLAN_CPU_MERGER_IDLE_S` seconds (60). `CASTELLAN_NPU_MERGER=0` turned it off. Each count held about 0.8 GB of the PC's memory, 0.4 GB of it committed.
+
+**The NPU's limit: 3,136 patches hangs it.** The merger alone, on OpenVINO 2026.4.1, against the processor's on the same patches:
+
+| Patches | Compiled on the NPU in | NPU / processor, first run (the processor's time) | Against the processor (cosine): its output / DeepStack's |
+|---|---|---|---|
+| 1,024 | 26 s | 0.94 / 3.1 s (22.7 s) | 0.9994 / 0.9996 |
+| 1,600 | 41 s | 1.9 / 4.5 s (33.9 s) | 0.9991 / 0.9996 |
+| 2,304 | 85 s | 3.0 / 8.5 s (64.9 s) | 0.9969 / 0.9995 |
+| 3,136 | 0.6 s | `ZE_RESULT_ERROR_DEVICE_LOST` ("device hung, reset, was removed"): no answer | |
+
+Once warm, a padded picture costs its count's time, whatever its own size: 0.31 s for any picture up to 784 patches, 0.92 s up to 1,600. Padding cost no agreement: from 256 patches padded to 784, up to 1,600 in 1,600, cosines of 0.998 to 0.9997.
+
+**Served, against the processor's merger.** OpenVINO Model Server 2026.4.1 with the route's model and command, its pictures read through the server. Memory is the PC's available memory and its commit, system-wide (about ±0.2 GB):
+
+| | The processor's merger (the route) | castellan.2 as built (784 and 1,600) | castellan.2 at 1,600 alone, the processor's merger freed after 60 s |
+|---|---|---|---|
+| The suite's 8 pictures | 8 of 8 | 8 of 8 | 8 of 8 |
+| The 16 TALLY answers | the reference | the same, but for one: asked for all its text, the greyscale 448 × 448 (the model's own misread, above) read "TALLY 487" against "TALY 487" | as built |
+| A suite picture: answer / processor time | 1.03 / 2.34 s | 0.97 / 0.22 s | 1.58 / 0.15 s |
+| A 448 × 448 picture | 1.63–1.69 / 6.0–6.6 s | 1.10–1.17 / 0.27–0.30 s | 1.73–1.79 / 0.27–0.34 s |
+| An 896 × 896 picture (the processor's merger, either way) | 9.25 / 56.7 s | 8.20 / 47.6 s | 8.07 / 45.9 s; after the free 8.36 s, its compile included |
+| Memory taken at load (commit) | 2.72 GB (+2.25) | 4.39 GB (+3.19) | 3.63 GB (+2.72) |
+| Before a big picture | 4.25 GB (+3.34) | 4.49 GB (+3.05) | 3.74 GB (+2.59) |
+| After one | 4.80 GB (+3.89) | 6.23 GB (+4.59) | 5.49 GB (+4.11) |
+| 60 s later | 4.56 GB (+3.56) | 6.09 GB (+4.35) | 3.88 GB (+2.80) |
+
+Freeing the processor's merger works and costs little, but one count of 1,600 pads a suite picture enough to make it slower than the processor. Freeing with both counts wasn't measured.
+
+**Its reach.** What the staff's pictures become on Intel's route: the kit's `fitPicture` at the route's 1,024 picture tokens, then GenAI's `smart_resize` (32 px, 65,536 to 1,048,576 pixels) into 16 px patches:
+
+| Who sends it | The picture | Sent as | Read as | Patches |
+|---|---|---|---|---|
+| Scribe (screenshots as captured) | 1920 × 1080, 2560 × 1440, 3840 × 2160 | 1344 × 768 | 1344 × 768 | 4,032 |
+| | 1920 × 1200 | 1280 × 800 | 1280 × 800 | 4,000 |
+| Clerk (the person's pictures) | a phone's photo, 4032 × 3024 either way up | 1152 × 864 | 1152 × 864 | 3,888 |
+| | a phone's screenshot, 1080 × 2400 | 672 × 1504 | 672 × 1504 | 3,948 |
+| | a scan, A4 at 300 dpi / Letter at 200 dpi | 832 × 1216 / 896 × 1152 | the same | 3,952 / 4,032 |
+| Chronicler, Miller (video frames, ffmpeg's `scale='min(1024,iw)':-2`) | from 720p, 1080p, 1440p | 1024 × 576 | 1024 × 576 | 2,304 |
+| | from 640 × 360 | 640 × 360 | 640 × 352 | 880 |
+| The Auditor, the Smith (`vision-check.png`) | 512 × 512 | 512 × 512 | 512 × 512 | 1,024 |
+
+So only the check pictures, and frames of videos 640 px wide or less, fit in 1,600. Screenshots, photos and scans come to about 4,000 patches, past the 3,136 that hangs the NPU, and go to the processor either way. A count of 2,304 would take the video frames, and only those, for the same memory and less agreement (0.997). Shrinking the pictures to 1,600 patches (400 tokens, about 640 × 640) would trade accuracy for it.
+
+**What would change that:** an NPU, or an NPU compiler, that runs about 4,000 patches without hanging. **Not tried:** a weights bank. Each count holds its own copy of the merger's weights. NPUW could share one between them (`NPU_USE_NPUW` YES, one `NPUW_WEIGHTS_BANK` name for every count, perhaps `NPUW_FOLD` for the 24 identical blocks), with speed and agreement measured again: about half a day. It would cut the memory but not widen the reach.
+
+### No reranker on Intel's NPU (2026-10-24)
+
+Reeve's reranker (`rerank`) goes to the graphics card or the processor on Intel, as before. OpenVINO Model Server 2026.4.1 doesn't compile one for the NPU 3720. Asked `--task rerank --target_device NPU` with OpenVINO's export of the same reranker, `OpenVINO/Qwen3-Reranker-0.6B-seq-cls-fp16-ov`, it logs:
+
+```
+[IE::FrontEnd::importNetwork] Upper bounds are not specified for node '__module.model.embed_tokens/aten::embedding/Convert' (type 'Convert'): input '0' bounds are '[9223372036854775807, 9223372036854775807]'
+[vpux-compiler] Got non broadcastable dimensions pair : '9223372036854775807' and -9223372036854775808'
+```
+
+Then it exits (0xC0000409) after 3 s, without listing its model. OpenVINO Model Server's weekly build of main (2026.5.0.eec7daac4, 2026-10-20, with GenAI 2026.5.0.0-3538) fails the same way.
+
+- **Why.** OpenVINO Model Server's reranker compiles the model as exported, its length unknown (`SidepacketServable::initialize`'s `compile_model`, on main too). The NPU compiles only fixed shapes. The embeddings graph has `max_length` for that (Embeddings on Intel's NPU, above). The rerank graph has none: only `num_streams` and `max_allowed_chunks`. Its calculator pads a batch to its longest document, and GenAI's tokenizer turns `pad_to_max_length` off at every encode. So a fixed 512 or 1,024 tokens takes a patch to the server or to GenAI.
+- **GenAI's own `TextRerankPipeline`** gained an NPU path on master (openvino.genai#4064, merged 2026-10-05, in the weekly's GenAI). The server's reranker doesn't use that pipeline, so the fix doesn't reach it.
+- **OpenVINO's export ranks worse than the GGUF, even on the processor.** Reeve's 23 search questions (Maestro's docs aren't on that PC), each with Reeve's keyword search's ten best files, the same documents to each:
+
+  | | Reranked alone: right file first / in the top five, mean reciprocal rank | Blended with search's order, as Reeve does | Ten files, median (p90) | Processor time a question |
+  |---|---|---|---|---|
+  | Keywords alone | 8 / 17, 0.502 | | | |
+  | The card's reranker (llama.cpp b11734 Vulkan on the Intel Graphics, Qwen3-Reranker-0.6B Q8_0, the kit's flags) | 11 / 18, 0.614 | 12 / 18, 0.621 | 7.9 s (8.8) | 1.64 s |
+  | OpenVINO's export on the processor (the server's `--target_device CPU`) | 5 / 17, 0.437 | 6 / 17, 0.469 | 16.5 s | 139 s |
+
+  On the same texts its scores are squeezed against llama.cpp's (7.3 against 5.3 at the top, −5.7 against −2.6 at the bottom), with a median rank correlation of 0.90 and the same first file for 11 of 23. The cause is neither tokenizing (the server reads `<|im_start|>` as token 151644) nor batching (a document alone scores as in a batch). That leaves the seq-cls conversion against ggml-org's GGUF; which of the two is off wasn't found.
+- **Its API differs from llama.cpp's `/v1/rerank`.** Both take `{model, query, documents, top_n}` and answer `results[]` of `{index, relevance_score}`, which Reeve's `orderOf` reads either way. llama.cpp also gives `model`, `object` and `usage`. The difference that matters is the template: llama.cpp wraps the query and each document in the GGUF's own rerank template (`tokenizer.chat_template.rerank`), while the server's `/v3/rerank` joins them as sent. A caller would have to wrap them in Qwen's template itself.
+- **The card's figures.** The card's reranker reads the ten documents (about 3,900 tokens) one after another at `--parallel 1`, about 0.85 s each. Its server loads in 11 s and takes 1.9 GB of the PC's available memory (2.3 GB after work), with 1.8 GB of the graphics' shared memory.
+
+**When to look again:** when an OpenVINO Model Server release reranks on the NPU at a fixed length, or a server runs GenAI's `TextRerankPipeline` on it. And only if OpenVINO's export then scores as llama.cpp's GGUF does.
 
 ### FastFlowLM's pictures with sides of 32 px (AMD)
 
@@ -973,6 +1050,7 @@ node <agent>\src\kit\npu-bench.ts --generation snapdragon-x --yes
 - on `castellan-npu-bench/2` (2026-10-15), 11 quick runs over the prefix cache (OpenVINO Model Server's 128 blocks, 32 and off) and the 4,096-token cap's chunks: the cache turned off (Per generation, above).
 - `Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov` on Castellan's build of `openvino_genai.dll` (2026-10-22 and 23): with Intel's own file every prompt without a picture failed; with the build, npu-bench's full run on the kit's command (2,048 tokens read 256 at a time, `BEST_PERF`, the prefix cache off) answered 22 of 24 and 4 of 4 pictures, did the jobs in 12.9 s and wrote 17.9 tokens a second; the prompt chunks from 128 to 1,024, the cap at 4,096, full-size screenshots, and the picture encoder on the graphics (Qwen3-VL-2B on Intel's NPU, above); OpenVINO's Qwen3-VL-4B on the same server for comparison;
 - its DeepStack rewrite: four pictures of TALLY 4827 asked four ways, the NPU's 16 answers the processor's, and the processor's two pipelines and the graphics answering word for word as before it.
+- tried and not carried (2026-10-24): Qwen3-VL's picture merger on the NPU, at fixed patch counts up to 2,304 (3,136 hung the NPU), and OpenVINO Model Server's reranker on the NPU, which doesn't compile on 2026.4.1 or main's weekly build (Qwen3-VL's picture merger on the NPU 3720 and No reranker on Intel's NPU, above).
 
 **Run on an AMD Krackan** (Ryzen AI 7 350 w/ Radeon 860M, XDNA 2, PCI `17F0`, NPU driver 32.0.20102.3930, 15.3 GB of memory, 2026-10-15), the NPU check passing every step, `--harden` and `--idle` too:
 - FastFlowLM 1.0.7's zip and both models pulled by setup's steps (`qwen3-it:4b` and `qwen3vl-it:4b`, 7.4 GB in 521 s), `--no-setup` finding them by their files (through kit 2.74.4 the route named none, so it never did);
