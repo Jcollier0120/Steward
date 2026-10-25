@@ -1,0 +1,459 @@
+diff --git a/src/cpp/src/visual_language/pipeline.cpp b/src/cpp/src/visual_language/pipeline.cpp
+index c92ad52..489358d 100644
+--- a/src/cpp/src/visual_language/pipeline.cpp
++++ b/src/cpp/src/visual_language/pipeline.cpp
+@@ -349,6 +349,9 @@ public:
+         if (!m_is_chat_conversation) {
+             reset_language_state();
+             m_language.get_tensor("attention_mask").set_shape({1, 0});
++            // A request that failed part-way leaves its prompt tokens in the cache state, which only a finished
++            // generate clears; left there, they make every later request fail its tokenized history check.
++            m_inputs_embedder->get_cache_state().reset_state();
+         }
+ 
+         setup_generation_config(generation_config);
+@@ -913,7 +916,21 @@ private:
+         std::optional<int64_t> rope_delta;
+         std::tie(position_ids, rope_delta) = m_inputs_embedder->get_position_ids(inputs_embeds_size, history_size);
+ 
+-        const auto& lm_extra_inputs = m_inputs_embedder->get_lm_extra_inputs();
++        const auto& embedder_extra_inputs = m_inputs_embedder->get_lm_extra_inputs();
++        // NPUW's chunked prefill slices visual_pos_masks along the prompt, so on NPU the one-element mask a
++        // text-only prompt gets (Qwen3-VL) must be widened to the whole prompt, all false.
++        std::unordered_map<std::string, ov::Tensor> npu_extra_inputs;
++        const auto masks = embedder_extra_inputs.find("visual_pos_masks");
++        const size_t prompt_len = history_size + inputs_embeds_size;
++        const bool widen_masks = m_is_npu && masks != embedder_extra_inputs.end() && masks->second &&
++                                 masks->second.get_shape().back() == 1 && prompt_len > 1;
++        if (widen_masks) {
++            npu_extra_inputs = embedder_extra_inputs;
++            ov::Tensor whole_prompt(ov::element::boolean, {masks->second.get_shape().at(0), prompt_len});
++            std::fill_n(whole_prompt.data<bool>(), whole_prompt.get_size(), false);
++            npu_extra_inputs["visual_pos_masks"] = std::move(whole_prompt);
++        }
++        const auto& lm_extra_inputs = widen_masks ? npu_extra_inputs : embedder_extra_inputs;
+ 
+         auto per_layer_callback = m_inputs_embedder->get_per_layer_embeddings_callback();
+ 
+diff --git a/src/cpp/src/visual_language/qwen2vl/classes.cpp b/src/cpp/src/visual_language/qwen2vl/classes.cpp
+index 31edb52..f58ad84 100644
+--- a/src/cpp/src/visual_language/qwen2vl/classes.cpp
++++ b/src/cpp/src/visual_language/qwen2vl/classes.cpp
+@@ -4,6 +4,11 @@
+ 
+ #include "visual_language/qwen2vl/classes.hpp"
+ 
++#include <algorithm>
++#include <cstdlib>
++#include <iostream>
++#include <sstream>
++
+ #include "visual_language/clip.hpp"
+ 
+ #include "utils.hpp"
+@@ -256,6 +261,55 @@ std::shared_ptr<ov::Model> patch_preprocess_into_model(const std::shared_ptr<ov:
+                                                            reshape_shape4d,
+                                                            reshape_shape2d});
+ }
++
++// Castellan: is the merger asked for on the NPU (its device, or AUTO's first priority)? CASTELLAN_NPU_MERGER=0 says no.
++bool castellan_merger_on_npu(const std::string& device, const ov::AnyMap& properties) {
++    const char* off = std::getenv("CASTELLAN_NPU_MERGER");
++    if (off && std::string(off) == "0") {
++        return false;
++    }
++    if (device == "NPU") {
++        return true;
++    }
++    if (device.rfind("AUTO", 0) != 0) {
++        return false;
++    }
++    auto it = properties.find(ov::device::priorities.name());
++    return it != properties.end() && it->second.as<std::string>().rfind("NPU", 0) == 0;
++}
++
++// Castellan: the patch counts the NPU's mergers are compiled at, ascending: CASTELLAN_NPU_MERGER_PATCHES
++// (comma-separated), else 784 and 1600, a 448 px square and a 640 px one. 3136, an 896 px square, hangs the NPU 3720
++// (ZE_RESULT_ERROR_DEVICE_LOST), and agreement with the processor falls as the count grows (2304: cosine 0.997).
++std::vector<size_t> castellan_npu_merger_patches() {
++    std::vector<size_t> patches;
++    const char* given = std::getenv("CASTELLAN_NPU_MERGER_PATCHES");
++    std::stringstream list(given ? given : "784,1600");
++    for (std::string item; std::getline(list, item, ',');) {
++        const size_t n = std::strtoull(item.c_str(), nullptr, 10);
++        if (n > 0 && n % 4 == 0) {
++            patches.push_back(n);
++        }
++    }
++    std::sort(patches.begin(), patches.end());
++    patches.erase(std::unique(patches.begin(), patches.end()), patches.end());
++    return patches;
++}
++
++// Castellan: how long the processor's merger is kept after its last use, CASTELLAN_CPU_MERGER_IDLE_S, else 60 s; 0 keeps it.
++std::chrono::seconds castellan_cpu_merger_idle() {
++    const char* given = std::getenv("CASTELLAN_CPU_MERGER_IDLE_S");
++    return std::chrono::seconds(given ? std::strtoll(given, nullptr, 10) : 60);
++}
++
++bool castellan_has_input(const std::shared_ptr<ov::Model>& model, const std::string& name) {
++    for (const auto& input : model->inputs()) {
++        if (input.get_names().count(name)) {
++            return true;
++        }
++    }
++    return false;
++}
+ } // namespace
+ 
+ namespace qwen2_vl_utils {
+@@ -945,26 +999,124 @@ InputsEmbedderQwen2VL::InputsEmbedderQwen2VL(
+     auto merger_path = model_dir / "openvino_vision_embeddings_merger_model.xml";
+     if (std::filesystem::exists(merger_path)) {
+         auto model = utils::singleton_core().read_model(merger_path);
+-        utils::request_vl_sdpa_transformations(model);
++        auto merger_properties = utils::get_model_properties(device_config, "vision_embeddings_merger", device);
++        const bool npu_merger = vlm_config.model_type == VLMModelType::QWEN3_VL &&
++                                castellan_merger_on_npu(device, merger_properties) &&
++                                castellan_has_input(model, "hidden_states") &&
++                                castellan_has_input(model, "attention_mask") &&
++                                castellan_has_input(model, "rotary_pos_emb");
++        if (npu_merger) {
++            ov::AnyMap npu_properties;
++            if (auto it = merger_properties.find(ov::cache_dir.name()); it != merger_properties.end()) {
++                npu_properties.insert(*it);
++            }
++            const auto hidden = model->input("hidden_states").get_partial_shape()[1];
++            const auto rotary = model->input("rotary_pos_emb").get_partial_shape()[1];
++            OPENVINO_ASSERT(hidden.is_static() && rotary.is_static(), "Castellan: the merger's hidden and rotary widths must be fixed");
++            m_castellan_rotary_dim = static_cast<size_t>(rotary.get_length());
++            for (size_t patches : castellan_npu_merger_patches()) {
++                const ov::Dimension n(static_cast<int64_t>(patches));
++                auto fixed = model->clone();
++                fixed->reshape(std::map<std::string, ov::PartialShape>{
++                    {"hidden_states", ov::PartialShape{n, hidden}},
++                    {"attention_mask", ov::PartialShape{1, n, n}},
++                    {"rotary_pos_emb", ov::PartialShape{n, rotary}}});
++                auto compiled = utils::singleton_core().compile_model(fixed, "NPU", npu_properties);
++                const std::string title = "VLM vision embeddings merger model on NPU (Castellan), " + std::to_string(patches) + " patches";
++                ov::genai::utils::print_compiled_model_properties(compiled, title.c_str());
++                m_castellan_npu_mergers.push_back({patches, compiled.create_infer_request()});
++            }
++            // Past the largest: the merger as GenAI compiles it for an NPU pipeline, AUTO on the processor.
++            m_castellan_cpu_merger_model = model;
++            if (device.rfind("AUTO", 0) == 0) {
++                m_castellan_cpu_merger_device = device;
++                merger_properties[ov::device::priorities.name()] = std::string("CPU");
++            } else {
++                m_castellan_cpu_merger_device = "CPU";
++                merger_properties.erase(ov::device::priorities.name());
++            }
++            m_castellan_cpu_merger_properties = merger_properties;
++            m_castellan_cpu_merger_idle = castellan_cpu_merger_idle();
++        } else {
++            utils::request_vl_sdpa_transformations(model);
++
++            auto compiled_model = utils::singleton_core().compile_model(model, device, merger_properties);
++
++            m_with_cu_seqlens_input = utils::check_vl_sdpa_transformations(compiled_model);
++            ov::genai::utils::print_compiled_model_properties(compiled_model,
++                m_with_cu_seqlens_input ? "VLM vision embeddings merger model with VLSDPA optimization ENABLED" :
++                "VLM vision embeddings merger model with VLSDPA optimization DISABLED");
++
++            m_ireq_queue_vision_embeddings_merger = std::make_unique<CircularBufferQueue<ov::InferRequest>>(
++                compiled_model.get_property(ov::optimal_number_of_infer_requests),
++                [&compiled_model]() -> ov::InferRequest {
++                    return compiled_model.create_infer_request();
++                });
++        }
++    }
+ 
+-        auto compiled_model = utils::singleton_core().compile_model(
+-            model, device, utils::get_model_properties(device_config, "vision_embeddings_merger", device));
++    encode_vision_placeholder_tokens();
+ 
+-        m_with_cu_seqlens_input = utils::check_vl_sdpa_transformations(compiled_model);
+-        ov::genai::utils::print_compiled_model_properties(compiled_model,
+-            m_with_cu_seqlens_input ? "VLM vision embeddings merger model with VLSDPA optimization ENABLED" :
+-            "VLM vision embeddings merger model with VLSDPA optimization DISABLED");
++    m_merge_length = std::pow(m_vision_encoder->get_processor_config().merge_size, 2);
+ 
+-        m_ireq_queue_vision_embeddings_merger = std::make_unique<CircularBufferQueue<ov::InferRequest>>(
+-            compiled_model.get_property(ov::optimal_number_of_infer_requests),
+-            [&compiled_model]() -> ov::InferRequest {
+-                return compiled_model.create_infer_request();
+-            });
++    // Last, so that nothing can throw with the thread running and leave it unjoined.
++    if (m_castellan_cpu_merger_model && m_castellan_cpu_merger_idle.count() > 0) {
++        m_castellan_reaper = std::thread([this] { castellan_reap(); });
+     }
++}
+ 
+-    encode_vision_placeholder_tokens();
++InputsEmbedderQwen2VL::~InputsEmbedderQwen2VL() {
++    if (m_castellan_reaper.joinable()) {
++        {
++            std::lock_guard<std::mutex> lock(m_castellan_cpu_merger_mutex);
++            m_castellan_stop = true;
++        }
++        m_castellan_cpu_merger_cv.notify_all();
++        m_castellan_reaper.join();
++    }
++}
+ 
+-    m_merge_length = std::pow(m_vision_encoder->get_processor_config().merge_size, 2);
++void InputsEmbedderQwen2VL::castellan_cpu_merger_used() {
++    m_castellan_cpu_merger_used = std::chrono::steady_clock::now();
++    m_castellan_cpu_merger_cv.notify_all();
++}
++
++void InputsEmbedderQwen2VL::castellan_reap() {
++    std::unique_lock<std::mutex> lock(m_castellan_cpu_merger_mutex);
++    while (!m_castellan_stop) {
++        if (!m_ireq_queue_vision_embeddings_merger) {
++            m_castellan_cpu_merger_cv.wait(lock);
++            continue;
++        }
++        const auto due = m_castellan_cpu_merger_used + m_castellan_cpu_merger_idle;
++        if (std::chrono::steady_clock::now() < due) {
++            m_castellan_cpu_merger_cv.wait_until(lock, due);
++            continue;
++        }
++        // Its requests hold its compiled model: with them gone, so is the model.
++        m_ireq_queue_vision_embeddings_merger.reset();
++        if (utils::env_setup_for_print_debug_info()) {
++            std::cout << "Castellan: the processor's merger freed, " << m_castellan_cpu_merger_idle.count() << " s after its last use" << std::endl;
++        }
++    }
++}
++
++void InputsEmbedderQwen2VL::castellan_cpu_merger() {
++    if (m_ireq_queue_vision_embeddings_merger || !m_castellan_cpu_merger_model) {
++        return;
++    }
++    auto model = m_castellan_cpu_merger_model->clone();
++    utils::request_vl_sdpa_transformations(model);
++    auto compiled_model = utils::singleton_core().compile_model(model, m_castellan_cpu_merger_device, m_castellan_cpu_merger_properties);
++    m_with_cu_seqlens_input = utils::check_vl_sdpa_transformations(compiled_model);
++    ov::genai::utils::print_compiled_model_properties(compiled_model,
++        m_with_cu_seqlens_input ? "VLM vision embeddings merger model past the NPU's (Castellan) with VLSDPA optimization ENABLED" :
++        "VLM vision embeddings merger model past the NPU's (Castellan) with VLSDPA optimization DISABLED");
++    m_ireq_queue_vision_embeddings_merger = std::make_unique<CircularBufferQueue<ov::InferRequest>>(
++        compiled_model.get_property(ov::optimal_number_of_infer_requests),
++        [&compiled_model]() -> ov::InferRequest {
++            return compiled_model.create_infer_request();
++        });
+ }
+ 
+ InputsEmbedderQwen2VL::InputsEmbedderQwen2VL(
+@@ -1418,9 +1570,13 @@ ov::Tensor InputsEmbedderQwen2VL::get_rotary_pos_emb(const std::vector<std::arra
+     }
+ 
+     // Calculate rotary embeddings for max_grid_size
+-    CircularBufferQueueElementGuard<ov::InferRequest> infer_request_guard(this->m_ireq_queue_vision_embeddings_merger.get());
+-    ov::InferRequest& vision_embeddings_merger = infer_request_guard.get();
+-    const size_t dim = vision_embeddings_merger.get_tensor("rotary_pos_emb").get_shape().at(1);
++    // Castellan: with the merger on the NPU, the processor's isn't compiled until a picture needs it; the width is the model's.
++    size_t dim = m_castellan_rotary_dim;
++    if (!dim) {
++        CircularBufferQueueElementGuard<ov::InferRequest> infer_request_guard(this->m_ireq_queue_vision_embeddings_merger.get());
++        ov::InferRequest& vision_embeddings_merger = infer_request_guard.get();
++        dim = vision_embeddings_merger.get_tensor("rotary_pos_emb").get_shape().at(1);
++    }
+     const float theta = 10000.0f;
+     
+     std::vector<float> inv_freq(dim / 2);
+diff --git a/src/cpp/src/visual_language/qwen2vl/classes.hpp b/src/cpp/src/visual_language/qwen2vl/classes.hpp
+index 918e869..3d0fd66 100644
+--- a/src/cpp/src/visual_language/qwen2vl/classes.hpp
++++ b/src/cpp/src/visual_language/qwen2vl/classes.hpp
+@@ -3,7 +3,11 @@
+ 
+ #pragma once
+ 
++#include <chrono>
++#include <condition_variable>
+ #include <filesystem>
++#include <mutex>
++#include <thread>
+ 
+ #include "visual_language/vlm_config.hpp"
+ 
+@@ -75,6 +79,8 @@ public:
+         const std::string& device,
+         const ov::AnyMap device_config);
+ 
++    ~InputsEmbedderQwen2VL() override;
++
+     ov::Tensor get_inputs_embeds(const std::string& prompt, const std::vector<ov::genai::EncodedImage>& images, ov::genai::VLMPerfMetrics& metrics, bool recalculate_merged_embeddings = true, const std::vector<size_t>& image_sequence = {}) override;
+     ov::Tensor get_inputs_embeds(const std::string& prompt,
+                                  const std::vector<ov::genai::EncodedImage>& images,
+@@ -136,6 +142,36 @@ protected:
+ 
+     bool m_with_cu_seqlens_input = false;
+ 
++    // Castellan: Qwen3-VL's merger on the NPU, where it is asked for there (MODEL_PROPERTIES' vision_embeddings_merger
++    // MULTI_DEVICE_PRIORITIES NPU). The NPU compiles no dynamic shapes, so it is compiled at fixed patch counts,
++    // smallest first, and a picture's patches are padded up to the next. Past the largest, the processor's merger, as
++    // GenAI compiles it for NPU pipelines, compiled when first needed (castellan_cpu_merger).
++    struct CastellanNpuMerger {
++        size_t patches;
++        ov::InferRequest request;
++    };
++    std::vector<CastellanNpuMerger> m_castellan_npu_mergers;
++    // The merger's rotary_pos_emb width, set where the NPU's mergers are (get_rotary_pos_emb reads the processor's otherwise).
++    size_t m_castellan_rotary_dim = 0;
++    std::mutex m_castellan_npu_mutex;
++    std::shared_ptr<ov::Model> m_castellan_cpu_merger_model;
++    std::string m_castellan_cpu_merger_device;
++    ov::AnyMap m_castellan_cpu_merger_properties;
++    // Held while the processor's merger is compiled, used or freed.
++    std::mutex m_castellan_cpu_merger_mutex;
++    // Compiles the processor's merger, if it isn't; m_castellan_cpu_merger_mutex held.
++    void castellan_cpu_merger();
++    // The processor's merger is freed this long after its last use (CASTELLAN_CPU_MERGER_IDLE_S, default 60; 0 keeps
++    // it), as it takes over a gigabyte the NPU's mergers don't need: by castellan_reap, on a thread of its own.
++    std::chrono::seconds m_castellan_cpu_merger_idle{60};
++    std::chrono::steady_clock::time_point m_castellan_cpu_merger_used;
++    std::condition_variable m_castellan_cpu_merger_cv;
++    bool m_castellan_stop = false;
++    std::thread m_castellan_reaper;
++    // After a use of the processor's merger; m_castellan_cpu_merger_mutex held.
++    void castellan_cpu_merger_used();
++    void castellan_reap();
++
+     virtual void expand_video_tags_in_prompt(
+         std::string& unified_prompt,
+         const std::vector<EncodedVideo>& encoded_videos,
+diff --git a/src/cpp/src/visual_language/qwen3_vl/classes.cpp b/src/cpp/src/visual_language/qwen3_vl/classes.cpp
+index ee881bf..0c29788 100644
+--- a/src/cpp/src/visual_language/qwen3_vl/classes.cpp
++++ b/src/cpp/src/visual_language/qwen3_vl/classes.cpp
+@@ -11,6 +11,8 @@
+ 
+ #include <cstdlib>
+ #include <cstring>
++#include <limits>
++#include <optional>
+ 
+ #include "openvino/op/add.hpp"
+ #include "openvino/op/multiply.hpp"
+@@ -603,31 +605,98 @@ std::pair<ov::Tensor, ov::Tensor> InputsEmbedderQwen3VL::run_video_image_embeddi
+ 
+     ov::Tensor rotary_pos_emb = get_rotary_pos_emb(combined_grid_thw);
+ 
+-    CircularBufferQueueElementGuard<ov::InferRequest> infer_request_guard(m_ireq_queue_vision_embeddings_merger.get());
+-    ov::InferRequest& vision_embeddings_merger = infer_request_guard.get();
++    ov::Tensor vision_embeds;
++    std::optional<CircularBufferQueueElementGuard<ov::InferRequest>> infer_request_guard;
++    // Castellan: the NPU's merger at the smallest patch count that takes them all, if it has one.
++    const size_t patches = concatenated_embeds.get_shape().at(0);
++    auto npu = std::find_if(m_castellan_npu_mergers.begin(), m_castellan_npu_mergers.end(),
++                            [patches](const CastellanNpuMerger& m) { return patches <= m.patches; });
++    if (npu != m_castellan_npu_mergers.end()) {
++        std::lock_guard<std::mutex> lock(m_castellan_npu_mutex);
++        const size_t padded = npu->patches;
++        // The patches, then zeros up to the merger's count; the same for their rotary embeddings.
++        auto pad_rows = [padded](const ov::Tensor& t) {
++            ov::Tensor out(t.get_element_type(), {padded, t.get_shape().at(1)});
++            std::memset(out.data(), 0, out.get_byte_size());
++            std::memcpy(out.data(), t.data(), t.get_byte_size());
++            return out;
++        };
++        // Each picture's patches see only each other, as before; each padding patch sees only itself.
++        ov::Tensor own_mask = qwen2_vl_utils::get_attention_mask(reordered_images_grid_thw, reordered_videos_grid_thw);
++        OPENVINO_ASSERT(own_mask.get_shape().at(1) == patches, "Castellan: the attention mask doesn't cover the patches");
++        ov::Tensor mask(ov::element::f32, {1, padded, padded});
++        float* m = mask.data<float>();
++        std::fill_n(m, mask.get_size(), -std::numeric_limits<float>::infinity());
++        const float* own = own_mask.data<float>();
++        for (size_t r = 0; r < patches; ++r) {
++            std::memcpy(m + r * padded, own + r * patches, patches * sizeof(float));
++        }
++        for (size_t r = patches; r < padded; ++r) {
++            m[r * padded + r] = 0.0f;
++        }
++        ov::InferRequest& request = npu->request;
++        request.set_tensor("hidden_states", pad_rows(concatenated_embeds));
++        request.set_tensor("attention_mask", mask);
++        request.set_tensor("rotary_pos_emb", pad_rows(rotary_pos_emb));
++        request.infer();
++        // The merged tokens of the patches, the padding's cut off.
++        const size_t tokens = patches / m_merge_length;
++        ov::Tensor merged = request.get_tensor("last_hidden_state");
++        vision_embeds = ov::Tensor(merged.get_element_type(), {tokens, merged.get_shape().at(1)});
++        std::memcpy(vision_embeds.data(), merged.data(), vision_embeds.get_byte_size());
++        if (has_lm_extra_input("deepstack_visual_embeds")) {
++            ov::Tensor deepstack = request.get_tensor("deepstack_feature_lists");
++            const auto shape = deepstack.get_shape();
++            ov::Tensor deepstack_owned(deepstack.get_element_type(), {shape.at(0), tokens, shape.at(2)});
++            const size_t row = shape.at(2) * deepstack.get_element_type().size();
++            for (size_t layer = 0; layer < shape.at(0); ++layer) {
++                std::memcpy(static_cast<uint8_t*>(deepstack_owned.data()) + layer * tokens * row,
++                            static_cast<const uint8_t*>(deepstack.data()) + layer * shape.at(1) * row,
++                            tokens * row);
++            }
++            m_lm_extra_inputs["deepstack_visual_embeds"] = std::move(deepstack_owned);
++        }
++    } else {
++        // Castellan: past the NPU's mergers, the processor's, held while it's used (castellan_reap frees it after).
++        std::unique_lock<std::mutex> cpu_merger_lock(m_castellan_cpu_merger_mutex, std::defer_lock);
++        if (m_castellan_cpu_merger_model) {
++            cpu_merger_lock.lock();
++            castellan_cpu_merger();
++        }
++        infer_request_guard.emplace(m_ireq_queue_vision_embeddings_merger.get());
++        ov::InferRequest& vision_embeddings_merger = infer_request_guard->get();
+ 
+-    vision_embeddings_merger.set_tensor("hidden_states", concatenated_embeds);
++        vision_embeddings_merger.set_tensor("hidden_states", concatenated_embeds);
+ 
+-    if (m_with_cu_seqlens_input) {
+-        vision_embeddings_merger.set_tensor(
+-            "cu_seq_lens",
+-            qwen2_vl_utils::get_cu_seqlens(reordered_images_grid_thw, reordered_videos_grid_thw));
+-    } else {
+-        vision_embeddings_merger.set_tensor(
+-            "attention_mask",
+-            qwen2_vl_utils::get_attention_mask(reordered_images_grid_thw, reordered_videos_grid_thw));
+-    }
++        if (m_with_cu_seqlens_input) {
++            vision_embeddings_merger.set_tensor(
++                "cu_seq_lens",
++                qwen2_vl_utils::get_cu_seqlens(reordered_images_grid_thw, reordered_videos_grid_thw));
++        } else {
++            vision_embeddings_merger.set_tensor(
++                "attention_mask",
++                qwen2_vl_utils::get_attention_mask(reordered_images_grid_thw, reordered_videos_grid_thw));
++        }
+ 
+-    vision_embeddings_merger.set_tensor("rotary_pos_emb", rotary_pos_emb);
+-    vision_embeddings_merger.infer();
++        vision_embeddings_merger.set_tensor("rotary_pos_emb", rotary_pos_emb);
++        vision_embeddings_merger.infer();
+ 
+-    ov::Tensor vision_embeds = vision_embeddings_merger.get_tensor("last_hidden_state");
++        vision_embeds = vision_embeddings_merger.get_tensor("last_hidden_state");
+ 
+-    if (has_lm_extra_input("deepstack_visual_embeds")) {
+-        ov::Tensor deepstack_view = vision_embeddings_merger.get_tensor("deepstack_feature_lists");
+-        ov::Tensor deepstack_owned(deepstack_view.get_element_type(), deepstack_view.get_shape());
+-        deepstack_view.copy_to(deepstack_owned);
+-        m_lm_extra_inputs["deepstack_visual_embeds"] = std::move(deepstack_owned);
++        if (has_lm_extra_input("deepstack_visual_embeds")) {
++            ov::Tensor deepstack_view = vision_embeddings_merger.get_tensor("deepstack_feature_lists");
++            ov::Tensor deepstack_owned(deepstack_view.get_element_type(), deepstack_view.get_shape());
++            deepstack_view.copy_to(deepstack_owned);
++            m_lm_extra_inputs["deepstack_visual_embeds"] = std::move(deepstack_owned);
++        }
++        if (cpu_merger_lock.owns_lock()) {
++            // Its own copy, and the request back in its queue, before the merger may be freed.
++            ov::Tensor owned(vision_embeds.get_element_type(), vision_embeds.get_shape());
++            vision_embeds.copy_to(owned);
++            vision_embeds = owned;
++            infer_request_guard.reset();
++            castellan_cpu_merger_used();
++        }
+     }
+ 
+     auto vision_embeds_shape = vision_embeds.get_shape();
