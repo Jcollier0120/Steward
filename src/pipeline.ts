@@ -17,8 +17,9 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
  * override, Build now (POST /api/pipeline/build, or `steward build` at a console), begins one at once: for some
  * repositories, or all, and, ticked, lets its releases out to customers at once too. An urgent fix (a commit on main whose
  * changelog entry has a line starting "**Urgent fix:", stages/urgent.ts) begins one at once too, for its repository
- * alone, without the kit; and so do releases that waited until this PC could sign, once a round between builds finds it
- * can (signing.ts's signedBetween, Steward 0.36.161), rather than waiting for the next build time.
+ * alone, without the kit (unless the kit is the urgent fix: kitRides); and so do releases that waited until this PC could
+ * sign, once a round between builds finds it can (signing.ts's signedBetween, Steward 0.36.161), rather than waiting for
+ * the next build time.
  *
  * pipeline.json keeps the build that is open, and the last builds, each with what it merged itself and released.
  */
@@ -244,14 +245,31 @@ export function lateLine(run: BuildRun | null | undefined, now: Date): string | 
 }
 
 /**
- * Whether the newest kit goes into this build: every build, or only the day's first scheduled one. Never an urgent fix's,
- * nor a signing build's: a kit PR would hold its release until the kit's checks pass, and the next build takes the kit.
+ * Whether the newest kit goes into this build: every build, or only the day's first scheduled one. Never a signing
+ * build's, nor an urgent fix's: a kit PR would hold its release until the kit's checks pass, and the next build takes the
+ * kit. But for the urgent fix's build of the Steward's own whose kit is itself urgent (`urgentKit`, rollout.ts's
+ * urgentKit): it rolls that kit out to every employee, each entry marked urgent, and each employee is built at once
+ * after it (stages/urgent.ts), rather than at the next build, up to a night later (Steward 0.36.234).
  */
-export function kitRides(p: BuildPipeline, state: PipelineState, run: BuildRun): boolean {
-  if (run.by === 'urgent' || run.by === 'signing') return false;
+export function kitRides(p: BuildPipeline, state: PipelineState, run: BuildRun, o: { urgentKit?: boolean } = {}): boolean {
+  if (run.by === 'urgent') return !!o.urgentKit;
+  if (run.by === 'signing') return false;
   if (p.kit === 'every' || run.by === 'owner') return true;
   const day = new Date(run.due).toDateString();
   return !state.builds.some((b) => b.by === 'schedule' && b !== run && new Date(b.due).toDateString() === day && Date.parse(b.due) < Date.parse(run.due));
+}
+
+/**
+ * What a build's round does with the newest kit, once the Steward's own releases have had their turn: roll it out
+ * ('rollout'), wait for the kit main carries, still being tried or waiting for its whole suite (`waits`, 'wait'), or leave
+ * it to the next build ('next'). A build that takes no kit (kitRides: `rides` false) waits for it all the same when it is
+ * the urgent fix's build of the Steward's own (`selfUrgent`): the Steward's version waits for its kit's release, and its
+ * urgent fix would otherwise wait for the next build, as it did on 2026-10-25 (Steward 0.36.234). Never once the
+ * build's time has run out (`closing`). Pure.
+ */
+export function kitStep(o: { rides: boolean; waits: string | null; closing: boolean; selfUrgent: boolean }): 'rollout' | 'wait' | 'next' {
+  if (o.waits && !o.closing && (o.rides || o.selfUrgent)) return 'wait';
+  return o.rides ? 'rollout' : 'next';
 }
 
 /**

@@ -25,7 +25,7 @@ import { loadInstallHolds } from './installscripts.ts';
 import { finishPending, release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile, signedBetween, signingAhead } from './stages/round.ts';
-import { clearRolloutHolds, loadRolloutFailures, rollout, takeRolloutResults } from './stages/rollout.ts';
+import { clearRolloutHolds, loadRolloutFailures, rollout, takeRolloutResults, urgentKit } from './stages/rollout.ts';
 import { loadSelfFailures, releaseSelf, selfFactsAlone, selfToFinish, trialAhead } from './stages/self.ts';
 import { heldKit, kitTrialsFile, TRIAL_GOING, type KitTrial } from './stages/trial.ts';
 import { stampAll } from './stages/stamp.ts';
@@ -47,7 +47,7 @@ import { whereAzure } from './hosts/azure.ts';
 import { whereGitea } from './hosts/gitea.ts';
 import { heldBy, withRepo, withStageSlot } from './stages/slots.ts';
 import { lastWoke } from './fresh-start.ts';
-import { boardedUrgent, buildWhen, endRound, kitRides, lateLine, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode, type PipelineState, type UrgentPr } from './pipeline.ts';
+import { boardedUrgent, buildWhen, endRound, kitRides, kitStep, lateLine, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode, type PipelineState, type UrgentPr } from './pipeline.ts';
 import { urgentReady } from './stages/urgent.ts';
 import { letOut } from './kit/exchequer.ts';
 import { keepPhases, phaseOf, timed } from './buildtimes.ts';
@@ -766,10 +766,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // The newest kit, rolled out to each employee behind it (stages/rollout.ts): bumped, pushed and merged by the
           // Steward itself. On the Steward's page the bumps run beside the rounds (`beside`): this round goes on at once,
           // and a round comes as soon as they end (agent.ts).
-          const rollOut = async (): Promise<{ beside: boolean }> => {
+          const rollOut = async (who: Employee[]): Promise<{ beside: boolean }> => {
             const newest = latestKit(ctx.kit);
             try {
-              const rolled = await rollout(ctx, employees, { kit: newest, ownKit: own, changelog: (k) => changelogFor(ctx, k) });
+              const rolled = await rollout(ctx, who, { kit: newest, ownKit: own, changelog: (k) => changelogFor(ctx, k) });
               out.results.push(...rolled.results);
               mergedHere.push(...rolled.results.filter((r) => r.outcome === 'done' && /\bmerged\b/.test(r.message) && r.url).map((r) => `${r.id} #${r.url!.split('/').pop()}`));
               if (rolled.plan.waitsForSteward && newest && own) rolloutWaits = { kit: newest, own };
@@ -784,12 +784,22 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             // rolled out, every repository's main released at once, the one release of this build. Or when the build's
             // time has run out. A kit main carries that is still being tried (stages/trial.ts) keeps the build open,
             // rather than sending every agent the kit before it to be bumped again at the next build.
-            const rolled: { beside: boolean; waits?: string } = !kitRides(ctx.settings.buildPipeline, pipeline!, mode.run)
-              ? (log(mode.run.by === 'urgent' ? 'the newest kit waits for the next build: this one is for an urgent fix' : mode.run.by === 'signing' ? 'the newest kit waits for the next build: this one is for the releases that waited to sign' : "the newest kit waits for the day's first build (Settings: Build pipeline)"), { beside: false })
-              : kitWaits && !mode.closing
-                ? (log(`rollout: waits for kit ${kitWaits}, which is being tried`), { beside: false, waits: `kit ${kitWaits} is being tried` })
-                : await rollOut();
+            // The urgent fix's build of the Steward's own (Steward 0.36.234) waits for its kit too, which its version waits
+            // for; and a kit that is itself urgent (rollout.ts's urgentKit) goes out in it to every employee, not only the
+            // build's: each one's entry marked urgent, the round after it builds each at once (stages/urgent.ts).
+            const selfUrgent = mode.run.by === 'urgent' && !!self;
+            const urgentKitNow = selfUrgent ? await urgentKit(ctx, latestKit(ctx.kit), (k) => changelogFor(ctx, k)).catch(() => null) : null;
+            const step = kitStep({ rides: kitRides(ctx.settings.buildPipeline, pipeline!, mode.run, { urgentKit: !!urgentKitNow }), waits: kitWaits, closing: mode.closing, selfUrgent });
+            if (urgentKitNow) log(`kit ${urgentKitNow} is an urgent fix: kit ${latestKit(ctx.kit)} goes out in this build to every employee still behind it, and each is built at once after it`);
+            const rolled: { beside: boolean; waits?: string } =
+              step === 'next'
+                ? (log(mode.run.by === 'urgent' ? 'the newest kit waits for the next build: this one is for an urgent fix' : mode.run.by === 'signing' ? 'the newest kit waits for the next build: this one is for the releases that waited to sign' : "the newest kit waits for the day's first build (Settings: Build pipeline)"), { beside: false })
+                : step === 'wait'
+                  ? (log(`rollout: waits for kit ${kitWaits}, which is being tried`), { beside: false, waits: `kit ${kitWaits} is being tried` })
+                  : await rollOut(urgentKitNow ? free((await takeTurnsFor(ctx, o, ctx.settings.employees, null, true)).acting) : employees);
             buildCloses = mode.closing || (!rolled.beside && !rolled.waits);
+            // The urgent kit's employees, merged now, are each built at once by the next round: it comes sooner.
+            if (buildCloses && urgentKitNow) out.soon = true;
             if (buildCloses) {
               // The build's one release is every repository of the build's: their turns taken.
               const all = await takeTurnsFor(ctx, o, picked.employees, null, true);
@@ -800,7 +810,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               log(`the build releases once it has settled: ${rolled.waits ?? "the kit's rollout goes on beside the rounds"}`);
             }
           } else {
-            await rollOut();
+            await rollOut(employees);
             await releaseNow(free(employees));
           }
           lap('rollout and releases');

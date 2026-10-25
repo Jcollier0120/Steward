@@ -58,6 +58,14 @@ The Steward's kit bump (`steward bump`, a round's rollout) raises an agent's ver
 
 So a kit entry in `kit/CHANGELOG.md` that needs something of the people updating says so under its own `### Before you update`: it reaches every agent's notes.
 
+A kit entry marked urgent (its bold line starts with `Urgent fix:`) makes every agent's bump entry urgent too: its bold line starts `**Urgent fix:`, naming the kit. The Steward then rolls that kit out at once rather than at its next build, builds each agent as soon as its bump merges, and each release goes out to customers at once, as any urgent fix does.
+
+```markdown
+## 0.5.84
+
+**Urgent fix: it carries the Steward's kit 2.136.1, with an urgent fix to the parts every agent of the manor shares.**
+```
+
 ## Merging
 
 Two changes side by side each add an entry at the top. The Steward's catch-up keeps both, the newer under the version it ends up with (`mergeChangelogs`), and renames a PR's top entry when it gives the PR another version.

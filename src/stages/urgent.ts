@@ -1,4 +1,4 @@
-import { CHANGES_DIR } from '../entries.ts';
+import { CHANGES_DIR, KIT_CHANGES_DIR } from '../entries.ts';
 import { commitOf, fetchBranch, git, gitMaybe } from '../git.ts';
 import { isUrgent } from '../kit/exchequer.ts';
 import { CHANGELOG } from '../kit/notes.ts';
@@ -46,7 +46,9 @@ const LOOKED_MAX = 1000;
 
 /**
  * Whether main at `head` adds an urgent entry since the release `tag` (its commit `tagged`, when the glance says): the
- * lines it adds to CHANGELOG.md or changes/. Only what the clone lacks is fetched: main's head, the release's commit.
+ * lines it adds to CHANGELOG.md or changes/, and in the Steward's own repository to the kit's (kit/CHANGELOG.md,
+ * kit/changes/): an urgent kit builds the Steward at once, whose build rolls it out (pipeline.ts kitRides). Only what the
+ * clone lacks is fetched: main's head, the release's commit.
  */
 async function readUrgent(ctx: Ctx, e: Employee, head: string, tag: string, tagged: string | null): Promise<boolean> {
   const repo = checkoutOf(e);
@@ -57,7 +59,7 @@ async function readUrgent(ctx: Ctx, e: Employee, head: string, tag: string, tagg
     if ((await gitMaybe(ctx.run, repo, 'fetch', '--quiet', 'origin', `+${ref}:${ref}`)) === null) return false;
     from = ref;
   }
-  const diff = await git(ctx.run, repo, 'diff', '--no-color', '--no-ext-diff', '--unified=0', `${from}..${head}`, '--', CHANGELOG, `${CHANGES_DIR}/`);
+  const diff = await git(ctx.run, repo, 'diff', '--no-color', '--no-ext-diff', '--unified=0', `${from}..${head}`, '--', CHANGELOG, `${CHANGES_DIR}/`, `kit/${CHANGELOG}`, `${KIT_CHANGES_DIR}/`);
   return marksUrgent(diff);
 }
 

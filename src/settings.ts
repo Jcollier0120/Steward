@@ -513,7 +513,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'group',
     tab: 'Build pipeline',
     label: 'Build pipeline',
-    help: "At set times a day, a build: each repository's main tested once at its newest commit (unless a vouch covers it) and released once, main's new kit tried on the agents and rolled out, and Manor told once. Whoever writes a PR merges it once vouched, and it waits on main for the next build, except an urgent fix (its changelog entry starting \"**Urgent fix:\"), which builds at once for its repository.",
+    help: "At set times a day, a build: each repository's main tested once at its newest commit (unless a vouch covers it) and released once, main's new kit tried on the agents and rolled out, and Manor told once. Whoever writes a PR merges it once vouched, and it waits on main for the next build, except an urgent fix (its changelog entry starting \"**Urgent fix:\"), which builds at once for its repository. An urgent kit goes out to every agent in that build, and each is built at once after it.",
     fields: [
       // The switch it had (0.36.40 to 0.36.62), never drawn: a Manor that still sends it saves this group as before, and
       // whatever it says is left out (pipeline.ts' normalizePipeline).
