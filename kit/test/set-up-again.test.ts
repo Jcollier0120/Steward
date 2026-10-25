@@ -14,7 +14,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const A = await import('./fixture/src/kit/set-up-again.ts');
 const { parseDetection } = await import('./fixture/src/kit/detect.ts');
-const { pinnedHfFiles, pinnedRelease, planSetup, runSetup, setupCommand } = await import('./fixture/src/kit/setup.ts');
+const { pinnedHfFiles, pinnedRelease, planSetup, runSetup, setupCommand, withWorkOrder } = await import('./fixture/src/kit/setup.ts');
 const { QueueFull } = await import('./fixture/src/kit/npu-queue.ts');
 const { RETIRED_GRACE_MS } = await import('./fixture/src/kit/retired.ts');
 const { serversToReap } = await import('./fixture/src/kit/keeper.ts');
@@ -464,7 +464,8 @@ function onOlderVulkan(e: Record<string, any>): Record<string, any> {
   return old;
 }
 
-const amdConfig = (radeon: Record<string, any>, more: Record<string, any> = {}) => ({ ...configOf(FLM, radeon), workOrder: AMD_ORDER, ...more });
+/** config.json as setup writes it on AMD's XDNA 2: its order, the reranker's apart (rerankOrder, kit 2.136.3). */
+const amdConfig = (radeon: Record<string, any>, more: Record<string, any> = {}) => ({ ...withWorkOrder(configOf(FLM, radeon), AMD_ORDER), ...more });
 
 test("an AMD Radeon set up before kit 2.111.0, for embeddings only, is behind its work order: it gains pictures, said so; its build and models otherwise this kit's", async () => {
   assert.deepEqual(AMD_ORDER.vision?.devices, ['gpu', 'npu', 'cpu'], "AMD xdna2's pictures: the Radeon first");
@@ -506,7 +507,7 @@ test("Manor's switch off adds the pictures too (kit 2.135.3), never chat; the pe
   assert.deepEqual(old.kinds, ['vision', 'embed']);
   assert.equal(old.why[0], "vision added: this PC's work order puts the graphics card first for it");
   // An order that put the card first for chat: chat is added only with the switch on; off, the pictures alone.
-  const chatFirst = { workOrder: { ...AMD_ORDER, chat: { devices: ['gpu', 'npu', 'cpu'] } } };
+  const chatFirst = { workOrder: { ...amdConfig(entry).workOrder, chat: { devices: ['gpu', 'npu', 'cpu'] } } };
   assert.deepEqual((await behind(amdConfig(entry, chatFirst), false))[0].kinds, ['vision', 'embed']);
   assert.ok((await behind(amdConfig(entry, chatFirst), true))[0].kinds.includes('chat'));
   // An order of their own: the core reads no work order, so nothing is added, the switch on or off.
@@ -552,7 +553,7 @@ async function cpuFor(det: ReturnType<typeof parseDetection>, tools: string, kin
   return JSON.parse(JSON.stringify(e)) as Record<string, any>;
 }
 
-test("Intel, a reranker the processor took (kit 2.135.5): the card gains it, its route's order putting the card first, the switch off or on; the processor's stays; a PC with no reranker, or whose card has one, gains nothing; AMD's and an X2's order none", async () => {
+test("Intel, a reranker the processor took (kit 2.135.5): the card gains it, its route's order putting the card first, the switch off or on; the processor's stays; a PC with no reranker, or whose card has one, gains nothing; an X2's order none", async () => {
   assert.equal(INTEL_PC.npu?.vendor, 'intel');
   assert.deepEqual(INTEL_ORDER, { rerank: { devices: ['gpu', 'cpu'] } });
   const { tools, entry } = await cardFor(INTEL_PC, INTEL_CARD_ID, ['chat', 'vision', 'embed'], INTEL_LIST);
@@ -582,10 +583,42 @@ test("Intel, a reranker the processor took (kit 2.135.5): the card gains it, its
   assert.deepEqual(await A.behindPins({ raw: intelConfig(both.entry, await cpuFor(INTEL_PC, both.tools, ['rerank'])), detection: INTEL_PC, kit: KIT, tools: both.tools, gpuWithNpu: false }), []);
   // An order of their own: nothing read, nothing added.
   assert.deepEqual(await behind({ ...intelConfig(entry, cpu), acceleratorOrder: [INTEL_CARD_ID, 'npu', 'cpu'] }, false), []);
-  // AMD's order (for now) and a Snapdragon's (none) put no card first for a reranker.
-  assert.equal(AMD_ORDER.rerank, undefined);
-  assert.deepEqual(A.orderAdds(amdConfig({ ...entry, id: RADEON_ID }, { accelerators: [FLM, { ...entry, id: RADEON_ID }, cpu] }), [], false).size, 0);
+  // A Snapdragon's order (none) puts no card first for a reranker.
   assert.equal(workOrderFor(NPU_CATALOG.routes.qualcomm, 'snapdragon-x2'), null);
+});
+
+// AMD's reranker on the Radeon (kit 2.136.3, the owner's ruling, as Intel's): AMD xdna2's order puts the card first for
+// one. A PC whose Radeon was set up with the reranker ticked needs nothing once the keeper's look writes the order; one
+// whose processor took it gains the Radeon's, the same way as Intel's, beside the pictures it gained before.
+test("AMD, a reranker the processor took (kit 2.136.3): the Radeon gains it, AMD xdna2's order putting the card first, the switch off or on; the processor's stays; a PC with no reranker, or whose Radeon has one, gains nothing", async () => {
+  assert.deepEqual(AMD_ORDER.rerank, { devices: ['gpu', 'cpu'] });
+  const { tools, entry } = await cardFor(AMD_PC, RADEON_ID, ['vision', 'embed'], RADEON_LIST);
+  assert.equal(entry.rerank, undefined);
+  const cpu = await cpuFor(AMD_PC, tools, ['rerank']);
+  assert.ok(cpu.rerank?.startCommand?.length && !cpu.chat, 'the processor reranks, and does nothing else');
+  const raw = amdConfig(entry, { accelerators: [FLM, entry, cpu] });
+  assert.deepEqual(raw.rerankOrder, AMD_ORDER.rerank, "the reranker's order apart, as setup writes it");
+  assert.equal(raw.workOrder.rerank, undefined);
+  const behind = (r: Record<string, any>, gpuWithNpu: boolean) => A.behindPins({ raw: r, detection: AMD_PC, kit: KIT, tools, gpuWithNpu });
+
+  const [off, ...rest] = await behind(raw, false);
+  assert.deepEqual(rest, [], 'the processor itself is as the pins make it');
+  assert.equal(off.id, RADEON_ID);
+  assert.deepEqual(off.kinds, ['vision', 'embed', 'rerank'], 'set up again for what it serves, and the reranker; never chat');
+  assert.equal(off.why[0], "rerank added: this PC's work order puts the graphics card first for it");
+  assert.match(off.why[1], /qwen3-reranker-0\.6b-q8_0\.gguf in place of none$/);
+  assert.equal(off.key, (await behind(raw, true))[0].key, 'the switch on: the same');
+  const plan = await planSetup({ detection: AMD_PC, ids: [RADEON_ID], kinds: off.kinds, raw, releases: [pinnedRelease()], hfFiles: pinnedHfFiles, home: tools, skipNpu: true });
+  assert.deepEqual(plan.targets.map((t) => [t.id, t.kinds]), [[RADEON_ID, ['vision', 'embed', 'rerank']]]);
+
+  // No reranker anywhere: none added, it's an add-on the person ticks.
+  assert.deepEqual(await behind(amdConfig(entry), false), []);
+  // The Radeon reranks already (the Smith's Set up, the reranker ticked): nothing to do.
+  const both = await cardFor(AMD_PC, RADEON_ID, ['vision', 'embed', 'rerank' as never], RADEON_LIST);
+  assert.ok(both.entry.rerank?.startCommand?.length);
+  assert.deepEqual(await A.behindPins({ raw: amdConfig(both.entry, { accelerators: [FLM, both.entry, await cpuFor(AMD_PC, both.tools, ['rerank'])] }), detection: AMD_PC, kit: KIT, tools: both.tools, gpuWithNpu: false }), []);
+  // An order of their own: nothing read, nothing added.
+  assert.deepEqual(await behind({ ...raw, acceleratorOrder: [RADEON_ID, 'npu', 'cpu'] }, false), []);
 });
 
 test('a card the work would not fit on beside the rest (setup leaves pictures off it) gains nothing: a plan that would not give it the work leaves it as it is', async () => {
@@ -597,7 +630,7 @@ ram|34359738368
   const id = small.cards[0].id;
   assert.deepEqual(sizing({ kind: 'gpu', memoryGb: small.cards[0].memoryGb, kinds: ['vision', 'embed'] }).left, ['vision'], 'pictures left off a 4 GB card beside its embeddings');
   const { tools, entry } = await cardFor(small, id, ['embed'], '  CUDA0: NVIDIA GeForce RTX 2050 (4096 MiB, 3800 MiB free)\n');
-  const raw = { ...configOf(FLM, entry), workOrder: AMD_ORDER };
+  const raw = withWorkOrder(configOf(FLM, entry), AMD_ORDER);
   assert.deepEqual(await A.behindPins({ raw, detection: small, kit: KIT, tools, gpuWithNpu: true }), []);
   // Behind its pins otherwise: set up again for what it serves, nothing added.
   const [old] = await A.behindPins({ raw: { ...raw, accelerators: [FLM, onOlderBuild(entry)] }, detection: small, kit: KIT, tools, gpuWithNpu: true });
@@ -641,7 +674,7 @@ test("the update, Manor's switch off (kit 2.135.3): the keeper's look asks setup
   assert.equal(card.chat, undefined, 'no chat added: the NPU chats');
   assert.deepEqual(card.embed, entry.embed, 'its embeddings as they were');
   assert.deepEqual(after.accelerators.find((a: any) => a.id === 'npu'), FLM, "the NPU's entry untouched");
-  assert.deepEqual(after.workOrder, AMD_ORDER);
+  assert.deepEqual({ ...after.workOrder, rerank: after.rerankOrder }, AMD_ORDER, 'its order as written');
   // With the switch off, the keeper keeps none of the card's servers out: its pictures and embeddings run on demand, stopped once unused.
   const kept = serversToReap(after, { withNpu: false }).filter((s) => s.acc.id === RADEON_ID);
   assert.deepEqual(kept.map((s) => [s.base, !!s.keptOut]), [[card.vision.baseUrl, false], [card.embed.baseUrl, false]]);
@@ -650,6 +683,59 @@ test("the update, Manor's switch off (kit 2.135.3): the keeper's look asks setup
   assert.ok(turn >= 0, pc.did.join(', '));
   assert.ok(pc.did.slice(turn).some((d) => d.startsWith('test chat llama.cpp-b')), `its pictures' server asked a question: ${pc.did.join(', ')}`);
   assert.ok(pc.did.slice(turn).some((d) => d.startsWith('test embed llama.cpp-b')), pc.did.join(', '));
+  // The next look: nothing behind.
+  assert.deepEqual(await A.setUpAgain(deps), { did: 'none' });
+  assert.equal(asked.length, 1);
+});
+
+test("the update on AMD with the switch off (kit 2.136.3): a PC whose processor took the reranker has the keeper's look ask setup for the Radeon's reranker, staged and in the background; in its turn it's tested and answers, run on demand beside the pictures; the processor's stays; no errors, and the next look finds nothing behind", async () => {
+  const { tools, entry } = await cardFor(AMD_PC, RADEON_ID, ['vision', 'embed'], RADEON_LIST);
+  const cpu = await cpuFor(AMD_PC, tools, ['rerank']);
+  const dir = path.join(home, `pc-${++n}`);
+  mkdirSync(dir, { recursive: true });
+  const configFile = path.join(dir, 'config.json');
+  writeFileSync(configFile, JSON.stringify(amdConfig(entry, { accelerators: [FLM, entry, cpu] }), null, 2));
+  const asked: any[] = [];
+  const log: string[] = [];
+  const pc = stagePc();
+  const setupLog: string[] = [];
+  const deps: Parameters<typeof A.setUpAgain>[0] = {
+    kit: KIT,
+    configFile,
+    tools,
+    now: () => Date.parse('2026-10-25T12:00:00Z'),
+    detect: async () => AMD_PC,
+    idle: () => true,
+    stopped: () => false,
+    npuRefresh: () => null,
+    gpuWithNpu: () => false,
+    setup: async (x) => {
+      asked.push(x);
+      return setupCommand({ ...x, detection: AMD_PC, releases: async () => [pinnedRelease()], hfFiles: pinnedHfFiles, home: tools, gpuWithNpu: false, npuReportFile: null, blockedFile: null, signaturesFile: null, log: (l) => setupLog.push(l), io: { ...ioOf(), listDevices: async () => RADEON_LIST, ...pc.io }, stage: pc.deps });
+    },
+    log: (l) => log.push(l),
+  };
+  const r = await A.setUpAgain(deps);
+  assert.deepEqual(r, { did: 'set-up', id: RADEON_ID, code: 0 }, setupLog.join('\n'));
+  assert.deepEqual(asked.map((x) => [x.ids, x.kinds, x.staged]), [[[RADEON_ID], ['vision', 'embed', 'rerank'], true]]);
+  assert.match(log[0], new RegExp(`^setting ${RADEON_ID} up again with this kit's pins, in the background \\(rerank added: this PC's work order puts the graphics card first for it; `));
+  assert.ok(!setupLog.some((l) => /error|failed|couldn't/i.test(l)), setupLog.join('\n'));
+  const after = JSON.parse(readFileSync(configFile, 'utf8'));
+  const card = after.accelerators.find((a: any) => a.id === RADEON_ID);
+  assert.ok(card.rerank?.baseUrl && card.rerank.startCommand?.includes('--reranking'), 'the reranker on a server of its own');
+  assert.equal(card.chat, undefined, 'no chat added: the NPU chats');
+  // Set up again whole, staged: its pictures and embeddings on the same models and files, on the ports setup gives them.
+  const same = (e: any) => ({ model: e.model, files: e.startCommand.filter((x: string) => /\.gguf$/i.test(x)) });
+  assert.deepEqual([same(card.vision), same(card.embed)], [same(entry.vision), same(entry.embed)], 'its pictures and embeddings: the same models and files');
+  assert.deepEqual(after.accelerators.find((a: any) => a.id === 'cpu').rerank, cpu.rerank, "the processor's reranker stays, the next in the order");
+  assert.deepEqual(after.accelerators.find((a: any) => a.id === 'npu'), FLM, "the NPU's entry untouched");
+  assert.deepEqual(after.rerankOrder, AMD_ORDER.rerank);
+  // With the switch off, the keeper keeps none of the card's servers out: they run on demand, stopped once unused.
+  const kept = serversToReap(after, { withNpu: false }).filter((s) => s.acc.id === RADEON_ID);
+  assert.deepEqual(kept.map((s) => [s.base, !!s.keptOut]), [[card.vision.baseUrl, false], [card.embed.baseUrl, false], [card.rerank.baseUrl, false]]);
+  // Tested in the card's turn.
+  const turn = pc.did.indexOf(`turn ${RADEON_ID}`);
+  assert.ok(turn >= 0 && pc.did.slice(turn).includes('test rerank'), pc.did.join(', '));
   // The next look: nothing behind.
   assert.deepEqual(await A.setUpAgain(deps), { did: 'none' });
   assert.equal(asked.length, 1);

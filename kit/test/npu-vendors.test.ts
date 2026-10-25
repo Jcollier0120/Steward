@@ -312,7 +312,8 @@ test('every route in npu-vendors.json is whole: a pinned https download, an inst
         assert.ok(o.devices.length && o.devices.every((d) => ['npu', 'gpu', 'cpu'].includes(d)) && new Set(o.devices).size === o.devices.length, at);
         assert.ok(o.runningFirst === undefined || typeof o.runningFirst === 'boolean', at);
         assert.ok(o.batchAt === undefined || (o.runningFirst && Number.isInteger(o.batchAt) && o.batchAt >= 2), `${at}: batchAt goes with runningFirst`);
-        assert.ok(o.basis.length > 40 && /\d J|mJ/.test(o.basis), `${at}: its figures`);
+        // Energy for the routed work; a reranker's are times, as a route's (AMD XDNA 2's, kit 2.136.3).
+        assert.ok(o.basis.length > 40 && (w === 'rerank' ? /\d J|mJ|\d s\b/ : /\d J|mJ/).test(o.basis), `${at}: its figures`);
       }
       const wo = V.workOrderFor(r, id)!;
       const written = withWorkOrder({}, wo);
@@ -336,13 +337,15 @@ test('every route in npu-vendors.json is whole: a pinned https download, an inst
   assert.deepEqual(V.NPU_CATALOG.routes.qualcomm.rerankServer?.smallPc?.generations, ['snapdragon-x2'], 'the X2 alone: the first X was not measured');
 });
 
-test("each work's order by generation (kit 2.111.0): AMD's Ryzen AI 300 sends every picture to the Radeon (kit 2.135.1, the owner's ruling); Intel's every reranker to the card (kit 2.135.5, the owner's ruling); the others the NPU first", () => {
+test("each work's order by generation (kit 2.111.0): AMD's Ryzen AI 300 sends every picture to the Radeon (kit 2.135.1, the owner's ruling) and every reranker (kit 2.136.3, the owner's ruling); Intel's every reranker to the card (kit 2.135.5, the owner's ruling); the others the NPU first", () => {
   const amd = V.NPU_CATALOG.routes.amd;
   assert.deepEqual(V.workOrderFor(amd, 'xdna2'), {
     chat: { devices: ['npu', 'gpu', 'cpu'] },
     vision: { devices: ['gpu', 'npu', 'cpu'] },
     embed: { devices: ['gpu', 'cpu'] },
+    rerank: { devices: ['gpu', 'cpu'] },
   });
+  assert.match(amd.generations.xdna2.order!.rerank!.basis, /Radeon 860M.*73\.8 s on the processor.*tried and parked.*The owner's ruling \(2026-10-25\): "Yes: on AMD too, a ticked reranker goes to the Radeon/, 'its figures, the NPU parked, and the ruling behind it');
   // Intel's route orders the reranker, on every generation, one nobody knows too: the card, then the processor.
   const intel = V.NPU_CATALOG.routes.intel;
   for (const id of [...Object.keys(intel.generations), 'next-lake', null]) assert.deepEqual(V.workOrderFor(intel, id), { rerank: { devices: ['gpu', 'cpu'] } }, `intel ${id}`);
@@ -350,14 +353,14 @@ test("each work's order by generation (kit 2.111.0): AMD's Ryzen AI 300 sends ev
   const both = { ...intel, generations: { ...intel.generations, 'lunar-lake': { ...intel.generations['lunar-lake'], order: { rerank: { devices: ['cpu'] as 'cpu'[], basis: 'a test' }, vision: { devices: ['gpu', 'npu'] as ('gpu' | 'npu')[], basis: 'a test' } } } } };
   assert.deepEqual(V.workOrderFor(both, 'lunar-lake'), { rerank: { devices: ['cpu'] }, vision: { devices: ['gpu', 'npu'] } });
   assert.deepEqual(V.workOrderFor(both, 'meteor-lake'), { rerank: { devices: ['gpu', 'cpu'] } });
-  // Every other generation records none: the NPU first for every work, AMD's reranker and the Snapdragons' included.
+  // Every other generation records none: the NPU first for every work, the Snapdragons' reranker included.
   for (const [vendor, r] of Object.entries(V.NPU_CATALOG.routes))
     for (const id of Object.keys(r.generations)) if (vendor !== 'intel' && !(vendor === 'amd' && id === 'xdna2')) assert.equal(V.workOrderFor(r, id), null, `${vendor} ${id}`);
   assert.equal(V.workOrderFor(amd, null), null);
-  assert.equal(V.workOrderFor(amd, 'xdna2')!.rerank, undefined, "AMD's reranker waits for its own trial");
   // Where the NPU's work goes when the NPU can't take it: the devices after it in the order, else a card, then the processor.
   assert.deepEqual(V.fallbackDevices(amd, 'xdna2', 'vision'), ['gpu', 'cpu']);
   assert.deepEqual(V.fallbackDevices(amd, 'xdna2', 'embed'), ['gpu', 'cpu']);
+  assert.deepEqual(V.fallbackDevices(amd, 'xdna2', 'rerank'), ['gpu', 'cpu']);
   assert.deepEqual(V.fallbackDevices(V.NPU_CATALOG.routes.intel, 'lunar-lake', 'chat'), ['gpu', 'cpu']);
   assert.deepEqual(V.fallbackDevices(V.NPU_CATALOG.routes.intel, 'lunar-lake', 'rerank'), ['gpu', 'cpu']);
   assert.deepEqual(V.fallbackDevices(null, null, 'chat'), ['gpu', 'cpu']);
@@ -1955,15 +1958,16 @@ const VL_GGUF = /Qwen3VL-2B-Instruct-Q4_K_M\.gguf/;
 const EMBED_GGUF = /Qwen3-Embedding-0\.6B-Q8_0\.gguf/;
 /** What a setup run downloaded, by file. */
 const downloaded = (did: string[]) => did.filter((d) => d.startsWith('download '));
-/** setupCommand on a 16 GB Intel PC with its Arc, on fakes: the config written and what it downloaded. */
-async function intelSetup(name: string, o: { gpuWithNpu: boolean; npu?: Parameters<typeof fakeNpuIo>[0]; kinds?: ('chat' | 'vision' | 'embed' | 'rerank')[] }) {
+/** setupCommand on a PC with its card, on fakes (a 16 GB Intel PC with its Arc unless said): the config written and what it downloaded. */
+async function intelSetup(name: string, o: { gpuWithNpu: boolean; npu?: Parameters<typeof fakeNpuIo>[0]; kinds?: ('chat' | 'vision' | 'embed' | 'rerank')[]; pc?: { detection: ReturnType<typeof parseDetection>; card: string; list: string } }) {
+  const pc = o.pc ?? { detection: LUNAR(), card: ARC, list: ARC_VK };
   const file = path.join(home, `${name}-config.json`);
   if (!existsSync(file)) writeFileSync(file, '{}');
   const npu = fakeNpuIo(o.npu);
   const log: string[] = [];
-  const r = await setupCommand({ ids: [], ...(o.kinds ? { kinds: o.kinds } : {}), detection: LUNAR(), releases: async () => RELEASES, hfFiles: hf, configFile: file, home: path.join(home, name), env: ENV, yes: true, npuNoteFile: path.join(home, `${name}-note.json`), gpuWithNpu: o.gpuWithNpu, log: (l: string) => log.push(l), io: { ...npu.io, exists: (p: string) => disk()(p) || npu.io.exists(p), listDevices: async () => ARC_VK } });
+  const r = await setupCommand({ ids: [], ...(o.kinds ? { kinds: o.kinds } : {}), detection: pc.detection, releases: async () => RELEASES, hfFiles: hf, configFile: file, home: path.join(home, name), env: ENV, yes: true, npuNoteFile: path.join(home, `${name}-note.json`), gpuWithNpu: o.gpuWithNpu, log: (l: string) => log.push(l), io: { ...npu.io, exists: (p: string) => disk()(p) || npu.io.exists(p), listDevices: async () => pc.list } });
   const written = JSON.parse(readFileSync(file, 'utf8'));
-  const arc = written.accelerators?.find((a: any) => a.id === ARC);
+  const arc = written.accelerators?.find((a: any) => a.id === pc.card);
   const npuEntry = written.accelerators?.find((a: any) => a.kind === 'npu');
   return { r, log, written, arc, npuEntry, did: npu.did };
 }
@@ -2045,6 +2049,27 @@ test("beside AMD's NPU, with the switch off, the Radeon is planned for the pictu
   // A person's own list of accelerators: the core reads no work order, so the card is set up for its embeddings alone, as before.
   const theirs = await plan(false, { acceleratorOrder: ['npu', RADEON, 'cpu'] });
   assert.deepEqual(theirs.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[RADEON, ['embed'], ['chat', 'vision']]]);
+  // The reranker is an add-on: none planned unless it's ticked.
+  assert.ok(!off.targets.some((t) => t.kinds.includes('rerank')));
+});
+
+// AMD's reranker (kit 2.136.3, the owner's ruling, as Intel's): ticked in the Smith's Set up, it goes on the Radeon,
+// never the processor, and the work order setup writes puts the card first for it, so with the switch off the card
+// still reranks, on demand; chat stays on the NPU.
+test("beside AMD's NPU, with the switch off, a ticked reranker goes on the Radeon, not the processor, and the order written keeps it reranking there beside the pictures, never chat; the switch on, the same set-up", async () => {
+  const pc = { detection: parseDetection(`${AMD_IGPU}${NPU.strix}\n${X64('AMD Ryzen AI 9 HX 370 w/ Radeon 890M')}`), card: 'gpu-amd-radeon-tm-890m-graphics', list: '  Vulkan0: AMD Radeon(TM) 890M Graphics (16384 MiB, 15000 MiB free)\n' };
+  for (const gpuWithNpu of [false, true]) {
+    const run = await intelSetup(`amd-rerank-${gpuWithNpu ? 'on' : 'off'}`, { gpuWithNpu, kinds: ['chat', 'vision', 'embed', 'rerank'], pc });
+    assert.equal(run.r.code, 0, run.log.join('\n'));
+    assert.deepEqual(kindsOf(run.arc), ['chat', 'vision', 'embed', 'rerank'], 'kinds asked for by name: the Radeon set up whole, its reranker too');
+    assert.equal(run.written.accelerators.some((a: any) => a.kind === 'cpu'), false, 'nothing on the processor');
+    assert.deepEqual(run.written.rerankOrder, { devices: ['gpu', 'cpu'] }, "AMD xdna2's order");
+    assert.deepEqual(Object.keys(run.written.workOrder), ['chat', 'vision', 'embed'], "the reranker's apart: config.json reads as it did to a kit before");
+    assert.deepEqual(validateAccelerators(run.written), []);
+    assert.ok(downloaded(run.did).some((d) => /qwen3-reranker-0\.6b-q8_0\.gguf/i.test(d)), downloaded(run.did).join('\n'));
+    // What the card does beside the NPU with the switch off: the pictures, the embeddings and the reranker; never chat.
+    assert.deepEqual(core.cardWorkBesideNpu(kindsOf(run.arc), core.npuServes([run.npuEntry]), core.workOrderIn(run.written)), ['vision', 'embed', 'rerank']);
+  }
 });
 
 test('the NPU failing its test at setup: the card takes its chat and pictures, beside its embeddings', async () => {
@@ -2388,7 +2413,9 @@ test("setup as a command, FastFlowLM blocked: the processor takes the NPU's work
   const cpu = await run('blocked-cpu', false);
   assert.ok(cpu.log.some((l) => /^The processor takes the NPU's chat/.test(l)), cpu.log.join('\n'));
   // The NPU's generation's order is written all the same (kit 2.111.0): the processor and any card go by it.
-  assert.deepEqual(cpu.written.workOrder, V.workOrderFor(V.NPU_CATALOG.routes.amd, 'xdna2'));
+  const { rerank, ...routed } = V.workOrderFor(V.NPU_CATALOG.routes.amd, 'xdna2')!;
+  assert.deepEqual(cpu.written.workOrder, routed);
+  assert.deepEqual(cpu.written.rerankOrder, rerank, "the reranker's apart (kit 2.136.3)");
   assert.ok(cpu.written.accelerators.find((a: any) => a.id === 'cpu')?.chat, JSON.stringify(cpu.written));
   assert.ok(!cpu.written.accelerators.some((a: any) => a.kind === 'npu'));
   assert.match(cpu.note!, /^The NPU \(.+\) isn't used: Windows' Smart App Control blocks its model server, as its maker doesn't sign it\. The staff use the processor instead\.$/);

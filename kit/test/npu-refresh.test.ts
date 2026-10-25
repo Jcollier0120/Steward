@@ -560,11 +560,12 @@ test('a command that needs a download, another server, or no NPU at all: left fo
 
 const STRIX = 'npu2|32.0.203.376|2026-06-01|Advanced Micro Devices, Inc.|PCI\\VEN_1022&DEV_17F0&SUBSYS_88EE103C&REV_10\\4&2EA2F1A3&0&0141|NPU Compute Accelerator Device';
 
-test("each work's order brought to this kit's (kit 2.135.1): an AMD PC set up when its pictures went to the NPU while only FastFlowLM was up gets the Radeon first for every picture, whatever its NPU's entry; an Intel PC its reranker's, apart (kit 2.135.5); a generation with no order loses one", async () => {
+test("each work's order brought to this kit's (kit 2.135.1): an AMD PC set up when its pictures went to the NPU while only FastFlowLM was up gets the Radeon first for every picture, whatever its NPU's entry, and its reranker's apart (kit 2.136.3); an Intel PC its reranker's, apart (kit 2.135.5); a generation with no order loses one", async () => {
   const amd = parseNpus(STRIX, 'x64')[0];
   const OLD = { chat: { devices: ['npu', 'gpu', 'cpu'] }, vision: { devices: ['gpu', 'npu', 'cpu'], runningFirst: true, batchAt: 4 }, embed: { devices: ['gpu', 'cpu'] } };
-  const order = V.workOrderFor(V.NPU_CATALOG.routes.amd, amd.generation)!;
+  const { rerank, ...order } = V.workOrderFor(V.NPU_CATALOG.routes.amd, amd.generation)!;
   assert.deepEqual(order.vision, { devices: ['gpu', 'npu', 'cpu'] }, "AMD's pictures: the Radeon first, no runningFirst or batchAt");
+  assert.deepEqual(rerank, { devices: ['gpu', 'cpu'] }, "AMD's reranker: the Radeon on demand, then the processor (kit 2.136.3)");
   const words = /^each work's order is now this kit's \(2\.75\.0\): .*vision gpu, npu, cpu(;|$)/;
 
   // A person's own server on the NPU: its entry left alone, the order written all the same, the rest of config.json kept.
@@ -573,6 +574,7 @@ test("each work's order brought to this kit's (kit 2.135.1): an AMD PC set up wh
   const pointed = fakePc(other, { workOrder: OLD, support: amd });
   assert.deepEqual(await refreshNpu(pointed.deps), { did: 'not-route' });
   assert.deepEqual(pointed.config().workOrder, order);
+  assert.deepEqual(pointed.config().rerankOrder, rerank);
   assert.deepEqual(pointed.npu(), other);
   assert.equal(pointed.config().acceleratorOrder, 'auto');
   assert.deepEqual(pointed.config().jobs, { toast: false });
@@ -585,6 +587,13 @@ test("each work's order brought to this kit's (kit 2.135.1): an AMD PC set up wh
   const unserved = fakePc(null, { workOrder: OLD, support: amd });
   assert.deepEqual(await refreshNpu(unserved.deps), { did: 'no-npu' });
   assert.deepEqual(unserved.config().workOrder, order);
+  // One set up before kit 2.136.3, its reranker ticked or not: the reranker's order comes with the look, apart, nothing
+  // else changed; the keeper serves a reranker on the Radeon only while searches ask for it.
+  const before2136 = fakePc(null, { workOrder: order, rerankOrder: undefined, support: amd });
+  const had = before2136.config();
+  assert.deepEqual(await refreshNpu(before2136.deps), { did: 'no-npu' });
+  assert.deepEqual(before2136.config(), { ...had, rerankOrder: rerank });
+  assert.match(before2136.log.join('\n'), /each work's order is now this kit's \(2\.75\.0\): .*embed gpu, cpu; rerank gpu, cpu$/m);
   // Already this kit's: config.json not written, nothing said.
   const current = fakePc(null, { workOrder: order, support: amd });
   const before = readFileSync(current.configFile, 'utf8');

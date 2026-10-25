@@ -1330,6 +1330,13 @@
                 "cpu"
               ],
               "basis": "None on the NPU on this route (embeddings, below). npu-bench's quick profile, three runs on each device, medians, on AMD Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), NPU driver 32.0.20102.3930, the package meter (Windows' Energy Meter, rapl_package0_pkg: the chip's energy, there being no whole-PC part), kit 2.99.1, 2026-10-23, each job over the PC at rest: an embedding 12.8 mJ a token on the Radeon 860M and 44.1 mJ on the processor (llama.cpp b11734, Qwen3-Embedding-0.6B Q8_0), 1,614 and 515 tokens a second."
+            },
+            "rerank": {
+              "devices": [
+                "gpu",
+                "cpu"
+              ],
+              "basis": "Reeve's 24 captured reranks over the manor's repositories (each a search's first ten files from Reeve's keyword search, as its search sends them to the reranker: about 1,600 characters a file), on the Dell 14: AMD Ryzen AI 7 350 w/ Radeon 860M (Krackan, XDNA 2, 16 GB), Qwen3-Reranker-0.6B Q8_0 on llama.cpp b11734 with the kit's server arguments (the Radeon 860M on Vulkan, the processor with -ngl 0), three interleaved runs each, the manor stopped, 2026-10-25: nearly the same ranks on the Radeon as on the processor, blended as Reeve's search blends them (the right file first for 12 of 24 on both, in the first five for 19 on the Radeon and 20 on the processor, mean reciprocal rank 0.638 on the Radeon and 0.629 on the processor; alone, 9 / 17 and 0.519 on the Radeon, 9 / 16 and 0.514 on the processor), the same first file for all 24, scores at most 0.117 apart. A search's ten files took a median 3.08 s on the Radeon (p90 3.49 s; the three runs' medians 3.04 to 3.23 s) and 9.09 s on the processor (p90 10.04 s; 8.61 to 9.37 s), for 0.70 s of processor time on the Radeon against 73.8 s on the processor. While it runs, the Radeon's server holds about 2.0 GB of the PC's memory (private: the card shares it), the processor's 1.2 GB (1.4 GB at its peak); the keeper stops it once unused (gpuIdleStopMinutes), as it does the Radeon's pictures beside the NPU. AMD's NPU reranker was tried and parked (spec/NPU-VENDORS.md, Reranking on AMD's NPU): a BF16 compile through VitisAI ranked a little worse than the Radeon 860M and was slower. Energy isn't measured yet. The owner's ruling (2026-10-25): \"Yes: on AMD too, a ticked reranker goes to the Radeon on demand even with the switch off, like Intel's; it stops when idle.\""
             }
           }
         }

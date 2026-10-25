@@ -32,7 +32,8 @@ import { download, type HfFile, installSignedBuild, type NpuRefreshRecord, pinne
  *   it gains only what the core's rule leaves the card beside the NPU: from kit 2.135.3, that includes the work its order
  *   puts it first for (AMD's pictures, run on demand), never chat. A reranker, an add-on, only on a PC that reranks
  *   already: from kit 2.135.5, an Intel PC whose processor took the reranker the person ticked gains the card's too,
- *   which its route's order puts first (the processor's stays, the next in that order).
+ *   which its route's order puts first (the processor's stays, the next in that order); from kit 2.136.3, an AMD XDNA 2
+ *   one the Radeon's, by its generation's order.
  * - **Gently.** One accelerator a look, once nobody has used it for AGAIN_QUIET_MS, never while the manor is stopped, in
  *   the background (the Smith's own pace). At the manor's gentle pace, downloads go at GENTLE_BYTES_PER_SECOND at most
  *   (pacedFetch); a model the NPU's own server pulls (GenieX's, FastFlowLM's) comes at that server's pace. Setup runs as
@@ -137,7 +138,7 @@ const lower = (p: string) => p.toLowerCase();
  * cardWorkBesideNpu, the one rule requests follow). That rule keeps a card the work its order puts it first for (kit
  * 2.135.3), so with the switch off too, an AMD PC set up before gains the Radeon's vision, run on demand. A reranker,
  * an add-on set up only when asked for, is gained only where something else here reranks already (kit 2.135.5: Intel's
- * processor, which took the one the person ticked).
+ * processor, which took the one the person ticked; kit 2.136.3: AMD XDNA 2's).
  */
 export function orderAdds(raw: Record<string, any>, accs: Accelerator[], withNpu: boolean): Map<string, EndpointKind[]> {
   const out = new Map<string, EndpointKind[]>();

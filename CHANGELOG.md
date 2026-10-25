@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.233
+
+**It hands out the kit 2.136.3: on AMD PCs, sharper search now runs on the graphics card when it's needed, about three times as fast, without keeping the processor busy.**
+
+### What changed
+
+- On AMD Ryzen AI PCs, Reeve's sharper search (its reranker) now runs on the Radeon graphics, also when "Use the graphics card for models when there's an NPU" is off, Manor's default. AMD's NPU doesn't rerank. Until now, with the switch off, the reranker ran only where it had been set up on the processor, and otherwise Reeve searched without it.
+  - Measured on a Ryzen AI 7 350 with Reeve's 24 search questions: nearly the same results as on the processor, ten files in 3.1 s against 9.1 s, and 0.7 s of the processor's time against 74 s.
+  - The graphics card's reranker starts with the first search that needs it, and stops again after a few minutes unused. It takes about 2 GB of the PC's memory while it runs, and gives it back when it stops.
+  - Chat stays on the NPU. It never moves to the graphics card with the switch off.
+  - A PC set up before needs nothing: its next update moves the reranker to the graphics card by itself. Where the processor had it, the graphics card's is downloaded gently in the background, and the processor's stays behind it.
+- A reranker on AMD's NPU itself was tried. It ranked a little worse than the graphics card and was slower, so it's set aside for now.
+- Nothing changes when sharper search isn't ticked, on Intel or Snapdragon PCs, or for an order of accelerators of your own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.231
 
 **Urgent fix: it hands out the kit 2.136.1. Staff whose latest update signed their scripts can run their PowerShell work again.**
