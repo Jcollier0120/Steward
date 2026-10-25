@@ -1,8 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { sharesConsole, startFailed } from './console.ts';
 
 const PRELUDE = "$ProgressPreference = 'SilentlyContinue'; $ErrorActionPreference = 'Stop'; " +
@@ -35,7 +36,16 @@ export const psStart = (shares = sharesConsole()) => ({ windowsHide: !shares });
 export function powershell(script: string, opts: { timeoutMs?: number } = {}): Promise<string> {
   const timeoutMs = psPaced(opts.timeoutMs ?? 60_000);
   if (oneShotOnly || CALLS_EXIT.test(script) || WRITES_CONSOLE.test(script)) return oneShot(script, timeoutMs);
-  return worker().run(script, timeoutMs).catch((e) => (e instanceof WorkerGone ? oneShot(script, e.timeLeft) : Promise.reject(e)));
+  let w: Worker;
+  try {
+    w = worker();
+  } catch {
+    // Windows refused the worker's start outright: spawn throws, not emits, for a command line it won't take
+    // (ENAMETOOLONG, EINVAL), and it would every time. Scripts run on their own from now on, never failing for it.
+    oneShotOnly = true;
+    return oneShot(script, timeoutMs);
+  }
+  return w.run(script, timeoutMs).catch((e) => (e instanceof WorkerGone ? oneShot(script, e.timeLeft) : Promise.reject(e)));
 }
 
 /**
@@ -94,10 +104,14 @@ class Worker {
   private idle: NodeJS.Timeout | null = null;
   gone = false;
 
+  /**
+   * The worker runs from its file (kit 2.136.1), not as -EncodedCommand: a release signs it (kit 2.123.0), and the
+   * signature block took it from 3.4 to 18 KB, 48,000 characters encoded, over a command line's 32,767. Every worker's
+   * start then failed (spawn ENAMETOOLONG), and every script with it. From its file, its signature counts too.
+   */
   constructor() {
-    const source = readFileSync(new URL('./ps-worker.ps1', import.meta.url), 'utf8');
     const start = psStart();
-    this.proc = spawn('powershell.exe', [...PS_ARGS, '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')], start);
+    this.proc = spawn('powershell.exe', [...PS_ARGS, '-File', fileURLToPath(new URL('./ps-worker.ps1', import.meta.url))], start);
     this.proc.stdout.setEncoding('utf8').on('data', (d: string) => this.read(d));
     this.proc.stderr.resume();
     this.proc.stdin.on('error', () => this.end());

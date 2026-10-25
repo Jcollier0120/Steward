@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.231
+
+**Urgent fix: it hands out the kit 2.136.1. Staff whose latest update signed their scripts can run their PowerShell work again.**
+
+### What changed
+
+- Since the kit 2.123.0, a release signs the staff's PowerShell scripts. The signature made the script behind the staff's PowerShell helper too long to start. Every staff member updated since then lost all its PowerShell work:
+  - the Clerk's rounds failed while reading the text in pictures;
+  - each staff member's pace was set by priority alone;
+  - Manor couldn't look at the accelerators.
+  - Manor showed it as problems such as "Clerk's round failed once in the last 24 hours".
+- The helper now starts from its file, however long it is. If Windows ever refuses to start it, each script runs on its own instead of failing.
+- The Steward was affected too, and this release fixes it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member gets the fix with its next update.
+
 ## 0.36.229
 
 **It hands out the kit 2.135.5: on Intel PCs, sharper search now runs on the graphics card when it's needed, about twice as fast, without keeping the processor busy.**
