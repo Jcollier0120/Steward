@@ -57,13 +57,20 @@ test("AMD's: Windows ML's DLL in its own folder, the program told to load only c
   const place = m.placeOf(path.join(home, 'amd'), 'x64', m.VITISAI_PACK);
   assert.equal(place.pack, path.join(home, 'amd', 'winml-2.4.89'), "Envoy's folder name, so one PC keeps one copy");
   assert.equal(place.graphs, m.AMD_GRAPHS ? path.join(home, 'amd', `amd-graphs-${m.MODEL_VERSION}-${m.AMD_GRAPHS.plugin}`) : null);
-  assert.deepEqual(m.missingIn(place), [place.models, place.ort, place.pack, place.graphs].filter(Boolean));
+  assert.equal(place.npuModels, path.join(home, 'amd', `model-${m.MODEL_VERSION}-amd`), "AMD's NPU's own copy, beside the model the processor reads");
+  assert.deepEqual(m.missingIn(place), [place.models, place.npuModels, place.ort, place.pack, place.graphs].filter(Boolean));
   const args = m.readerArgs(place, m.VITISAI_PACK);
   assert.equal(args[args.indexOf('--on') + 1], 'npu');
+  assert.equal(args[args.indexOf('--models') + 1], place.models);
+  assert.equal(args[args.indexOf('--npu-models') + 1], place.npuModels);
   assert.equal(args[args.indexOf('--vitisai') + 1], place.pack);
   assert.ok(args.includes('--compiled-only'), 'compiling is prepareReader\'s, in the background');
   assert.ok(!args.includes('--qnn') && !args.includes('--openvino'));
   assert.ok(!m.readerArgs(place, m.QNN_PACK).includes('--compiled-only'));
+  const qnn = m.placeOf(path.join(home, 'qnn'), 'arm64', m.QNN_PACK);
+  assert.equal(qnn.npuModels, null, "Qualcomm's and Intel's NPUs read the model itself");
+  assert.ok(!m.readerArgs(qnn, m.QNN_PACK).includes('--npu-models'));
+  assert.ok(!m.readerArgs(m.placeOf(path.join(home, 'cpu'), 'x64', null), null).includes('--npu-models'));
 });
 
 test("which engine reads: the model where it's worth it, Windows' OCR under node:test unless told", () => {
@@ -80,6 +87,7 @@ test('every file the reader fetches is pinned by size and SHA-256, from its make
     m.OPENVINO_PACK.package,
     m.VITISAI_PACK.package,
     ...Object.values(m.MODEL_FILES),
+    ...Object.values(m.AMD_MODEL_FILES),
     ...(m.AMD_GRAPHS ? [m.AMD_GRAPHS.zip] : []),
   ];
   for (const p of pins) {
@@ -88,6 +96,27 @@ test('every file the reader fetches is pinned by size and SHA-256, from its make
     assert.match(p.url, /^https:\/\/(github\.com\/microsoft\/onnxruntime|api\.nuget\.org|github\.com\/[^/]+\/Manor-releases)\//);
   }
   assert.notEqual(new Set(Object.values(m.MODEL_FILES).map((f) => f.sha256)).size, 1, 'the model files are pinned, not left blank');
+  for (const f of Object.values(m.AMD_MODEL_FILES)) assert.match(f.url, new RegExp(`/ocr-model-v${m.MODEL_VERSION}-amd/`), "AMD's copy is its own release");
+});
+
+test("AMD's NPU's copy of the model is fetched into its own folder, each file pinned, with its license and notice", async () => {
+  const place = m.placeOf(mkdtempSync(path.join(home, 'amd-fetch-')), 'x64', m.VITISAI_PACK);
+  for (const d of [place.models, place.ort, place.pack]) {
+    mkdirSync(d!, { recursive: true });
+    writeFileSync(path.join(d!, 'ready'), 'x');
+  }
+  const fetched: string[] = [];
+  await m.fetchReader(place, 'x64', m.VITISAI_PACK, {
+    async download(d: any) {
+      fetched.push(d.url);
+      mkdirSync(path.dirname(d.dest), { recursive: true });
+      writeFileSync(d.dest, path.basename(d.dest));
+    },
+  });
+  assert.deepEqual(fetched, Object.values(m.AMD_MODEL_FILES).map((f: any) => f.url));
+  assert.deepEqual(readdirSync(place.npuModels!).sort(), ['det.onnx', 'notices', 'ready', 'rec.onnx']);
+  assert.deepEqual(readdirSync(path.join(place.npuModels!, 'notices')).sort(), ['LICENSE.txt', 'NOTICE.txt']);
+  assert.deepEqual(m.missingIn(place), []);
 });
 
 test("the reader's folder: shared beside the NPU's line, one folder for each piece, whole once READY is in it", () => {
@@ -213,7 +242,7 @@ test("a program that can't start says why; one that takes too long over a pictur
 function readyPlace(arch: 'arm64' | 'x64', pack: any): string {
   const where = mkdtempSync(path.join(home, 'ready-'));
   const place = m.placeOf(where, arch, pack);
-  for (const d of [place.models, place.ort, place.pack]) {
+  for (const d of [place.models, place.npuModels, place.ort, place.pack]) {
     if (!d) continue;
     mkdirSync(d, { recursive: true });
     writeFileSync(path.join(d, 'ready'), 'x');

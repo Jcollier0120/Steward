@@ -5,7 +5,7 @@
 //   ocr-npu.exe --ort <folder of onnxruntime.dll> --models <folder> --cache <folder> [--on npu|cpu]
 //               [--qnn <folder>] [--openvino <folder>] [--vitisai <folder of Windows ML's DLL>] [--threads N]
 //               [--htp <performance mode>] [--idle <seconds>] [--widths n,n,..] [--batches n,n,..] [--bench]
-//               [--graphs <folder>] [--compiled-only] [--prepare [--export <folder>]]
+//               [--graphs <folder>] [--compiled-only] [--prepare [--export <folder>]] [--npu-models <folder>]
 //
 // The models folder has det.onnx (the detector: [1,3,h,w] -> [1,1,h,w]), rec.onnx (the recognizer: [n,3,48,w] ->
 // [n,w/s,classes], a step every s columns, 8 or 4) and charset.txt (the recognizer's characters, class 1 onwards; 0 is
@@ -14,12 +14,12 @@
 // The processor reads the same tiles and widths, so both give the same answer. --bench prints each graph's time a run,
 // and exits. The cache is the working folder, and has a folder for each pair of models as compiled.
 //
-// AMD's NPU (--vitisai) compiles each graph for minutes, each by a program of its own, as many at once as the PC's cores
-// and memory allow (--prepare does only that, and exits; --export then copies them out for a release). Its compiler can't
-// place a recognizer wider than 1,024 (AmdWidths), so a longer line is narrowed to that. --graphs gives graphs compiled
-// ahead, used when this PC's plugin is the one that compiled them; --compiled-only reads on the processor rather than
-// compile, its hello saying "prepare":true. As plugin 1.8.75 compiles the model (FP32 run as BF16) it reads worse than
-// the processor, so the self-check refuses it (spec/OCR.md, "Intel and AMD").
+// AMD's NPU (--vitisai) reads its own copy of the models (--npu-models: int8, each GELU a polynomial it computes as the
+// processor does), while the processor's reader, the self-check's yardstick, reads --models. It compiles each graph, each
+// by a program of its own, as many at once as the PC's cores and memory allow (--prepare does only that, and exits;
+// --export then copies them out for a release). --graphs gives graphs compiled ahead, used when this PC's plugin is the
+// one that compiled them; --compiled-only reads on the processor rather than compile, its hello saying "prepare":true.
+// As plugin 1.8.75 compiles the FP32 model (run as BF16) it reads worse than the processor (spec/OCR.md, "Intel and AMD").
 //
 // It says hello once, on one line of JSON: {"hello":1,"on":"npu"|"cpu","ep":"qnn"|...,"why":...,"loadMs":n,"compiled":n,...}
 // (compiled: the graphs it compiled rather than loaded; Qualcomm's compiler holds 2 GB until the program ends). What
@@ -786,8 +786,7 @@ namespace KitOcrNpu
     public sealed class Reader : IDisposable
     {
         public const int Tile = 640, Overlap = 64, Height = 48, ModelWidth = 2048;
-        // Fewer on AMD's NPU (Program.AmdWidths), where each is a compile of minutes and 1,280 doesn't compile; --widths
-        // sets them for a test.
+        // --widths sets them for a test.
         public static int[] Buckets = { 128, 256, 384, 512, 768, 1024, 1536, 2048 };
         /// <summary>The widest a line is read: the widest of Buckets (a wider line is narrowed to it).</summary>
         public static int MaxWidth { get { return Buckets[Buckets.Length - 1]; } }
@@ -1333,14 +1332,9 @@ namespace KitOcrNpu
         const string VitisAi = "VitisAIExecutionProvider", AmdRuntime = "AMD's NPU runtime (VitisAI)";
         // A graph VitisAI couldn't compile this many times isn't tried again until its driver or plugin changes.
         const int AmdTries = 2;
-        /// <summary>
-        /// The recognizer's widths on AMD's NPU: a compile each, of 3.5 to 7.5 minutes (measured on a Ryzen AI 7 350, with
-        /// Windows ML's VitisAI plugin 1.8.75), several at once beside the detector's 18. Its compiler can't place one
-        /// 1,280 wide or more ("DMA channel location ... cannot access full range of the shared buffer memory space"), so
-        /// the widest is 1,024, and a longer line is narrowed to it (on the processor, the check's 952 lines read the same
-        /// so). Lines are read one at a time there: VitisAI leaves part of a batch of more to the processor, and refuses.
-        /// </summary>
-        public static readonly int[] AmdWidths = { 128, 256, 384, 512, 768, 1024 };
+        // AMD's NPU reads the recognizer at every width of Reader.Buckets: its int8 copy (--npu-models) compiles at each,
+        // 2,048 too, in about a minute (the FP32 model, as BF16, took minutes a width and wouldn't place 1,280 or more).
+        // Lines are read one at a time there: VitisAI leaves part of a batch of more to the processor, and refuses.
         static string vitisAiPlugin, amdKey;
         static bool vitisAiRegistered;
 
@@ -1507,6 +1501,8 @@ namespace KitOcrNpu
                     Dictionary<string, string> settings = new Dictionary<string, string>();
                     settings["cache_dir"] = dir;
                     settings["cache_key"] = g.Name;
+                    // Without it an int8 graph's compile (XIR) stays in memory, and every start compiles it again.
+                    settings["enable_cache_file_io_in_mem"] = "0";
                     ort.Append(o, npus, settings);
                     s = ort.Open(g.Model, o);
                 }
@@ -1936,7 +1932,9 @@ namespace KitOcrNpu
             KeepStdoutForAnswers();
             Console.InputEncoding = new UTF8Encoding(false);
             ortDir = Arg(args, "--ort", null);
-            string models = modelsDir = Arg(args, "--models", null), cache = Arg(args, "--cache", null);
+            string models = Arg(args, "--models", null), cache = Arg(args, "--cache", null);
+            // The NPU's own copy of the models, where it has one (AMD's: int8, its GELUs swapped); the processor reads --models.
+            modelsDir = Arg(args, "--npu-models", models);
             string on = Arg(args, "--on", "npu"), qnn = Arg(args, "--qnn", null), openvino = Arg(args, "--openvino", null), vitisai = Arg(args, "--vitisai", null);
             graphsDir = Arg(args, "--graphs", null);
             compilersGiven = int.Parse(Arg(args, "--compilers", "0"), CultureInfo.InvariantCulture);
@@ -1954,7 +1952,6 @@ namespace KitOcrNpu
                     }
                 Reader.Buckets = widths.ToArray();
             }
-            else if (vitisai != null) Reader.Buckets = AmdWidths;
             // Qualcomm's NPU held at power_saver, as Envoy holds it: burst reads a picture a few per cent faster, but holds
             // the NPU awake while the program waits; and asking for burst for each run and power_saver after costs more
             // (10 ms or so a run, measured) than burst saves.
@@ -2009,7 +2006,7 @@ namespace KitOcrNpu
                     Reader npu = null;
                     try
                     {
-                        npu = NpuReader(ort, models, charset, cache, qnn, openvino, vitisai, htpMode, batches, compiledOnly, out ep);
+                        npu = NpuReader(ort, modelsDir, charset, cache, qnn, openvino, vitisai, htpMode, batches, compiledOnly, out ep);
                         Picture pic = SelfCheckPicture();
                         string want = Texts(cpu.ReadPicture(pic)), got = Texts(npu.ReadPicture(pic));
                         check = got;

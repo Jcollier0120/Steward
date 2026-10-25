@@ -196,6 +196,21 @@ export const MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'charset.txt
   'notices/NOTICE.txt': { url: `${MODEL_RELEASE}/NOTICE.txt`, size: 1_212, sha256: '1e5026805ff919b2c41cc08ba986b587eb7c89fa5e60be85578ea3a5b1869723' },
 };
 
+const AMD_MODEL_RELEASE = `${MODEL_RELEASE}-amd`;
+
+/**
+ * AMD's NPU's own copy of the model, which the NPU reads while the processor (its self-check's yardstick) reads
+ * MODEL_FILES: each GELU swapped for a polynomial of clips, products and sums, which the NPU computes as the processor
+ * does where its own GELU and sigmoid are coarse tables, then quantized to int8 for it (tools/ocr-model/README.md,
+ * "AMD's NPU's copy"; spec/OCR.md, "Intel and AMD"). Its notice says what was changed.
+ */
+export const AMD_MODEL_FILES: Readonly<Record<'det.onnx' | 'rec.onnx' | 'notices/LICENSE.txt' | 'notices/NOTICE.txt', Pinned>> = {
+  'det.onnx': { url: `${AMD_MODEL_RELEASE}/det.onnx`, size: 0, sha256: '' },
+  'rec.onnx': { url: `${AMD_MODEL_RELEASE}/rec.onnx`, size: 0, sha256: '' },
+  'notices/LICENSE.txt': { url: `${AMD_MODEL_RELEASE}/LICENSE.txt`, size: 11_358, sha256: 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30' },
+  'notices/NOTICE.txt': { url: `${AMD_MODEL_RELEASE}/NOTICE.txt`, size: 0, sha256: '' },
+};
+
 /**
  * Whether the model reads on the processor where no NPU can: on an AMD PC, whose NPU reads worse as VitisAI compiles
  * the model (measured in kit 2.127.0), an Intel PC whose NPU isn't of OPENVINO_GENERATIONS or that has none, and a PC
@@ -224,6 +239,8 @@ export interface ReaderPlace {
   /** The NPU maker's plugin; null where the model reads on the processor. */
   pack: string | null;
   models: string;
+  /** The NPU's own copy of the model (AMD's: AMD_MODEL_FILES); null where the NPU reads `models`. */
+  npuModels: string | null;
   /** The program's working folder: the NPUs' compiled graphs, and what their runtimes leave. */
   cache: string;
   /** AMD's NPU's graphs compiled ahead (AMD_GRAPHS), where some are pinned for this model; else null. */
@@ -246,6 +263,7 @@ export function placeOf(home: string, arch: OcrArch, pack: NpuPack | null): Read
     ort: path.join(home, `onnxruntime-${ORT_VERSION}-${arch}`),
     pack: pack ? path.join(home, pack.folder ?? `${pack.id}-${pack.version}`) : null,
     models: path.join(home, `model-${MODEL_VERSION}`),
+    npuModels: pack?.id === 'vitisai' ? path.join(home, `model-${MODEL_VERSION}-amd`) : null,
     cache: path.join(home, 'cache'),
     graphs: pack?.id === 'vitisai' && AMD_GRAPHS ? path.join(home, `amd-graphs-${MODEL_VERSION}-${AMD_GRAPHS.plugin}`) : null,
   };
@@ -253,7 +271,7 @@ export function placeOf(home: string, arch: OcrArch, pack: NpuPack | null): Read
 
 /** The folders of `place` not yet whole. */
 export function missingIn(place: ReaderPlace, exists: (p: string) => boolean = existsSync): string[] {
-  return [place.models, place.ort, place.pack, place.graphs].filter((d): d is string => !!d && !exists(path.join(d, READY)));
+  return [place.models, place.npuModels, place.ort, place.pack, place.graphs].filter((d): d is string => !!d && !exists(path.join(d, READY)));
 }
 
 /**
@@ -350,6 +368,15 @@ export async function fetchReader(place: ReaderPlace, arch: OcrArch, pack: NpuPa
     writeFileSync(path.join(tmp, READY), `${new Date().toISOString()}\n`);
     rmSync(place.models, { recursive: true, force: true });
     renameSoon(tmp, place.models);
+  }
+  if (place.npuModels && !exists(place.npuModels)) {
+    io.log?.(`fetching AMD's NPU's copy of the text reader's model (${Math.round(Object.values(AMD_MODEL_FILES).reduce((n, f) => n + f.size, 0) / 1e6)} MB)`);
+    const tmp = `${place.npuModels}.fetching`;
+    rmSync(tmp, { recursive: true, force: true });
+    for (const [name, f] of Object.entries(AMD_MODEL_FILES)) await get({ what: `AMD's NPU's ${name}`, ...f, dest: path.join(tmp, name), have: false });
+    writeFileSync(path.join(tmp, READY), `${new Date().toISOString()}\n`);
+    rmSync(place.npuModels, { recursive: true, force: true });
+    renameSoon(tmp, place.npuModels);
   }
   const fetchZip = async (what: string, f: Pinned, name: string, into: string, files: { member: string; as: string }[]) => {
     io.log?.(`fetching ${what} for the text reader (${Math.round(f.size / 1e6)} MB)`);
@@ -614,6 +641,7 @@ const NPU = { id: 'npu', name: 'NPU', slots: 1 };
  */
 export function readerArgs(place: ReaderPlace, pack: NpuPack | null): string[] {
   const args = ['--ort', place.ort, '--models', place.models, '--cache', place.cache, '--on', pack ? 'npu' : 'cpu', '--idle', '120'];
+  if (pack && place.npuModels) args.push('--npu-models', place.npuModels);
   if (pack?.id === 'qnn') args.push('--qnn', place.pack!);
   if (pack?.id === 'openvino') args.push('--openvino', place.pack!);
   if (pack?.id === 'vitisai') {
