@@ -83,6 +83,8 @@ export interface SettingsData {
   warnings: Messages;
   file: string;
   usedFrom?: string;
+  /** With Manor installed, the settings left out of this form since they're set on Manor's Settings (kit 2.140.0). */
+  inManor?: { manor: string; url: string; labels: string[] };
 }
 
 /** The kinds drawn as one control on one line. */

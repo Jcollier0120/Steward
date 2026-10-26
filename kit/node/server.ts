@@ -14,7 +14,7 @@ import { isNavigation, launchPath, Launches, lockedPage, manorAnswers, manorOpen
 import { hasTour, pageScript } from './react-page.ts';
 import { needsSettings, watchRequired } from './required.ts';
 import { rounds, roundTimes } from './schedule.ts';
-import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
+import { formPlace, saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
 import { demoAnswer, demoDir, DEMO_NO } from './demo.ts';
 import { shadowedRoutes } from './kit-routes.ts';
 import { dataFile, writeJson } from './store.ts';
@@ -269,8 +269,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
   };
   const spec = opts.settings;
   if (spec) {
-    get['/api/settings'] = async () => ({ json: await settingsReply(spec) });
-    post['/api/settings'] = ({ body }) => saveSettingsReply(spec, body);
+    // ?manor=1: Manor's Settings, asking for the settings the staff share that it shows (settings-kit.ts' formPlace).
+    get['/api/settings'] = async ({ query }) => ({ json: await settingsReply(spec, undefined, formPlace(query)) });
+    post['/api/settings'] = ({ body, query }) => saveSettingsReply(spec, body, undefined, formPlace(query));
   }
 
   const server = http.createServer(async (req, res) => {

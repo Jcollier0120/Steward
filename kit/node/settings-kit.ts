@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import { isDeveloper } from './developer.ts';
+import { type ManorLink, manorStaffSettingsUrl, sharedSettingsManor } from './manor.ts';
 import { readText, statOf } from './file-cache.ts';
 import { writeJson } from './store.ts';
 
@@ -125,6 +126,14 @@ interface Common {
   chipOff?: string;
   /** A record's switch: drawn on the record's folded line, and working there, so the one that matters most is a click away. */
   inline?: boolean;
+  /**
+   * A top-level setting the staff share, set on Manor's Settings (Staff settings) while Manor is installed (kit
+   * 2.140.0): shared-settings.ts' fields carry it. 'shared': one value for the whole manor, in Manor's settings.json,
+   * which the agent's read function takes first. 'own': the agent's own value, kept in its own settings.json, shown and
+   * saved on Manor's Settings through /api/settings?manor=1. Either way the agent's own Settings leaves it out and says
+   * where it's set (settingsReply's `inManor`). Without Manor it's an ordinary field.
+   */
+  inManor?: 'shared' | 'own';
   /**
    * Kept in the file and carried through every save, but never drawn: a value the agent decides itself (the Steward's
    * usesKit, from each repository's kit.json), which a person needn't see or set. The panel sends it back as it came.
@@ -584,6 +593,28 @@ function keepFields(fields: Field[], posted: Record<string, unknown>, stored: Re
   return out;
 }
 
+/**
+ * Where a form is asked from (kit 2.140.0): `manor`, the installed Manor, whose Settings show the settings the staff
+ * share (Field.inManor), or null without one; `asked`, Manor's Settings asking for them (?manor=1).
+ */
+export interface FormPlace {
+  manor: ManorLink | null;
+  asked: boolean;
+}
+
+/** Where a request to /api/settings comes from: Manor's Settings when it says ?manor=1. */
+export const formPlace = (query?: URLSearchParams): FormPlace => ({ manor: sharedSettingsManor(), asked: query?.get('manor') === '1' });
+
+/**
+ * The fields a form has, by where it's asked from: on the agent's own page, with Manor installed, the ones set on
+ * Manor's Settings are left out; Manor's Settings gets only those, to read (`save` false) or to save, when only the
+ * agent's own ('own'): a 'shared' one is Manor's own setting, saved in Manor's settings.json. Without Manor, all.
+ */
+function placed(schema: Field[], place: FormPlace, save = false): Field[] {
+  if (place.asked) return schema.filter((f) => (save ? f.inManor === 'own' : !!f.inManor));
+  return place.manor ? schema.filter((f) => !f.inManor) : schema;
+}
+
 /** Whether the switch leaves this agent's whole form out: said so (SettingsSpec.developerOnly), or every field is. */
 const formLeftOut = (spec: SettingsSpec, developer: boolean) => !developer && (!!spec.developerOnly || (spec.schema.length > 0 && spec.schema.every((f) => f.developerOnly)));
 
@@ -604,16 +635,24 @@ export interface SettingsReply {
   warnings: Messages;
   file: string;
   usedFrom?: string;
+  /**
+   * With Manor installed, the settings this form leaves out since they're set on Manor's Settings (Field.inManor, kit
+   * 2.140.0): the manor's name, the address of its Staff settings, and each one's label. The panels say so in a line.
+   */
+  inManor?: { manor: string; url: string; labels: string[] };
 }
 
-export async function settingsReply<S extends object>(spec: SettingsSpec<S>, developer = isDeveloper()): Promise<SettingsReply> {
+export async function settingsReply<S extends object>(spec: SettingsSpec<S>, developer = isDeveloper(), place: FormPlace = formPlace()): Promise<SettingsReply> {
   const usedFrom = spec.usedFrom ? { usedFrom: spec.usedFrom } : {};
   if (formLeftOut(spec, developer)) return { developerOnly: true, schema: [], values: {}, defaults: {}, problems: [], warnings: {}, file: '', ...usedFrom };
   const file = spec.file();
   const { raw, broken } = readRaw(file);
   const { settings, problems } = spec.normalize(raw ?? {});
   if (broken) problems.unshift(brokenNote(file));
-  const schema = schemaFor(spec.schema, developer);
+  const all = schemaFor(spec.schema, developer);
+  const schema = placed(all, place);
+  const elsewhere = place.manor && !place.asked ? all.filter((f) => f.inManor) : [];
+  const inManor = elsewhere.length && place.manor ? { inManor: { manor: place.manor.name, url: manorStaffSettingsUrl(place.manor), labels: elsewhere.map((f) => f.label) } } : {};
   const values = valuesFor(spec.schema, settings, developer);
   const out: Out = { errors: {}, warnings: {} };
   for (const f of schema) if (!f.readOnly) cleanValue(f, (values as any)[f.key], f.key, out);
@@ -622,7 +661,7 @@ export async function settingsReply<S extends object>(spec: SettingsSpec<S>, dev
   const shown = (path: string) => developer || path === '' || schema.some((f) => f.key === path.split('.')[0]);
   const warnings = Object.fromEntries(Object.entries({ ...out.warnings, ...extra?.warnings }).filter(([k]) => shown(k)));
   const said = developer ? problems : problems.length ? [PLAIN_PROBLEM] : [];
-  return { schema, values: values as Record<string, unknown>, defaults: valuesFor(spec.schema, spec.defaults, developer) as Record<string, unknown>, problems: said, warnings, file: developer ? file : '', ...usedFrom };
+  return { schema, values: values as Record<string, unknown>, defaults: valuesFor(spec.schema, spec.defaults, developer) as Record<string, unknown>, problems: said, warnings, file: developer ? file : '', ...usedFrom, ...inManor };
 }
 
 /**
@@ -632,16 +671,19 @@ export async function settingsReply<S extends object>(spec: SettingsSpec<S>, dev
  * shown (schemaFor), and what it left out is kept as settings.json has it: a developer-only setting, a group's
  * developer-only fields, a list's developer-only choices, and each record's developer-only fields (by its handle).
  */
-export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>, body: unknown, developer = isDeveloper()): Promise<{ json: unknown; status?: number }> {
+export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>, body: unknown, developer = isDeveloper(), place: FormPlace = formPlace()): Promise<{ json: unknown; status?: number }> {
   const changes = isObject(body) ? body.values : undefined;
   if (!isObject(changes)) return { json: { ok: false, error: 'Send {"values": {...}} with the settings to change.', errors: {} }, status: 400 };
   if (formLeftOut(spec, developer)) return { json: { ok: false, error: `Not saved: ${DEVELOPER_ONLY_FORM}`, errors: { '': DEVELOPER_ONLY_FORM } }, status: 400 };
-  const schema = schemaFor(spec.schema, developer);
+  const all = schemaFor(spec.schema, developer);
+  const schema = placed(all, place, true);
   const out: Out = { errors: {}, warnings: {} };
   const clean: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(changes)) {
     const f = schema.find((x) => x.key === k);
-    if (!f) out.errors[k] = `There's no setting called "${k}".`;
+    const elsewhere = f ? undefined : all.find((x) => x.key === k && x.inManor);
+    if (elsewhere && place.manor) out.errors[k] = elsewhere.inManor === 'shared' ? `It's set for the whole staff on ${place.manor.name}'s Settings.` : `It's set on ${place.manor.name}'s Settings, Staff settings.`;
+    else if (!f) out.errors[k] = `There's no setting called "${k}".`;
     else if (f.readOnly) out.errors[k] = "This one can't be changed here.";
     else {
       const c = cleanValue(f, v, k, out);

@@ -2,6 +2,42 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.140.0
+
+**The settings the staff share are set once, on Manor's Settings (Staff settings), and an agent's own Settings leaves them out; a list of short words is drawn in columns.**
+
+### What changed
+
+- **shared-settings.ts:** each shared field says where Manor keeps it (`inManor`, spec/SHARED-SETTINGS.md).
+  - The agent's own value, which Manor's Settings shows and saves through the agent (`'own'`): `roundEveryField`, `modelCallsField`.
+  - One value for the whole staff, in Manor's settings.json `"shared"` (`'shared'`):
+    - `plainNotesField`.
+    - New: `semanticRerankField`, `videoQualityField` (the `preset` key: smaller, balanced, better) and `keepVideoTagsField`.
+  - `readPlainNotes` takes Manor's value first when it says one it can use, and so do the new `readSemanticRerank`, `readVideoQuality` and `readKeepVideoTags`. Otherwise they fall back to the agent's own value, then the default.
+- **manor.ts:**
+  - `manorShared(key)`: Manor's value, read afresh.
+  - `sharedSettingsManor()`: the Manor whose Settings show them.
+  - `manorStaffSettingsUrl()`: `#/settings/staff`.
+  - Under node --test none is read unless a test says where.
+- **settings-kit.ts, `settingsReply` and `saveSettingsReply`, by where they're asked from (`FormPlace`, `formPlace(query)`; server.ts passes the request's):**
+  - **The agent's own page, with Manor installed:** the fields with `inManor` are left out. The reply says them as `inManor: { manor, url, labels }`, and a save naming one is refused with where it's set.
+  - **`?manor=1`, Manor's Settings:** only those fields; a save takes only the `'own'` ones.
+  - **Without Manor:** every field, as before.
+- **react/settings-form.tsx:**
+  - The whole form says the fields set on Manor in a line, linking to its Staff settings. Onboarding's few settings don't.
+  - `SettingsForm`'s new `api` is where it's read and saved (/api/settings unless said).
+  - A list of more than two short words (no path, none over 24 characters) is drawn in columns rather than one a line (web/settings-panel.css' `.sf-short`).
+- spec/SHARED-SETTINGS.md (new) says all of it.
+
+### Before you update
+
+- Nothing breaks: a field built by hand has no `inManor` and stays on the agent's page.
+- **To move a shared setting to Manor:**
+  - Build it with its factory.
+  - Read it with its read function. Clerk and Chamberlain read `semanticRerank` by hand; Miller and Chronicler read `preset` and `keepVideoTags` by hand.
+  - Take the agent's own default from DEFAULT_SETTINGS.
+- **A test that counts an agent's settings fields under node --test** sees them all, as before: no Manor is read there.
+
 ## 2.139.0
 
 **The kit's page talks like the manor: newcomers wait their turn at the door, the off-duty put their feet up by the fire, and an agent short of settings is awaiting orders.**

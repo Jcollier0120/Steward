@@ -51,6 +51,11 @@
 .sf-list { list-style: none; margin: 6px 0; padding: 0; }
 .sf-list > li { margin: 4px 0; }
 .sf-item { display: flex; gap: 6px; align-items: center; }
+/* A list of short words (runtimes, process names): in columns, not one a line (kit 2.140.0). */
+.sf-list.sf-short { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 4px 12px; }
+.sf-list.sf-short > li { margin: 0; min-width: 0; }
+/* Manor's Staff settings, said where its fields would be (kit 2.140.0). */
+.sf-in-manor a { color: var(--accent-text, var(--accent)); }
 .sf-item-text { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; padding: 5px 0; }
 .sf-panel select.sf-pick { margin-top: 2px; }
 .sf-panel .sf-item input[type=text] { flex: 1 1 auto; width: auto; min-width: 0; max-width: 560px; }
