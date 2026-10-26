@@ -38,6 +38,9 @@ test("the shared fields say where they're set: the agent's own rounds and calls,
   assert.match(q.plain?.help ?? '', /^Smaller files/, 'and the plain ones for everyone else');
   assert.equal(ss.semanticRerankField().advanced, true);
   assert.equal(ss.keepVideoTagsField().advanced, true);
+  // "A video's place" read as where videos are kept, sending the owner to look for a folder setting.
+  assert.doesNotMatch(ss.keepVideoTagsField().label, /place|folder|location/i, 'names what a copy keeps, not where videos go');
+  assert.match(ss.keepVideoTagsField().label, /GPS/);
   assert.equal(ss.videoQualityField().advanced, undefined, 'on the page');
   const shared = ss.manorSharedFields();
   assert.deepEqual(shared.map((f: Field) => f.key), ['plainNotes', 'preset', 'semanticRerank', 'keepVideoTags'], "Manor's list: every shared one");

@@ -147,13 +147,16 @@ export function readVideoQuality(raw: unknown, fallback: VideoQuality = 'balance
   return known(s.preset) ? s.preset : fallback;
 }
 
-/** Whether a video copy keeps where it was filmed and the camera: under Advanced. `help` says what this agent copies. */
+/**
+ * Whether a video copy keeps where it was filmed and the camera: under Advanced. `help` says what this agent copies.
+ * Its label names GPS, not "a video's place" (kit 2.142.3), which read as where the videos are kept: a folder setting.
+ */
 export function keepVideoTagsField(o: { help?: string } = {}): Field {
   return {
     key: 'keepVideoTags',
     kind: 'switch',
-    label: "Keep a video's place and camera details",
-    help: o.help ?? "Off: a video copy keeps when it was recorded and each track's language, and leaves out where it was filmed, the camera and its owner's name. On: it keeps every detail the original has, its place included.",
+    label: 'Keep GPS and camera details in video copies',
+    help: o.help ?? "Off: a video copy keeps when it was recorded and each track's language, and leaves out where it was filmed (GPS), the camera and its owner's name. On: it keeps every detail the original has.",
     advanced: true,
     inManor: 'shared',
   };

@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.249
+
+**It hands out the kit 2.142.3: the shared video switch is called "Keep GPS and camera details in video copies", not "Keep a video's place and camera details", which read as where the videos are kept.**
+
+### What changed
+
+- **The switch for whether a video copy keeps where it was filmed and the camera has a clearer name**, on each staff member's Settings and on Manor's Staff settings. It works as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.248
 
 **Every staff member's repository rides the build pipeline: its pull requests write their changelog entry in changes/, and the Steward's build sets the version, so work side by side no longer clashes over version lines. It hands out the kit 2.142.2.**
