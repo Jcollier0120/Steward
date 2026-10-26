@@ -19,7 +19,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const B = await import('./fixture/src/kit/npu-bench.ts');
 const V = await import('./fixture/src/kit/npu-vendors.ts');
-const { routeOnDevice } = await import('./fixture/src/kit/npu-check.ts');
+const { portFree, routeOnDevice } = await import('./fixture/src/kit/npu-check.ts');
 const { parseDetection } = await import('./fixture/src/kit/detect.ts');
 const { mb, portablePath } = await import('./fixture/src/kit/setup.ts');
 
@@ -245,7 +245,9 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
         await f.start(Number(new URL(e.chat.baseUrl).port));
         return { pid: 4242, stop: f.stop };
       },
-      portFree: async (p: number) => !o.held?.(p),
+      // A held port, or one this PC can't listen on: Windows keeps ranges of ports (Hyper-V, WinNAT), changed at each boot,
+      // and a fake server moved into one couldn't start there (EACCES), though the real portFree skips it.
+      portFree: async (p: number) => !o.held?.(p) && (await portFree(p)),
       memory: async () => ({ workingSetBytes: 3.6 * 1024 ** 3, privateBytes: 1.2 * 1024 ** 3 }),
       conditions: async () => o.conditions ?? PLUGGED,
       cpuBusy: async () => (typeof o.busy === 'function' ? o.busy() : (o.busy ?? 4)),

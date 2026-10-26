@@ -207,6 +207,22 @@ test('no licence.json: the agent holds, says why, and its page says signing in b
   assert.equal(shell.pill.text, 'No license');
 });
 
+test('in demo mode the page shows no hold (kit 2.142.1), so its pictures show a licensed page; its rounds still hold', () => {
+  rmSync(licenceFile, { recursive: true, force: true });
+  process.env.KIT_DEMO = root;
+  try {
+    assert.equal(check.licenseHeld(), 'This PC holds no license for it: signing in brings it back');
+    assert.equal(check.shownHold(), null);
+    assert.doesNotMatch(page({ token: 't', body: '<p>body</p>' }), /holds no license|No license/);
+    const shell = pageShell({ onboarding: null });
+    assert.equal(shell.trialEnded, null);
+    assert.notEqual(shell.pill.text, 'No license');
+  } finally {
+    delete process.env.KIT_DEMO;
+  }
+  assert.equal(check.shownHold(), check.licenseHeld());
+});
+
 test('an unreadable licence.json: it holds, and says why', () => {
   writeFileSync(licenceFile, '{ not json');
   let c = at();

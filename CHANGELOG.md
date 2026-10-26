@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.246
+
+**It hands out the kit 2.142.1: a staff member's page in demo mode, as Manor's hero pictures take it, no longer says "This PC holds no license for it".**
+
+### What changed
+
+- **Manor's pictures of each staff member's page show the page as it is on a licensed PC**, without the "no license" banner and pill they took on since the kit 2.110.0. Nothing changes on a real PC: an agent still holds without a license.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.245
 
 **It hands out the kit 2.142.0: a tile or link to part of a staff member's page opens the tab it's in, times to come read "in 6 hours", and an empty number in Settings says what it means.**
