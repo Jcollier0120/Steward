@@ -39,6 +39,14 @@ const data = (warnings = {}) => ({ schema, values, defaults: { ...values, interv
 // The same with fewer ordinary settings than a form in tabs has (TAB_FIELDS): the short page.
 const short = (warnings = {}) => ({ ...data(warnings), schema: schema.filter((f) => !['agents', 'jobs', 'env', 'kinds', 'folders'].includes(f.key)) });
 
+test('a number that may be empty says what empty means, as a text does', () => {
+  const f = { key: 'roundEvery', kind: 'whole', label: 'A round every', min: 60, max: 600, unit: 'minutes', nullable: "The variant's own: every 6 hours" };
+  const h = m.form({ schema: [f, { key: 'name', kind: 'text', label: 'Name', nullable: 'Its own name' }], values: { roundEvery: null, name: null }, defaults: { roundEvery: null, name: null }, problems: [], warnings: {}, file: '' });
+  assert.match(h, /<input type="number"[^>]*min="60" max="600"[^>]*value=""/, 'the box empty');
+  assert.match(h, /Empty: The variant(&#x27;|')s own: every 6 hours\./, 'and what that means');
+  assert.match(h, /Empty: Its own name\./, 'a text as before');
+});
+
 test('every field kind, drawn as settings-panel.js draws it, class for class', () => {
   const h = m.form(data());
   assert.match(h, /<div class="card sf-panel" data-tour="settings-panel">/);

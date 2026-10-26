@@ -444,7 +444,9 @@ const SwitchLabel = ({ control, label }: { control: ReactNode; label: ReactNode 
 /** Under a field: what empty means, its default and Reset to default, and whether it waits for the next start. */
 function FieldMeta({ f, value, def, top, onChange }: { f: SettingsField; value: unknown; def?: unknown; top: boolean; onChange: (v: unknown) => void }) {
   const meta: ReactNode[] = [];
-  if (f.kind === 'text' && (f.nullable || f.empty)) meta.push(<span key="empty">Empty: {f.nullable || f.empty}.</span>);
+  // What an empty box means: a text's, or a number's that may be null (the Herald's "The variant's own").
+  const empty = f.kind === 'text' ? f.nullable || f.empty : f.kind === 'whole' || f.kind === 'number' ? f.nullable : undefined;
+  if (empty) meta.push(<span key="empty">Empty: {empty}.</span>);
   // Its default, and the way back to it, only once it differs: a setting as it came says nothing more.
   if (def !== undefined && f.kind !== 'group' && !f.readOnly && !same(f, value, def)) {
     meta.push(<span key="default">Default: {words(f, def)}.</span>);
