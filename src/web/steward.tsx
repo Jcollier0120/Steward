@@ -259,20 +259,26 @@ function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRow
 
 /**
  * The staff's table, with each repository's release PC (lease.ts) in it once a turn was taken: who merges and releases
- * it, with Do it here and Keep it on this PC. Turns for no row here, and claims another PC made too (claims.ts), under it.
+ * it, with Do it here and Keep it on this PC. Turns for no row here, claims another PC made too (claims.ts) and the PRs
+ * passed over in their version lines (passover.ts), under it.
  */
-function StaffTable({ s, castellan, turns, clashes }: { s: StaffView | null; castellan: boolean; turns: TurnsView | null | undefined; clashes?: string[] }) {
+function StaffTable({ s, castellan, turns, clashes, passed }: { s: StaffView | null; castellan: boolean; turns: TurnsView | null | undefined; clashes?: string[]; passed?: string[] }) {
   const rows = s?.rows ?? [];
   const turnOf = new Map((turns?.rows ?? []).map((x) => [x.id, x]));
   const loose = (turns?.rows ?? []).filter((x) => !rows.some((r) => r.id === x.id));
   const showTurns = rows.some((r) => turnOf.has(r.id));
   const showNotes = rows.some((r) => shownNotes(r).length > 0);
-  const under = (loose.length > 0 || (clashes?.length ?? 0) > 0) && (
+  const under = (loose.length > 0 || (clashes?.length ?? 0) > 0 || (passed?.length ?? 0) > 0) && (
     <div className="turns">
       {loose.map((x) => (
         <TurnLine key={x.id} x={x} />
       ))}
       {(clashes ?? []).map((c) => (
+        <Text variant="muted" as="p" key={c}>
+          {c}.
+        </Text>
+      ))}
+      {(passed ?? []).map((c) => (
         <Text variant="muted" as="p" key={c}>
           {c}.
         </Text>
@@ -950,7 +956,7 @@ export function StewardBody({ v }: { v: StewardView }) {
       <TendingCard t={v.tending} r={v.round} now={now} />
       {foundOnPage(v.found) && <FoundCard f={v.found} finding={!!v.finding} now={now} tour="found" />}
       <Section title={castellan ? 'Staff' : 'Your repositories'} count={s?.rows.length}>
-        <StaffTable s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} />
+        <StaffTable s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} passed={v.passedOver} />
       </Section>
       {hasEmployees(v) && (
         <Section title={castellan ? 'Roll out the kit' : 'Release'}>

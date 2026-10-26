@@ -447,7 +447,7 @@ switch (cmd) {
     const all = loadClaims();
     if (rest.includes('--json')) console.log(JSON.stringify(all, null, 2));
     else if (!all.length) console.log('No versions are claimed.');
-    else for (const c of all) console.log(`${c.repo} ${c.version}: ${c.by}${c.for ? `, for ${c.for}` : ''}${c.branch ? ` (${c.branch})` : ''}, since ${c.at}${c.source === 'shared' ? ', shared by every PC that looks after it' : ''}${c.clash ? ` (${c.clash})` : ''}`);
+    else for (const c of all) console.log(`${c.repo} ${c.version}: ${c.by}${c.for ? `, for ${c.for}` : ''}${c.branch ? ` (${c.branch})` : ''}, since ${c.at}${c.source === 'shared' ? ', shared by every PC that looks after it' : ''}${c.clash ? ` (${c.clash})` : ''}${c.line ? `; next in its version line as #${c.line.pr} since ${c.line.since} (${c.line.why})` : ''}${c.passed ? `; #${c.passed.pr} stuck since ${c.passed.since}, passed over (${c.passed.why})${c.passed.from !== c.version ? `, re-versioned from ${c.passed.from}` : ''}` : ''}`);
     break;
   }
   case 'claim-port': {

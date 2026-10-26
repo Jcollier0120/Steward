@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.247
+
+**A PR stuck next in its repository's version line for an hour is passed over, so the PRs above it go ahead, and the Steward re-versions it and keeps it caught up with main until it moves again.**
+
+### What's new
+
+- **Passed over after an hour.** The open PR on a repository's lowest version claim is next in line. If its head and what holds it (a conflict, failing or unfinished checks, a draft, the owner, or only its author) stay the same for an hour, it is passed over, and the PR is told why.
+- **Re-versioned when main passes it.** The Steward claims it the next free version through the repository's claims ref, merges main into its branch, sets the new version in its version files, its changelog entry and its title, and pushes. It does this for a PR whose version main passed before it was passed over, too, which used to be put right by hand.
+- **Kept caught up.** While it stays passed over, each round that finds main moved merges main into its branch again.
+- **Taken back** when its author pushes to it, or what held it ends. It is re-versioned once more where main passed it, and told to vouch for it and merge it. The Steward still merges nothing.
+- **Owner-first PRs** (labelled `owner-first`, or changing a migration) are marked and shown, but never told, pushed to or re-versioned until the owner labels them `owner-done`.
+- **The page, an alarm and `steward claims`** say "stuck since …, passed over (what holds it); will be re-versioned to x.y.z". The marks live in the claims ref, so every PC shows the same, and only the PC whose turn it is on the repository acts on them.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.246
 
 **It hands out the kit 2.142.1: a staff member's page in demo mode, as Manor's hero pictures take it, no longer says "This PC holds no license for it".**

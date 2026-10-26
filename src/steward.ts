@@ -19,6 +19,7 @@ import { checkoutOf, pick, type Ctx, type EmployeeResult, type StageName, type S
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
 import { pruneClaims, shareClaims } from './claims.ts';
+import { passedConditions, passedLines, passOver } from './passover.ts';
 import { push } from './stages/push.ts';
 import { loadRefreshFailures, loadRefreshPending, refreshAfterReleases, refreshPendingFile, refreshStep, releasedWords } from './stages/refresh.ts';
 import { loadInstallHolds } from './installscripts.ts';
@@ -947,6 +948,17 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         }
         lap('claims');
       }
+      // A PR stuck next in its repository's version line for an hour is passed over, re-versioned, kept caught up, and
+      // taken back once it moves (passover.ts). Between builds too: that is when PRs merge.
+      if (name === 'round' && !quiet) {
+        try {
+          const self = selfEmployee(ctx, o);
+          out.results.push(...(await passOver(ctx, loadStaff()?.rows ?? [], { employees: [...ctx.settings.employees, ...(self ? [self] : [])] })));
+        } catch (e) {
+          log(`version lines: ${(e as Error).message}`);
+        }
+        lap('version lines');
+      }
       // After every round, done or not: what needs the person (alarms.ts).
       if (name === 'round') {
         try {
@@ -958,7 +970,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
           const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
           lap('ports');
-          await watchAlarms({ settings: ctx.settings, round: out, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, heldKit: heldKit(readJson<Record<string, KitTrial>>(kitTrialsFile(), {}), ctx.kit.released), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), signingAhead: loadSigningAhead(), exchequerPending: loadExchequerPending(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir, glance: quiet || out.error ? null : ctx.glance }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, heldKit: heldKit(readJson<Record<string, KitTrial>>(kitTrialsFile(), {}), ctx.kit.released), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), signingAhead: loadSigningAhead(), exchequerPending: loadExchequerPending(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), passedOver: passedConditions(passedLines(loadStaff()?.rows ?? [])), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir, glance: quiet || out.error ? null : ctx.glance }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }
