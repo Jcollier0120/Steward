@@ -15,8 +15,9 @@ process.env.MANOR_HOME = path.join(home, 'manor');
 process.env.LOCALAPPDATA = path.join(home, 'local');
 
 const F = await import('./fixture/src/kit/ffmpeg.ts');
-const { BUILDS, findTools, getFfmpeg, grindArgs, HEIWARD_BIN, HEIWARD_SOURCE, lastError, olderBuild, ownBin, SHARED_SOURCE, toolDirs, _resetFfmpegFetch } = F;
+const { BUILDS, findTools, getFfmpeg, grindArgs, HEIWARD_BIN, HEIWARD_SOURCE, lastError, olderBuild, ownBin, SHARED_SOURCE, tagArgs, toolDirs, _resetFfmpegFetch } = F;
 const { RANKED } = await import('./fixture/src/kit/video-encoders.ts');
+const { parseProbe } = await import('./fixture/src/kit/media-probe.ts');
 const { dataDir } = await import('./fixture/src/app.ts');
 type Run = typeof F.run;
 
@@ -316,27 +317,72 @@ test("FFmpeg's error lines are reduced to the one that says why", () => {
 const enc = (name: string) => RANKED.find((c) => c.name === name)!;
 const hd = { width: 1920, height: 1080, fps: 30, bitRate: null };
 
-test('the encoding command keeps every audio stream, the timing and the tags', () => {
-  const args = grindArgs({
-    input: 'C:\\Hopper\\a.mkv', output: 'C:\\Flour\\.miller-1.part.mp4', c: enc('hevc_mf'), preset: 'balanced',
+/** A phone video's probe: its place, its camera and its owner, beside when it was recorded and its tracks' languages. */
+const PLACE = '+48.8584+002.2945/';
+const filmed = parseProbe({
+  streams: [
+    { codec_type: 'video', codec_name: 'hevc', width: 1920, height: 1080, tags: { language: 'eng', handler_name: 'Core Media Video' } },
+    { codec_type: 'audio', codec_name: 'aac', channels: 2, tags: { language: 'fra' } },
+    { codec_type: 'audio', codec_name: 'aac', channels: 2, tags: { language: 'und' } },
+  ],
+  format: {
+    duration: '2',
+    tags: {
+      creation_time: '2026-07-04T12:00:00.000000Z',
+      location: PLACE,
+      'com.apple.quicktime.location.ISO6709': PLACE,
+      'com.apple.quicktime.make': 'Apple',
+      'com.apple.quicktime.model': 'iPhone 15 Pro',
+      author: 'Jane Doe',
+    },
+  },
+});
+
+test("a video copy keeps when it was recorded and each track's language, and leaves out its place, its camera and its owner", () => {
+  assert.equal(filmed.video?.language, 'eng');
+  assert.deepEqual(filmed.audio.map((a) => a.language), ['fra', undefined], '"und" names no language');
+  const args = tagArgs(filmed);
+  assert.deepEqual(args, [
+    '-map_metadata', '-1',
+    '-metadata', 'creation_time=2026-07-04T12:00:00.000000Z',
+    '-metadata:s:v:0', 'language=eng',
+    '-metadata:s:a:0', 'language=fra',
+    '-movflags', '+faststart',
+  ]);
+  assert.doesNotMatch(args.join(' '), /48\.8584|Apple|iPhone|Jane/);
+  // An agent's setting to keep them (off by default) keeps every one, as copies did before kit 2.137.2.
+  assert.deepEqual(tagArgs(filmed, true), ['-map_metadata', '0', '-movflags', '+faststart+use_metadata_tags']);
+  // A date that doesn't parse isn't passed on.
+  assert.deepEqual(tagArgs({ tags: { creation_time: 'unset' }, video: null, audio: [] }), ['-map_metadata', '-1', '-movflags', '+faststart']);
+});
+
+test('the encoding command keeps every audio stream and the timing, and only the tags it is given', () => {
+  const job = {
+    input: 'C:\\Hopper\\a.mkv', output: 'C:\\Flour\\.miller-1.part.mp4', c: enc('hevc_mf'), preset: 'balanced' as const,
     shape: hd, audio: [{ codec: 'opus', channels: 2 }], audioArgs: ['-c:a:0', 'aac'], cropToEven: true,
-  });
-  const at = (flag: string) => args[args.indexOf(flag) + 1];
+  };
+  const args = grindArgs(job);
+  const at = (flag: string, a = args) => a[a.indexOf(flag) + 1];
   assert.equal(at('-i'), 'C:\\Hopper\\a.mkv');
   assert.equal(at('-vf'), 'crop=trunc(iw/2)*2:trunc(ih/2)*2,format=nv12');
   assert.equal(at('-progress'), 'pipe:1');
   assert.equal(at('-fps_mode'), 'passthrough');
-  assert.equal(at('-map_metadata'), '0');
+  assert.equal(at('-map_metadata'), '-1', "no tags given: none of the original's");
+  assert.equal(at('-movflags'), '+faststart');
   assert.ok(args.join(' ').includes('-map 0:v:0 -map 0:a'));
   assert.equal(at('-f'), 'mp4');
   assert.equal(args.at(-1), 'C:\\Flour\\.miller-1.part.mp4');
-  // Without a format or cores, exactly the Chronicler's command.
+  // Without a format, cores or tags, the Chronicler's command, but for the tags.
   assert.deepEqual(args, [
     '-hide_banner', '-nostdin', '-y', '-v', 'error', '-nostats', '-progress', 'pipe:1',
     '-i', 'C:\\Hopper\\a.mkv', '-map', '0:v:0', '-map', '0:a', '-vf', 'crop=trunc(iw/2)*2:trunc(ih/2)*2,format=nv12',
     '-c:v', 'hevc_mf', '-hw_encoding', '1', '-rate_control', 'u_vbr', '-b:v', '3421k', '-tag:v', 'hvc1',
-    '-c:a:0', 'aac', '-fps_mode', 'passthrough', '-map_metadata', '0', '-movflags', '+faststart+use_metadata_tags', '-f', 'mp4', 'C:\\Flour\\.miller-1.part.mp4',
+    '-c:a:0', 'aac', '-fps_mode', 'passthrough', '-map_metadata', '-1', '-movflags', '+faststart', '-f', 'mp4', 'C:\\Flour\\.miller-1.part.mp4',
   ]);
+  const tagged = grindArgs({ ...job, tags: tagArgs(filmed) });
+  assert.equal(at('-metadata', tagged), 'creation_time=2026-07-04T12:00:00.000000Z');
+  assert.doesNotMatch(tagged.join(' '), /48\.8584|Apple|iPhone|Jane/);
+  assert.equal(tagged.at(-1), 'C:\\Flour\\.miller-1.part.mp4');
   const mov = grindArgs({ input: 'a.mov', output: 'b.mov', c: enc('hevc_mf'), preset: 'balanced', shape: hd, audio: [], audioArgs: [], cropToEven: false, format: 'mov' });
   assert.equal(mov[mov.indexOf('-f') + 1], 'mov', "a Miller project's MOV stays MOV");
   assert.equal(mov[mov.indexOf('-vf') + 1], 'format=nv12', 'nothing to crop');

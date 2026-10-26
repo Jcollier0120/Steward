@@ -2,6 +2,34 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.137.2
+
+**Three fixes from the launch checks: a video the kit makes no longer carries where it was filmed, the known folders come back right whatever script a user or folder name is in, and "Back to Castellan" goes to Castellan's own address.**
+
+### What changed
+
+- **ffmpeg.ts, video copies' tags:**
+  - New `tagArgs(info, all?)`: `-map_metadata -1`, then only `creation_time` and each track's language, by name, and `-movflags +faststart`. Where the video was filmed, the camera's make, model and serial number, the owner's name and every other tag stay with the original, as they do for photos. Rotation needs no tag: the picture is turned upright as it's re-encoded.
+  - `grindArgs` takes `tags` (tagArgs' options). Left out, the copy carries none of the original's tags. Before, it carried every one (`-map_metadata 0` with `+use_metadata_tags`).
+  - `shrinkVideo` takes `keepTags`: true keeps every tag, as copies did before. Leave it off unless the person asks, as the Miller's `keepVideoTags` setting does.
+  - `media-probe.ts`: `parseProbe` gives each track's `language` (ISO 639-2) when it names one ("und" is none).
+  - No staff member calls the kit's `grindArgs` or `shrinkVideo` yet: the Miller and the Chronicler have their own copies. The Miller's already keeps only these tags; the Chronicler's still keeps every one.
+- **folders.ts, the known folders:**
+  - `knownFolders()` asks Windows in one PowerShell script, UTF-8 end to end (`KNOWN_FOLDERS_SCRIPT`): `[Environment]::GetFolderPath(..., 'DoNotVerify')` for Desktop, Documents, Pictures, Music and Videos, and the registry's User Shell Folders, expanded, for Downloads, Screenshots and Captures. The usual places are the fallback, as before.
+  - Before, it read `reg.exe query`, which answers in the console's code page: a user or folder name in another script (Jürgen, Документы, 書類) came back mangled, and the folder wasn't found.
+  - Downloads is read by FOLDERID_Downloads' GUID. The GUID here before was another one, so a Downloads folder moved elsewhere was never found.
+  - `knownFolders()` is still synchronous and still read once, through the new `powershellSync` (ps.ts), about 0.2 s the first time. When Windows doesn't answer, it gives the usual places and asks again 10 minutes later, where before it kept the usual places until the agent restarted.
+  - New `readKnownFolders(ask?)` runs the script (a stand-in in tests). `foldersFrom` reads the script's JSON, and a `reg query`'s text as before; a value that isn't a full path is no place to look.
+  - The Cellarer, the Chronicler, the Miller, the Scribe, the Toller and the kit's own `captures.ts` read these folders.
+- **manor.ts, the Back link:** `manorLink().url` is `http://castellan.localhost:<port>/` (`MANOR_HOST`), the address Manor's own links use since Manor 0.11.0. It was `manor.localhost`, which Manor still answers and sends a browser on from. "Back to <manor>" in `page.ts` and `react/shell.tsx`, the locked page's "Open from <manor>" and the developer-options note all follow it.
+- **page-access.ts:** `pageToken` and `pageHeaders` read Manor's token for `castellan.localhost` as they do for `manor.localhost`, so a GET to Manor's page by its link is still signed in. `manorAnswers` still asks at `manor.localhost`, which every Manor answers.
+
+### Before you update
+
+- A test that pins `manorLink().url`, or anything built from it, as `http://manor.localhost:…` needs `castellan.localhost`, or a check that holds for both.
+- A test that pins `grindArgs`' `-map_metadata 0` needs `tagArgs`' options, or `tags: tagArgs(info, true)` for every tag.
+- Nothing else: the exports and their results are the same.
+
 ## 2.137.1
 
 **The text reader's helper is prebuilt and signed again: `kit/node/prebuilt/ocr-npu-87e019a2736d.exe`, for `ocr-npu.cs` as it is since 2.137.0.**

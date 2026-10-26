@@ -18,6 +18,8 @@ export interface VideoStream {
   /** Colour transfer: smpte2084 (PQ) and arib-std-b67 (HLG) are HDR. */
   transfer: string | null;
   bitRate: number | null;
+  /** The track's language (ISO 639-2, "eng"), when it names one: a copy keeps it (ffmpeg.ts, tagArgs). */
+  language?: string;
 }
 
 export interface MediaInfo {
@@ -25,7 +27,7 @@ export interface MediaInfo {
   duration: number | null;
   bitRate: number | null;
   video: VideoStream | null;
-  audio: { codec: string; channels: number }[];
+  audio: { codec: string; channels: number; language?: string }[];
   /** Container tags, keys lower-cased (creation_time, com.apple.quicktime.make, ...). */
   tags: Record<string, string>;
 }
@@ -45,6 +47,12 @@ export function rate(r: unknown): number | null {
 
 const lowerKeys = (o: unknown): Record<string, string> =>
   Object.fromEntries(Object.entries((o as Record<string, unknown>) ?? {}).map(([k, v]) => [k.toLowerCase(), String(v)]));
+
+/** A stream's language tag, when it names one ("und" is none), as `{ language }` to spread into the stream. */
+const language = (tags: any): { language?: string } => {
+  const l = String(tags?.language ?? '').trim().toLowerCase();
+  return /^[a-z]{3}$/.test(l) && l !== 'und' ? { language: l } : {};
+};
 
 /** `ffprobe -print_format json -show_format -show_streams` output, parsed. */
 export function parseProbe(json: any): MediaInfo {
@@ -70,6 +78,7 @@ export function parseProbe(json: any): MediaInfo {
       pixFmt: v.pix_fmt ?? null,
       transfer: v.color_transfer ?? null,
       bitRate: num(v.bit_rate),
+      ...language(v.tags),
     };
   }
   const durations = [num(json?.format?.duration), ...streams.map((s) => num(s.duration))].filter((d): d is number => d !== null && d > 0);
@@ -77,7 +86,7 @@ export function parseProbe(json: any): MediaInfo {
     duration: num(json?.format?.duration) ?? (durations.length ? Math.max(...durations) : null),
     bitRate: num(json?.format?.bit_rate),
     video,
-    audio: streams.filter((s) => s.codec_type === 'audio').map((s) => ({ codec: String(s.codec_name ?? ''), channels: num(s.channels) ?? 2 })),
+    audio: streams.filter((s) => s.codec_type === 'audio').map((s) => ({ codec: String(s.codec_name ?? ''), channels: num(s.channels) ?? 2, ...language(s.tags) })),
     tags: lowerKeys(json?.format?.tags),
   };
 }

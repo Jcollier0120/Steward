@@ -505,9 +505,31 @@ export function encode(t: Tools, job: EncodeJob): Running {
 }
 
 /**
+ * The tag options for a video copy, from the original's probe (kit 2.137.2, as the Miller's since its 0.6.70). A copy is
+ * made to share or to keep small, so it carries only what sorts and plays it right: when it was recorded
+ * (creation_time) and each track's language. Where it was filmed, the camera's make, model and serial number, the
+ * owner's name and every other tag stay with the original, as they do for photos. Rotation needs no tag: the picture is
+ * turned upright as it's re-encoded. `all` (an agent's setting, off by default, as the Miller's keepVideoTags) keeps
+ * every tag the original has, as copies did before.
+ */
+export function tagArgs(info: Pick<MediaInfo, 'tags' | 'video' | 'audio'>, all = false): string[] {
+  if (all) return ['-map_metadata', '0', '-movflags', '+faststart+use_metadata_tags'];
+  const created = info.tags.creation_time;
+  return [
+    // -1 with no specifier copies nothing: the file's tags, each stream's and the chapters'. The few kept are named.
+    '-map_metadata', '-1',
+    ...(created && Number.isFinite(Date.parse(created)) ? ['-metadata', `creation_time=${created}`] : []),
+    ...(info.video?.language ? ['-metadata:s:v:0', `language=${info.video.language}`] : []),
+    ...info.audio.flatMap((a, i) => (a.language ? [`-metadata:s:a:${i}`, `language=${a.language}`] : [])),
+    '-movflags', '+faststart',
+  ];
+}
+
+/**
  * The full argument list for re-encoding one video. `format` is the container written: MP4 when left out (a Miller
  * project's MOV stays MOV). `cores` holds the encode to that many threads (video-encoders.ts, grindCores: a software
- * encode at the manor's gentle pace); null or left out, as many as it likes.
+ * encode at the manor's gentle pace); null or left out, as many as it likes. `tags` are tagArgs' options; left out, the
+ * copy carries none of the original's tags (before kit 2.137.2 it carried every one, its place included).
  */
 export function grindArgs(o: {
   input: string;
@@ -520,6 +542,7 @@ export function grindArgs(o: {
   cropToEven: boolean;
   format?: 'mp4' | 'mov';
   cores?: number | null;
+  tags?: string[];
 }): string[] {
   const a = videoArgs(o.c, o.preset, o.shape);
   const th = threadArgs(o.c, o.cores ?? null);
@@ -534,9 +557,9 @@ export function grindArgs(o: {
     ...a.video,
     ...th.video,
     ...o.audioArgs,
-    // Keep the original's timing (screen recordings are often variable frame rate) and its tags
-    // (creation time, camera make and place).
-    '-fps_mode', 'passthrough', '-map_metadata', '0', '-movflags', '+faststart+use_metadata_tags',
+    // Keep the original's timing (screen recordings are often variable frame rate).
+    '-fps_mode', 'passthrough',
+    ...(o.tags ?? tagArgs({ tags: {}, video: null, audio: [] })),
     '-f', o.format ?? 'mp4', o.output,
   ];
 }

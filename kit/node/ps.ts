@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -246,6 +246,26 @@ export function oneShot(script: string, timeoutMs: number): Promise<string> {
       });
     });
   return attempt(psStart()).finally(cleanup);
+}
+
+/**
+ * A short script run now, in its own powershell.exe, holding the caller until it ends (kit 2.137.2): only for an answer
+ * a caller that can't wait asks once, as folders.ts' knownFolders does. Started as oneShot starts it, its output UTF-8
+ * as powershell()'s. Throws when it fails or passes `timeoutMs` (stretched as psPaced stretches it).
+ */
+export function powershellSync(script: string, opts: { timeoutMs?: number } = {}): string {
+  const encoded = Buffer.from(PRELUDE + script, 'utf16le').toString('base64');
+  if (encoded.length > 30_000) throw new Error('A script this long goes through powershell(), not powershellSync');
+  const timeout = psPaced(opts.timeoutMs ?? 60_000);
+  const attempt = (start: { windowsHide: boolean }) =>
+    spawnSync('powershell.exe', [...PS_ARGS, '-EncodedCommand', encoded], { ...start, encoding: 'utf8', timeout, maxBuffer: 16 * 1024 * 1024 });
+  const start = psStart();
+  let r = attempt(start);
+  // The console it shared had gone between console.ts' look and the start: once more, hidden.
+  if (startFailed(r.status, start.windowsHide)) r = attempt({ windowsHide: true });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(`PowerShell exited ${r.status}: ${(r.stderr || r.stdout).trim().slice(0, 500)}`);
+  return r.stdout;
 }
 
 /**

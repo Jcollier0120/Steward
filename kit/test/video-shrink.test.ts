@@ -341,6 +341,20 @@ test('a copy that passes its checks is kept: moved to its final name, with the o
   assert.ok(!r.seen.args.includes('-threads'));
 });
 
+test("a copy keeps when the video was recorded and its tracks' languages, not its place; keepTags keeps every tag", async () => {
+  const place = '+48.8584+002.2945/';
+  const filmed = media({ tags: { creation_time: '2026-07-04T12:00:00.000000Z', location: place, 'com.apple.quicktime.make': 'Apple' }, video: { language: 'eng' } });
+  filmed.audio[0].language = 'fra';
+  const r = rig('tags', { input: filmed });
+  assert.equal((await shrinkVideo(r.file, r.job()))?.status, 'kept');
+  const command = r.seen.args.join(' ');
+  assert.ok(command.includes('-map_metadata -1 -metadata creation_time=2026-07-04T12:00:00.000000Z -metadata:s:v:0 language=eng -metadata:s:a:0 language=fra -movflags +faststart -f'), command);
+  assert.doesNotMatch(command, /48\.8584|Apple|use_metadata_tags/);
+  const all = rig('all-tags', { input: filmed });
+  await shrinkVideo(all.file, all.job({ keepTags: true }));
+  assert.ok(all.seen.args.join(' ').includes('-map_metadata 0 -movflags +faststart+use_metadata_tags -f'), 'an agent that keeps every tag');
+});
+
 test("the Miller's cores and a MOV container reach the command; times that can't be set don't undo a kept copy", async () => {
   const r = rig('cores', { failTimes: true });
   const out = await shrinkVideo(r.file, r.job({ encoder: enc('libx265'), cores: 2, format: 'mov', final: () => path.join(r.dir, 'original.mov') }));
