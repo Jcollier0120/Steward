@@ -18,6 +18,7 @@ const { runStage } = await import('../src/steward.ts');
 const { planRollout, rollout, rolloutFacts, rolloutGate, rolloutSettleFile, loadRolloutFailures, settleKit, settlingLine, urgentIn, urgentKit } = await import('../src/stages/rollout.ts');
 const { urgentKits } = await import('../src/kitfiles.ts');
 const { bumpOne } = await import('../src/stages/bump.ts');
+const { changesReadme } = await import('../src/entries.ts');
 const { loadClaims } = await import('../src/claims.ts');
 const { roundConditions } = await import('../src/alarms.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
@@ -135,23 +136,52 @@ test('a kit PR open for an older kit takes the new kit (the fold), instead of wa
   assert.equal((await rolloutFacts(ctx, e, '1.0.3')).fold, undefined);
 });
 
-test("a round's rollout folds the new kit onto the open kit PR: pushed onto its branch, the PR retitled and merged, none opened", async () => {
-  const dir = mkdtempSync(path.join(home, 'fold-round-'));
+/** A fake employee on kit 1.0.0 whose kit PR #30 for 1.0.1 is open (`open` once it's pushed), and gh standing in for its PR. */
+function foldRound(name: string) {
+  const dir = mkdtempSync(path.join(home, `${name}-`));
   const fk = fakeEmployee(dir, { kit: '1.0.0' });
-  const e = employee(fk.checkout, { fill: '' });
-  let open: any[] = [];
+  // A repository of its own: the claims it makes aren't the whole rounds' Fake's below.
+  const e = employee(fk.checkout, { fill: '', repo: `Jcollier0120/${name}` });
+  const pr = { open: [] as any[] };
   const r = runner((a) => {
     if (a[0] === 'release' && a[1] === 'list') return ok([]);
-    if (a[0] === 'pr' && a[1] === 'list') return ok(open);
+    if (a[0] === 'pr' && a[1] === 'list') return ok(pr.open);
     if (a[0] === 'pr' && a[1] === 'view') return ok({ state: 'OPEN', headRefName: 'steward/kit-1.0.1' });
     if (a[0] === 'pr' && a[1] === 'edit') return ok('');
     if (a[0] === 'pr' && a[1] === 'merge') return ok('');
   });
   const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
-  // Kit 1.0.1's PR, open and waiting.
+  const opened = (title: string) => {
+    sh(fk.checkout, 'push', '--quiet', 'origin', 'steward/kit-1.0.1');
+    pr.open = [{ number: 30, title, url: 'u30', body: '', headRefName: 'steward/kit-1.0.1', headRefOid: '', baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, files: [{ path: 'kit.json' }] }];
+  };
+  return { fk, e, r, ctx, opened };
+}
+
+test("a round's rollout folds the new kit onto the open kit PR on the build pipeline: its entry in changes/ written again, no version, pushed onto its branch, the PR retitled and merged", async () => {
+  const { fk, e, r, ctx, opened } = foldRound('fold-pipeline');
   assert.equal((await bumpOne(ctx, e, { kit: '1.0.1', changelog: null })).outcome, 'done');
-  sh(fk.checkout, 'push', '--quiet', 'origin', 'steward/kit-1.0.1');
-  open = [{ number: 30, title: "Fake 0.4.1: the Steward's kit 1.0.1", url: 'u30', body: '', headRefName: 'steward/kit-1.0.1', headRefOid: '', baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, files: [{ path: 'kit.json' }] }];
+  opened("Fake: the Steward's kit 1.0.1");
+  const prHead = sh(fk.origin, 'rev-parse', 'steward/kit-1.0.1');
+  const out = await rollout(ctx, [e], { kit: '1.0.2', ownKit: null, changelog: async () => null });
+  assert.deepEqual(out.results.map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [['done', `rollout: kit 1.0.2: changes/steward-kit-1-0-1.md on steward/kit-1.0.1 (…): kit 1.0.1 → 1.0.2, onto its open PR #30, checks passed; put kit 1.0.2 onto its open PR #30, now "Fake: the Steward's kit 1.0.2"; merged it`]]);
+  assert.equal(sh(fk.origin, 'rev-parse', 'steward/kit-1.0.1^'), prHead);
+  assert.deepEqual(sh(fk.origin, 'diff', '--name-only', 'main', 'steward/kit-1.0.1').split('\n').sort(), ['changes/README.md', 'changes/steward-kit-1-0-1.md', 'kit.json']);
+  const entry = sh(fk.origin, 'show', 'steward/kit-1.0.1:changes/steward-kit-1-0-1.md').replace(/\r\n/g, '\n');
+  assert.match(entry, /^\*\*It carries the Steward's kit 1\.0\.2: [\s\S]*- The Steward's kit 1\.0\.2, after 1\.0\.0: /);
+  assert.doesNotMatch(entry, /kit 1\.0\.1/, "the PR's old entry is gone");
+  assert.deepEqual(loadClaims().filter((c) => c.repo === e.repo), [], 'nothing claimed');
+  const edit = r.gh.find((a) => a[1] === 'edit' && a[2] === '30')!;
+  assert.equal(edit[edit.indexOf('--title') + 1], "Fake: the Steward's kit 1.0.2");
+  assert.match(edit[edit.indexOf('--body-file') + 1], /its changelog entry is `changes\/steward-kit-1-0-1\.md`[\s\S]*puts Fake on the build pipeline[\s\S]*Opened for kit 1\.0\.1; kit 1\.0\.2 came out while it was open/);
+});
+
+test("a round's rollout folds the new kit onto a kit PR opened the old way, before the switch to the build pipeline: pushed onto its branch at its version, the PR retitled and merged, none opened", async () => {
+  const { fk, e, r, ctx, opened } = foldRound('fold-round');
+  // Kit 1.0.1's PR, open and waiting: made as the Steward made them before the build pipeline (as it still does for one
+  // worked with plain git), its version claimed and set, and its entry in CHANGELOG.md.
+  assert.equal((await bumpOne({ ...ctx, host: () => 'git' as const }, e, { kit: '1.0.1', changelog: null })).outcome, 'done');
+  opened("Fake 0.4.1: the Steward's kit 1.0.1");
   const prHead = sh(fk.origin, 'rev-parse', 'steward/kit-1.0.1');
   const claims = loadClaims().map((c) => [c.version, c.branch]);
 
@@ -167,6 +197,7 @@ test("a round's rollout folds the new kit onto the open kit PR: pushed onto its 
   assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.2: [\s\S]*- The Steward's kit 1\.0\.2, after 1\.0\.0: /);
   assert.doesNotMatch(log, /kit 1\.0\.1/, "the PR's old entry is gone");
   assert.equal(sh(fk.origin, 'log', '-1', '--format=%s', 'steward/kit-1.0.1'), "Fake 0.4.1: the Steward's kit 1.0.2");
+  assert.equal(sh(fk.origin, 'ls-tree', '--name-only', 'steward/kit-1.0.1', 'changes/'), '', 'the way its PR took: nothing in changes/');
   assert.ok(!r.gh.some((a) => a[1] === 'create'), 'no second kit PR');
   // The PR's title and description become the new kit's.
   const edit = r.gh.find((a) => a[1] === 'edit' && a[2] === '30')!;
@@ -284,6 +315,7 @@ const run = async (cmd: string, args: string[], opts?: any) => {
     if (createFails) return { code: 1, out: '', err: createFails };
     const head = args[args.indexOf('--head') + 1];
     const n = ++prNumber;
+    heads.set(String(n), head);
     prs.push({ number: n, title: args[args.indexOf('--title') + 1], url: `https://github.com/Jcollier0120/Fake/pull/${n}`, body: '', headRefName: head, headRefOid: sh(f.origin, 'rev-parse', head), baseRefName: 'main', isCrossRepository: false, isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', additions: 8, deletions: 8, author: { __typename: 'User', login: 'Jcollier0120' }, labels: { nodes: [] }, files: { nodes: [] }, commits: { nodes: [] } });
     return ok(`https://github.com/Jcollier0120/Fake/pull/${n}\n`);
   }
@@ -301,7 +333,12 @@ const round = (full = false) => {
   return runStage('round', full ? { full: true } : {}, { run, ownKit: '9.9.9' });
 };
 const checksRun = () => (existsSync(checks) ? readFileSync(checks, 'utf8').length : 0);
-const created = () => gh.filter((a) => a[0] === 'pr' && a[1] === 'create');
+/** The PRs opened (`gh pr create`) since the round began, of branches starting `prefix`: steward/kit-, steward/stamp-, steward/pipeline-. */
+const created = (prefix = '') => gh.filter((a) => a[0] === 'pr' && a[1] === 'create' && a[a.indexOf('--head') + 1].startsWith(prefix));
+/** Each PR's branch, by its number, as `gh pr create` opened it. */
+const heads = new Map<string, string>();
+/** The merges (`gh pr merge`) since the round began, of PRs whose branch starts `prefix`. */
+const merges = (prefix = '') => gh.filter((a) => a[0] === 'pr' && a[1] === 'merge' && (heads.get(a[2]) ?? '').startsWith(prefix));
 const openAlarms = () => JSON.parse(readFileSync(path.join(home, 'alarms.json'), 'utf8')).open.map((a: any) => a.id);
 /** A commit pushed straight to origin's main, as a person's would be. */
 function commit(file: string) {
@@ -312,22 +349,44 @@ function commit(file: string) {
   sh(f.checkout, 'push', '--quiet', 'origin', 'main');
 }
 
-test('a round rolls a new kit out by itself: bumped, its PR opened and merged by the Steward, and released in the same round', async () => {
+test('an employee on the newest kit already, not on the build pipeline, is put on it: changes/README.md alone, in a PR the Steward opens and merges; nothing released for it', async () => {
   const first = await round();
-  assert.equal(first.error, undefined);
-  assert.deepEqual(created(), [], 'on the newest kit already');
+  assert.equal(first.error, undefined, first.log.join('\n'));
+  assert.deepEqual(created('steward/kit-'), [], 'on the newest kit already');
+  const r = first.results.find((x) => x.message.startsWith('rollout: '))!;
+  assert.equal(r.outcome, 'done', `${r.message}\n${first.log.join('\n')}`);
+  assert.match(r.message, /^rollout: put it on the build pipeline \(changes\/README\.md, https:\/\/github\.com\/Jcollier0120\/Fake\/pull\/7\), and merged it$/);
+  const [create] = created('steward/pipeline-');
+  assert.equal(create[create.indexOf('--title') + 1], 'Fake rides the build pipeline: changes/README.md');
+  assert.equal(merges('steward/pipeline-').length, 1);
+  assert.deepEqual(sh(f.origin, 'diff', '--name-only', 'main^', 'main').split('\n'), ['changes/README.md'], 'that file alone');
+  assert.equal(sh(f.origin, 'show', 'main:changes/README.md'), changesReadme('Fake').trimEnd());
+  assert.deepEqual(released(), ['0.4.0'], 'v0.4.0 is released already: nothing new to release');
+  // Once is enough.
+  const again = await round();
+  assert.deepEqual(created(), []);
+  assert.deepEqual(again.results.filter((x) => x.outcome !== 'skipped').map((x) => x.message), []);
+});
 
+test('a round rolls a new kit out by itself: bumped with its entry in changes/, its PR opened and merged by the Steward, stamped and released in the same round', async () => {
   kits = ['1.0.1', '1.0.0'];
   const out = await round();
   assert.equal(out.error, undefined, out.log.join('\n'));
   const r = out.results.find((x) => x.message.startsWith('rollout: '))!;
   assert.equal(r.outcome, 'done', `${r.message}\n${out.log.join('\n')}`);
-  assert.match(r.message, /^rollout: kit 1\.0\.1: 0\.4\.1 on steward\/kit-1\.0\.1 \(.{7}\): kit 1\.0\.0 → 1\.0\.1, checks passed; opened "Fake 0\.4\.1: the Steward's kit 1\.0\.1"; merged it$/);
-  assert.equal(created().length, 1);
+  assert.match(r.message, /^rollout: kit 1\.0\.1: changes\/steward-kit-1-0-1\.md on steward\/kit-1\.0\.1 \(.{7}\): kit 1\.0\.0 → 1\.0\.1, checks passed; opened "Fake: the Steward's kit 1\.0\.1"; merged it$/);
+  assert.equal(created('steward/kit-').length, 1);
   // Merged by the Steward at the commit it pushed, its branch deleted: no one else merges the Steward's PRs.
-  const merge = gh.filter((a) => a[0] === 'pr' && a[1] === 'merge');
-  assert.deepEqual(merge.map((a) => [a[2], a.includes('--delete-branch'), a[a.indexOf('--match-head-commit') + 1]]), [['7', true, sh(f.origin, 'rev-parse', 'main')]]);
+  const [merge] = merges('steward/kit-');
+  assert.deepEqual([merge.includes('--delete-branch'), merge[merge.indexOf('--match-head-commit') + 1]], [true, sh(f.origin, 'rev-parse', 'main^')]);
+  // Then stamped, before the release: its version, its entry moved into CHANGELOG.md, the file deleted.
+  assert.equal(created('steward/stamp-').length, 1);
+  assert.equal(merges('steward/stamp-').length, 1);
+  assert.deepEqual(out.results.filter((x) => x.message.startsWith('stamp: ')).map((x) => [x.outcome, x.version]), [['done', '0.4.1']]);
   assert.equal(sh(f.origin, 'show', 'main:kit.json'), '{\n  "kit": "1.0.1",\n  "parts": ["node"]\n}');
+  assert.match(sh(f.origin, 'show', 'main:src/app.ts'), /version: '0\.4\.1'/);
+  assert.match(sh(f.origin, 'show', 'main:CHANGELOG.md').replace(/\r\n/g, '\n'), /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.1: /);
+  assert.deepEqual(sh(f.origin, 'ls-tree', '--name-only', 'main', 'changes/').split('\n'), ['changes/README.md']);
   // And released in the same round, main's head tested first (no vouch covers it).
   assert.deepEqual(out.results.filter((x) => x.message.startsWith('release: ')).map((x) => x.message.replace(/\(.{7}\)/, '(…)')), ['release: released v0.4.1 from origin/main (…), with kit 1.0.1']);
   assert.deepEqual(released(), ['0.4.0', '0.4.1']);
@@ -368,7 +427,7 @@ test("a bump whose checks fail is an alarm, and isn't tried again for that kit u
   assert.equal(bumped.results[0].outcome, 'done', bumped.results[0].message);
   assert.deepEqual(loadRolloutFailures(), {});
   const pushed = await round();
-  assert.match(pushed.results.find((x) => x.message.startsWith('rollout: '))!.message, /opened "Fake 0\.4\.2: the Steward's kit 1\.0\.2"; merged it$/);
+  assert.match(pushed.results.find((x) => x.message.startsWith('rollout: '))!.message, /opened "Fake: the Steward's kit 1\.0\.2"; merged it$/);
   assert.deepEqual(openAlarms(), [], 'the alarm cleared');
   assert.deepEqual(released().at(-1), '0.4.2', 'released in the same round');
 });
@@ -399,8 +458,8 @@ test("the Steward carrying an older kit, with the new kit's tag in its clone: th
     assert.doesNotMatch(log, /waits for this Steward to carry it/);
     assert.match(log, /rollout: this Steward carries kit 1\.0\.4, so each bump hands out the tools\/kit\.ts released with kit 1\.0\.5/);
     assert.equal(readFileSync(path.join(home, 'work', '_kit-tool-1.0.5.ts'), 'utf8'), '// tools/kit.ts as released with kit 1.0.5\n');
-    assert.equal(created().length, 1, log);
-    assert.match(out.results.find((x) => x.message.startsWith('rollout: '))?.message ?? '', /opened "Fake 0\.4\.3: the Steward's kit 1\.0\.5"; merged it$/, log);
+    assert.equal(created('steward/kit-').length, 1, log);
+    assert.match(out.results.find((x) => x.message.startsWith('rollout: '))?.message ?? '', /opened "Fake: the Steward's kit 1\.0\.5"; merged it$/, log);
     assert.deepEqual(released().at(-1), '0.4.3', 'merged and released in the same round');
   } finally {
     writeFileSync(file, before);
@@ -426,8 +485,8 @@ test('a bump whose PR the network kept from opening is a wait, with no failure, 
   const next = await round();
   const opened = next.results.find((x) => x.message.startsWith('rollout: '))!;
   assert.equal(opened.outcome, 'done', `${opened.message}\n${next.log.join('\n')}`);
-  assert.match(opened.message, /^rollout: kit 1\.0\.6: steward\/kit-1\.0\.6 \(.{7}\) was on origin with no PR: its PR is opened now; opened "Fake 0\.4\.4: the Steward's kit 1\.0\.6"; merged it$/);
-  assert.equal(created().length, 1);
+  assert.match(opened.message, /^rollout: kit 1\.0\.6: steward\/kit-1\.0\.6 \(.{7}\) was on origin with no PR: its PR is opened now; opened "Fake: the Steward's kit 1\.0\.6"; merged it$/);
+  assert.equal(created('steward/kit-').length, 1);
   assert.equal(sh(f.origin, 'show', 'main:kit.json'), '{\n  "kit": "1.0.6",\n  "parts": ["node"]\n}');
   assert.deepEqual(loadRolloutFailures(), {});
   assert.deepEqual(openAlarms(), []);

@@ -767,18 +767,27 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // The newest kit, rolled out to each employee behind it (stages/rollout.ts): bumped, pushed and merged by the
           // Steward itself. On the Steward's page the bumps run beside the rounds (`beside`): this round goes on at once,
           // and a round comes as soon as they end (agent.ts).
-          const rollOut = async (who: Employee[]): Promise<{ beside: boolean }> => {
+          const rollOut = async (who: Employee[]): Promise<{ beside: boolean; merged: Employee[] }> => {
             const newest = latestKit(ctx.kit);
             try {
               const rolled = await rollout(ctx, who, { kit: newest, ownKit: own, changelog: (k) => changelogFor(ctx, k) });
               out.results.push(...rolled.results);
-              mergedHere.push(...rolled.results.filter((r) => r.outcome === 'done' && /\bmerged\b/.test(r.message) && r.url).map((r) => `${r.id} #${r.url!.split('/').pop()}`));
+              const merged = rolled.results.filter((r) => r.outcome === 'done' && /\bmerged\b/.test(r.message) && r.url);
+              mergedHere.push(...merged.map((r) => `${r.id} #${r.url!.split('/').pop()}`));
               if (rolled.plan.waitsForSteward && newest && own) rolloutWaits = { kit: newest, own };
-              return { beside: !!rolled.beside };
+              return { beside: !!rolled.beside, merged: who.filter((e) => merged.some((r) => r.id === e.id)) };
             } catch (err) {
               log(`rollout: ${(err as Error).message}`);
-              return { beside: false };
+              return { beside: false, merged: [] };
             }
+          };
+          // A kit PR the rollout merged inside this round brings its entry in changes/ (stages/bump.ts pipelineWay): stamped
+          // now, so the release below carries its version. Beside the rounds, the round that comes once they end stamps it.
+          const stampRolled = async (who: Employee[]) => {
+            if (!who.length) return;
+            const s = await timed(phaseOf(ctx), 'merges', null, () => stampAll(ctx, free(who)), (r) => r.results.length > 0);
+            out.results.push(...s.results);
+            mergedHere.push(...s.merged);
           };
           if (mode.kind === 'build') {
             // A build: the newest kit rolled out first, so it goes into this build; then, once no kit is being tried or
@@ -792,7 +801,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             const urgentKitNow = selfUrgent ? await urgentKit(ctx, latestKit(ctx.kit), (k) => changelogFor(ctx, k)).catch(() => null) : null;
             const step = kitStep({ rides: kitRides(ctx.settings.buildPipeline, pipeline!, mode.run, { urgentKit: !!urgentKitNow }), waits: kitWaits, closing: mode.closing, selfUrgent });
             if (urgentKitNow) log(`kit ${urgentKitNow} is an urgent fix: kit ${latestKit(ctx.kit)} goes out in this build to every employee still behind it, and each is built at once after it`);
-            const rolled: { beside: boolean; waits?: string } =
+            const rolled: { beside: boolean; waits?: string; merged?: Employee[] } =
               step === 'next'
                 ? (log(mode.run.by === 'urgent' ? 'the newest kit waits for the next build: this one is for an urgent fix' : mode.run.by === 'signing' ? 'the newest kit waits for the next build: this one is for the releases that waited to sign' : "the newest kit waits for the day's first build (Settings: Build pipeline)"), { beside: false })
                 : step === 'wait'
@@ -802,6 +811,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             // The urgent kit's employees, merged now, are each built at once by the next round: it comes sooner.
             if (buildCloses && urgentKitNow) out.soon = true;
             if (buildCloses) {
+              await stampRolled(rolled.merged ?? []);
               // The build's one release is every repository of the build's: their turns taken.
               const all = await takeTurnsFor(ctx, o, picked.employees, null, true);
               await timed(phaseOf(ctx), 'releases', null, () => releaseNow(free(all.acting)));
@@ -811,7 +821,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               log(`the build releases once it has settled: ${rolled.waits ?? "the kit's rollout goes on beside the rounds"}`);
             }
           } else {
-            await rollOut(employees);
+            await stampRolled((await rollOut(employees)).merged);
             await releaseNow(free(employees));
           }
           lap('rollout and releases');

@@ -352,6 +352,14 @@ export const bumpDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), 
 export const releaseDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), `${e.id}-release`);
 /** The branch a bump to a kit version is prepared on. */
 export const bumpBranch = (kit: string) => `steward/kit-${kit}`;
+/** The branches (steward/pipeline-<main's head>) that put an employee on the build pipeline when no kit bump does (stages/onpipeline.ts). */
+export const PIPELINE_BRANCH = 'steward/pipeline-';
+export const pipelineBranch = (head: string) => `${PIPELINE_BRANCH}${head.slice(0, 7)}`;
+/**
+ * Whether an employee can ride the build pipeline (entries.ts, stages/stamp.ts): its host has pull requests for the
+ * build's stamp to go through. One worked with plain git keeps setting its version in each change.
+ */
+export const takesPipeline = (ctx: Pick<Ctx, 'host'>, e: Employee) => hostIs(ctx, e) !== 'git';
 /**
  * The Steward's kit PR still open for an older kit, which a newer kit goes onto instead of a PR of its own (the rollout's
  * fold): its number, its branch (steward/kit-<the kit it was opened for>) and the kit its branch pins now.

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { FOLDER, landsAt, pinOnly, resolveSpecifier, specifiersOf, versionOnly } from '../affected.ts';
+import { CHANGES_README } from '../entries.ts';
 import { commitOf, gitMaybe, showFile } from '../git.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import { changelogBetween } from '../kitfiles.ts';
@@ -39,8 +40,11 @@ export type KitOnly =
   | { kitOnly: true; release: true; why: string; daily: boolean }
   | { kitOnly: true; release: false; why: string };
 
-/** The files a kit bump changes in an agent, besides the version files: what bump.ts writes. */
-const BUMPED = new Set(['kit.json', 'CHANGELOG.md', 'tools/kit.ts']);
+/**
+ * The files a kit bump changes in an agent, besides the version files: what bump.ts writes. On the build pipeline its
+ * changes/ entry is gone once stamped, and changes/README.md comes with the bump that puts the agent on it.
+ */
+const BUMPED = new Set(['kit.json', 'CHANGELOG.md', 'tools/kit.ts', CHANGES_README]);
 
 /**
  * Whether an agent's change since its last release is a kit bump alone: kit.json changes in its pin only, each version

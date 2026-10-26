@@ -22,11 +22,13 @@ const { loadPipeline } = await import('../src/pipeline.ts');
 const { kitTrialsFile, mainKeyOf } = await import('../src/stages/trial.ts');
 const { fakeEmployee, ok, sh } = await import('./helpers.ts');
 const { run: realRun } = await import('../src/run.ts');
+const { changesReadme } = await import('../src/entries.ts');
 
 // The Steward's package.json names the scripts a person runs (npm stands in for each): its whole suite runs before a kit's release.
 const stewardPackage = `{\n  "name": "fake",\n  "version": "0.8.13",\n  "private": true,\n  "type": "module",\n  "scripts": {\n    "kit": "node tools/kit.ts --from kit",\n    "typecheck": "tsc --noEmit",\n    "test": "node --test",\n    "release": "node tools/release.ts"\n  }\n}\n`;
 const steward = fakeEmployee(path.join(home, 'steward'), { version: '0.8.13', kit: null, files: { 'kit/VERSION': '1.0.1\n', 'package.json': stewardPackage } });
-const other = fakeEmployee(path.join(home, 'other'), { version: '0.4.0', kit: '1.0.1' });
+// On the build pipeline already (its changes/README.md): a kit PR writes its entry in changes/, and the build stamps it.
+const other = fakeEmployee(path.join(home, 'other'), { version: '0.4.0', kit: '1.0.1', files: { 'changes/README.md': changesReadme('Other') } });
 const STEWARD = 'Jcollier0120/Steward';
 const OTHER = 'Jcollier0120/Other';
 const repos: Record<string, { origin: string; checkout: string }> = { [STEWARD]: steward, [OTHER]: other };
@@ -200,20 +202,21 @@ test("in a build, main's new kit is tried on the agents, released, and rolled ou
   const out = await buildNow();
   const log = out.log.join('\n');
   assert.equal(out.error, undefined, log);
-  // Tried on Other at main and the Steward's whole suite run there first; released; then Other bumped to it, and its kit
-  // PR merged by the Steward itself, at once.
-  assert.deepEqual(events, ['Steward tests begin', 'Steward tests end', 'kit 1.0.2 released', 'Other #101 merged']);
+  // Tried on Other at main and the Steward's whole suite run there first; released; then Other bumped to it, its kit
+  // PR merged by the Steward itself, at once, and its entry stamped (another PR of the Steward's) before the release.
+  assert.deepEqual(events, ['Steward tests begin', 'Steward tests end', 'kit 1.0.2 released', 'Other #101 merged', 'Other #102 merged']);
   const trial = JSON.parse(readFileSync(kitTrialsFile(), 'utf8'))[mainKeyOf(at)];
   assert.deepEqual([trial?.kit, trial?.failed, trial?.pending], ['1.0.2', [], undefined], JSON.stringify(trial));
   assert.match(log, /kit 1\.0\.2 released: it is rolled out now/);
   const did = done(out);
-  assert.equal(did.length, 3, did.join('\n'));
+  assert.equal(did.length, 4, did.join('\n'));
   assert.match(did[0], /^self: released kit-v1\.0\.2 from origin\/main \(…\)$/);
-  assert.match(did[1], /^rollout: kit 1\.0\.2: 0\.4\.2 on steward\/kit-1\.0\.2 \(…\): kit 1\.0\.1 → 1\.0\.2.*; opened "Other 0\.4\.2: the Steward's kit 1\.0\.2"; merged it$/);
-  assert.equal(did[2], 'release: released v0.4.2 from origin/main (…), with kit 1.0.2');
+  assert.match(did[1], /^rollout: kit 1\.0\.2: changes\/steward-kit-1-0-2\.md on steward\/kit-1\.0\.2 \(…\): kit 1\.0\.1 → 1\.0\.2.*; opened "Other: the Steward's kit 1\.0\.2"; merged it$/);
+  assert.equal(did[2], 'stamp: stamped v0.4.2, and merged it');
+  assert.equal(did[3], 'release: released v0.4.2 from origin/main (…), with kit 1.0.2');
   assert.equal(out.build?.closed, true, log);
   const build = loadPipeline().builds.at(-1);
-  assert.deepEqual(build?.merged, ['other #101'], 'its own kit PR, merged by the Steward');
+  assert.deepEqual(build?.merged, ['other #101', 'other #102'], 'its own kit PR and its stamp, merged by the Steward');
   // A kit's release isn't a version of a repository's (steward.ts's releasedSomething): the build's record has the agent's.
   assert.deepEqual(build?.released, ['other v0.4.2']);
   assert.deepEqual(released(), ['0.4.0', '0.4.1', '0.4.2']);

@@ -2,7 +2,7 @@
 
 > **This page's home is the Steward's kit**, its `spec` part: `kit/spec/RELEASE-NOTES.md` in the Steward's repository, and `src/kit/spec/RELEASE-NOTES.md` in every agent that takes the part. Since kit 2.19.0.
 
-Every release says what it brings. A release's notes come from its repository's **`CHANGELOG.md`**, at the repository's root, and are what Manor's **What's new** link opens. Each version has an entry there, newest first. Whoever raises the version writes it, in the same change: a person, a Claude Code session, the Wright's worker, or the Steward's kit bump.
+Every release says what it brings. A release's notes come from its repository's **`CHANGELOG.md`**, at the repository's root, and are what Manor's **What's new** link opens. Each version has an entry there, newest first. Whoever does the work writes it, in the same change: a person, a Claude Code session, the Wright's worker, or the Steward's kit bump. On the build pipeline (**Entries in changes/** below), as every agent is from Steward 0.36.248, the work writes it in `changes/`, and the Steward's build moves it into `CHANGELOG.md` under the version it gives the release.
 
 ## An entry
 
@@ -54,7 +54,9 @@ The kit's `release.ts` (and Manor's and Reeve's own, with `notes.ts`) publishes 
 
 ## The kit bump
 
-The Steward's kit bump (`steward bump`, a round's rollout) raises an agent's version, so it writes that version's entry, at the top of the agent's `CHANGELOG.md` (starting one when there's none): the kit it now carries, a **What changed** line for each kit version since the one it pinned (that entry's headline, its opening bold sentence), and a **Before you update** made of those kit entries' own **Before you update** sections, or "Nothing: it updates itself as usual." when none has one.
+The Steward's kit bump (`steward bump`, a round's rollout) writes the agent's entry for the kit it now carries: a **What changed** line for each kit version since the one it pinned (that entry's headline, its opening bold sentence), and a **Before you update** made of those kit entries' own **Before you update** sections, or "Nothing: it updates itself as usual." when none has one.
+
+It writes it as any work on the build pipeline does: in `changes/steward-kit-<kit, dots as dashes>.md`, setting no version and leaving `CHANGELOG.md` alone, so an agent's own pull request open beside it never meets it in the same lines. One without `changes/README.md` gets that file in the same bump, which puts it on the pipeline. Only an agent worked with plain git, where the Steward opens no pull requests and so has nothing to stamp through, is bumped the old way: its version raised, and the entry at the top of its `CHANGELOG.md` under that version.
 
 So a kit entry in `kit/CHANGELOG.md` that needs something of the people updating says so under its own `### Before you update`: it reaches every agent's notes.
 
@@ -68,14 +70,17 @@ A kit entry marked urgent (its bold line starts with `Urgent fix:`) makes every 
 
 ## Merging
 
-Two changes side by side each add an entry at the top. The Steward's catch-up keeps both, the newer under the version it ends up with (`mergeChangelogs`), and renames a PR's top entry when it gives the PR another version.
+On the build pipeline, work side by side never meets: each piece writes a file of its own in `changes/`. Off it, two changes side by side each add an entry at the top, and set a version. The Steward's catch-up keeps both entries, the newer under the version it ends up with (`mergeChangelogs`), and renames a PR's top entry when it gives the PR another version.
 
 ## Entries in changes/
 
-A repository with `changes/README.md` on its branch writes its entries as files of their own, so two pieces of work side by side never touch the same lines:
+A repository with `changes/README.md` on its branch rides the **build pipeline**: its work writes its entries as files of their own, and the Steward's build sets the version, so two pieces of work side by side never touch the same lines. Every agent the Steward rolls its kit out to is on it from the first build after Steward 0.36.248 is installed: the rollout adds `changes/README.md` on its own, in a pull request the Steward opens and merges, to one on the newest kit already, and the kit bump adds it to one behind (**The kit bump** above). Manor has been on it since 2026-10-09.
 
-1. Claim a version from the Steward (`claim-version`): it answers with the file to write, `changes/<version>.md`.
-2. Write the entry there, as above, with or without its `## <version>` heading. Leave the version files (`package.json`, `package-lock.json`, `src/app.ts`) and `CHANGELOG.md` as they are.
-3. Just before it merges the pull request, the Steward stamps it on the pull request's own branch: it merges the branch in, sets the version in the version files, moves the entry into `CHANGELOG.md` under `## <version>`, and deletes the file. A version taken meanwhile is replaced by the next free one (a minor step stays a minor step), and the pull request's title follows. What passed at the pull request's head (its vouch, or its checks passing on the Steward's PC) holds at the stamped head, since only versions and entries changed.
+1. Ask the Steward (`claim-version <repo> --branch <your branch>`): it claims nothing, says the repository rides the build pipeline, and names the file to write, `changes/<your branch, slashes as dashes>.md` (`claude/some-work` writes `changes/claude-some-work.md`).
+2. Write the entry there, as above, without its `## ` heading. A first line `minor: true` asks for a minor step. Leave the version files (`package.json`, `package-lock.json`, `src/app.ts`, or a .NET agent's project file) and `CHANGELOG.md` as they are.
+3. Merge the pull request once it's vouched for, as any other.
+4. At its next build the Steward stamps main: in a pull request of its own (`steward/stamp-<commit>`), which it opens and merges, it sets the release's version in the version files, moves every entry waiting in `changes/` into one `CHANGELOG.md` entry under that version (`Brings 3 changes: …`, or `Urgent fix: brings 3 changes: …` when one of them is urgent), and deletes their files. The version is the next free one above every version released or claimed; when main's own version isn't released yet, the entries join its entry instead. What covered main's head (its vouch) covers the stamp, since only versions and entries changed. Then it releases.
 
-An entry that says nothing, or whose heading names another version, waits for its author. In the Steward's own repository the kit has the same, in `kit/changes/<kit version>.md`. A repository without `changes/README.md` keeps the way above, and the catch-up merges its entries as before.
+The switch is gentle. A pull request opened before it, which set its version and wrote its `CHANGELOG.md` entry the old way, still merges cleanly, since the kit bump and the entries in `changes/` touch none of its lines; while it is next in its repository's version line, the stamp waits for it, and its version is the one the stamp gives the entries merged beside it. One stuck there for an hour is passed over: the stamp goes ahead, and the Steward gives it the next free version.
+
+An entry that says nothing waits for its author. In the Steward's own repository the kit has the same, in `kit/changes/`. A repository without `changes/README.md` keeps the way above, and the catch-up merges its entries as before.

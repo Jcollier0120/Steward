@@ -14,7 +14,8 @@ import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { errorLines, failedTests, runLine, tail, type Runner } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, readVersion, setVersion } from '../versions.ts';
-import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkFailure, networkNote, NOT_ON_KIT, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkFailure, networkNote, NOT_ON_KIT, result, freshWorktree, takesPipeline, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { CHANGES_DIR, CHANGES_README, changesReadme, fragmentFor } from '../entries.ts';
 import { installLines } from '../installscripts.ts';
 import { guardPackages, linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
@@ -45,6 +46,13 @@ import { checksTask, type CheckTask } from './seneschal.ts';
  * The new version's entry goes at the top of its CHANGELOG.md (one is started when it has none), so its release's notes
  * say what it brings (the kit's spec/RELEASE-NOTES.md): each kit version's headline since the one it pinned, and those
  * kit entries' own "Before you update", else that updating needs nothing.
+ *
+ * On the build pipeline (entries.ts, Steward 0.36.248), as every agent is once its kit bump has put it there
+ * (pipelineWay): no version is claimed or set, and that entry goes into changes/steward-kit-<kit>.md instead, for the
+ * build's stamp to give the next release's version (stages/stamp.ts). Its PR then touches nothing another piece of work
+ * does: an agent's own PR open beside it, which set its version the old way, merges as cleanly after it as before it.
+ * Through 0.36.247 each kit PR took a version of its own, and met the PRs beside it in the version lines: on
+ * 2026-10-26 Reeve's kit PR, Reeve#257 at 0.18.90, conflicted once Reeve#254 had merged 0.18.90 first, and held its kit back.
  */
 
 export interface BumpOptions {
@@ -92,6 +100,14 @@ export const trialBranch = (kit: string) => `steward/trial-kit-${kit}`;
  * builds (stages/urgent.ts) and let out to customers at once (release.ts urgentNote).
  */
 export function kitBumpEntry(o: { version: string; from: string; kit: string; changelog: string | null }): string {
+  return `## ${o.version}\n\n${kitBumpBody(o)}`;
+}
+
+/**
+ * kitBumpEntry without its `## ` heading: a kit bump's entry on the build pipeline, changes/<its branch>.md (entries.ts),
+ * which the build's stamp gives the next release's version (stamp.ts).
+ */
+export function kitBumpBody(o: { from: string; kit: string; changelog: string | null }): string {
   const back = compareVersions(o.kit, o.from) < 0;
   const sections = !back && o.changelog ? changelogBetween(o.changelog, o.from, o.kit).split(/^(?=## )/m).filter((s) => s.startsWith('## ')) : [];
   const changed: string[] = [];
@@ -113,8 +129,6 @@ export function kitBumpEntry(o: { version: string; from: string; kit: string; ch
   // The urgent kits it brings, named when the kit it carries isn't the only one ("kit 2.4.1", "kits 2.4.1 and 2.4.2").
   const named = urgent.length === 1 && urgent[0] === o.kit ? '' : ` (kit${urgent.length > 1 ? 's' : ''} ${urgent.length > 1 ? `${urgent.slice(0, -1).join(', ')} and ${urgent.at(-1)}` : urgent[0]})`;
   return [
-    `## ${o.version}`,
-    '',
     urgent.length
       ? `**Urgent fix: it carries the Steward's kit ${o.kit}, with ${urgent.length > 1 ? 'urgent fixes' : 'an urgent fix'} to the parts every agent of the manor shares${named}.**`
       : `**It carries the Steward's kit ${o.kit}${back ? ', a step back' : ''}: the parts every agent of the manor shares.**`,
@@ -635,6 +649,21 @@ async function copiedIn(ctx: Ctx, dir: string, o: { from: string; kit: string; k
   return found.fixes ? { seen: found.seen, fixes: found.fixes, files: applyFixes(dir, found.fixes) } : { seen: found.seen };
 }
 
+/**
+ * How a bump on `branch` writes its entry. On the build pipeline (entries.ts): `entry`, its changes/<branch>.md, which the
+ * build's stamp gives the next release's version, and `readme` when this bump puts the employee on it, adding
+ * changes/README.md. Null: the old way, its version raised and CHANGELOG.md's entry written. An employee whose branch
+ * has changes/README.md is on it; one that hasn't is put on it by its next bump, when it can ride it (takesPipeline), so
+ * the kit's rollout brings every agent onto it (Steward 0.36.248). A fold keeps the way its PR took: on the pipeline when
+ * the PR's branch has its entry in changes/, else its version kept and its entry written again, as before.
+ */
+export function pipelineWay(ctx: Pick<Ctx, 'host'>, e: Employee, dir: string, branch: string, fold: boolean): { entry: string; readme: boolean } | null {
+  const entry = fragmentFor(branch);
+  if (fold) return existsSync(path.join(dir, entry)) ? { entry, readme: false } : null;
+  if (existsSync(path.join(dir, CHANGES_README))) return { entry, readme: false };
+  return takesPipeline(ctx, e) ? { entry, readme: true } : null;
+}
+
 /** What a bump's refusal says when its branch is on origin with a PR (or a commit that isn't the bump's): the words work.ts reads. */
 export const ON_ORIGIN = 'is already on origin: merge or close its PR first (a bump is never force-pushed)';
 
@@ -670,14 +699,16 @@ async function unopenedBump(ctx: Ctx, e: Employee, o: { repo: string; branch: st
   if (parents.length !== 2 || parents[1] !== baseCommit) return null;
   const local = await commitOf(run, repo, `refs/heads/${branch}`);
   if (local !== head) {
-    const allowed = new Set([...e.versionFiles, 'kit.json', CHANGELOG, TOOL].map((f) => f.replace(/\\/g, '/')));
+    const allowed = new Set([...e.versionFiles, 'kit.json', CHANGELOG, TOOL, CHANGES_README, fragmentFor(branch)].map((f) => f.replace(/\\/g, '/')));
     const changed = (await git(run, repo, 'diff', '--name-only', baseCommit, head)).split('\n').filter(Boolean);
     if (readPin(await showFile(run, repo, head, 'kit.json'))?.kit !== o.kit || changed.some((f) => !allowed.has(f))) return null;
     // Put back here as origin has it, for the push stage: a bump made here before is the worktree and branch it replaces.
     for (const line of await removeWorktree(run, repo, bumpDirOf(ctx.settings, e), branch)) say(line);
     await git(run, repo, 'branch', '--no-track', branch, head);
   }
-  const version = readVersion(e.versionFiles[0], (await showFile(run, repo, head, e.versionFiles[0])) ?? '') ?? undefined;
+  // On the build pipeline (pipelineWay) its version is the stamp's, not its own: none is said.
+  const [entry, versionText] = await Promise.all([showFile(run, repo, head, fragmentFor(branch)), showFile(run, repo, head, e.versionFiles[0])]);
+  const version = entry === null ? (readVersion(e.versionFiles[0], versionText ?? '') ?? undefined) : undefined;
   say(`${branch} is on origin at ${head.slice(0, 7)} with no PR, and is the Steward's own bump: its PR is opened as the push would have`);
   return result(e, 'done', `${branch} (${head.slice(0, 7)}) was on origin with no PR: its PR is opened now`, { commit: head.slice(0, 7), ...(version ? { version } : {}) });
 }
@@ -740,29 +771,42 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const texts = e.versionFiles.map((f) => [f, existsSync(path.join(dir, f)) ? readFileSync(path.join(dir, f), 'utf8') : null] as [string, string | null]);
   const agreed = agreedVersion(texts);
   if ('error' in agreed) return result(e, 'failed', agreed.error, { base: baseCommit });
-  // A trial's branch is never pushed, so it claims nothing. A version that can't be claimed (GitHub out of reach) is no
-  // bump: the next patch could be another PR's, and the rounds try again. A fold keeps its PR's version, claimed when
-  // that PR was bumped: one PR, one version.
-  let next = fold ? agreed.version : bumpPatch(agreed.version);
-  if (!o.trial && !fold) {
-    try {
-      next = (await claimVersion(ctx, e, { branch, by: 'steward', for: `the Steward's kit ${o.kit}` })).claim.version;
-    } catch (err) {
-      return result(e, 'failed', `couldn't claim a version for the bump: ${(err as Error).message}`);
+  const way = pipelineWay(ctx, e, dir, fold ? fold.head : bumpBranch(o.kit), !!fold);
+  let next = agreed.version;
+  if (way) {
+    // On the build pipeline: its entry in changes/, which the build stamps with the next release's version, the version
+    // files and CHANGELOG.md left as they are, so this PR meets no other work's lines. Nothing is claimed.
+    mkdirSync(path.join(dir, CHANGES_DIR), { recursive: true });
+    if (way.readme) writeFileSync(path.join(dir, CHANGES_README), changesReadme(e.name));
+    writeFileSync(path.join(dir, way.entry), `${kitBumpBody({ from, kit: o.kit, changelog: o.changelog ?? null })}\n`);
+    say(`kit.json: ${pin.kit} → ${o.kit}; its entry in ${way.entry}${fold ? `, for every kit since ${from}` : ''}, for the build to stamp${way.readme ? `; ${CHANGES_README} puts it on the build pipeline` : ''}`);
+  } else {
+    // A trial's branch is never pushed, so it claims nothing. A version that can't be claimed (GitHub out of reach) is no
+    // bump: the next patch could be another PR's, and the rounds try again. A fold keeps its PR's version, claimed when
+    // that PR was bumped: one PR, one version.
+    next = fold ? agreed.version : bumpPatch(agreed.version);
+    if (!o.trial && !fold) {
+      try {
+        next = (await claimVersion(ctx, e, { branch, by: 'steward', for: `the Steward's kit ${o.kit}` })).claim.version;
+      } catch (err) {
+        return result(e, 'failed', `couldn't claim a version for the bump: ${(err as Error).message}`);
+      }
     }
+    try {
+      for (const [f, t] of texts) writeFileSync(path.join(dir, f), setVersion(f, t!, agreed.version, next));
+    } catch (err) {
+      return result(e, 'failed', (err as Error).message, { base: baseCommit });
+    }
+    say(`kit.json: ${pin.kit} → ${o.kit}; ${fold ? `version ${next} as PR #${fold.number} has it` : `version ${agreed.version} → ${next}`} in ${e.versionFiles.join(', ')}`);
+    // The new version's entry, so its release's notes say what it brings: a fold's, its PR's entry written again.
+    const logAt = path.join(dir, CHANGELOG);
+    const logText = existsSync(logAt) ? readFileSync(logAt, 'utf8') : null;
+    const entry = kitBumpEntry({ version: next, from, kit: o.kit, changelog: o.changelog ?? null });
+    writeFileSync(logAt, fold ? replacingEntry(logText, entry, e.name) : withEntry(logText, entry, e.name));
+    say(`${CHANGELOG}: the entry for ${next}${logText === null ? ' (a new changelog)' : fold ? `, for every kit since ${from}` : ''}`);
   }
-  try {
-    for (const [f, t] of texts) writeFileSync(path.join(dir, f), setVersion(f, t!, agreed.version, next));
-  } catch (err) {
-    return result(e, 'failed', (err as Error).message, { base: baseCommit });
-  }
-  say(`kit.json: ${pin.kit} → ${o.kit}; ${fold ? `version ${next} as PR #${fold.number} has it` : `version ${agreed.version} → ${next}`} in ${e.versionFiles.join(', ')}`);
-  // The new version's entry, so its release's notes say what it brings: a fold's, its PR's entry written again.
-  const logAt = path.join(dir, CHANGELOG);
-  const logText = existsSync(logAt) ? readFileSync(logAt, 'utf8') : null;
-  const entry = kitBumpEntry({ version: next, from, kit: o.kit, changelog: o.changelog ?? null });
-  writeFileSync(logAt, fold ? replacingEntry(logText, entry, e.name) : withEntry(logText, entry, e.name));
-  say(`${CHANGELOG}: the entry for ${next}${logText === null ? ' (a new changelog)' : fold ? `, for every kit since ${from}` : ''}`);
+  // On the build pipeline the version is the stamp's, not this PR's: none is said.
+  const versionOf = way ? {} : { version: next };
 
   // A failure is tried once more, as main's checks are at a build (mainbuild.ts): a round bumps several employees at once, and a
   // test that keeps time can fail under that load and pass alone. Failing twice is the bump's failure.
@@ -793,27 +837,30 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
     const alone = again && o.trial ? await withoutTheKit(ctx, e, dir, { say, affected: scope, profile }) : null;
     if (alone && alone === again) return result(e, 'skipped', `${WITHOUT_THE_KIT} ${o.kit} too, so not the kit's doing: ${alone}`, { base: baseCommit });
     if (alone) say(`without the kit it fails otherwise (${alone}): the failure stands`);
-    if (again) return result(e, 'failed', `${again}${copies ? ` (the first time, before its tests were brought up to the kit (${fixesLine(copies.fixes)}): ${first})` : again === first ? ', twice' : ` (the first time: ${first})`}${unfixed}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${kept?.log ?? checksLogOf(dir)}`, { version: next, base: baseCommit, checks: true, ...(alone ? { without: alone } : {}), ...(kept?.errors.length ? { errors: kept.errors } : {}) });
+    if (again) return result(e, 'failed', `${again}${copies ? ` (the first time, before its tests were brought up to the kit (${fixesLine(copies.fixes)}): ${first})` : again === first ? ', twice' : ` (the first time: ${first})`}${unfixed}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${kept?.log ?? checksLogOf(dir)}`, { ...versionOf, base: baseCommit, checks: true, ...(alone ? { without: alone } : {}), ...(kept?.errors.length ? { errors: kept.errors } : {}) });
   }
   const copiesOf = copies ? { copies: copies.fixes.map((f) => fixesLine([f])) } : {};
   // Only the tests the kit reaches ran: its rollout's bump runs the same ones, so the trial's pass is kept all the same.
   const partial = !!scope?.chose && scope.chose !== 'the whole suite';
-  if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${partial ? ` (${scope!.chose})` : ''}${copies ? brought : first ? ` on a second try (the first: ${first})` : ''}`, { version: next, base: baseCommit, ...(partial ? { partial } : {}), ...copiesOf });
+  if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${partial ? ` (${scope!.chose})` : ''}${copies ? brought : first ? ` on a second try (the first: ${first})` : ''}`, { ...versionOf, base: baseCommit, ...(partial ? { partial } : {}), ...copiesOf });
   const secondTry = tried ? ` in the kit's trial (${tried}), not run again` : copies ? brought : first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';
 
-  await git(run, dir, 'add', '--', 'kit.json', CHANGELOG, ...e.versionFiles, ...(toolChanged ? [TOOL] : []), ...(copies?.files ?? []));
+  await git(run, dir, 'add', '--', 'kit.json', ...(way ? [way.entry, ...(way.readme ? [CHANGES_README] : [])] : [CHANGELOG, ...e.versionFiles]), ...(toolChanged ? [TOOL] : []), ...(copies?.files ?? []));
   const toolLine = toolChanged ? ` ${TOOL} is the Steward's.` : '';
-  const what = fold
-    ? `kit.json pins the Steward's kit ${o.kit} (this PR, #${fold.number}, brought ${pin.kit}: the newer kit goes onto it rather than a PR of its own); the version stays ${next}, and ${CHANGELOG}'s entry for it covers every kit since ${from}.`
-    : `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit}); the version is ${next} in ${e.versionFiles.join(', ')}, and ${CHANGELOG} has its entry.`;
-  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `${what}${toolLine} Made by steward bump.${tried ? ` Its checks passed in the kit's trial from the same commit (${tried}), so they weren't run again.` : copies ? ` Its tests expected what kit ${pin.kit} said, which kit ${o.kit} changed, and are brought up to it: ${fixesLine(copies.fixes)}. Its checks passed with them.` : first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
+  const pinned = fold ? `kit.json pins the Steward's kit ${o.kit} (this PR, #${fold.number}, brought ${pin.kit}: the newer kit goes onto it rather than a PR of its own)` : `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit})`;
+  const what = way
+    ? `${pinned}; its changelog entry is ${way.entry}${fold ? `, covering every kit since ${from}` : ''}, which the build stamps with the next release's version, leaving the version files and ${CHANGELOG} alone.${way.readme ? ` ${CHANGES_README} puts ${e.name} on the build pipeline: from now on each piece of work writes its entry in ${CHANGES_DIR}/.` : ''}`
+    : fold
+      ? `${pinned}; the version stays ${next}, and ${CHANGELOG}'s entry for it covers every kit since ${from}.`
+      : `${pinned}; the version is ${next} in ${e.versionFiles.join(', ')}, and ${CHANGELOG} has its entry.`;
+  await git(run, dir, 'commit', '--quiet', '-m', `${way ? e.name : `${e.name} ${next}`}: the Steward's kit ${o.kit}`, '-m', `${what}${toolLine} Made by steward bump.${tried ? ` Its checks passed in the kit's trial from the same commit (${tried}), so they weren't run again.` : copies ? ` Its tests expected what kit ${pin.kit} said, which kit ${o.kit} changed, and are brought up to it: ${fixesLine(copies.fixes)}. Its checks passed with them.` : first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
   const full = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
   const commit = full.slice(0, 7);
   // Passed with the kit's release, as anyone can fetch it: the Surveyor's GET /api/tested (tested.ts). Not a trial's kit
   // tree, nor one whose checks the trial ran (nothing ran at this commit).
   if (!o.kitFrom && !tried) recordTested(e.id, { commit: full, stage: 'bump', branch, version: next });
   const back =compareVersions(o.kit, pin.kit) < 0 ? ' (a step back to an older kit)' : '';
-  return result(e, 'done', `${next} on ${branch} (${commit}): kit ${pin.kit} → ${o.kit}${back}${fold ? `, onto its open PR #${fold.number}` : ''}${toolChanged ? `, ${TOOL} updated` : ''}, checks passed${secondTry}${o.kitFrom ? ` with the kit from ${o.kitFrom}` : ''}`, { version: next, commit });
+  return result(e, 'done', `${way ? `${way.entry}` : next} on ${branch} (${commit}): kit ${pin.kit} → ${o.kit}${back}${fold ? `, onto its open PR #${fold.number}` : ''}${way?.readme ? `, on the build pipeline from now on` : ''}${toolChanged ? `, ${TOOL} updated` : ''}, checks passed${secondTry}${o.kitFrom ? ` with the kit from ${o.kitFrom}` : ''}`, { ...versionOf, commit });
 }
 
 export async function bump(ctx: Ctx, employees: Employee[], o: BumpOptions): Promise<EmployeeResult[]> {

@@ -2,12 +2,13 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'no
 import path from 'node:path';
 import { addToEntry, changeFiles, CHANGES_DIR, CHANGES_README, entryBody, foldEntries, fragmentBody, fragmentFiles, isMinor, KIT_CHANGES_DIR, nextFree, stampVersions, type Stamped } from '../entries.ts';
 import { commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { compareVersions } from '../kitfiles.ts';
 import { CHANGELOG } from '../kit/notes.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { agreedVersion, readVersion, setVersion } from '../versions.ts';
 import { checkoutOf, freshWorktree, hostIs, releasedOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { KIT_CHANGELOG, KIT_VERSION_FILE, kitClaimKey, kitVersionText, repinKit } from './kitpart.ts';
-import { claimsOn } from '../claims.ts';
+import { claimsOn, type Claim } from '../claims.ts';
 import { withRepo } from './slots.ts';
 import { hostFor, must } from '../hosts/index.ts';
 import { coveredBy, mergeOwn, prNumberOf } from './mainbuild.ts';
@@ -208,11 +209,29 @@ async function openStamps(ctx: Ctx, e: Employee): Promise<OpenStamp[]> {
 }
 
 /**
+ * The PR that sets its version the old way and is next in line on the repository (passover.ts marks its claim `line`),
+ * in words, when main's entries in changes/ wait for it; else null. Stamped first, main would take a version line that PR
+ * changes too, and it would conflict. Merged first, its version is the one the stamp gives them, their entries joining
+ * its own (stampFragments' waiting version). This is the switch to the build pipeline (bump.ts pipelineWay): work begun
+ * before it claimed its version and set it, and merges as it would have. One stuck there is passed over after an hour
+ * (passover.ts STUCK_MS) and waited for no more: the stamp goes ahead, and passover re-versions it once main passes it.
+ * Only the repository's own entries wait, not the kit's (kit/changes/, in the Steward's).
+ */
+export async function oldWayFirst(ctx: Ctx, e: Employee, o: { head: string; files: string[]; inLine: Claim[]; released: string[] }): Promise<string | null> {
+  const waiting = o.inLine.filter((c) => c.line && !c.passed && !o.released.includes(c.version));
+  if (!waiting.length || !(changeFiles(o.files, CHANGES_DIR).length + fragmentFiles(o.files, CHANGES_DIR).length)) return null;
+  const main = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(ctx.run, checkoutOf(e), o.head, f)] as [string, string | null])));
+  // Merged already (main carries its version), or main can't be read: nothing to wait for.
+  const c = 'version' in main ? waiting.find((x) => compareVersions(x.version, main.version) > 0) : undefined;
+  return c ? `#${c.line!.pr} (v${c.version}), which sets its version itself and is next in line: merged first, it takes them into its release; stuck there an hour, it is passed over and they are stamped without it` : null;
+}
+
+/**
  * Main's unstamped entries stamped, as the module's comment says: null when main carries none (or there's no clone);
  * else what was done, or why not. `released` are the employee's released versions, `taken` those other work has
  * claimed (claims.ts); `kit` the same for the kit, in the Steward's own repository.
  */
-export async function stampMain(ctx: Ctx, e: Employee, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[] } }): Promise<StampResult | null> {
+export async function stampMain(ctx: Ctx, e: Employee, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[] }; inLine?: Claim[] }): Promise<StampResult | null> {
   const { run } = ctx;
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return null;
@@ -221,10 +240,13 @@ export async function stampMain(ctx: Ctx, e: Employee, o: { released: string[]; 
   if (!head) return null;
   // A look at main's files first: most builds have nothing to stamp, and no worktree is made for them.
   const tree = await gitMaybe(run, repo, 'ls-tree', '-r', '--name-only', head, `${CHANGES_DIR}/`, `${KIT_CHANGES_DIR}/`);
-  if (!tree || !stampsAny(tree.split('\n').map((l) => l.trim()).filter(Boolean))) return null;
+  const files = tree ? tree.split('\n').map((l) => l.trim()).filter(Boolean) : [];
+  if (!stampsAny(files)) return null;
   const sha = head.slice(0, 7);
   // Worked with plain git: there is no PR to stamp through, and the Steward never pushes to the branch itself.
   if (hostIs(ctx, e) === 'git') return { done: false, skipped: true, note: `its changes/ entries on ${e.branch} at ${sha} aren't stamped: it is worked with plain git, where the Steward opens no PRs and never pushes to ${e.branch}. Put them into one version and changelog entry on a branch, and land it` };
+  const waits = await oldWayFirst(ctx, e, { head, files, inLine: o.inLine ?? [], released: o.released });
+  if (waits) return { done: false, skipped: true, note: `its changes/ entries on ${e.branch} at ${sha} wait for ${waits}` };
   const branch = stampBranch(head);
   // A stamp of its own an earlier build left open (GitHub wouldn't merge it then): merged now while main is where it was
   // stamped from, never stamped twice; else closed, main having moved on, and main stamped again below.
@@ -294,9 +316,9 @@ export async function stampAll(ctx: Ctx, employees: Employee[]): Promise<{ resul
       const s = await withRepo(ctx.log, e.id, async () => {
         if (!existsSync(checkoutOf(e))) return null;
         const released = (await releasedOf(ctx, e)).map((r) => r.version);
-        const taken = claimsOn(e.repo).map((c) => c.version);
+        const claims = claimsOn(e.repo);
         const kit = existsSync(path.join(checkoutOf(e), KIT_VERSION_FILE)) ? { released: ctx.kit.released, taken: claimsOn(kitClaimKey(e.repo)).map((c) => c.version) } : undefined;
-        return stampMain(ctx, e, { released, taken, ...(kit ? { kit } : {}) });
+        return stampMain(ctx, e, { released, taken: claims.map((c) => c.version), inLine: claims.filter((c) => c.line), ...(kit ? { kit } : {}) });
       });
       if (!s) continue;
       results.push(result(e, s.done ? 'done' : s.skipped ? 'skipped' : 'failed', `stamp: ${s.note}`, { ...(s.url ? { url: s.url } : {}), ...(s.version ? { version: s.version } : {}) }));

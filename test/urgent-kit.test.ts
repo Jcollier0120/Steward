@@ -187,8 +187,8 @@ test("the urgent fix's build of the Steward's own, its kit urgent: the kit is tr
   assert.equal(out.error, undefined, log);
   assert.equal(out.build?.by, 'urgent', log);
   // Tried on Other and the whole suite run, the kit released, the Steward's urgent version with it; then Other bumped to
-  // the kit and its kit PR merged by the Steward itself, in the same build.
-  assert.deepEqual(events.filter((x) => !x.startsWith('Steward tests')), ['kit 1.0.2 released', 'Steward v0.8.14 released', 'Other #101 merged'], log);
+  // the kit and its kit PR merged by the Steward itself, in the same build, and its entry in changes/ stamped (#102).
+  assert.deepEqual(events.filter((x) => !x.startsWith('Steward tests')), ['kit 1.0.2 released', 'Steward v0.8.14 released', 'Other #101 merged', 'Other #102 merged'], log);
   assert.match(log, /kit 1\.0\.2 is an urgent fix: kit 1\.0\.2 goes out in this build to every employee still behind it, and each is built at once after it/);
   assert.doesNotMatch(log, /the newest kit waits for the next build/);
   // Other's entry is an urgent fix, as the Steward's urgent rule reads one (the kit's exchequer.ts isUrgent).

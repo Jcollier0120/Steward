@@ -8,15 +8,17 @@ import type { Employee } from '../src/settings.ts';
 import { gitExe } from '../src/kit/git-exe.ts';
 
 // A .NET employee, as Heiward is: C#, its branch master, its version a .csproj's <VersionPrefix>, no package.json,
-// and its kit\ filled by a PowerShell script of its own. It goes through every stage (bump, push and its merge,
-// release, staff) with git for real and gh standing in, and gets nothing of a Node agent's: no npm, no tools/kit.ts. A bump's
-// version is claimed (claims.ts), in a Steward home of the test's own.
+// and its kit\ filled by a PowerShell script of its own. It goes through every stage (bump, push and its merge, the
+// build's stamp, release, staff) with git for real and gh standing in, and gets nothing of a Node agent's: no npm, no
+// tools/kit.ts. On the build pipeline, as every employee is: the bump writes its entry in changes/, and the stamp sets the
+// version in the .csproj (Steward 0.36.248), in a Steward home of the test's own.
 const tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'steward-dotnet-'))); // its real path, as git spells it (a Dev Drive mounted in a folder)
 after(() => rmSync(tmp, { recursive: true, force: true }));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
 const { bumpOne, needsNpmCi } = await import('../src/stages/bump.ts');
 const { pushOne } = await import('../src/stages/push.ts');
+const { stampMain } = await import('../src/stages/stamp.ts');
 const { releaseOne } = await import('../src/stages/release.ts');
 const { staffRow } = await import('../src/stages/staff.ts');
 const { ctxFor, ok, runner, sh } = await import('./helpers.ts');
@@ -137,13 +139,14 @@ test('a .NET employee on master, through every stage: bump, push and its merge, 
   writeFileSync(nodeTool, "console.log('the Steward\\'s tools/kit.ts');\n");
   const bumped = await bumpOne(ctx, e, { kit: '1.0.1', kitFrom, tool: nodeTool });
   assert.equal(bumped.outcome, 'done', `${bumped.message}\n${ctx.lines.join('\n')}`);
-  assert.equal(bumped.version, '1.7.1');
-  assert.match(bumped.message, /^1\.7\.1 on steward\/kit-1\.0\.1 \([0-9a-f]+\): kit 1\.0\.0 → 1\.0\.1, checks passed with the kit from /);
-  assert.deepEqual(sh(f.checkout, 'diff', '--name-only', 'origin/master', branch).split('\n').sort(), ['CHANGELOG.md', 'HEI.Agent/HEI.Agent.csproj', 'kit.json']);
+  assert.equal(bumped.version, undefined, "the stamp's");
+  assert.match(bumped.message, /^changes\/steward-kit-1-0-1\.md on steward\/kit-1\.0\.1 \([0-9a-f]+\): kit 1\.0\.0 → 1\.0\.1, on the build pipeline from now on, checks passed with the kit from /);
+  assert.deepEqual(sh(f.checkout, 'diff', '--name-only', 'origin/master', branch).split('\n').sort(), ['changes/README.md', 'changes/steward-kit-1-0-1.md', 'kit.json']);
   assert.equal(sh(f.checkout, 'show', `${branch}:kit.json`), '{\n  "kit": "1.0.1",\n  "parts": ["spec"]\n}');
-  assert.equal(execFileSync(gitExe(), ['show', `${branch}:HEI.Agent/HEI.Agent.csproj`], { cwd: f.checkout, encoding: 'utf8' }), CSPROJ('1.7.1'), 'only the version changed, CRLF and all');
-  assert.equal(sh(f.checkout, 'log', '-1', '--format=%s', branch), "Heiward 1.7.1: the Steward's kit 1.0.1");
-  assert.match(sh(f.checkout, 'log', '-1', '--format=%b', branch), /the version is 1\.7\.1 in HEI\.Agent\/HEI\.Agent\.csproj, and CHANGELOG\.md has its entry\. Made by steward bump\./);
+  assert.match(sh(f.checkout, 'show', `${branch}:changes/README.md`), /^# Heiward's changes waiting to be released\n/);
+  assert.equal(execFileSync(gitExe(), ['show', `${branch}:HEI.Agent/HEI.Agent.csproj`], { cwd: f.checkout, encoding: 'utf8' }), CSPROJ('1.7.0'), 'the version left to the stamp');
+  assert.equal(sh(f.checkout, 'log', '-1', '--format=%s', branch), "Heiward: the Steward's kit 1.0.1");
+  assert.match(sh(f.checkout, 'log', '-1', '--format=%b', branch), /its changelog entry is changes\/steward-kit-1-0-1\.md, which the build stamps with the next release's version, leaving the version files and CHANGELOG\.md alone\. changes\/README\.md puts Heiward on the build pipeline/);
   const workTree = path.join(work, 'heiward');
   assert.equal(readFileSync(path.join(workTree, 'kit', 'VERSION'), 'utf8').trim(), '1.0.1', 'its own tools\\kit.ps1 filled kit\\ from the kit tree');
   assert.ok(existsSync(path.join(workTree, 'kit', 'spec', 'npu-queue-vectors.json')));
@@ -167,17 +170,36 @@ test('a .NET employee on master, through every stage: bump, push and its merge, 
   });
   const pushed = await pushOne({ ...ctx, run: p.run }, e, { kit: '1.0.1', changelog: '## 1.0.1\n\n- new vectors\n', merge: true });
   assert.equal(pushed.outcome, 'done', pushed.message);
-  assert.equal(pushed.message, `opened "Heiward 1.7.1: the Steward's kit 1.0.1"; merged it`);
+  assert.equal(pushed.message, `opened "Heiward: the Steward's kit 1.0.1"; merged it`);
   assert.equal(sh(f.origin, 'rev-parse', `refs/heads/${branch}`), bumpedAt);
   const create = p.gh.find((a) => a[1] === 'create')!;
   assert.equal(create[create.indexOf('--base') + 1], 'master');
   assert.equal(create[create.indexOf('--repo') + 1], 'Jcollier0120/Heiward');
-  assert.equal(create[create.indexOf('--title') + 1], "Heiward 1.7.1: the Steward's kit 1.0.1");
+  assert.equal(create[create.indexOf('--title') + 1], "Heiward: the Steward's kit 1.0.1");
   const body = create[create.indexOf('--body-file') + 1];
-  assert.match(body, /the version is 1\.7\.1 in HEI\.Agent\/HEI\.Agent\.csproj\. The kit itself isn't in the repo: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\\kit\.ps1` fills it/);
+  assert.match(body, /its changelog entry is `changes\/steward-kit-1-0-1\.md`, which the next build stamps .* The kit itself isn't in the repo: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\\kit\.ps1` fills it/);
   assert.doesNotMatch(body, /tools\/kit\.ts/);
   assert.match(body, /- new vectors/);
   assert.deepEqual(p.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '60', '--repo', 'Jcollier0120/Heiward', '--merge', '--match-head-commit', bumpedAt, '--delete-branch']]);
+
+  // The build's stamp: master's entry given the next version, 1.7.1, in the .csproj's <VersionPrefix> (CRLF and all), moved
+  // into a CHANGELOG.md of its own and the file deleted, in a PR the Steward opens and merges.
+  const st = runner((args) => {
+    if (args[0] === 'pr' && args[1] === 'list') return ok([]);
+    if (args[0] === 'pr' && args[1] === 'create') return ok('https://github.com/Jcollier0120/Heiward/pull/61\n');
+    if (args[0] === 'pr' && args[1] === 'merge') {
+      sh(f.origin, 'update-ref', 'refs/heads/master', args[args.indexOf('--match-head-commit') + 1]);
+      return ok('');
+    }
+  });
+  const stamped = await stampMain({ ...ctx, run: st.run }, e, { released: ['1.7.0'], taken: [] });
+  assert.equal(stamped?.done, true, `${stamped?.note}\n${ctx.lines.join('\n')}`);
+  assert.equal(stamped?.version, '1.7.1');
+  assert.equal(execFileSync(gitExe(), ['show', 'master:HEI.Agent/HEI.Agent.csproj'], { cwd: f.origin, encoding: 'utf8' }), CSPROJ('1.7.1'), 'only the version changed, CRLF and all');
+  assert.match(sh(f.origin, 'show', 'master:CHANGELOG.md').replace(/\r\n/g, '\n'), /\n## 1\.7\.1\n\n\*\*It carries the Steward's kit 1\.0\.1: /);
+  assert.deepEqual(sh(f.origin, 'ls-tree', '--name-only', 'master', 'changes/').split('\n'), ['changes/README.md']);
+  const stampPr = st.gh.find((a) => a[1] === 'create')!;
+  assert.equal(stampPr[stampPr.indexOf('--title') + 1], 'Heiward 1.7.1: version and changelog, stamped by the Steward');
 
   // release: from origin/master at the merged commit, in a worktree of its own, with its release command.
   // GitHub has v1.7.1 once its release command has run.

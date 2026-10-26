@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { CHANGES_README, fragmentFor, onPipelineNote } from '../entries.ts';
 import { changelogBetween } from '../kitfiles.ts';
 import { aheadOf, branchExists, commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { TOOL } from '../kitsource.ts';
@@ -23,13 +24,22 @@ import { mergeOwn, prNumberOf } from './mainbuild.ts';
  * mergeOwn): their checks passed in the bump, and no one else merges the Steward's PRs. The build releases them.
  */
 
-export const prTitle = (e: Employee, version: string, kit: string) => `${e.name} ${version}: the Steward's kit ${kit}`;
+/** A kit PR's title: on the build pipeline, with no version (the stamp's is the release's: bump.ts pipelineWay). */
+export const prTitle = (e: Employee, version: string | null, kit: string) => `${e.name}${version ? ` ${version}` : ''}: the Steward's kit ${kit}`;
 
-export function prBody(o: { kit: string; from: string | null; version: string; changelog: string | null; files: string[]; fill: string; tool?: boolean; folded?: string }): string {
+/**
+ * A kit PR's description. `entry`: on the build pipeline, its changelog entry's file, and no version (`version` null);
+ * `readme`: the employee's name, when this PR puts it on the pipeline (changes/README.md).
+ */
+export function prBody(o: { kit: string; from: string | null; version: string | null; changelog: string | null; files: string[]; fill: string; tool?: boolean; folded?: string; entry?: string; readme?: string }): string {
   const entries = o.changelog ? changelogBetween(o.changelog, o.from, o.kit) : '';
+  const versioned = o.entry
+    ? `; its changelog entry is \`${o.entry}\`, which the next build stamps with the release's version, leaving the version files and CHANGELOG.md alone.`
+    : `, and the version is ${o.version} in ${o.files.join(', ')}.`;
   return [
-    `kit.json pins the Steward's kit ${o.kit}${o.from ? ` (it pinned ${o.from})` : ''}, and the version is ${o.version} in ${o.files.join(', ')}.${o.tool ? ` ${TOOL} is the Steward's, which changed since this one's.` : ''} The kit itself isn't in the repo: \`${o.fill}\` fills it from the kit release kit-v${o.kit}, and a release carries it.`,
+    `kit.json pins the Steward's kit ${o.kit}${o.from ? ` (it pinned ${o.from})` : ''}${versioned}${o.tool ? ` ${TOOL} is the Steward's, which changed since this one's.` : ''} The kit itself isn't in the repo: \`${o.fill}\` fills it from the kit release kit-v${o.kit}, and a release carries it.`,
     '',
+    ...(o.readme ? [onPipelineNote(o.readme), ''] : []),
     ...(o.folded ? [`Opened for kit ${o.folded}; kit ${o.kit} came out while it was open, and went onto it rather than into a second kit PR beside it.`, ''] : []),
     'Made by `steward bump`, which filled the kit and ran the checks in a fresh worktree of the branch before committing.',
     '',
@@ -102,24 +112,27 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
   const versionFile = e.versionFiles[0];
   // Both asked at once, so git reads them in one command (showFile).
   const [versionText, pinText] = await Promise.all([showFile(run, repo, branch, versionFile), showFile(run, repo, remote, 'kit.json')]);
-  const version = readVersion(versionFile, versionText ?? '') ?? '?';
   const from = readPin(pinText)?.kit ?? null;
-  const title = prTitle(e, version, o.kit);
   const changed = (await git(run, repo, 'diff', '--name-only', `${remote}...${branch}`)).split('\n').filter(Boolean);
+  // On the build pipeline (bump.ts pipelineWay): its entry in changes/, and no version of its own; the stamp's is the release's.
+  const entry = changed.find((f) => f === fragmentFor(branch)) ?? null;
+  const version = entry ? null : (readVersion(versionFile, versionText ?? '') ?? '?');
+  const title = prTitle(e, version, o.kit);
   const files = e.versionFiles.filter((f) => changed.includes(f.replace(/\\/g, '/')));
   const folded = fold ? (/^steward\/kit-(.+)$/.exec(fold.head)?.[1] ?? fold.kit) : undefined;
-  const body = prBody({ kit: o.kit, from, version, changelog: o.changelog, files: files.length ? files : e.versionFiles, fill: e.fill, tool: changed.includes(TOOL), folded });
+  const body = prBody({ kit: o.kit, from, version, changelog: o.changelog, files: files.length ? files : e.versionFiles, fill: e.fill, tool: changed.includes(TOOL), folded, ...(entry ? { entry, readme: changed.includes(CHANGES_README) ? e.name : undefined } : {}) });
+  const versionOf = version ? { version } : {};
   if (fold) {
     must(await host.editPr(e.repo, fold.number, { title, body }));
     const url = open[0]?.url;
     ctx.log(`[${e.id}] kit ${o.kit} onto #${fold.number}`);
-    return result(e, 'done', `put kit ${o.kit} onto its open PR #${fold.number}, now "${title}"${await merged(fold.number)}`, { ...(url ? { url } : {}), version });
+    return result(e, 'done', `put kit ${o.kit} onto its open PR #${fold.number}, now "${title}"${await merged(fold.number)}`, { ...(url ? { url } : {}), ...versionOf });
   }
   const out = must(await host.createPr(e.repo, { base: e.branch, head: branch, title, body }));
   const url = out.trim().split('\n').pop() ?? '';
   ctx.log(`[${e.id}] opened ${url}`);
   noteOpened(e, url, localSha);
-  return result(e, 'done', `opened "${title}"${await merged(prNumberOf(url))}`, { url, version });
+  return result(e, 'done', `opened "${title}"${await merged(prNumberOf(url))}`, { url, ...versionOf });
 }
 
 /**
