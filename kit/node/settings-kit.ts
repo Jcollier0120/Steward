@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { copyFileSync, statSync } from 'node:fs';
 import os from 'node:os';
+import { isDemo, shownDataDir } from './demo.ts';
 import { isDeveloper } from './developer.ts';
 import { type ManorLink, manorStaffSettingsUrl, sharedSettingsManor } from './manor.ts';
 import { readText, statOf } from './file-cache.ts';
@@ -205,7 +206,7 @@ export interface SettingsSpec<S extends object = any> {
   check?: (next: S, changed: string[], raw: Record<string, unknown>) => Findings | Promise<Findings>;
   /** After a save: apply what can be applied at once (reschedule the rounds, say). */
   onSaved?: (next: S, before: S) => void;
-  /** When a saved change is used, for the panel's first line (default "from the next round on"). */
+  /** When a saved change is used, for the panel's first line (default "from the next round on", or "from now on" for an agent with no rounds). */
   usedFrom?: string;
   /**
    * The whole form is a developer's (the Auditor's, the Developer Herald's): with the switch off, /api/settings says
@@ -661,7 +662,9 @@ export async function settingsReply<S extends object>(spec: SettingsSpec<S>, dev
   const shown = (path: string) => developer || path === '' || schema.some((f) => f.key === path.split('.')[0]);
   const warnings = Object.fromEntries(Object.entries({ ...out.warnings, ...extra?.warnings }).filter(([k]) => shown(k)));
   const said = developer ? problems : problems.length ? [PLAIN_PROBLEM] : [];
-  return { schema, values: values as Record<string, unknown>, defaults: valuesFor(spec.schema, spec.defaults, developer) as Record<string, unknown>, problems: said, warnings, file: developer ? file : '', ...usedFrom, ...inManor };
+  // In a demo (demo.ts), a made-up path where it would be on Alex's PC, never the picture-taker's scratch folder.
+  const named = isDemo() ? `${shownDataDir()}\\${file.split(/[\\/]/).pop()}` : file;
+  return { schema, values: values as Record<string, unknown>, defaults: valuesFor(spec.schema, spec.defaults, developer) as Record<string, unknown>, problems: said, warnings, file: developer ? named : '', ...usedFrom, ...inManor };
 }
 
 /**

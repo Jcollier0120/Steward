@@ -212,8 +212,9 @@ function ListItem({ f, value, path, label, focus, onChange }: { f: SettingsField
 /** The most fields a record shows as a table row; a wider record folds to a line (RecordBox). */
 const TABLE_FIELDS = 4;
 
-/** A table of rows the form edits: its column headings, and an empty one over each row's Remove. */
-function EditTable({ headings, children }: { headings: string[]; children: ReactNode }) {
+/** A table of rows the form edits: its column headings, and an empty one over each row's Remove. No rows: no table, only its Add. */
+function EditTable({ headings, rows, children }: { headings: string[]; rows: number; children: ReactNode }) {
+  if (!rows) return null;
   return (
     <div className="sf-scroll">
       <table className="sf-table">
@@ -250,7 +251,7 @@ function MapEd({ f, value, onChange, path }: EdProps) {
   );
   return (
     <div>
-      <EditTable headings={[f.keyLabel, f.valueLabel]}>
+      <EditTable headings={[f.keyLabel, f.valueLabel]} rows={rows.length}>
         {rows.map((_, i) => (
           <tr key={i}>
             {cell(i, 0, f.keyLabel)}
@@ -274,8 +275,8 @@ function Records({ f, value, onChange, path }: EdProps) {
   const recs = Array.isArray(value) ? value.map(asObj) : [];
   const noun = (f.noun || 'entry').toLowerCase();
   // A table row only while it reads as one: a few plain fields, none advanced. Anything more folds to a line of its own.
-  // A record's handle (kept) goes with it, never drawn.
-  const drawn = f.fields.filter((g) => !g.kept);
+  // A record's handle (kept) goes with it, never drawn, and so does a hidden field (the agent's own to set): neither is a column.
+  const drawn = f.fields.filter((g) => !g.kept && !g.hidden);
   const flat = drawn.length <= TABLE_FIELDS && drawn.every((g) => SCALAR.includes(g.kind) && !g.advanced && !g.shownWhen);
   const set = (i: number, r: Obj) => onChange(recs.map((x, j) => (j === i ? r : x)));
   const remove = (i: number) => (
@@ -286,7 +287,7 @@ function Records({ f, value, onChange, path }: EdProps) {
   if (flat)
     return (
       <div>
-        <EditTable headings={drawn.map((g) => g.label)}>
+        <EditTable headings={drawn.map((g) => g.label)} rows={recs.length}>
           {recs.map((r, i) => (
             <tr key={i}>
               {drawn.map((g) => (
@@ -552,7 +553,8 @@ function useSettings(initial: SettingsData | undefined, onSaved?: () => void, ap
     setFailed(null);
     try {
       const r = await fetch(api, { headers: { accept: 'application/json' } });
-      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+      // The server's own words when it has them (Manor's "the Clerk's page isn't running"), else the status.
+      if (!r.ok) throw new Error(((await r.json().catch(() => null)) as { error?: unknown } | null)?.error?.toString() || `${r.status} ${r.statusText}`);
       const d = (await r.json()) as SettingsData;
       fresh(d, d.values);
     } catch (e) {
@@ -624,7 +626,9 @@ function FormHead({ data, later, general, whole }: { data: SettingsData; later: 
 
 /** The settings this form leaves out, set on Manor's Settings with the rest of the staff's (kit 2.140.0), in a line. */
 function InManor({ manor, url, labels }: NonNullable<SettingsData['inManor']>) {
-  const named = labels.length <= 1 ? labels.join('') : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+  // In quotes, as the form's labels: "Look for new clips every" reads as a name, not half a sentence.
+  const q = labels.map((l) => `"${l}"`);
+  const named = q.length <= 1 ? q.join('') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
   return (
     <p className="sf-intro muted sf-in-manor">
       {named} {labels.length === 1 ? 'is' : 'are'} set with the rest of the staff's settings, on {manor}'s <a href={url}>Staff settings</a>.
@@ -717,8 +721,11 @@ function FormTabs({ panels, tab, onChoose, block }: { panels: Panel[]; tab: stri
   );
 }
 
-/** How many ordinary settings (a group counting as one) a form with two or more groups needs before it's in tabs. */
-export const TAB_FIELDS = 10;
+/**
+ * How many ordinary settings (a group counting as one) a form with two or more groups or named tabs needs before it's
+ * in tabs: every one it has, shown now or not (shownWhen), so the tabs don't come and go as a switch shows its fields.
+ */
+export const TAB_FIELDS = 8;
 
 /**
  * The agent's settings, as a form: all of them, or `keys` (onboarding's few, never an advanced one). A short page: the
@@ -768,10 +775,13 @@ export function SettingsForm({ keys, onSaved, onDirty, initial, api }: { keys?: 
   const ordinary = visible.filter((f) => !f.advanced);
   const advanced = visible.filter((f) => f.advanced);
   const sections: SettingsField[] = keys ? [] : ordinary.filter((f) => f.kind === 'group');
-  // Tabs: two or more groups or named tabs, in a long form.
-  const named = new Set(keys ? [] : ordinary.flatMap((f) => (f.kind === 'group' || f.tab ? [tabOf(f, data.schema).id] : [])));
+  // Tabs: two or more groups or named tabs, in a long form, counted over all its ordinary settings (TAB_FIELDS); and two
+  // panels to show now, never a row of one tab.
+  const all = keys ? [] : fields.filter((f) => !f.advanced && !f.hidden && !f.kept);
+  const named = new Set(all.flatMap((f) => (f.kind === 'group' || f.tab ? [tabOf(f, data.schema).id] : [])));
   named.delete('general');
-  const tabbed = named.size >= 2 && ordinary.length >= TAB_FIELDS;
+  const panels = panelsOf(ordinary, advanced, data.schema);
+  const tabbed = named.size >= 2 && all.length >= TAB_FIELDS && panels.length >= 2;
   const open = (key: string) => sections.length === 1 || !!opened[key] || under(msgs, key);
   const jump = (key: string) => {
     setOpened({ ...opened, [key]: true });
@@ -805,7 +815,7 @@ export function SettingsForm({ keys, onSaved, onDirty, initial, api }: { keys?: 
           <BusyArea busy={s.busy} className="sf-busy">
             <form className="sf-form" noValidate onSubmit={(e) => (e.preventDefault(), void s.save(fields))}>
               {tabbed ? (
-                <FormTabs panels={panelsOf(ordinary, advanced, data.schema)} tab={tab} onChoose={setTab} block={block} />
+                <FormTabs panels={panels} tab={tab} onChoose={setTab} block={block} />
               ) : (
                 <>
                   {ordinary.map(block)}

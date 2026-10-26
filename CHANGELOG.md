@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.244
+
+**It hands out the kit 2.141.0: Settings and the staff's tabbed pages are tidier, and its own Release card says less.**
+
+### What changed
+
+- **Settings take less room.** The fields sit straight in their panel, with no box inside a box. An empty list shows no headings over nothing. A long form, of 8 settings or more in two or more groups, is in tabs, and its tabs stay put as switches show or hide their fields.
+- **A tab's title is said once.** A section titled as the tab it's in leaves the title to the tab.
+- **"They are used from now on"** in the Settings of a staff member that works without rounds, in place of "from the next round on".
+- **The Release card is shorter:** what Release does and who merges PRs in two short sentences, and a round's line in plain words.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.243
 
 **It hands out the kit 2.140.0: the settings your staff share are set once, on Castellan's Settings, and long lists of short names take less room.**

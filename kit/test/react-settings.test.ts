@@ -37,7 +37,7 @@ const schema = [
 const values = { variant: 'gamer', stocks: ['MSFT'], notes: true, interval: 5, folders: null, kinds: ['b'], agents: [{ port: 18383, name: 'Reeve' }], jobs: [{ name: 'build', cmds: ['npm test'] }], env: { A: '1' }, limits: { piece: 6, share: 0.5 }, alarms: { on: true }, port: 19494, since: '2026-10-05T12:00:00.000Z' };
 const data = (warnings = {}) => ({ schema, values, defaults: { ...values, interval: 10 }, problems: ['settings.json had a stray key.'], warnings, file: 'C:\\x\\settings.json' });
 // The same with fewer ordinary settings than a form in tabs has (TAB_FIELDS): the short page.
-const short = (warnings = {}) => ({ ...data(warnings), schema: schema.filter((f) => !['agents', 'jobs', 'env'].includes(f.key)) });
+const short = (warnings = {}) => ({ ...data(warnings), schema: schema.filter((f) => !['agents', 'jobs', 'env', 'kinds', 'folders'].includes(f.key)) });
 
 test('every field kind, drawn as settings-panel.js draws it, class for class', () => {
   const h = m.form(data());
@@ -167,6 +167,36 @@ test('a long form (two groups or more, TAB_FIELDS ordinary settings) is in tabs:
   assert.doesNotMatch(err, /id="sf-tab-alarms"[^>]*>Alarms<span class="tab-mark"/);
 });
 
+test('tabs counted over every ordinary setting, shown now or not, so they stay put as a switch shows its fields; a hidden one never counts', () => {
+  const sw = (key: string, more = {}) => ({ key, kind: 'switch', label: key, ...more });
+  const schema = [
+    { key: 'mode', kind: 'choice', label: 'Mode', options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }] },
+    ...['p', 'q', 'r', 's'].map((k) => sw(k, { shownWhen: { key: 'mode', is: ['b'] } })),
+    { key: 'one', kind: 'group', label: 'One', fields: [sw('x')] },
+    { key: 'two', kind: 'group', label: 'Two', fields: [sw('y')] },
+    sw('t'),
+  ];
+  const values = { mode: 'a', p: false, q: false, r: false, s: false, one: { x: true }, two: { y: true }, t: false };
+  const form = (sch: unknown[], v = values) => m.form({ schema: sch, values: v, defaults: values, problems: [], warnings: {}, file: 'f' });
+  assert.match(form(schema), /role="tablist"/, 'eight settings, four not shown for A: in tabs all the same');
+  assert.match(form(schema, { ...values, mode: 'b' }), /role="tablist"/, 'and for B');
+  assert.doesNotMatch(form(schema.map((f) => (f.key === 't' ? { ...f, hidden: true } : f))), /role="tablist"/, 'seven and a hidden one: the short page');
+});
+
+test('a table of records: a hidden field is no column; an empty list or map draws no table, only its Add', () => {
+  const agents = { key: 'agents', kind: 'records', label: 'Agents', noun: 'agent', fields: [{ key: 'port', kind: 'whole', label: 'Port', min: 1, max: 65535 }, { key: 'name', kind: 'text', label: 'Agent' }, { key: 'added', kind: 'text', label: 'Added', readOnly: true, hidden: true }] };
+  const env = { key: 'env', kind: 'map', label: 'Environment', keyLabel: 'Name', valueLabel: 'Value' };
+  const form = (v: unknown) => m.form({ schema: [agents, env], values: v, defaults: { agents: [], env: {} }, problems: [], warnings: {}, file: 'f' });
+  const h = form({ agents: [{ port: 1, name: 'Reeve', added: '2026-10-26' }], env: {} });
+  assert.match(h, /<thead><tr><th scope="col">Port<\/th><th scope="col">Agent<\/th><th><\/th><\/tr><\/thead>/, 'two columns and the Remove');
+  assert.doesNotMatch(h, /Added|2026-10-26/);
+  assert.equal(h.match(/<table/g)?.length, 1, 'the empty map: no table');
+  assert.match(h, />Add name<\/button>/);
+  const none = form({ agents: [], env: {} });
+  assert.doesNotMatch(none, /<table|<th/, 'nothing in either: no headings over nothing');
+  assert.match(none, />Add agent<\/button>/);
+});
+
 test("the Tour's three steps: what the role is, its settings, what its page shows", () => {
   const o = { intro: { title: 'Meet the fixture', text: 'It carries the kit.' }, settings: [], tour: [{ tour: 'status', title: 'Its status', text: 'On duty or off.' }, { tour: 'staff', text: 'Who works here.' }] };
   const intro = m.tour(o, 'intro');
@@ -274,8 +304,8 @@ test('a list with item.options is picked, not typed: each item by its label with
 test("with Manor installed: the settings set on its Staff settings are said in a line, with the way there (kit 2.140.0)", () => {
   const inManor = { manor: 'Oakfield Manor', url: 'http://castellan.localhost:18585/#/settings/staff', labels: ['Plain-words notes', 'A round every'] };
   const html = m.form({ ...short(), inManor });
-  assert.match(html, /<p class="sf-intro muted sf-in-manor">Plain-words notes and A round every are set with the rest of the staff&#x27;s settings, on Oakfield Manor&#x27;s <a href="http:\/\/castellan\.localhost:18585\/#\/settings\/staff">Staff settings<\/a>\.<\/p>/);
-  assert.match(m.form({ ...short(), inManor: { ...inManor, labels: ['Video quality'] } }), /Video quality is set with/);
+  assert.match(html, /<p class="sf-intro muted sf-in-manor">(&quot;|")Plain-words notes(&quot;|") and (&quot;|")A round every(&quot;|") are set with the rest of the staff&#x27;s settings, on Oakfield Manor&#x27;s <a href="http:\/\/castellan\.localhost:18585\/#\/settings\/staff">Staff settings<\/a>\.<\/p>/);
+  assert.match(m.form({ ...short(), inManor: { ...inManor, labels: ['Video quality'] } }), /(&quot;|")Video quality(&quot;|") is set with/);
   assert.doesNotMatch(m.form(short()), /sf-in-manor/, 'without Manor, nothing');
   assert.doesNotMatch(m.form({ ...short(), inManor }, ['notes']), /sf-in-manor/, "onboarding's few settings say nothing of it");
 });

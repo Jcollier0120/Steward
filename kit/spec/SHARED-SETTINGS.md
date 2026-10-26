@@ -20,6 +20,8 @@ The fields come from `node/shared-settings.ts`, one factory and one read functio
 
 A field an agent builds by hand has no `inManor`, so it stays on the agent's own page. Build these settings from the factories, and read them with the read functions, so they move to Manor.
 
+Manor's Staff settings draws the `shared` ones from `manorSharedFields()`, with `MANOR_SHARED_DEFAULTS` while neither Manor nor an agent says a value (kit 2.141.0), so a shared setting the kit adds shows there too.
+
 ## The API
 
 `/api/settings` serves a form by where it's asked from (`settings-kit.ts`' `FormPlace`, from `formPlace(query)`):
