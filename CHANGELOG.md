@@ -4,12 +4,13 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.245
 
-**It hands out the kit 2.142.0: a tile or link to part of a staff member's page opens the tab it's in, and times to come read "in 6 hours".**
+**It hands out the kit 2.142.0: a tile or link to part of a staff member's page opens the tab it's in, times to come read "in 6 hours", and an empty number in Settings says what it means.**
 
 ### What changed
 
 - **A tile at a glance, or a link to part of a page, opens the tab that part is in** and scrolls to it, instead of scrolling to a tab not shown.
 - **A time still to come reads "in 6 hours"**, not "just now".
+- **A number in Settings that may be left empty says what empty means**, such as the Herald's round interval ("Empty: The variant's own…").
 
 ### Before you update
 
