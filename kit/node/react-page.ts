@@ -3,7 +3,7 @@ import path from 'node:path';
 import { APP, appRoot } from '../app.ts';
 import { developer } from './developer.ts';
 import { duty } from './duty.ts';
-import { heldNote, licenseHeld } from './license-check.ts';
+import { heldNote, shownHold } from './license-check.ts';
 import { lookFor, sceneSvg } from './look.ts';
 import { manorLink, manorSettingsUrl } from './manor.ts';
 import type { Onboarding } from './onboarding.ts';
@@ -94,7 +94,7 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
   const dev = developer().on;
   const first = firstRoundNow();
   const settling = settlingText(APP.name, look, first);
-  const ended = licenseHeld();
+  const ended = shownHold();
   return {
     app: { id: APP.id, name: APP.name, role: APP.role, version: APP.version },
     title: o.title ?? APP.name,

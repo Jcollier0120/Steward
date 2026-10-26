@@ -2,6 +2,7 @@ import type { JsonWebKey } from 'node:crypto';
 import { statSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
+import { isDemo } from './demo.ts';
 import { sharedLicenseFolder } from './everyone.ts';
 import { isThisPc, LICENSE_FILE, readHeldFile, trustedKeys, verifyLicense, type LicensePayload } from './license.ts';
 import { MANOR_DEFAULT_NAME, manorHome, manorLink } from './manor.ts';
@@ -221,6 +222,12 @@ export function licenseNow(o: { now?: number; env?: NodeJS.ProcessEnv } = {}): L
 
 /** What holds this agent now, in words (holdText); null when nothing does. */
 export const licenseHeld = (): string | null => holdText(licenseNow());
+
+/**
+ * The hold the page shows (licenseHeld), but none in demo mode (kit 2.142.1): a demo's pictures (Manor's hero pictures)
+ * show the page as it is on a licensed PC. Only what the page shows: its rounds still hold, and a demo runs none anyway.
+ */
+export const shownHold = (): string | null => (isDemo() ? null : licenseHeld());
 
 /** Kit 2.45.0's name for licenseHeld, kept for an agent that calls it: since kit 2.110.0, no license holds it too. */
 export const trialEnded = licenseHeld;
