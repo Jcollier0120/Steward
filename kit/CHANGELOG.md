@@ -2,6 +2,32 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.141.0
+
+**Settings and tabbed pages take less room: no box inside the Settings panel, no headings over an empty table, tabs that stay put, and a tab's title said once.**
+
+### What changed
+
+- **react/settings-form.tsx:**
+  - The form's busy area draws no border or padding of its own: the panel holds the fields directly, not in a second box (react/styles.ts' `.sf-panel .ui-busy-area`, over settings-panel.css' boxed `.sf-panel fieldset`).
+  - An empty records list or map draws no table and no headings, only its Add.
+  - A flat records table has no column for a `hidden` field. The field's value is still kept in each record.
+  - A long form is in tabs at `TAB_FIELDS` = 8 ordinary settings (it was 10). They're counted over every one the form has, shown now or not (`shownWhen`), so the tabs no longer come and go as a switch shows its fields. A hidden one never counts, and there are never tabs with only one to show.
+  - A form that can't be loaded says the server's own `error`, not only its status.
+  - The line naming the settings set on Manor puts each in quotes ("Look for new clips every" is set with…).
+- **react/ui.tsx, `Section`:** in a page tab of the same name (`PageTabs`, matched without case), it leaves its title, icon and count to the tab. It keeps `leading` and `right`, and draws no heading row without them (`TabLabel`).
+- **react/styles.ts:** a page tab's first heading, section or card has no top margin, so the gap under the tabs is the tabs' own.
+- **server.ts, GET /api/settings:** an agent with no rounds (no `every()`) and no `usedFrom` of its own says its settings are used "from now on", not "from the next round on". `usedFrom` must still read after "They are used " ("at once", "from the next look on").
+- **settings-kit.ts, `settingsReply`:** in a demo (`KIT_DEMO`), a developer's form names its file where it would be on Alex's PC (`shownDataDir()`), never the picture-taker's folder.
+- **shared-settings.ts:** `manorSharedFields()` and `MANOR_SHARED_DEFAULTS`, the settings Manor's Staff settings keeps for the whole staff and their defaults, so Manor reads them from the kit (spec/SHARED-SETTINGS.md).
+
+### Before you update
+
+- Nothing breaks.
+- **A Settings form of 8 or 9 ordinary settings, in two or more groups or named tabs,** is in tabs now. Look at it once.
+- **A `Section` titled as its page tab** no longer repeats its title. Take out any agent-side workaround.
+- **A test that matches an empty records or map field's `<table>` or its headings** finds none.
+
 ## 2.140.0
 
 **The settings the staff share are set once, on Manor's Settings (Staff settings), and an agent's own Settings leaves them out; a list of short words is drawn in columns.**

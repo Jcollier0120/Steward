@@ -167,6 +167,14 @@ export function readKeepVideoTags(raw: unknown, fallback = false, o: { home?: st
   return typeof s.keepVideoTags === 'boolean' ? s.keepVideoTags : fallback;
 }
 
+/**
+ * The settings Manor keeps for the whole staff (inManor 'shared'), as its Staff settings draws them, and the value each
+ * has while neither Manor nor an agent says one: Manor reads the list from here, so a shared setting the kit adds is
+ * there too.
+ */
+export const manorSharedFields = (): Field[] => [plainNotesField(), videoQualityField(), semanticRerankField(), keepVideoTagsField()];
+export const MANOR_SHARED_DEFAULTS: Readonly<{ plainNotes: boolean; preset: VideoQuality; semanticRerank: boolean; keepVideoTags: boolean }> = { plainNotes: true, preset: 'balanced', semanticRerank: true, keepVideoTags: false };
+
 /** An agent's bounds for its model calls in a round (0 is always allowed: none). */
 export interface ModelCalls {
   max: number;

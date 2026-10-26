@@ -99,7 +99,8 @@ button.ui-choice:hover:not(:disabled) { background: var(--hover); filter: none; 
 /* BusyArea (busy.tsx): the part of a page whose work runs, disabled; a plain block. The spinner, the modal card and
    the dialogs are page.ts's CSS: its script draws them too. */
 .ui-busy-area { border: 0; margin: 0; padding: 0; min-width: 0; }
-.sf-panel .ui-busy-area { background: inherit; }
+/* In the Settings form, over settings-panel.css's boxed .sf-panel fieldset: the panel's own background, and no second box in it. */
+.sf-panel .ui-busy-area { background: inherit; border: 0; margin: 0; padding: 0; }
 /* The Settings form (settings-form.tsx): sections, jump links and Advanced, beside settings-panel.css's own. */
 .sf-jump { position: sticky; top: var(--titlebar-h, 0); z-index: 5; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 0; margin-bottom: 4px; background: var(--card); border-bottom: 1px solid var(--line); }
 .sf-panel .sf-jump button.link { text-decoration: none; font-weight: 600; }
@@ -132,7 +133,8 @@ details.sf-advanced[open] > summary { margin-bottom: 4px; }
 .tab:hover { color: var(--fg); background: var(--hover); }
 .tab[aria-selected="true"] { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.tab-panel > h2:first-child, .tab-panel > h3:first-child { margin-top: 0; }
+/* The tabs' own margin is the gap under them: none again over a panel's first heading, section or card. */
+.tab-panel > :is(h2, h3, .ui-section, .card):first-child { margin-top: 0; }
 .tab-panel[hidden] { display: none; }
 .tab-count { margin-left: 6px; padding: 0 6px; border-radius: 9px; background: var(--quiet-bg, var(--line)); color: var(--muted); font-size: 12px; font-weight: 600; }
 .tab-mark { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--alert); vertical-align: 2px; }

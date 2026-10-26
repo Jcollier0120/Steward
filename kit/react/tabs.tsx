@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { TabLabel } from './ui.tsx';
 
 /**
  * A row of tabs (WAI-ARIA tabs: the arrows, Home and End move between them, and the chosen one is the only one in the
@@ -78,7 +79,8 @@ export function usePageTab(ids: readonly string[]): [string, (id: string) => voi
 /**
  * An agent's page in tabs, for a page too long for one column: put it in the page's body, after what should show
  * whatever the tab (a summary). Each tab's panel is drawn and kept while hidden, so what's typed or ticked in one
- * stays, and the tour finds every part (it shows the tab a part is in: SHOW_TAB). A short page needs none.
+ * stays, and the tour finds every part (it shows the tab a part is in: SHOW_TAB). A Section titled as its tab leaves
+ * the title to the tab (TabLabel). A short page needs none.
  */
 export function PageTabs({ tabs, label = 'Sections' }: { tabs: PageTab[]; label?: string }) {
   const ids = tabs.map((t) => t.id);
@@ -96,7 +98,7 @@ export function PageTabs({ tabs, label = 'Sections' }: { tabs: PageTab[]; label?
       <Tabs tabs={tabs} tab={tab} onChoose={choose} label={label} prefix="page" />
       {tabs.map((t) => (
         <div key={t.id} className="tab-panel" role="tabpanel" id={`page-panel-${t.id}`} aria-labelledby={`page-tab-${t.id}`} hidden={t.id !== tab}>
-          {t.content}
+          <TabLabel.Provider value={t.label}>{t.content}</TabLabel.Provider>
         </div>
       ))}
     </>

@@ -96,7 +96,7 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.equal(body.round.repos, false);
   assert.match(html, /The kit the Steward manages: <strong>1\.0\.0<\/strong>/);
   assert.match(html, /No repositories yet\. Pick the ones to look after from those Reeve found/, 'no repositories: how to add one');
-  assert.match(html, /No repositories to look after on this PC, so a round every 10 minutes while on duty opens again, through Manor, the page of any agent/);
+  assert.match(html, /No repositories to look after on this PC, so a round every 10 minutes while on duty reopens, through Manor, any on-duty agent(?:'|&#x27;)s page that stops answering/);
   assert.doesNotMatch(html, /data-post="\/api\/stage\//, 'no stages, with no one to run them for');
   // With an employee: the kit it hands out, the stages and the whole round (the same data, drawn as if it had one).
   const rows = [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', parts: ['node'], usesKit: true, branch: 'main', checkout: { path: home, exists: true, branch: 'main', changes: 0 }, main: null, release: null, releaseNeeded: false, prs: [], prepared: null, notes: [] }];
@@ -107,7 +107,7 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   // name a team.
   const withTeam = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true }, team: ['someone'], teamNote: null });
   for (const h of [withOne, withTeam]) assert.doesNotMatch(h, /data-post="\/api\/stage\/merge|>Merge the team/);
-  assert.match(withOne, /The Steward merges no one(&#x27;|')s PRs but its own kit PRs/);
+  assert.match(withOne, /The Steward merges only its own kit PRs, in the build that rolls them out/);
   // By itself (Settings' default): it builds at set times, a build releasing each repository's main, its rounds only
   // looking between builds but for an urgent fix; and Run now, in the title bar.
   assert.match(withOne, /It builds at set times \(00:00, 06:00, 12:00, 18:00; Settings: Build pipeline\): a build releases each employee whose branch carries something new \(everyone merges their own PRs\)/);

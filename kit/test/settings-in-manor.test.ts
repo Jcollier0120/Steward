@@ -39,6 +39,10 @@ test("the shared fields say where they're set: the agent's own rounds and calls,
   assert.equal(ss.semanticRerankField().advanced, true);
   assert.equal(ss.keepVideoTagsField().advanced, true);
   assert.equal(ss.videoQualityField().advanced, undefined, 'on the page');
+  const shared = ss.manorSharedFields();
+  assert.deepEqual(shared.map((f: Field) => f.key), ['plainNotes', 'preset', 'semanticRerank', 'keepVideoTags'], "Manor's list: every shared one");
+  assert.ok(shared.every((f: Field) => f.inManor === 'shared'));
+  assert.deepEqual(Object.keys(ss.MANOR_SHARED_DEFAULTS).sort(), shared.map((f: Field) => f.key).sort(), 'a default for each');
 });
 
 test("the manor-wide ones: Manor's value when it says; the agent's own while it doesn't, or says something it can't use", () => {
@@ -120,4 +124,16 @@ test("Manor's Settings (?manor=1): the shared fields to read, the agent's own on
   const other: any = await saveSettingsReply(spec, { values: { folders: [] } }, false, { manor, asked: true });
   assert.equal(other.status, 400, "the agent's other settings aren't Manor's to change");
   assert.equal(read().plainNotes, undefined);
+});
+
+test("a demo's form names the file where it would be on Alex's PC, never the folder of the PC taking the picture", async () => {
+  const none = { manor: null, asked: false };
+  assert.equal((await settingsReply(spec, true, none)).file, file, "a developer's own: the real file");
+  process.env.KIT_DEMO = path.join(home, 'demo');
+  try {
+    assert.equal((await settingsReply(spec, true, none)).file, `C:\\Users\\Alex\\.${id}\\settings.json`);
+    assert.equal((await settingsReply(spec, false, none)).file, '', 'and none without Developer options, as ever');
+  } finally {
+    delete process.env.KIT_DEMO;
+  }
 });

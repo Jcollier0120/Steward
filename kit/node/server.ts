@@ -270,7 +270,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
   const spec = opts.settings;
   if (spec) {
     // ?manor=1: Manor's Settings, asking for the settings the staff share that it shows (settings-kit.ts' formPlace).
-    get['/api/settings'] = async ({ query }) => ({ json: await settingsReply(spec, undefined, formPlace(query)) });
+    // An agent with no rounds (no every(), schedule.ts) uses its settings from now on, not "from the next round on".
+    const told = () => (spec.usedFrom || rounds().length ? spec : { ...spec, usedFrom: 'from now on' });
+    get['/api/settings'] = async ({ query }) => ({ json: await settingsReply(told(), undefined, formPlace(query)) });
     post['/api/settings'] = ({ body, query }) => saveSettingsReply(spec, body, undefined, formPlace(query));
   }
 

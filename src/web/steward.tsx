@@ -423,7 +423,7 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
     r.castellan === false
       ? 'releases each new version on a branch in the repositories you said yes to, where Settings say how (you merge your own PRs)'
       : `releases each employee whose branch carries something new (everyone merges their own PRs), ${more.length ? `${more.join(', ')}, ` : ''}and approves the jobs whose installed scripts are the released ones`;
-  const tend = "opens again, through Manor, the page of any agent that is on duty but doesn't answer, and installs again, once, an update rolled back only because the PC was offline for a moment";
+  const tend = "reopens, through Manor, any on-duty agent's page that stops answering, and retries once an update rolled back only by a moment offline";
   const noRepos = r.repos === false;
   const what = noRepos
     ? r.tend
@@ -701,7 +701,7 @@ function Stages({ v }: { v: StewardView }) {
           <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
         </div>
         <Text variant="muted" as="p">
-          Each asks first, works through the ticked repositories, and reports for each below. Nothing is released until Settings say how. The Steward merges no PRs: merge your own once vouched, and each build releases what is on the branch.
+          Release asks first, then reports on each ticked repository below. Nothing is released until Settings say how. The Steward merges no PRs: merge your own once vouched.
         </Text>
         <div className="row round">
           <Text variant="muted">{roundWords(v.round).when}</Text>
@@ -726,7 +726,7 @@ function Stages({ v }: { v: StewardView }) {
         <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
       </div>
       <Text variant="muted" as="p">
-        Each stage asks first, works through the ticked employees, and reports for each below. The Steward merges no one's PRs but its own kit PRs: each build merges those it rolls out, and releases each branch.{offKitNote}
+        Each stage asks first, then reports on each ticked employee below. The Steward merges only its own kit PRs, in the build that rolls them out.{offKitNote}
       </Text>
       <div className="row round">
         <Text variant="muted">{roundWords(v.round).when}</Text>

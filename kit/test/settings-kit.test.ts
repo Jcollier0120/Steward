@@ -79,6 +79,7 @@ test('GET /api/settings returns the schema, the values in use and the defaults',
   assert.deepEqual(j.values, json(spec.normalize({}).settings));
   assert.equal(j.file, '', "Developer options off (no Manor, no switch of its own): the file's path isn't sent");
   assert.ok(Array.isArray(j.problems) && typeof j.warnings === 'object');
+  assert.equal(j.usedFrom, 'from now on', 'no rounds yet (no every()): used from now on, not from a next round');
 });
 
 test("with the agent's own Developer options on (no Manor to say), the file's path and its problems' own words are sent", async () => {
@@ -173,6 +174,7 @@ test('a new interval applies to the wait under way', async () => {
   try {
     await until(() => rounds === 1 && job.state.lastRunAt !== null);
     assert.ok(Date.parse(job.state.nextRunAt!) - Date.now() > 50_000, 'the first round ran; the next waits a minute');
+    assert.equal((await getSettings()).usedFrom, undefined, 'with rounds: the panel says its own "from the next round on"');
     ms = 20;
     job.reschedule();
     await until(() => rounds >= 2);

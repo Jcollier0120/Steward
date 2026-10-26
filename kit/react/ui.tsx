@@ -60,22 +60,30 @@ export function CardFooter({ className, children }: { className?: string; childr
   return <div className={cx('ui-card-footer', className)}>{children}</div>;
 }
 
+/** The label of the page tab (PageTabs) a part of the page is in; null outside one. */
+export const TabLabel = createContext<string | null>(null);
+
 /**
  * A titled block: a heading row (an icon or leading mark, the title, a "· 12" count, and `right` pinned to the far
- * end) with its content under it, at one of two spacings.
+ * end) with its content under it, at one of two spacings. In a page tab of the same name (PageTabs), the tab says its
+ * title and count already: the row keeps only its leading mark and `right`, and none at all without them.
  */
 export function Section({ title, icon, leading, count, right, gap = 'md', className, tour, children }: { title: string; icon?: IconName | ReactNode; leading?: ReactNode; count?: number; right?: ReactNode; gap?: 'md' | 'lg'; className?: string; tour?: string; children: ReactNode }) {
+  const tab = useContext(TabLabel);
+  const named = tab === null || tab.trim().toLowerCase() !== title.trim().toLowerCase();
   return (
     <section className={cx('ui-section', `ui-gap-${gap}`, className)} data-tour={tour}>
-      <div className="ui-section-head">
-        <div className="ui-section-name">
-          {leading}
-          {icon !== undefined && <Icon name={icon} className="muted" />}
-          <h2>{title}</h2>
-          {count != null && <span className="muted ui-count">· {count}</span>}
+      {(named || leading || right) && (
+        <div className="ui-section-head">
+          <div className="ui-section-name">
+            {leading}
+            {named && icon !== undefined && <Icon name={icon} className="muted" />}
+            {named && <h2>{title}</h2>}
+            {named && count != null && <span className="muted ui-count">· {count}</span>}
+          </div>
+          {right && <div className="ui-section-right">{right}</div>}
         </div>
-        {right && <div className="ui-section-right">{right}</div>}
-      </div>
+      )}
       {children}
     </section>
   );
