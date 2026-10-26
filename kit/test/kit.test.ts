@@ -197,6 +197,7 @@ test('page text is escaped', () => {
   assert.equal(esc('<a href="x">&</a>'), '&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;');
   assert.equal(ago(null), 'never');
   assert.equal(ago(new Date(Date.now() - 3 * 3600_000).toISOString()), '3 hours ago');
+  assert.equal(ago(new Date(Date.now() + 6 * 3600_000).toISOString()), 'in 6 hours', 'a time still to come');
 });
 
 // ---------------------------------------------------------------- manners on a shared NPU

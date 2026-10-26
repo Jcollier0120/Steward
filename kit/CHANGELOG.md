@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.142.0
+
+**A link to a part of the page in a tab not shown opens that tab, a time still to come reads "in 6 hours", and an empty number setting says what empty means.**
+
+### What changed
+
+- **react/staff.tsx, `showSection`:** a part in a hidden page tab (`PageTabs`) has its tab chosen first (`SHOW_TAB`, as the tour does). The page then scrolls to it once the tab is drawn. Glance's tiles use it, and so does any agent's in-page link that calls it.
+- **`ago()`, in node/page.ts and react/time.ts:** a time more than 45 seconds ahead reads "in 6 hours" or "in 2 days", not "just now". A clock a moment ahead still reads "just now".
+- **react/settings-form.tsx:** a `nullable` whole or number field says what its empty box means ("Empty: The variant's own…"), as a text field already did. It no longer draws a bare empty box.
+
+### Before you update
+
+- Nothing breaks.
+- **A test that renders a future time and expects "just now"** finds "in …" instead.
+
 ## 2.141.0
 
 **Settings and tabbed pages take less room: no box inside the Settings panel, no headings over an empty table, tabs that stay put, and a tab's title said once.**

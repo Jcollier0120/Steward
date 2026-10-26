@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { SHOW_TAB } from './tabs.tsx';
 import { ago } from './time.ts';
 import { Badge, Button } from './ui.tsx';
 
@@ -42,9 +43,18 @@ export function useFold(name: string, byDefault: boolean): [boolean, (open: bool
   return [open, set];
 }
 
-/** Scrolls to one of the page's sections by its tour name (the `tour` of a Section or Card). */
+/**
+ * Scrolls to one of the page's sections by its tour name (the `tour` of a Section or Card). One in a page tab not
+ * shown (PageTabs) has its tab chosen first, as the tour does, and is scrolled to once that tab is drawn.
+ */
 export function showSection(tour: string): void {
-  document.querySelector(`[data-tour="${tour.replace(/["\\]/g, '\\$&')}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const el = document.querySelector<HTMLElement>(`[data-tour="${tour.replace(/["\\]/g, '\\$&')}"]`);
+  if (!el) return;
+  const panel = el.closest<HTMLElement>('[role="tabpanel"][hidden]');
+  if (!panel?.id.startsWith('page-panel-')) return el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  window.dispatchEvent(new CustomEvent(SHOW_TAB, { detail: panel.id.slice('page-panel-'.length) }));
+  const scroll = (frames: number): unknown => (panel.hidden && frames ? requestAnimationFrame(() => scroll(frames - 1)) : el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  scroll(10);
 }
 
 /**
