@@ -102,3 +102,103 @@ test('a phase the agent gives is kept, and an interval off the clock keeps the o
     off.stop();
   }
 });
+
+// Manor's rota (rota.ts, kit 2.138.0): each schedule's phase on this PC, anywhere in its interval, and each agent's
+// place in the start window. A test's rounds read a rota only from the home they give.
+const { rotaEntry, rotaPhase, rotaStartAt, ROTA_FILE } = await import('./fixture/src/kit/rota.ts');
+const { startWindow, WOKE_LATE_MS } = await import('./fixture/src/kit/schedule.ts');
+const { pace } = await import('./fixture/src/kit/pace.ts');
+const { mock } = await import('node:test');
+const { mkdirSync, writeFileSync } = await import('node:fs');
+
+/** A Manor folder whose rota.json is `doc` (a string as it is). */
+const manorWith = (doc: unknown) => {
+  const dir = mkdtempSync(path.join(home, 'manor-'));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, ROTA_FILE), typeof doc === 'string' ? doc : JSON.stringify(doc));
+  return dir;
+};
+const rota = (agents: Record<string, unknown>) => ({ v: 1, made: new Date().toISOString(), agents });
+
+test("the rota, read leniently: a phase counts only at the interval it was placed for, and anything malformed is left out", () => {
+  const dir = manorWith(
+    rota({
+      [id]: { startAt: 0.25, phases: { round: { everyMs: HOUR, phaseMs: 47 * MIN, startAt: 0.75 }, bad: { everyMs: HOUR, phaseMs: HOUR }, odd: { everyMs: 'hourly', phaseMs: 1 }, names: { everyMs: 6 * HOUR, phaseMs: 200 * MIN } } },
+      other: 'nonsense',
+    }),
+  );
+  assert.deepEqual(Object.keys(rotaEntry(id, dir)!.phases), ['round', 'names']);
+  assert.equal(rotaPhase(id, 'round', HOUR, dir), 47 * MIN, 'anywhere in the interval, past the clock\'s 30 minutes');
+  assert.equal(rotaPhase(id, 'round', 30 * MIN, dir), null, 'its interval changed since: the clock\'s, until Manor places it again');
+  assert.equal(rotaPhase(id, 'names', 6 * HOUR, dir), 200 * MIN);
+  assert.equal(rotaStartAt(id, 'round', dir), 0.75, "the schedule's own place");
+  assert.equal(rotaStartAt(id, 'names', dir), 0.25, "else its agent's");
+  assert.equal(rotaEntry('other', dir), null);
+  assert.equal(rotaEntry('nobody', dir), null);
+  for (const doc of ['{ not json', JSON.stringify({ v: 2, agents: { [id]: { phases: {} } } }), JSON.stringify([1, 2])]) assert.equal(rotaEntry(id, manorWith(doc)), null, `none from ${doc.slice(0, 20)}`);
+  assert.equal(rotaEntry(id, path.join(home, 'no-manor')), null, 'no rota.json: none');
+  assert.equal(rotaEntry(id), null, "under node --test, never the PC's own");
+});
+
+test("a round in the rota falls on the rota's phase, an agent's own phase wins, and round.json says where each came from", async () => {
+  setDuty(true);
+  const dir = manorWith(rota({ [id]: { phases: { 'rota-placed': { everyMs: HOUR, phaseMs: 47 * MIN }, 'rota-moved': { everyMs: 30 * MIN, phaseMs: 13 * MIN }, 'rota-own': { everyMs: HOUR, phaseMs: 5 * MIN } } } }));
+  const placed = every(HOUR, async () => {}, { firstDelayMs: HOUR, name: 'rota-placed', rotaHome: dir });
+  const moved = every(HOUR, async () => {}, { firstDelayMs: HOUR, name: 'rota-moved', rotaHome: dir });
+  const own = every(HOUR, async () => {}, { firstDelayMs: HOUR, name: 'rota-own', phaseMs: 17 * MIN, rotaHome: dir });
+  try {
+    for (const job of [placed, moved, own]) {
+      assert.ok(job.runNow());
+      await until(() => !job.running && job.state.lastRunAt, 10_000, 'the round to end');
+    }
+    const next = (job: typeof placed) => Date.parse(job.state.nextRunAt!);
+    assert.equal(nextOnClock(next(placed), HOUR, 47 * MIN), next(placed), '47 minutes past the hour');
+    assert.equal(nextOnClock(next(moved), HOUR, clockPhase(id, 'rota-moved', HOUR)), next(moved), "placed for 30 minutes, run hourly: the clock's");
+    assert.equal(nextOnClock(next(own), HOUR, 17 * MIN), next(own), "the agent's own");
+    const r = readJson<{ rounds: Record<string, { phaseMs?: number; phaseFrom?: string }> }>(roundFile(), { rounds: {} }).rounds;
+    assert.deepEqual([r['rota-placed'].phaseMs, r['rota-placed'].phaseFrom], [47 * MIN, 'rota']);
+    assert.equal(r['rota-moved'].phaseFrom, 'clock');
+    assert.deepEqual([r['rota-own'].phaseMs, r['rota-own'].phaseFrom], [17 * MIN, 'agent']);
+  } finally {
+    for (const job of [placed, moved, own]) job.stop();
+  }
+});
+
+test("the first round after a start comes at the rota's place in the start window", () => {
+  setDuty(true);
+  const dir = manorWith(rota({ [id]: { startAt: 0.5, phases: {} } }));
+  const w = startWindow(pace());
+  const before = Date.now();
+  const job = every(HOUR, async () => {}, { name: 'rota-start', rotaHome: dir });
+  try {
+    const wait = Date.parse(job.state.nextRunAt!) - before;
+    const want = w.fromMs + 0.5 * w.spanMs;
+    assert.ok(Math.abs(wait - want) < 2_000, `${wait} ms after the start, not ${want}`);
+  } finally {
+    job.stop();
+  }
+  assert.deepEqual(startWindow('gentle'), { fromMs: 2 * MIN, spanMs: 13 * MIN });
+  assert.deepEqual(startWindow('full'), { fromMs: 30_000, spanMs: 150_000 });
+});
+
+test('a round whose time came while the PC slept waits its place in the start window first', async () => {
+  setDuty(true);
+  const dir = manorWith(rota({ [id]: { startAt: 0.2, phases: {} } }));
+  const w = startWindow(pace());
+  let ran = 0;
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+  const job = every(HOUR, async () => void ran++, { firstDelayMs: MIN, name: 'woke', rotaHome: dir });
+  try {
+    // Asleep through its time: the timer fires 10 minutes late.
+    mock.timers.setTime(Date.now() + 10 * MIN);
+    mock.timers.tick(MIN);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(ran, 0, 'not at once');
+    const wait = Date.parse(job.state.nextRunAt!) - Date.now();
+    assert.ok(Math.abs(wait - (w.fromMs + 0.2 * w.spanMs)) < 1_000, `it waits its place in the window: ${wait} ms`);
+    assert.ok(WOKE_LATE_MS >= MIN && WOKE_LATE_MS <= 5 * MIN);
+  } finally {
+    job.stop();
+    mock.timers.reset();
+  }
+});

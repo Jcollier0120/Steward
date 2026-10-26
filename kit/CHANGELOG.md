@@ -2,6 +2,36 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.138.0
+
+**The whole staff employed at once: rounds placed apart on each PC by Manor's rota, staggered after a start or a wake, a model loaded only under the manor's memory ceiling, and at most 2 or 4 agents' text readers at once.**
+
+### What changed
+
+- **rota.ts (new), Manor's rota:** `rotaEntry(who)`, `rotaPhase(who, schedule, everyMs)` and `rotaStartAt(who, schedule)` read `<Manor's folder>\rota.json`, which Manor keeps on each PC from the staff's round.json (Manor#415). It places each schedule's phase anywhere in its interval where the day's load is least, the busiest rounds first and salted by the PC, and each agent's place in the start window. It's read leniently through the file cache: no rota, or a malformed one, keeps the clock's phases and a random place, as before. A phase counts only for the interval it was placed for. Under node --test none is read unless a test gives `every()` a `rotaHome`.
+- **schedule.ts, `every()`:**
+  - A round's phase on the clock is the agent's own `phaseMs`, else the rota's, else `clockPhase()`'s, as before. round.json's new `phaseFrom` says which (`agent`, `rota` or `clock`; spec/ROUND.md).
+  - The first round after a start comes in the start window (`startWindow(pace)`: 2 to 15 minutes at a gentle pace, 30 s to 3 minutes at a full one, as before), at the rota's place for the schedule or its agent, else by chance.
+  - **New:** a scheduled round whose timer fired 2 minutes or more late (`WOKE_LATE_MS`: the PC slept) waits its place in the start window again before it runs, unless its rounds are `light`. A round the person asks for runs at once, as before.
+- **memory-guard.ts (new), the memory guard,** called from `accelerators.ts`' start, so before every model server starts:
+  - It needs the model's files (`modelBytes`: llama-server's `-m` and `--mmproj`, OpenVINO's `--model_path`, OpenVINO Model Server's `--source_model` folder) and the 15% of memory the manor's ceiling leaves (`headroomBytes`, at least 1.5 GB) in what Windows has available. A card with its own memory is left alone.
+  - Short of it, it stops the manor's other servers unused for 30 s, the longest unused first, in the keeper's turn on each (`pcReaper`, which takes a `log` now). It never stops one in use, one whose idle stop config.json turns off, or another on the starting server's accelerator.
+  - Still short, a person's request looks again every 10 s for up to 2 minutes, then starts anyway. Background work waits up to 30 s, then starts nothing: `ensureServer`'s new `whenShort: 'defer'` throws `NoRoomToLoad`, and `npu.ts` gives background requests that option and defers them (`NpuBusy`, "model work deferred for 5 min", that accelerator left alone for `backOffMs`), as for a model still loading.
+  - Its lines go in the keeper's log, `memory guard: …`. Under node --test it looks at nothing unless `ensureServer` is given a `room` stand-in.
+- **ocr-npu.ts, readers at once:**
+  - At most 2 agents' text readers run at once on a PC under 24 GB, 4 with 24 GB or more (`readersAtOnce`). An agent's readers (the NPU's and the processor's) take one place between them in a line every agent shares (`ocr-readers`), before either starts and never inside the NPU's turn.
+  - They keep the place while one runs. When another agent waits, they end after the batch they're reading, never in its middle, and give it up; the next batch starts them again from the cache.
+  - A place not had in 5 minutes is gone without: the reader starts anyway, since the model reads more exactly than Windows OCR.
+  - `modelReader`'s new `cap` option gives the places, or `null` for none. Under node --test there are none unless a test gives them.
+- spec/ROUND.md (Phase, Start, `phaseFrom`), spec/ACCELERATORS.md (Room to start a server) and spec/OCR.md (Readers at once) say all of this.
+- This release brings 2.137.2's changes too.
+
+### Before you update
+
+- A test that moves the clock past a scheduled round's time with mock timers (`setTime`) before ticking it now sees the round wait its place in the start window first. Tick to the round's time, or make it `light`.
+- A test that compares a whole round.json record on the clock needs `phaseFrom`.
+- Nothing else: an agent's own `phaseMs` and `firstDelayMs` keep their meaning, and a background request that finds no room to load its model is deferred as a busy NPU's is, which agents already handle.
+
 ## 2.137.2
 
 **Three fixes from the launch checks: a video the kit makes no longer carries where it was filmed, the known folders come back right whatever script a user or folder name is in, and "Back to Castellan" goes to Castellan's own address.**

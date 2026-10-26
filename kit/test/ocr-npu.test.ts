@@ -524,3 +524,67 @@ test("the program's name carries its references and manifest, the older helpers'
   assert.match(ps, /<supportedArchitectures [^>]*>amd64 arm64</);
   assert.match(ps, /GenerateExecutable = \$true/);
 });
+
+test('readers at once (kit 2.138.0): 2 under 24 GB of memory, 4 with more', () => {
+  assert.equal(m.readersAtOnce(16 * 1024 ** 3), 2);
+  assert.equal(m.readersAtOnce(24 * 1024 ** 3), 4);
+  assert.equal(m.readersAtOnce(64 * 1024 ** 3), 4);
+});
+
+test("a place among the readers: waited for before the reader starts; given up for another agent once no batch is read, never in one's middle", async () => {
+  const { slotDirs, withAcceleratorTurn } = await import('./fixture/src/kit/npu-queue.ts');
+  const cap = { dirs: slotDirs(path.join(home, 'readers-line', 'ocr-readers'), 1), lookMs: 50, waitMs: 20_000 };
+  /** Another agent's place: held until `go` is called. */
+  const other = () => {
+    let go!: () => void;
+    const held = new Promise<void>((r) => (go = r));
+    let had = false;
+    const done = withAcceleratorTurn(cap.dirs, async () => {
+      had = true;
+      await held;
+    }, { who: 'other', waitMs: 20_000 });
+    return { go, done, had: () => had };
+  };
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const until = async (f: () => boolean) => {
+    for (let i = 0; i < 200 && !f(); i++) await sleep(25);
+    assert.ok(f());
+  };
+  const where = readyPlace('x64', null);
+  const started: string[][] = [];
+  const start = (args: string[], cwd: string) => (started.push(args), startFake(args, cwd));
+  const o = { env: { KIT_OCR_ENGINE: 'model' }, arch: 'x64', home: where, start, cap };
+
+  const first = other();
+  await until(first.had);
+  const making = m.modelReader(o);
+  await sleep(300);
+  assert.equal(started.length, 0, 'no reader starts while the only place is held');
+  first.go();
+  await first.done;
+  const r = await making;
+  assert.equal(r?.engine, 'model-cpu');
+  assert.equal(started.length, 1);
+
+  // In the middle of a batch (a page the program never answers), another agent waits: the batch isn't cut short.
+  const second = other();
+  const slow = await r!.read([{ file: path.join(home, 'slow.png'), scale: 1, orient: true }], { timeoutMs: 600 });
+  assert.match(slow[0]?.error ?? '', /too long/, 'ended by its own time limit, not for the agent waiting');
+  await until(second.had);
+
+  // The next batch waits for the place again, and starts the reader afresh.
+  const reading = r!.read([{ file: path.join(home, 'again.png'), scale: 1, orient: true }]);
+  await sleep(300);
+  assert.equal(started.length, 1);
+  second.go();
+  await second.done;
+  const again = await reading;
+  assert.equal(again[0]?.lines?.[0].text, 'again.png 1 1');
+  assert.equal(started.length, 2);
+
+  // Idle, holding the place, with another agent waiting: its reader ends and the place is given.
+  const third = other();
+  await until(third.had);
+  third.go();
+  await third.done;
+});
