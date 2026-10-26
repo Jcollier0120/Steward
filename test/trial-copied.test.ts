@@ -87,7 +87,7 @@ test("a rollout's bump brings the test up too, and its commit carries it with a 
   assert.equal(res.outcome, 'done', `${res.message}\n${a.c.lines.join('\n')}`);
   assert.match(res.message, /checks passed once its tests were brought up to the kit \(test\/label\.test\.ts:7: /);
   const branch = 'steward/kit-1.0.1';
-  assert.deepEqual(sh(a.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['CHANGELOG.md', 'kit.json', 'package-lock.json', 'package.json', 'src/app.ts', 'test/label.test.ts']);
+  assert.deepEqual(sh(a.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['changes/README.md', 'changes/steward-kit-1-0-1.md', 'kit.json', 'test/label.test.ts']);
   assert.match(sh(a.checkout, 'show', `${branch}:test/label.test.ts`), new RegExp(`assert\\.equal\\(LABEL, '${NEW}'\\);`));
   assert.match(sh(a.checkout, 'log', '-1', '--format=%b', branch), new RegExp(`Its tests expected what kit 1\\.0\\.0 said, which kit 1\\.0\\.1 changed, and are brought up to it: test/label\\.test\\.ts:7: '${OLD}' → '${NEW}'\\. Its checks passed with them\\.`));
 });

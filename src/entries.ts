@@ -20,13 +20,21 @@ export const CHANGES_DIR = 'changes';
 export const CHANGES_README = 'changes/README.md';
 export const KIT_CHANGES_DIR = 'kit/changes';
 
-/** What changes/README.md says, for a repository starting the folder. */
+/**
+ * What changes/README.md says, for a repository starting the folder: Manor's (on the build pipeline since 2026-10-09),
+ * with the repository's name. A kit bump puts it into each repository that hasn't it (stages/bump.ts), and the rollout
+ * into one on the kit already (stages/onpipeline.ts).
+ */
 export const changesReadme = (name: string) =>
   `# ${name}'s changes waiting to be released\n\n` +
-  'Each piece of work writes its changelog entry here and leaves the version files and CHANGELOG.md alone: as `<branch>.md` (its branch as one word, `claude/build-pipeline` → `claude-build-pipeline.md`) when the Steward builds at set times, which picks no version (a first line `minor: true` asks for a minor step); ' +
-  'else as `<version>.md`, named by the version the Steward handed out for it (`claim-version`). ' +
+  "Each piece of work writes its changelog entry here, in the file the Steward's `claim-version` names for its branch (`claude/some-work` writes `claude-some-work.md`), and leaves the version files and CHANGELOG.md alone. " +
   "The entry is what the Steward's kit spec/RELEASE-NOTES.md describes (a bold line, What's new and/or What changed, Before you update), without its `## ` heading. " +
-  'When the Steward merges the work, it sets the version, moves the entry into CHANGELOG.md (each `<branch>.md` merged before the next release into that release\'s one entry) and deletes the file, so two pieces of work never meet in the same lines.\n';
+  "You merge the work yourself once it's vouched for. " +
+  "The Steward's next build stamps it: it sets the release's version, moves the entry into CHANGELOG.md and deletes the file, in a pull request of its own, so two pieces of work never meet in the same lines.\n";
+
+/** What a PR that adds changes/README.md says of it, in its description. */
+export const onPipelineNote = (name: string) =>
+  `\`${CHANGES_README}\` puts ${name} on the build pipeline: from now on each piece of work writes its changelog entry in \`changes/<its branch>.md\` and leaves the version files and CHANGELOG.md alone, and the Steward's build stamps the version. A PR open now that sets its version the old way still merges as before.`;
 
 const VERSION_FILE = /^(?:kit\/)?changes\/(\d+\.\d+\.\d+)\.md$/;
 
@@ -128,19 +136,23 @@ function parts(body: string): { head: string; lead: string[]; sections: [string,
 
 /** A headline as words: its bold and its last full stop taken off. */
 const headWords = (head: string) => head.replace(/^\*\*|\*\*$/g, '').trim().replace(/\.$/, '');
-const BRINGS = /^Brings (\d+) changes: (.*)$/;
+const BRINGS = /^Brings (\d+) changes: (.*)$/i;
+/** An urgent fix's headline begins so (the kit's exchequer.ts isUrgent reads a line starting "**Urgent fix:"). */
+const URGENT = /^Urgent fix:\s*/i;
 
 /**
  * Two entries made one (the first, then the second): headline "Brings N changes: <each headline>", each section's
  * bullets one after the other, and "Before you update" saying "Nothing: it updates itself as usual." only when neither
- * says anything else. Pure.
+ * says anything else. When either is an urgent fix (a kit bump's that brings one: bump.ts kitBumpBody), so is the one
+ * they make: "Urgent fix: brings N changes: …", so the release still goes out at once. Pure.
  */
 export function composeEntry(a: string, b: string): string {
   const x = parts(a);
   const y = parts(b);
-  const xh = headWords(x.head);
-  const was = BRINGS.exec(xh);
-  const head = `**Brings ${was ? Number(was[1]) + 1 : 2} changes: ${was ? was[2] : xh}; ${headWords(y.head)}.**`;
+  const [xh, yh] = [headWords(x.head), headWords(y.head)];
+  const urgent = URGENT.test(xh) || URGENT.test(yh);
+  const was = BRINGS.exec(xh.replace(URGENT, ''));
+  const head = `**${urgent ? 'Urgent fix: brings' : 'Brings'} ${was ? Number(was[1]) + 1 : 2} changes: ${was ? was[2] : xh.replace(URGENT, '')}; ${yh.replace(URGENT, '')}.**`;
   const sections = new Map<string, { title: string; lines: string[] }>();
   for (const [title, lines] of [...x.sections, ...y.sections]) {
     const key = title.toLowerCase();

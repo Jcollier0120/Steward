@@ -24,9 +24,12 @@ const { rolloutDone, rolloutLock, rolloutsBeside } = await import('../src/stages
 const { withLock } = await import('../src/kit/lock.ts');
 const { fakeEmployee, ok, sh } = await import('./helpers.ts');
 const { run: realRun } = await import('../src/run.ts');
+const { changesReadme } = await import('../src/entries.ts');
 
 const fake = fakeEmployee(path.join(home, 'fake'), { version: '0.4.0', kit: '1.0.0' });
-const other = fakeEmployee(path.join(home, 'other'), { version: '0.4.0', kit: '1.0.1' });
+// Other on the build pipeline already (its changes/README.md), so the rollout has nothing for it; its PR #7 below still
+// sets its version the old way, as one opened before the switch does, and merges as before.
+const other = fakeEmployee(path.join(home, 'other'), { version: '0.4.0', kit: '1.0.1', files: { 'changes/README.md': changesReadme('Other') } });
 const repos: Record<string, { origin: string; checkout: string }> = { 'Jcollier0120/Fake': fake, 'Jcollier0120/Other': other };
 
 // Fake's checks say they've started, then wait until the test lets them go (with a limit of their own, should it never).
@@ -172,17 +175,19 @@ test("rounds go on while a kit's rollout runs beside them, and merge no one's re
   assert.deepEqual(created, ['Jcollier0120/Fake#8']);
   assert.deepEqual(merged, ['Jcollier0120/Fake#8'], 'merged by the rollout, before any round');
   assert.deepEqual(prs['Jcollier0120/Fake'], []);
-  assert.match(ended[0].results.map((r) => r.message).join('\n'), /^rollout: kit 1\.0\.1: 0\.4\.1 on steward\/kit-1\.0\.1 \(.{7}\): kit 1\.0\.0 → 1\.0\.1, checks passed; opened "Fake 0\.4\.1: the Steward's kit 1\.0\.1"; merged it$/);
+  assert.match(ended[0].results.map((r) => r.message).join('\n'), /^rollout: kit 1\.0\.1: changes\/steward-kit-1-0-1\.md on steward\/kit-1\.0\.1 \(.{7}\): kit 1\.0\.0 → 1\.0\.1, on the build pipeline from now on, checks passed; opened "Fake: the Steward's kit 1\.0\.1"; merged it$/);
   assert.match(lines.join('\n'), /rollout: kit 1\.0\.1's rollout ended beside the rounds after .*: 1 PR opened or updated/);
   assert.match(sh(fake.origin, 'show', 'main:kit.json'), /"kit": "1\.0\.1"/, "Fake's main on the kit now");
+  // The round after it stamps Fake's entry (its own PR, merged by the Steward), then releases it at the version stamped.
   const fourth = await round();
   assert.equal(fourth.error, undefined, fourth.log.join('\n'));
   const did = done(fourth);
-  assert.ok(did.some((m) => /^rollout: kit 1\.0\.1: 0\.4\.1 on steward\/kit-1\.0\.1 .*; merged it$/.test(m)), `the rollout reported by this round: ${did.join('\n')}`);
+  assert.ok(did.some((m) => /^rollout: kit 1\.0\.1: changes\/steward-kit-1-0-1\.md on steward\/kit-1\.0\.1 .*; merged it$/.test(m)), `the rollout reported by this round: ${did.join('\n')}`);
+  assert.ok(did.includes('stamp: stamped v0.4.1, and merged it'), did.join('\n'));
   assert.ok(did.includes('release: released v0.4.1 from origin/main (…), with kit 1.0.1'), did.join('\n'));
   assert.ok(!did.some((m) => /^merged #/.test(m)), `the round merges nothing itself: ${did.join('\n')}`);
   assert.deepEqual(released('fake'), ['0.4.0', '0.4.1']);
-  assert.deepEqual(merged, ['Jcollier0120/Fake#8']);
+  assert.deepEqual(merged, ['Jcollier0120/Fake#8', 'Jcollier0120/Fake#9'], 'the kit PR, then its stamp');
 
   // On the kit now: the next round starts no rollout, and reports nothing again.
   const fifth = await round();

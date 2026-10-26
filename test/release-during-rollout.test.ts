@@ -96,14 +96,15 @@ test("a Release for a kit pressed while that kit's rollout runs beside the round
   assert.equal(ended, false, 'still waiting while the bump is held');
   assert.deepEqual(released(), ['0.4.0']);
 
-  // Its checks pass: the rollout merges Fake's kit PR and ends, and the Release goes on from the merged bump.
+  // Its checks pass: the rollout merges Fake's kit PR and ends, and the Release goes on from the merged bump: its entry
+  // in changes/ stamped first, as a build does (Steward 0.36.248), then released at the version stamped.
   writeFileSync(letGo, '');
   const out = await pressed;
   assert.equal(out.error, undefined, out.log.join('\n'));
-  assert.deepEqual(merged, [8], 'the rollout merged its kit PR');
+  assert.deepEqual(merged, [8, 9], 'the rollout merged its kit PR, then the Release its stamp');
   const fakes = out.results.filter((r) => r.id === 'fake');
   assert.equal(fakes.length, 1, out.log.join('\n'));
   assert.equal(fakes[0].outcome, 'done', `${fakes[0].message}\n${out.log.join('\n')}`);
-  assert.match(fakes[0].message, /^released v0\.4\.1 from origin\/main \(.{7}\), with kit 1\.0\.1/);
+  assert.match(fakes[0].message, /^released v0\.4\.1 from origin\/main \(.{7}\), with kit 1\.0\.1.*; stamp: stamped v0\.4\.1, and merged it$/);
   assert.deepEqual(released(), ['0.4.0', '0.4.1']);
 });

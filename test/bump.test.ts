@@ -16,6 +16,7 @@ const { bumpOne, kitBumpEntry, onlyFlaky, repin, replacingEntry, wholeTestSteps 
 const { prBody, push, pushOne } = await import('../src/stages/push.ts');
 const { claimsFile, loadClaims } = await import('../src/claims.ts');
 const { isUrgent } = await import('../src/kit/exchequer.ts');
+const { changesReadme } = await import('../src/entries.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type GhScript = Parameters<typeof runner>[0];
 
@@ -43,25 +44,27 @@ function setup(o: Parameters<typeof fakeEmployee>[1] = {}, more: Parameters<type
   return { ...f, e, ctx, r, dir, work: path.join(dir, 'work', 'fake') };
 }
 
-test('a bump: a worktree of origin/main on steward/kit-<version>, kit.json and the version changed, the kit filled, checks run, committed', async () => {
+test('a bump: a worktree of origin/main on steward/kit-<version>, kit.json changed and its entry in changes/ for the build to stamp, the kit filled, checks run, committed', async () => {
   const s = setup();
   const res = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });
   assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
-  assert.equal(res.version, '0.4.1');
+  assert.equal(res.version, undefined, "on the build pipeline the version is the stamp's");
+  assert.match(res.message, /^changes\/steward-kit-1-0-1\.md on steward\/kit-1\.0\.1 .*, on the build pipeline from now on/);
   const branch = bumpBranch('1.0.1');
   assert.equal(branch, 'steward/kit-1.0.1');
-  // The commit: exactly kit.json, the three version files and the changelog, started with the new version's entry.
-  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['CHANGELOG.md', 'kit.json', 'package-lock.json', 'package.json', 'src/app.ts']);
-  const log = sh(s.checkout, 'show', `${branch}:CHANGELOG.md`).replace(/\r\n/g, '\n');
-  assert.match(log, /^# Fake's changelog\n/);
-  assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.1: /);
-  assert.match(log, /### What changed\n\n- The Steward's kit 1\.0\.1, after 1\.0\.0: the parts every agent of the manor shares\./);
-  assert.doesNotMatch(log, /Jcollier0120|Steward\.git|github\.com/i, "no repository's name in notes the agent ships");
-  assert.match(log, /### Before you update\n\nNothing: it updates itself as usual\.$/);
+  // The commit: exactly kit.json, its entry and changes/README.md, which puts Fake on the build pipeline. No version
+  // file nor CHANGELOG.md: an agent's own PR open beside it, which set its version, meets none of its lines.
+  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['changes/README.md', 'changes/steward-kit-1-0-1.md', 'kit.json']);
+  assert.equal(sh(s.checkout, 'show', `${branch}:changes/README.md`), changesReadme('Fake').trimEnd());
+  const entry = sh(s.checkout, 'show', `${branch}:changes/steward-kit-1-0-1.md`).replace(/\r\n/g, '\n');
+  assert.match(entry, /^\*\*It carries the Steward's kit 1\.0\.1: /, 'no heading: the stamp gives it its version');
+  assert.match(entry, /### What changed\n\n- The Steward's kit 1\.0\.1, after 1\.0\.0: the parts every agent of the manor shares\./);
+  assert.doesNotMatch(entry, /Jcollier0120|Steward\.git|github\.com/i, "no repository's name in notes the agent ships");
+  assert.match(entry, /### Before you update\n\nNothing: it updates itself as usual\.$/);
   assert.equal(sh(s.checkout, 'show', `${branch}:kit.json`), '{\n  "kit": "1.0.1",\n  "parts": ["node"]\n}');
-  assert.match(sh(s.checkout, 'show', `${branch}:src/app.ts`), /version: '0\.4\.1'/);
-  assert.equal(JSON.parse(sh(s.checkout, 'show', `${branch}:package-lock.json`)).packages[''].version, '0.4.1');
-  assert.equal(sh(s.checkout, 'log', '-1', '--format=%s', branch), "Fake 0.4.1: the Steward's kit 1.0.1");
+  assert.match(sh(s.checkout, 'show', `${branch}:src/app.ts`), /version: '0\.4\.0'/);
+  assert.equal(sh(s.checkout, 'log', '-1', '--format=%s', branch), "Fake: the Steward's kit 1.0.1");
+  assert.deepEqual(loadClaims(), [], 'nothing claimed');
   // The worktree has the kit it was checked with; the person's checkout is as it was.
   assert.equal(readFileSync(path.join(s.work, 'src', 'kit', 'VERSION'), 'utf8').trim(), '1.0.1');
   assert.equal(sh(s.checkout, 'branch', '--show-current'), 'main');
@@ -71,6 +74,33 @@ test('a bump: a worktree of origin/main on steward/kit-<version>, kit.json and t
   const again = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });
   assert.equal(again.outcome, 'done', again.message);
   assert.equal(sh(s.checkout, 'rev-list', '--count', `origin/main..${branch}`), '1');
+  // On the pipeline already (its changes/README.md on main): the entry alone.
+  const on = setup({ files: { 'changes/README.md': changesReadme('Fake') } });
+  const res2 = await bumpOne(on.ctx, on.e, { kit: '1.0.1', kitFrom });
+  assert.equal(res2.outcome, 'done', res2.message);
+  assert.doesNotMatch(res2.message, /from now on/);
+  assert.deepEqual(sh(on.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['changes/steward-kit-1-0-1.md', 'kit.json']);
+});
+
+test('worked with plain git, a bump sets its version the old way: kit.json and the version changed, the version claimed, its CHANGELOG.md entry written', async () => {
+  // No PR for the build's stamp to go through, so it never rides the build pipeline.
+  const s = setup();
+  const ctx = { ...s.ctx, host: () => 'git' as const };
+  const res = await bumpOne(ctx, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
+  assert.equal(res.version, '0.4.1');
+  const branch = bumpBranch('1.0.1');
+  // The commit: exactly kit.json, the three version files and the changelog, started with the new version's entry.
+  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['CHANGELOG.md', 'kit.json', 'package-lock.json', 'package.json', 'src/app.ts']);
+  const log = sh(s.checkout, 'show', `${branch}:CHANGELOG.md`).replace(/\r\n/g, '\n');
+  assert.match(log, /^# Fake's changelog\n/);
+  assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.1: /);
+  assert.match(log, /### Before you update\n\nNothing: it updates itself as usual\.$/);
+  assert.match(sh(s.checkout, 'show', `${branch}:src/app.ts`), /version: '0\.4\.1'/);
+  assert.equal(JSON.parse(sh(s.checkout, 'show', `${branch}:package-lock.json`)).packages[''].version, '0.4.1');
+  assert.equal(sh(s.checkout, 'log', '-1', '--format=%s', branch), "Fake 0.4.1: the Steward's kit 1.0.1");
+  assert.deepEqual(loadClaims().map((c) => [c.version, c.branch, c.by]), [['0.4.1', 'steward/kit-1.0.1', 'steward']]);
+  assert.throws(() => sh(s.checkout, 'show', `${branch}:changes/README.md`), 'no changes/README.md');
 });
 
 test("a rollout's bump the kit reaches nothing in is still made, its checks but no tests run; a trial's isn't tried", async () => {
@@ -100,9 +130,12 @@ test('push: the branch goes to origin (never forced) and a PR is opened with the
   assert.equal(res.url, 'https://github.com/Jcollier0120/Fake/pull/7');
   assert.equal(sh(s.origin, 'rev-parse', 'refs/heads/steward/kit-1.0.1'), sh(s.checkout, 'rev-parse', 'steward/kit-1.0.1'));
   const create = r.gh.find((a) => a[1] === 'create')!;
-  assert.equal(create[create.indexOf('--title') + 1], "Fake 0.4.1: the Steward's kit 1.0.1");
+  // On the build pipeline: no version in its title, as the stamp's is the release's.
+  assert.equal(create[create.indexOf('--title') + 1], "Fake: the Steward's kit 1.0.1");
   assert.equal(create[create.indexOf('--base') + 1], 'main');
   const body = create[create.indexOf('--body-file') + 1];
+  assert.match(body, /its changelog entry is `changes\/steward-kit-1-0-1\.md`, which the next build stamps with the release's version, leaving the version files and CHANGELOG\.md alone\./);
+  assert.match(body, /`changes\/README\.md` puts Fake on the build pipeline: .* A PR open now that sets its version the old way still merges as before\./);
   assert.match(body, /## 1\.0\.1\n\n- the fix/);
   assert.doesNotMatch(body, /the first/, 'only the entries after the kit it had');
   // Pushed again with nothing new: no second PR.
@@ -166,7 +199,7 @@ test("a bump branch on origin with no PR at all, whose head is the Steward's own
   assert.equal(bumped.outcome, 'done', bumped.message);
   assert.match(bumped.message, /^steward\/kit-1\.0\.1 \(.{7}\) was on origin with no PR: its PR is opened now$/);
   assert.equal(bumped.commit, head.slice(0, 7));
-  assert.equal(bumped.version, '0.4.1');
+  assert.equal(bumped.version, undefined, "on the build pipeline: the stamp's");
   assert.deepEqual(asked(r.gh), ['open', 'closed', 'merged'], 'no PR in any state');
   assert.equal(sh(s.checkout, 'rev-parse', BRANCH), head, 'not made again');
   // The push stage carries on: its PR opened, its branch as origin has it.
@@ -189,7 +222,7 @@ test("a bump branch on origin with no PR that this PC no longer has (its work fo
   assert.equal(sh(s.checkout, 'rev-parse', BRANCH), head);
   const p = runner(prsGh({}, () => ok('https://github.com/Jcollier0120/Fake/pull/8\n')));
   const pushed = await pushOne({ ...s.ctx, run: p.run }, s.e, { kit: '1.0.1', changelog: null });
-  assert.match(pushed.message, /^opened "Fake 0\.4\.1: the Steward's kit 1\.0\.1"/);
+  assert.match(pushed.message, /^opened "Fake: the Steward's kit 1\.0\.1"/);
 });
 
 test("a bump branch on origin with no PR that has moved past main, or has a commit that isn't the Steward's bump, is still refused", async () => {
@@ -322,8 +355,7 @@ test("Reeve's own files at the old kit's paths don't stop its bump", async () =>
   );
   const res = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });
   assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
-  assert.equal(res.version, '0.3.1');
-  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', 'steward/kit-1.0.1').split('\n').sort(), ['CHANGELOG.md', 'kit.json', 'package-lock.json', 'package.json', 'src/mcp.ts']);
+  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', 'steward/kit-1.0.1').split('\n').sort(), ['changes/README.md', 'changes/steward-kit-1-0-1.md', 'kit.json']);
   for (const p of own) assert.equal(sh(s.checkout, 'show', `steward/kit-1.0.1:${p}`), `// Reeve's own ${p}`, `${p} is still there`);
 });
 
@@ -334,7 +366,7 @@ test("tools/kit.ts rides with the pin: an agent's old one is replaced with the S
   assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
   assert.match(res.message, /tools\/kit\.ts updated/);
   const branch = 'steward/kit-1.0.1';
-  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['CHANGELOG.md', 'kit.json', 'package-lock.json', 'package.json', 'src/app.ts', 'tools/kit.ts']);
+  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['changes/README.md', 'changes/steward-kit-1-0-1.md', 'kit.json', 'tools/kit.ts']);
   assert.equal(sh(s.checkout, 'show', `${branch}:tools/kit.ts`), kitTool.replace(/\r\n/g, '\n').trimEnd(), "the Steward's own, byte for byte (LF)");
   assert.match(sh(s.checkout, 'log', '-1', '--format=%b', branch), /tools\/kit\.ts is the Steward's\./);
   assert.equal(readFileSync(path.join(s.work, 'src', 'kit', 'VERSION'), 'utf8').trim(), '1.0.1', 'the new tool filled the kit');
@@ -343,7 +375,7 @@ test("tools/kit.ts rides with the pin: an agent's old one is replaced with the S
   assert.equal((await pushOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.1', changelog: null })).outcome, 'done');
   const create = r.gh.find((a) => a[1] === 'create')!;
   const body = create[create.indexOf('--body-file') + 1];
-  assert.match(body, /the version is 0\.4\.1 in package\.json, package-lock\.json, src\/app\.ts\. tools\/kit\.ts is the Steward's/);
+  assert.match(body, /leaving the version files and CHANGELOG\.md alone\. tools\/kit\.ts is the Steward's/);
 });
 
 test("an agent that doesn't fill with tools/kit.ts gets none; with no tools/kit.ts to hand out, a Node agent is refused", async () => {
@@ -455,23 +487,19 @@ test("a kit bump that brings an urgent kit is an urgent fix itself: its bold lin
   assert.equal(isUrgent(kitBumpEntry({ version: '0.5.85', from: '1.0.2', kit: '1.0.3', changelog: null })), false);
 });
 
-test("a bump's version is claimed: above an open PR's (an agent's own work beside it) and every live claim, the same again when made again", async () => {
+test("a bump on the build pipeline claims no version: an open PR's (an agent's own work beside it, set the old way) is left to it, and GitHub out of reach stops nothing", async () => {
   rmSync(claimsFile(), { force: true });
   const s = setup();
   const titles = [{ title: 'Fake 0.4.1: Developer options', headRefName: 'claude/developer-options' }];
   const ctx = { ...s.ctx, run: runner(claimGh(titles)).run };
   const res = await bumpOne(ctx, s.e, { kit: '1.0.1', kitFrom });
   assert.equal(res.outcome, 'done', res.message);
-  assert.equal(res.version, '0.4.2', 'not the open PR\'s 0.4.1');
-  assert.match(sh(s.checkout, 'show', 'steward/kit-1.0.1:package.json'), /"version": "0\.4\.2"/);
-  assert.deepEqual(loadClaims().map((c) => [c.version, c.branch, c.by]), [['0.4.2', 'steward/kit-1.0.1', 'steward']]);
-  const again = await bumpOne(ctx, s.e, { kit: '1.0.1', kitFrom });
-  assert.equal(again.version, '0.4.2', 'its own claim again');
-  // GitHub out of reach: no version can be claimed, so no bump (the next patch could be another PR's).
-  rmSync(claimsFile(), { force: true });
+  assert.equal(res.version, undefined);
+  assert.match(sh(s.checkout, 'show', 'steward/kit-1.0.1:package.json'), /"version": "0\.4\.0"/);
+  assert.deepEqual(loadClaims(), []);
+  // GitHub out of reach: nothing to claim, so the bump is made all the same.
   const offline = await bumpOne({ ...s.ctx, run: runner().run }, s.e, { kit: '1.0.1', kitFrom });
-  assert.equal(offline.outcome, 'failed');
-  assert.match(offline.message, /^couldn't claim a version for the bump: /);
+  assert.equal(offline.outcome, 'done', offline.message);
 });
 
 test('a fold whose PR merged or closed meanwhile is pushed nowhere', async () => {

@@ -2,6 +2,27 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.248
+
+**Every staff member's repository rides the build pipeline: its pull requests write their changelog entry in changes/, and the Steward's build sets the version, so work side by side no longer clashes over version lines. It hands out the kit 2.142.2.**
+
+### What's new
+
+- **Each staff member is put on the build pipeline.** At the first build after this update, a staff member on the newest kit gets `changes/README.md` in a small pull request the Steward opens and merges itself; nothing is released for it. From then on a kit bump writes its entry in `changes/steward-kit-<kit>.md` instead of raising the version, and adds `changes/README.md` to a staff member that lacks it.
+- **`claim-version` then says the repository "rides the build pipeline"** and names the file to write, `changes/<your branch>.md`, instead of handing out a version.
+
+### What changed
+
+- **Work begun before the switch still merges.** A pull request that set its version and wrote its `CHANGELOG.md` entry merges cleanly beside the kit's and the new entries; while it is next in its version line, the stamp waits for it, so the entries join the version it brings. One passed over after an hour is waited for no more.
+- **A kit pull request merged during a build is stamped before the build releases,** so its entry goes out in that release.
+- **A Release pressed on the page stamps main's waiting entries first,** and releases the version stamped.
+- A staff member worked with plain git, where the Steward opens no pull requests, keeps setting its version in each change, as before.
+- It hands out the kit 2.142.2, whose spec/RELEASE-NOTES.md describes the build pipeline as every staff member now rides it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. After its first build, write each piece of work's changelog entry in `changes/<branch>.md` in every staff repository, and leave the version files and `CHANGELOG.md` alone.
+
 ## 0.36.247
 
 **A PR stuck next in its repository's version line for an hour is passed over, so the PRs above it go ahead, and the Steward re-versions it and keeps it caught up with main until it moves again.**

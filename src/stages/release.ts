@@ -25,6 +25,7 @@ import { withRepo } from './slots.ts';
 import { linkSharedModules } from './modules.ts';
 import { kitOnlyRelease, noteKitOnlyRelease, type KitOnly } from './kitonly.ts';
 import { rolloutDone, rolloutGoingOn } from './rollout.ts';
+import { stampAll } from './stamp.ts';
 import { clearPending, dueAgain, exchequerCommand, finishFailed, loadExchequerPending, missedExchequer, notePending } from './exchequer.ts';
 
 /**
@@ -505,12 +506,19 @@ export async function release(ctx: Ctx, employees: Employee[], o: { kit: string 
     ctx.log(`waits for kit ${going.kit}'s rollout beside the rounds to end (${going.names.length} employee${going.names.length === 1 ? '' : 's'}), so each release reads the bump it merged`);
     await rolloutDone();
   }
+  // What main carries in changes/ stamped first, as a build does (stamp.ts, Steward 0.36.248): every employee rides the
+  // build pipeline, and a kit PR the rollout merged brings its entry there with no version, so the Release would find the
+  // version released already. Not a hire, which installs from the clone as it is.
+  const stamps = o.hire ? new Map<string, EmployeeResult>() : new Map((await stampAll(ctx, employees)).results.map((r) => [r.id, r]));
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
+    let r: EmployeeResult;
     try {
-      return await withRepo(ctx.log, e.id, () => releaseOne(ctx, e, o));
+      r = await withRepo(ctx.log, e.id, () => releaseOne(ctx, e, o));
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
-      return result(e, 'failed', (err as Error).message);
+      r = result(e, 'failed', (err as Error).message);
     }
+    const s = stamps.get(e.id);
+    return s ? { ...r, outcome: s.outcome === 'failed' ? 'failed' : r.outcome, message: `${r.message}; ${s.message}` } : r;
   });
 }

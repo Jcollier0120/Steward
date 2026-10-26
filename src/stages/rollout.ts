@@ -5,7 +5,9 @@ import { compareVersions, KIT_VERSION, urgentIn, urgentKits } from '../kitfiles.
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bump } from './bump.ts';
-import { checkoutOf, freshBranch, workRootOf, glanceOf, networkFailure, NOT_ON_KIT, passingFailure, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { checkoutOf, freshBranch, workRootOf, glanceOf, networkFailure, NOT_ON_KIT, passingFailure, result, takesPipeline, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { CHANGES_README } from '../entries.ts';
+import { onPipeline } from './onpipeline.ts';
 import { push } from './push.ts';
 import { openPrs, parsePrs, readPin } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
@@ -31,6 +33,11 @@ import { RETIRED, retiredOf } from '../retired.ts';
  *
  * An agent Manor has retired (its staff.json: retired.ts) gets no kit: the rounds pass it over, and a bump of it that
  * failed before is let go. A person's Bump or Push naming it still does it.
+ *
+ * Every employee rides the build pipeline (Steward 0.36.248): its PRs write changes/<branch>.md, and the build stamps the
+ * version (stamp.ts). One behind the kit gets changes/README.md with its kit bump, which writes its own entry there and
+ * sets no version (bump.ts pipelineWay); one on the kit already that hasn't the file gets it alone, in a PR the rollout
+ * opens and merges (onpipeline.ts), beside the bumps. Not one worked with plain git, which has no PRs to stamp through.
  *
  * A kit PR of the Steward's still open for an older kit (waiting its turn behind the employee's other PRs, which its
  * version is above) gets the newer kit instead of a second kit PR beside it: the fold. Its branch is bumped again, at
@@ -275,6 +282,8 @@ export interface RolloutFacts {
   own?: { number: number; head: string };
   /** Its other open PRs that pin the kit rolled out already, or a newer one (#20 (claude/developer-options, kit 2.39.0)). */
   pinPrs?: string[];
+  /** On the kit rolled out already, with no changes/README.md, and it can ride the build pipeline: put on it (onpipeline.ts). */
+  toPipeline?: boolean;
 }
 
 export interface RolloutPlan {
@@ -290,6 +299,8 @@ export interface RolloutPlan {
   bump: { employee: Employee; head: string; fold?: KitFold }[];
   /** Its kit PR open at the kit rolled out, merged now (RolloutFacts' `own`). */
   merge?: { employee: Employee; number: number; head: string }[];
+  /** On the kit already, put on the build pipeline now (RolloutFacts' `toPipeline`): changes/README.md in a PR of its own. */
+  pipeline?: { employee: Employee; head: string }[];
   /** Not now, and why; `held` for one whose bump failed at this head. */
   skip: { employee: Employee; why: string; held?: boolean }[];
 }
@@ -320,8 +331,10 @@ export function planRollout(o: { on: boolean; kit: string | null; ownKit: string
     else if (!f.checkout) skip(`no checkout at ${checkoutOf(e)}`);
     else if (!f.head) skip(`no ${e.branch} on origin`);
     else if (!f.pin) skip(`no kit.json on origin/${e.branch}`);
-    else if (compareVersions(f.pin, kit) >= 0) skip(`on kit ${f.pin} already`);
-    else if (f.kitPrs.length && f.own) (plan.merge ??= []).push({ employee: e, ...f.own });
+    else if (compareVersions(f.pin, kit) >= 0) {
+      skip(`on kit ${f.pin} already`);
+      if (f.toPipeline) (plan.pipeline ??= []).push({ employee: e, head: f.head });
+    } else if (f.kitPrs.length && f.own) (plan.merge ??= []).push({ employee: e, ...f.own });
     else if (f.kitPrs.length && !f.fold) skip(`its kit PR ${f.kitPrs.join(', ')} is open: close it, and the next build rolls the kit out afresh`);
     else if (f.pinPrs?.length) skip(`its open PR ${f.pinPrs.join(', ')} already brings kit ${kit}, so it gets no kit PR of its own beside it`);
     else {
@@ -342,8 +355,11 @@ export async function rolloutFacts(ctx: Ctx, e: Employee, kit: string): Promise<
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return { checkout: false, head: null, pin: null, kitPrs: [] };
   const head = await freshBranch(ctx, e, repo);
-  const pin = head ? (readPin(await showFile(ctx.run, repo, `origin/${e.branch}`, 'kit.json'))?.kit ?? null) : null;
-  if (!pin || compareVersions(pin, kit) >= 0) return { checkout: true, head, pin, kitPrs: [] };
+  // Both asked at once, so git reads them in one command (showFile).
+  const [pinText, readme] = head ? await Promise.all([showFile(ctx.run, repo, `origin/${e.branch}`, 'kit.json'), showFile(ctx.run, repo, `origin/${e.branch}`, CHANGES_README)]) : [null, null];
+  const pin = readPin(pinText)?.kit ?? null;
+  // One behind the kit gets changes/README.md with its kit bump (bump.ts pipelineWay); one on it already, on its own.
+  if (!pin || compareVersions(pin, kit) >= 0) return { checkout: true, head, pin, kitPrs: [], ...(pin && readme === null && takesPipeline(ctx, e) ? { toPipeline: true } : {}) };
   const g = glanceOf(ctx, e);
   const prs = parsePrs(g ? JSON.stringify(g.prs) : await openPrs(hostFor(ctx, e), e.repo), ctx.settings.team);
   const open = prs.filter((p) => p.whose === 'steward' && p.head.startsWith('steward/kit-') && !p.fork);
@@ -453,13 +469,13 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
     const why = await withRepo(ctx.log, m.employee.id, () => mergeOwn(ctx, m.employee, m)).catch((err: Error) => err.message);
     results.push(why ? result(m.employee, 'failed', `rollout: its kit PR #${m.number} at kit ${kit} is open still (${why}): the next build tries again`) : result(m.employee, 'done', `rollout: merged its kit PR #${m.number} (kit ${kit})`));
   }
-  if (!plan.bump.length) return { results, plan };
-  const names = plan.bump.map((b) => b.employee.name).join(', ');
+  if (!plan.bump.length && !plan.pipeline?.length) return { results, plan };
+  const names = [...plan.bump.map((b) => b.employee.name), ...(plan.pipeline ?? []).map((p) => `${p.employee.name} (onto the build pipeline)`)].join(', ');
   // One at a time on this PC: a rollout another process runs (a round in a terminal) has the kit.
   const bumps = (c: Ctx) => withLock(rolloutLock(), () => timed(phaseOf(c), 'rollout', `kit ${kit}`, () => bumpAndPush(c, plan, { kit, changelog: o.changelog, ...(tool ? { tool } : {}) })), { waitMs: 0, staleMs: STAGE_STALE_MS });
   if (beside) {
     ctx.log(`rollout: kit ${kit} for ${names}, beside the rounds: the rounds go on meanwhile`);
-    startBeside(ctx, kit, plan.bump.map((b) => b.employee.name), bumps);
+    startBeside(ctx, kit, [...plan.bump, ...(plan.pipeline ?? [])].map((b) => b.employee.name), bumps);
     return { results, plan, beside: true };
   }
   ctx.log(`rollout: kit ${kit} for ${names}`);
@@ -477,10 +493,17 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
  * failed is kept in rollout-failed.json, and what went is let go, written over the file as it is when they end.
  */
 async function bumpAndPush(ctx: Ctx, plan: RolloutPlan, o: { kit: string; changelog: (kit: string) => Promise<string | null>; tool?: string }): Promise<EmployeeResult[]> {
+  const results: EmployeeResult[] = [];
+  // Those on the kit already, put on the build pipeline (onpipeline.ts): a file each, nothing tested. Not held when it
+  // fails: the next build tries again.
+  for (const p of plan.pipeline ?? []) {
+    const r = await withRepo(ctx.log, p.employee.id, () => onPipeline(ctx, p.employee)).catch((err: Error) => result(p.employee, 'failed', err.message));
+    results.push({ ...r, message: `rollout: ${r.message}` });
+  }
+  if (!plan.bump.length) return results;
   const { kit, tool } = o;
   const failed = loadRolloutFailures();
   const before = JSON.stringify(failed);
-  const results: EmployeeResult[] = [];
   const heads = new Map(plan.bump.map((b) => [b.employee.id, b.head]));
   const at = new Date().toISOString();
   // The kit's changelog: each bump's entry in the employee's own, and its PR's body.

@@ -232,17 +232,18 @@ test('whole rounds: no alarm for what the rounds merged and released; one when s
   const round = () => runStage('round', {}, { run, ownKit: '9.9.9' });
   const alarms = () => JSON.parse(readFileSync(path.join(home, 'alarms.json'), 'utf8')).open as { id: string; title: string; detail: string[] }[];
 
+  // On the kit already: this round puts Porter on the build pipeline (#65, changes/README.md), and merges it itself.
   await round();
-  // A new kit: this round opens Porter's kit PR and merges it itself, then tests main and releases it; the next round
-  // sees only its own work.
+  // A new kit: this round opens Porter's kit PR (#66) and merges it itself, stamps its entry (#67, merged too), then tests
+  // main and releases it; the next round sees only its own work.
   kits = ['1.0.1', '1.0.0'];
   const rolled = await round();
   assert.deepEqual(
     rolled.results.filter((x) => x.outcome === 'done').map((x) => x.message.replace(/\([0-9a-f]{7}\)/g, '(…)')),
-    ['rollout: kit 1.0.1: 0.5.13 on steward/kit-1.0.1 (…): kit 1.0.0 → 1.0.1, checks passed; opened "Porter 0.5.13: the Steward\'s kit 1.0.1"; merged it', 'release: released v0.5.13 from origin/main (…), with kit 1.0.1'],
+    ['rollout: kit 1.0.1: changes/steward-kit-1-0-1.md on steward/kit-1.0.1 (…): kit 1.0.0 → 1.0.1, checks passed; opened "Porter: the Steward\'s kit 1.0.1"; merged it', 'stamp: stamped v0.5.13, and merged it', 'release: released v0.5.13 from origin/main (…), with kit 1.0.1'],
     rolled.log.join('\n'),
   );
-  assert.equal(prs.length, 0, '#65 merged by the round that opened it');
+  assert.equal(prs.length, 0, '#66 and #67 merged by the round that opened them');
   await round();
   assert.deepEqual(alarms().filter((a) => a.id.startsWith('strangers:')), [], 'its own merge and release raise nothing');
   assert.deepEqual(S.loadActed().strangers, []);
@@ -252,9 +253,9 @@ test('whole rounds: no alarm for what the rounds merged and released; one when s
   kits = ['1.0.2', ...kits];
   refuse = true;
   const left = await round();
-  assert.match(left.results.find((x) => x.message.startsWith('rollout: '))?.message ?? '', /opened "Porter 0\.5\.14: the Steward's kit 1\.0\.2"; it is open still \(GitHub wouldn't merge #66: .*Head branch was modified/, left.log.join('\n'));
-  const pr = prs.find((p) => p.number === 66);
-  assert.ok(pr, 'Porter #66 open still');
+  assert.match(left.results.find((x) => x.message.startsWith('rollout: '))?.message ?? '', /opened "Porter: the Steward's kit 1\.0\.2"; it is open still \(GitHub wouldn't merge #68: .*Head branch was modified/, left.log.join('\n'));
+  const pr = prs.find((p) => p.number === 68);
+  assert.ok(pr, 'Porter #68 open still');
   mergeBy(pr);
   theirs.push('0.5.14');
   const seen = await round();
@@ -262,7 +263,7 @@ test('whole rounds: no alarm for what the rounds merged and released; one when s
   const open = alarms().filter((a) => a.id.startsWith('strangers:'));
   assert.equal(open.length, 1, JSON.stringify(alarms()));
   assert.equal(open[0].title, 'Another Steward or person seems to be merging and releasing Porter: no round here did');
-  assert.equal(open[0].detail[0], "The Steward's PRs merged without it: Porter #66.");
+  assert.equal(open[0].detail[0], "The Steward's PRs merged without it: Porter #68.");
   assert.equal(open[0].detail[1], 'Released without it: Porter v0.5.14.');
   assert.match(seen.log.join('\n'), /alarm: Another Steward or person seems to be merging and releasing Porter/);
 });

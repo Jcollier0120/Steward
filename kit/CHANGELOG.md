@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.142.2
+
+**spec/RELEASE-NOTES.md says how every agent rides the build pipeline: its work writes its changelog entry in changes/, and the Steward's build sets the version.**
+
+### What changed
+
+- **spec/RELEASE-NOTES.md, "The kit bump":** a kit bump writes its entry in `changes/steward-kit-<kit, dots as dashes>.md` and sets no version, adding `changes/README.md` where it's missing. Only an agent worked with plain git is bumped the old way.
+- **"Entries in changes/"** describes the pipeline as it is: `claim-version` names `changes/<your branch>.md`, the work leaves the version files and `CHANGELOG.md` alone, and the Steward's next build stamps main in a pull request of its own. A pull request opened before the switch, which set its version itself, still merges cleanly, and the stamp waits for it while it's next in its version line.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Once Steward 0.36.248 is installed, its next build puts each agent on the build pipeline, in a pull request it opens and merges itself; from then on, write each piece of work's entry in `changes/<branch>.md` and leave the version files and `CHANGELOG.md` alone.
+
 ## 2.142.1
 
 **A page in demo mode no longer shows "This PC holds no license for it", so Manor's hero pictures show each page as it is on a licensed PC.**
