@@ -15,6 +15,8 @@ const { WAKE_RETRY_MS, endWakeTask, keepWakeTask, setWakeDeps, wakesPc, wakeTask
 const { WAKE_TASK_NAME } = await import('./fixture/src/kit/install.ts');
 const { awakeCompileScript } = await import('./fixture/src/kit/awake.ts');
 const { powershell } = await import('./fixture/src/kit/ps.ts');
+const { smartAppControlState } = await import('./fixture/src/kit/app-control.ts');
+const ownExe = process.platform !== 'win32' || (smartAppControlState() === 'on' && 'Smart App Control is on: it blocks the helper this test compiles, which nothing signs');
 after(() => setWakeDeps(null));
 type WakePlan = import('./fixture/src/kit/wake.ts').WakePlan;
 
@@ -149,7 +151,7 @@ test("the wake task's run is ended once the work is done (Task Scheduler answers
   assert.equal(await endWakeTask(log), 'none');
 });
 
-test("on Windows the helper's timed hold, as the wake task runs it, holds and ends by itself", { skip: process.platform !== 'win32' }, async () => {
+test("on Windows the helper's timed hold, as the wake task runs it, holds and ends by itself", { skip: ownExe }, async () => {
   const exe = path.join(home, 'awake-wake-test.exe');
   const source = readFileSync(new URL('./fixture/src/kit/awake.cs', import.meta.url), 'utf8');
   assert.equal((await powershell(awakeCompileScript(exe, source), { timeoutMs: 120_000 })).trim(), 'ready');

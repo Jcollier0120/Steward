@@ -16,6 +16,8 @@ const { awakeCompileScript, awakeFor, setAwakeDeps, stayAwake, whileAwake } = aw
 const { every } = await import('./fixture/src/kit/schedule.ts');
 const { setDuty } = await import('./fixture/src/kit/duty.ts');
 const { powershell } = await import('./fixture/src/kit/ps.ts');
+const { smartAppControlState } = await import('./fixture/src/kit/app-control.ts');
+const ownExe = process.platform !== 'win32' || (smartAppControlState() === 'on' && 'Smart App Control is on: it blocks the helper this test compiles, which nothing signs');
 after(() => setAwakeDeps(null));
 
 /** Windows stood in for: each hold had and ended, in order. */
@@ -96,7 +98,7 @@ test("a round's work holds the PC awake, and every hold it took is let go when t
   }
 });
 
-test('on Windows the helper compiles, holds Windows awake while its input is open, and ends once it closes', { skip: process.platform !== 'win32' }, async () => {
+test('on Windows the helper compiles, holds Windows awake while its input is open, and ends once it closes', { skip: ownExe }, async () => {
   const exe = path.join(home, 'awake-test.exe');
   const source = readFileSync(new URL('./fixture/src/kit/awake.cs', import.meta.url), 'utf8');
   assert.equal((await powershell(awakeCompileScript(exe, source), { timeoutMs: 120_000 })).trim(), 'ready');
