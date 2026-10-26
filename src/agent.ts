@@ -23,6 +23,7 @@ import { testedView } from './tested.ts';
 import { findRepos, foundStale, foundView, loadFound, lookAfterAll } from './found.ts';
 import { handOver, turnsView, type TurnsDeps } from './lease.ts';
 import { claimClashes } from './claims.ts';
+import { passedLines, passedWords } from './passover.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { rolloutsBeside } from './stages/rollout.ts';
 import { buildTimeLine } from './buildtimes.ts';
@@ -437,7 +438,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
     const scm = loadScm();
-    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined, wholeSuite: loadWholeJob() };
+    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), passedOver: passedLines(loadStaff()?.rows ?? []).map((l) => passedWords(l)), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined, wholeSuite: loadWholeJob() };
     return { shell: pageShell({ busy, title: runs.length ? `(${runs.map((r) => r.stage).join(', ')}) ${APP.name}` : APP.name }), body };
   };
 

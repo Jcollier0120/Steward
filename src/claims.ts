@@ -67,6 +67,42 @@ export interface Claim {
    * gone): kept so the claims ref other PCs share still reads.
    */
   moved?: number;
+  /** Its PR is next in line on its repository (passover.ts): since when, at which head, held by what. Shared. */
+  line?: InLine;
+  /** Its PR was stuck next in line, and is passed over (passover.ts). Shared. */
+  passed?: PassedOver;
+}
+
+/** What holds a PR in its version line (passover.ts's holdOf): its kind, and the words for it. */
+export interface Hold {
+  kind: 'owner' | 'draft' | 'conflict' | 'failing' | 'pending' | 'unknown' | 'author';
+  why: string;
+}
+
+/** A claim's PR next in line (passover.ts): since when, at which head, held by what. */
+export interface InLine extends Hold {
+  pr: number;
+  since: string;
+  head: string;
+}
+
+/** A claim's PR stuck next in line, passed over (passover.ts). */
+export interface PassedOver extends Hold {
+  pr: number;
+  url: string;
+  /** Stuck since: when it was next in line with this head and hold. */
+  since: string;
+  /** When it was passed over. */
+  at: string;
+  /** Its head then. */
+  head: string;
+  /** Its version then. */
+  from: string;
+  /** The head the Steward last pushed to it, and main's commit it caught it up with: a head of neither is its author's. */
+  pushed?: string;
+  main?: string;
+  /** What the Steward's last look did, or why it couldn't. */
+  note?: string;
 }
 
 export const claimsFile = () => dataFile('version-claims.json');
@@ -98,16 +134,25 @@ export const titleVersions = (name: string, titles: string[]): string[] =>
 
 /**
  * Whether a claim still holds, given what is known of its repository now: its version not yet on the branch or
- * released, and either younger than CLAIM_DAYS or named by an open PR (its branch, or a title).
+ * released, and either younger than CLAIM_DAYS or named by an open PR (its branch, or a title). A repository's claim
+ * whose branch's PR is open holds though the branch or a release passes it, so passover.ts can re-version that PR.
  */
 export function stillHeld(c: Claim, o: { branchVersion: string | null; released: string[]; openBranches: string[]; openVersions: string[]; now: number }): boolean {
+  if (c.branch && !isKitKey(c.repo) && o.openBranches.includes(c.branch)) return true;
   // Released, or overtaken by a release: either way it's no longer free work's to hold.
-  const top = highest(o.released);
-  if (top && compareVersions(top, c.version) >= 0) return false;
-  if (o.branchVersion && compareVersions(o.branchVersion, c.version) >= 0) return false;
+  if (overtaken(c, o)) return false;
   if (o.now - Date.parse(c.at) < CLAIM_DAYS * DAY) return true;
   return (!!c.branch && o.openBranches.some((b) => b === c.branch)) || o.openVersions.includes(c.version);
 }
+
+/** Whether the branch's version or a release has reached a claim's. Pure. */
+export function overtaken(c: Pick<Claim, 'version'>, o: { branchVersion: string | null; released: string[] }): boolean {
+  const top = highest([o.branchVersion, ...o.released]);
+  return !!top && compareVersions(top, c.version) >= 0;
+}
+
+/** Whether a claims key is a repository's kit's (stages/kitpart.ts' kitClaimKey). */
+const isKitKey = (key: string) => key.endsWith(kitClaimKey(''));
 
 /** The live claims on a repository, for a build's stamp: versions taken by work that hasn't landed. */
 export const claimsOn = (repo: string, all = loadClaims()): Claim[] => all.filter((c) => same(c.repo, repo));
@@ -117,8 +162,11 @@ export const claimsOn = (repo: string, all = loadClaims()): Claim[] => all.filte
  * reached, through its claims ref (refs/manor/claims), for every PC that looks after it; else in this PC's store alone,
  * as always, and shared on the next round that reaches the remote (shareClaims). `now`, the facts it reads and `remote`
  * stand in for tests (under node --test there's no remote unless given).
+ *
+ * `move`: the branch's claim this one takes the place of (a PR passed over, re-versioned: passover.ts), given up in the
+ * same write; its marks (`marks`) go with the new one.
  */
-export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number; part?: 'kit'; remote?: RemoteRepo | null; canPush?: (repo: string) => Promise<boolean> }): Promise<{ claim: Claim; again: boolean }> {
+export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number; part?: 'kit'; remote?: RemoteRepo | null; canPush?: (repo: string) => Promise<boolean>; move?: Claim; marks?: Pick<Claim, 'passed'> }): Promise<{ claim: Claim; again: boolean }> {
   const now = o.now ?? Date.now();
   const kit = o.part === 'kit';
   // Off the maker's laptop, no version of Castellan's own repositories or kit is claimed, unless GitHub says this PC's
@@ -138,7 +186,7 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
   const openVersions = kit ? kitTitleVersions(prs.map((p) => p.title)) : titleVersions(e.name, prs.map((p) => p.title));
   const openBranches = prs.map((p) => p.headRefName);
   const facts = { branchVersion, released, openBranches, openVersions, now };
-  const ask: Ask = { key, branch: o.branch ?? null, by: o.by, for: o.for, minor: !!o.minor, now, facts, what: kit ? 'The kit' : e.name, files, from: `origin/${e.branch}` };
+  const ask: Ask = { key, branch: o.branch ?? null, by: o.by, for: o.for, minor: !!o.minor, now, facts, what: kit ? 'The kit' : e.name, files, from: `origin/${e.branch}`, move: o.move, marks: o.marks };
   const remote = o.remote !== undefined ? o.remote : process.env.NODE_TEST_CONTEXT ? null : await remoteFor(ctx.run, ctx.settings, e).catch(() => null);
   if (remote) {
     const shared = await claimShared(ctx.run, remote, ask);
@@ -147,7 +195,7 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
   if (sharedOnly(e)) throw new Error(`${ask.what}'s claims on GitHub (${CLAIMS_REF}) couldn't be read or written from here, and a claim kept on this PC alone would be seen by no other: nothing was claimed. Try again once GitHub answers.`);
   return withLock(claimsLock(), async () => {
     const all = loadClaims();
-    const live = all.filter((c) => !same(c.repo, key) || stillHeld(c, facts));
+    const live = all.filter((c) => !same(c.repo, key) || (!moving(ask, c) && stillHeld(c, facts)));
     const r = choose(live.filter((c) => same(c.repo, key)), ask);
     writeJson(claimsFile(), r.again ? live : [...live, r.claim]);
     return { claim: r.claim, again: r.again };
@@ -184,7 +232,17 @@ type Ask = {
   what: string;
   files: string[];
   from: string;
+  /** The claim this one takes the place of, and the marks it carries over (claimVersion's move). */
+  move?: Claim;
+  marks?: Pick<Claim, 'passed'>;
 };
+
+/**
+ * Whether `c` is the claim an ask takes the place of: its move, or the branch's own claim that the branch or a release
+ * passed while its PR stayed open (stillHeld), which a new claim for the branch replaces.
+ */
+const moving = (a: Pick<Ask, 'move' | 'key' | 'branch' | 'facts'>, c: Claim) =>
+  (!!a.move && same(c.repo, a.move.repo) && c.version === a.move.version && c.branch === a.move.branch) || (!!a.branch && c.branch === a.branch && same(c.repo, a.key) && overtaken(c, a.facts));
 
 /**
  * The claim for this work, from the live claims on its repository: the branch's own again, or the next free version. Pure.
@@ -195,7 +253,7 @@ function choose(mine: Claim[], a: Ask): { claim: Claim; again: boolean } {
   const f = a.facts;
   const top = highest([f.branchVersion, ...f.released, ...f.openVersions, ...mine.map((c) => c.version)]);
   if (!top) throw new Error(`${a.what} has no version to count from (${a.files.join(', ')} on ${a.from})`);
-  return { claim: { repo: a.key, version: after(top, a.minor), branch: a.branch, by: a.by, for: a.for, at: new Date(a.now).toISOString() }, again: false };
+  return { claim: { repo: a.key, version: after(top, a.minor), branch: a.branch, by: a.by, for: a.for, at: new Date(a.now).toISOString(), ...(a.marks?.passed ? { passed: a.marks.passed } : {}) }, again: false };
 }
 
 
@@ -205,10 +263,30 @@ export function parseClaims(text: string | null | undefined): Claim[] {
     const j = JSON.parse(text ?? '[]');
     return (Array.isArray(j) ? j : [])
       .filter((c) => typeof c?.repo === 'string' && typeof c?.version === 'string' && /^\d+\.\d+\.\d+$/.test(c.version) && typeof c?.at === 'string')
-      .map((c) => ({ repo: c.repo, version: c.version, branch: typeof c.branch === 'string' ? c.branch : null, by: String(c.by ?? ''), for: String(c.for ?? ''), at: c.at, ...(Number.isInteger(c.moved) && c.moved > 0 ? { moved: c.moved as number } : {}) }));
+      .map((c) => {
+        const line = inLineOf(c.line);
+        const passed = passedOf(c.passed);
+        return { repo: c.repo, version: c.version, branch: typeof c.branch === 'string' ? c.branch : null, by: String(c.by ?? ''), for: String(c.for ?? ''), at: c.at, ...(Number.isInteger(c.moved) && c.moved > 0 ? { moved: c.moved as number } : {}), ...(line ? { line } : {}), ...(passed ? { passed } : {}) };
+      });
   } catch {
     return [];
   }
+}
+
+const HOLDS: Hold['kind'][] = ['owner', 'draft', 'conflict', 'failing', 'pending', 'unknown', 'author'];
+const str = (x: unknown): x is string => typeof x === 'string' && x.length > 0;
+
+/** A claim's line mark as the claims ref has it, or null when it doesn't read. */
+function inLineOf(x: any): InLine | null {
+  if (!x || !Number.isInteger(x.pr) || ![x.since, x.head, x.why].every(str) || !HOLDS.includes(x.kind)) return null;
+  return { pr: x.pr, since: x.since, head: x.head, kind: x.kind, why: x.why };
+}
+
+/** A claim's passed-over mark as the claims ref has it, or null when it doesn't read. */
+function passedOf(x: any): PassedOver | null {
+  if (!x || !Number.isInteger(x.pr) || ![x.url, x.since, x.at, x.head, x.why, x.from].every(str) || !HOLDS.includes(x.kind)) return null;
+  const opt = (k: 'pushed' | 'main' | 'note') => (str(x[k]) ? { [k]: x[k] as string } : {});
+  return { pr: x.pr, url: x.url, since: x.since, at: x.at, head: x.head, kind: x.kind, why: x.why, from: x.from, ...opt('pushed'), ...opt('main'), ...opt('note') };
 }
 
 const sharedText = (list: Claim[]) => `${JSON.stringify(list.map(({ source: _s, clash: _c, copied: _k, ...c }) => c), null, 2)}\n`;
@@ -228,8 +306,8 @@ async function claimShared(run: Runner, remote: RemoteRepo, a: Ask): Promise<{ c
     const read = await readRef(run, remote, CLAIMS_REF, CLAIMS_FILE);
     if (read.kind === 'unreachable') return null;
     const there = read.kind === 'found' ? parseClaims(read.text) : [];
-    const sharedLive = there.filter((c) => same(c.repo, a.key) && stillHeld(c, a.facts));
-    const mineOnly = loadClaims().filter((c) => same(c.repo, a.key) && c.source !== 'shared' && !c.clash && stillHeld(c, a.facts));
+    const sharedLive = there.filter((c) => same(c.repo, a.key) && !moving(a, c) && stillHeld(c, a.facts));
+    const mineOnly = loadClaims().filter((c) => same(c.repo, a.key) && !moving(a, c) && c.source !== 'shared' && !c.clash && stillHeld(c, a.facts));
     // One of this PC's own whose version another PC has meanwhile stays here, marked: its work claims a new one.
     const going = mineOnly.filter((c) => !sharedLive.some((s) => s.version === c.version));
     const r = choose([...sharedLive, ...going], a);
@@ -244,7 +322,7 @@ async function claimShared(run: Runner, remote: RemoteRepo, a: Ask): Promise<{ c
       }
       if (w.kind !== 'ok') return null;
     }
-    await keepCopies(repoOfKey(a.key), list, readAt);
+    await keepCopies(repoOfKey(a.key), list, readAt, [], (c) => moving(a, c));
     const { source: _s, ...claim } = r.claim;
     return { claim: { ...claim, source: 'shared' }, again: r.again };
   }
@@ -254,14 +332,14 @@ async function claimShared(run: Runner, remote: RemoteRepo, a: Ask): Promise<{ c
 /**
  * A repository's shared claims, copied here in place of the copies before; this PC's own that went up become copies.
  * `readAt`: when `shared` was read from the ref. A copy made since (another process here claiming meanwhile, which
- * wrote the ref after this read) isn't in it yet, and stays. `stays`: false for a claim of this PC's own that a new one
- * took the place of (a PR moved past the others), which goes.
+ * wrote the ref after this read) isn't in it yet, and stays. `gone`: a claim of this PC's own that a new one took the
+ * place of (a PR passed over, re-versioned: passover.ts), which goes.
  */
-async function keepCopies(repo: string, shared: Claim[], readAt: number, clashes: Claim[] = []): Promise<void> {
+async function keepCopies(repo: string, shared: Claim[], readAt: number, clashes: Claim[] = [], gone: (c: Claim) => boolean = () => false): Promise<void> {
   await withLock(claimsLock(), async () => {
     const copied = Date.now();
     const mine = shared.filter((c) => belongs(c, repo));
-    const went = (c: Claim) => mine.some((s) => same(s.repo, c.repo) && s.version === c.version && s.branch === c.branch);
+    const went = (c: Claim) => gone(c) || mine.some((s) => same(s.repo, c.repo) && s.version === c.version && s.branch === c.branch);
     // This PC's own stay, unless they went up (the same version, for the same branch); so do copies newer than the read.
     const rest = loadClaims().filter((c) => !belongs(c, repo) || (!went(c) && (c.source !== 'shared' || (c.copied ?? 0) >= readAt)));
     const marked = rest.map((c) => {
@@ -302,6 +380,45 @@ export async function releaseClaim(repo: string, version: string, o: { remote?: 
     return true;
   });
   return local || shared;
+}
+
+/**
+ * A claim's marks (passover.ts) set as `marks` says, a mark given as undefined taken off: in its repository's claims ref
+ * by compare-and-swap where `remote` is given and the ref has the claim, and here. False when the ref couldn't be
+ * written, or neither has the claim: then nothing changed, and the next round tries again.
+ */
+export async function markClaim(run: Runner, remote: RemoteRepo | null, c: Pick<Claim, 'repo' | 'version' | 'branch'>, marks: { line?: InLine; passed?: PassedOver }): Promise<boolean> {
+  const is = (x: Claim) => same(x.repo, c.repo) && x.version === c.version && x.branch === c.branch;
+  const apply = (x: Claim): Claim => {
+    const y: Claim = { ...x, ...marks };
+    for (const k of Object.keys(marks) as (keyof typeof marks)[]) if (marks[k] === undefined) delete y[k];
+    return y;
+  };
+  const what = Object.entries(marks).map(([k, v]) => (v ? k : `no ${k}`)).join(', ');
+  let shared = false;
+  if (remote) {
+    for (let i = 0; ; i++) {
+      const read = await readRef(run, remote, CLAIMS_REF, CLAIMS_FILE);
+      if (read.kind === 'unreachable' || (read.kind === 'found' && read.text === null)) return false;
+      const there = read.kind === 'found' ? parseClaims(read.text) : [];
+      // Made here alone (the remote out of reach then): marked here, and shared with it on the next round.
+      if (!there.some(is)) break;
+      const w = await writeRef(run, remote, CLAIMS_REF, CLAIMS_FILE, sharedText(there.map((x) => (is(x) ? apply(x) : x))), (read as { sha: string }).sha, `${c.repo} ${c.version}: ${what}`);
+      if (w.kind === 'ok') {
+        shared = true;
+        break;
+      }
+      if (w.kind !== 'stale' || i >= 7) return false;
+      // Another PC (or worker) wrote first: a moment's wait, so two never keep colliding.
+      await new Promise((ok) => setTimeout(ok, 50 + Math.random() * 250));
+    }
+  }
+  return withLock(claimsLock(), async () => {
+    const all = loadClaims();
+    if (!all.some(is)) return shared;
+    writeJson(claimsFile(), all.map((x) => (is(x) ? apply(x) : x)));
+    return true;
+  });
 }
 
 type Row = { repo: string; name: string; main: { version: string | null } | null; release: { version: string } | null; prs: { head: string; title: string }[] };

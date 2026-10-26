@@ -64,6 +64,8 @@ export interface StewardView {
   turns?: TurnsView | null;
   /** This PC's version claims that another PC claimed too while this one couldn't reach the remote (claims.ts). */
   claimClashes?: string[];
+  /** The PRs stuck next in their version lines, passed over (passover.ts): what each waits on and the version it gets. */
+  passedOver?: string[];
   /** This PC releases Castellan itself (Settings): the kit, its rollout and the Steward's own releases are shown. */
   castellan?: boolean;
   /** The repositories Reeve found, to look after. */

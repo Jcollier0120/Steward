@@ -248,6 +248,8 @@ export function roundConditions(o: {
   unstick?: UnstickState | null;
   /** Merges and releases of this Steward's repositories that it didn't make (strangers.ts), as its alarm. */
   strangers?: Condition[];
+  /** The PRs stuck next in their version lines, passed over (passover.ts's passedConditions): each at once. */
+  passedOver?: Condition[];
   /** Every agent's port, as Manor's lists, the clones and the claims say (ports.ts): two agents on one is an alarm. */
   ports?: PortUse[];
   /** Packages whose install scripts held an install (installscripts.ts's install-held.json), by id. */
@@ -261,6 +263,7 @@ export function roundConditions(o: {
   if (o.tending) out.push(...tendConditions(o.tending));
   if (o.unstick) out.push(...unstickConditions(o.unstick));
   out.push(...(o.strangers ?? []));
+  out.push(...(o.passedOver ?? []));
   // Main's new kit, failing agents in its trial: it isn't released, and the Steward's own version that carries it waits
   // with it (stages/self.ts). Raised at once, naming each agent and what failed; no other repository waits for it.
   if (o.heldKit) {
