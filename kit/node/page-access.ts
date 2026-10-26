@@ -347,9 +347,10 @@ export function staffHeaders(id: string, o: { env?: NodeJS.ProcessEnv; home?: st
 
 /**
  * The token for a local page by its address (kit 2.118.0): `http://<id>.localhost:<port>/…`, as Manor's agents.json and
- * the kit's agentUrl give a staff member's page (and Manor's own, manor.localhost), from that page's server.json, only
- * when it names the same port: a checkout's page, 10000 above, is never sent its installed copy's. Null for any other
- * address (127.0.0.1: staffHeaders(id) there).
+ * the kit's agentUrl give a staff member's page (and Manor's own: castellan.localhost, manor.ts' MANOR_HOST, or
+ * manor.localhost, its old name, both in Manor's folder), from that page's server.json, only when it names the same
+ * port: a checkout's page, 10000 above, is never sent its installed copy's. Null for any other address (127.0.0.1:
+ * staffHeaders(id) there).
  */
 export function pageToken(url: string | URL, o: { env?: NodeJS.ProcessEnv; home?: string } = {}): string | null {
   let u: URL;
@@ -358,8 +359,9 @@ export function pageToken(url: string | URL, o: { env?: NodeJS.ProcessEnv; home?
   } catch {
     return null;
   }
-  const id = /^([a-z][a-z0-9-]*)\.localhost$/.exec(u.hostname.toLowerCase())?.[1];
-  if (u.protocol !== 'http:' || !id) return null;
+  const name = /^([a-z][a-z0-9-]*)\.localhost$/.exec(u.hostname.toLowerCase())?.[1];
+  if (u.protocol !== 'http:' || !name) return null;
+  const id = name === 'castellan' ? 'manor' : name;
   const s = serverFile(staffHome(id, o.env, o.home));
   return s && s.port === Number(u.port || 80) ? s.token : null;
 }

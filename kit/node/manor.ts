@@ -25,6 +25,14 @@ export const MANOR_DEFAULT_NAME = 'Castellan';
 
 export const manorHome = () => process.env.MANOR_HOME || path.join(os.homedir(), '.manor');
 
+/**
+ * The name Manor's page goes by in its links (kit 2.137.2): Castellan's, as Manor's own links say since Manor 0.11.0.
+ * Manor still answers at manor.localhost, its old name, and sends a browser there on to this one; a program
+ * asking at either is answered where it asked (page-access.ts' manorAnswers still asks at the old one, which every
+ * Manor answers).
+ */
+export const MANOR_HOST = 'castellan.localhost';
+
 export interface ManorLink {
   name: string;
   port: number;
@@ -85,7 +93,7 @@ function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean; no
   }
   const developerOptions = typeof raw.developerOptions === 'boolean' ? raw.developerOptions : null;
   const saysGpuWithNpu = typeof raw.gpuWithNpu === 'boolean';
-  return { link: { name, port, url: `http://manor.localhost:${port}/`, theme, developerOptions, gpuWithNpu: raw.gpuWithNpu !== false }, saysGpuWithNpu, notify: raw.notify };
+  return { link: { name, port, url: `http://${MANOR_HOST}:${port}/`, theme, developerOptions, gpuWithNpu: raw.gpuWithNpu !== false }, saysGpuWithNpu, notify: raw.notify };
 }
 
 /** Manor's Settings page (Manor's page at #/settings). */

@@ -30,9 +30,9 @@ function manorAt(name: string, settings: unknown, o: { installed?: boolean; art?
 }
 
 test("Manor's name, page and theme from its settings; nothing without an installed Manor", () => {
-  assert.deepEqual(manorLink(manorAt('named', { name: 'Weasel Manor', port: 18585, theme: 'onyx', developerOptions: true })), { name: 'Weasel Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'onyx', developerOptions: true, gpuWithNpu: true });
-  assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Castellan', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true }, 'Manor\'s own defaults: no name is Castellan');
-  assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80, theme: 'paisley' })), { name: 'Castellan', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true });
+  assert.deepEqual(manorLink(manorAt('named', { name: 'Weasel Manor', port: 18585, theme: 'onyx', developerOptions: true })), { name: 'Weasel Manor', port: 18585, url: 'http://castellan.localhost:18585/', theme: 'onyx', developerOptions: true, gpuWithNpu: true });
+  assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Castellan', port: 18585, url: 'http://castellan.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true }, 'Manor\'s own defaults: no name is Castellan');
+  assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80, theme: 'paisley' })), { name: 'Castellan', port: 18585, url: 'http://castellan.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true });
   assert.equal(manorLink(manorAt('unreadable', '{nope'))!.name, 'Castellan');
   assert.equal(manorLink(manorAt('not-an-object', 'null'))!.theme, 'system');
   assert.equal(manorLink(manorAt('bom', '﻿{"theme": "quest"}'))!.theme, 'quest');
@@ -46,7 +46,7 @@ test('the title bar says Back to <manor> first, with its icon, only when Manor i
   process.env.MANOR_HOME = manorAt('for-page', { name: 'Weasel Manor', port: 18600 });
   try {
     const html = page({ token: 't', body: '<p>hi</p>' });
-    assert.match(html, /<header class="titlebar[^"]*"[^>]*>\s*<a class="manor-back" href="http:\/\/manor\.localhost:18600\/" title="Back to Weasel Manor"><img src="\/manor-icon\.svg" alt="" width="22" height="22"><span>Back to Weasel Manor<\/span><\/a>/);
+    assert.match(html, /<header class="titlebar[^"]*"[^>]*>\s*<a class="manor-back" href="http:\/\/castellan\.localhost:18600\/" title="Back to Weasel Manor"><img src="\/manor-icon\.svg" alt="" width="22" height="22"><span>Back to Weasel Manor<\/span><\/a>/);
   } finally {
     process.env.MANOR_HOME = path.join(tmp, 'no-manor');
   }
@@ -57,14 +57,14 @@ test("with Manor, the page wears the manor's theme from its first paint, and its
   process.env.MANOR_HOME = manorAt('themed', { name: 'Weasel "&" Manor', port: 18600, theme: 'arcade' });
   try {
     const html = page({ token: 't', body: '' });
-    assert.match(html, /^<!doctype html>\n<html lang="en" data-theme="arcade" data-manor="Weasel &quot;&amp;&quot; Manor" data-manor-url="http:\/\/manor\.localhost:18600\/">/);
+    assert.match(html, /^<!doctype html>\n<html lang="en" data-theme="arcade" data-manor="Weasel &quot;&amp;&quot; Manor" data-manor-url="http:\/\/castellan\.localhost:18600\/">/);
     assert.doesNotMatch(html, /localStorage\.getItem/, "the agent's own choice doesn't apply");
     // The menu: the manor's theme, not a button, and the way to Manor to change it.
     assert.match(html, /title="Theme \(Weasel &quot;&amp;&quot; Manor&#39;s\)"/);
     assert.equal((html.match(/class="theme-item"/g) ?? []).length, 1);
     assert.match(html, /<div class="theme-item" role="menuitemradio" aria-checked="true" aria-disabled="true" data-theme="arcade">.*<span class="ti-label">Arcade<\/span>/);
     assert.match(html, /<p class="menu-note">Weasel &quot;&amp;&quot; Manor chooses the theme, for every page in the manor\.<\/p>/);
-    assert.match(html, /<a class="menu-link" role="menuitem" href="http:\/\/manor\.localhost:18600\/">Change it in Weasel &quot;&amp;&quot; Manor<\/a>/);
+    assert.match(html, /<a class="menu-link" role="menuitem" href="http:\/\/castellan\.localhost:18600\/">Change it in Weasel &quot;&amp;&quot; Manor<\/a>/);
     assert.doesNotMatch(html, /<button type="button" class="theme-item"/);
   } finally {
     process.env.MANOR_HOME = path.join(tmp, 'no-manor');
@@ -72,7 +72,7 @@ test("with Manor, the page wears the manor's theme from its first paint, and its
   process.env.MANOR_HOME = manorAt('windows', { name: 'Weasel Manor' });
   try {
     const html = page({ token: 't', body: '' });
-    assert.match(html, /<html lang="en" data-manor="Weasel Manor" data-manor-url="http:\/\/manor\.localhost:18585\/">/, "Match Windows: no data-theme, and still Manor's");
+    assert.match(html, /<html lang="en" data-manor="Weasel Manor" data-manor-url="http:\/\/castellan\.localhost:18585\/">/, "Match Windows: no data-theme, and still Manor's");
     assert.match(html, /aria-disabled="true" data-theme="system">.*<span class="ti-label">Match Windows<\/span>/);
     assert.doesNotMatch(html, /localStorage\.getItem/);
   } finally {
@@ -98,7 +98,7 @@ test("an agent's developer features: Manor's Developer options when it's install
     let r = developerOptions(own, on);
     assert.equal(r.on, true, `own ${own}, Manor on`);
     assert.equal(r.setBy!.name, 'Weasel Manor');
-    assert.equal(r.setBy!.url, 'http://manor.localhost:18600/');
+    assert.equal(r.setBy!.url, 'http://castellan.localhost:18600/');
     r = developerOptions(own, off);
     assert.equal(r.on, false, `own ${own}, Manor off`);
     assert.ok(r.setBy);
@@ -134,7 +134,7 @@ test("the graphics card beside the NPU: Manor's gpuWithNpu when it says; else th
   for (const own of [true, false]) {
     const r = gpuWithNpu(own, off);
     assert.equal(r.on, false, `own ${own}, Manor off`);
-    assert.equal(r.setBy!.url, 'http://manor.localhost:18600/');
+    assert.equal(r.setBy!.url, 'http://castellan.localhost:18600/');
     assert.equal(gpuWithNpu(own, on).on, true, `own ${own}, Manor on`);
     // An older Manor without the key, one that says something else, or none: the agent's own switch.
     for (const home of [manorAt('gpu-says-nothing', { name: 'Weasel Manor' }), manorAt('gpu-says-no', { gpuWithNpu: 'no' }), manorAt('gpu-not-installed', { gpuWithNpu: false }, { installed: false }), path.join(tmp, 'nowhere')]) {
@@ -153,10 +153,10 @@ test("the graphics card beside the NPU: Manor's gpuWithNpu when it says; else th
 
 test('in place of the agent\'s own switch: developer features show while developer staff are hired in <manor>, and the way to its staff', () => {
   const m = developerOptions(false, manorAt('note', { name: 'Weasel "&" Manor', port: 18600, developerOptions: true })).setBy;
-  assert.equal(manorSettingsUrl(m!), 'http://manor.localhost:18600/#/settings', "Manor's Settings page");
-  assert.equal(manorStaffUrl(m!), 'http://manor.localhost:18600/#/settings/employees', "Manor's Settings, Employees");
+  assert.equal(manorSettingsUrl(m!), 'http://castellan.localhost:18600/#/settings', "Manor's Settings page");
+  assert.equal(manorStaffUrl(m!), 'http://castellan.localhost:18600/#/settings/employees', "Manor's Settings, Employees");
   assert.equal(developerOptionsNote(m),
-    '<p class="manor-decides"><span>Developer features show while developer staff are hired in Weasel &quot;&amp;&quot; Manor.</span> <a href="http://manor.localhost:18600/#/settings/employees">See the staff in Weasel &quot;&amp;&quot; Manor</a></p>');
+    '<p class="manor-decides"><span>Developer features show while developer staff are hired in Weasel &quot;&amp;&quot; Manor.</span> <a href="http://castellan.localhost:18600/#/settings/employees">See the staff in Weasel &quot;&amp;&quot; Manor</a></p>');
   assert.doesNotMatch(developerOptionsNote(m), /Developer options/, 'Manor has no such switch');
   assert.equal(developerOptionsNote(null), '', 'the agent\'s own switch stands');
   assert.match(page({ token: 't', body: '' }), /\.manor-decides \{/, 'its look is in every page');

@@ -1,6 +1,6 @@
 import { renameSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { encode, findTools, getFfmpeg, grindArgs, HEIWARD_SOURCE, pickEncoder, probe, type FindOptions, type GetOptions, type Running, type Tools, type ToolSearch } from './ffmpeg.ts';
+import { encode, findTools, getFfmpeg, grindArgs, HEIWARD_SOURCE, pickEncoder, probe, tagArgs, type FindOptions, type GetOptions, type Running, type Tools, type ToolSearch } from './ffmpeg.ts';
 import { setFileTimes } from './files.ts';
 import { isHdr, type MediaInfo } from './media-probe.ts';
 import { agentOf, audioArgs, RANKED, type Candidate, type Choice, type EncoderWords, type Preset } from './video-encoders.ts';
@@ -248,6 +248,12 @@ export interface ShrinkJob {
   cores?: number | null;
   /** The container: MP4 when left out. */
   format?: 'mp4' | 'mov';
+  /**
+   * Whether the copy keeps every tag the original has, where it was filmed included (ffmpeg.ts, tagArgs): an agent's
+   * setting, off by default, as the Miller's keepVideoTags. Left out (kit 2.137.2): only when it was recorded and each
+   * track's language.
+   */
+  keepTags?: boolean;
   onPhase?: (phase: ShrinkPhase) => void;
   /** Each progress block: how far through (0 to 100), the copy's bytes so far, and FFmpeg's speed. */
   onProgress?: (p: { percent: number; outBytes: number; speed: number | null }) => void;
@@ -311,6 +317,7 @@ export async function shrinkVideo(file: string, j: ShrinkJob): Promise<Shrunk | 
     cropToEven: plan.expected.cropToEven,
     format: j.format,
     cores: j.cores,
+    tags: tagArgs(info, j.keepTags),
   });
   j.onPhase?.('encoding');
   const running = d.encode(j.t, {

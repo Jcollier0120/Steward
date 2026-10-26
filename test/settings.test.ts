@@ -155,7 +155,7 @@ test("the other agents' pages are Manor's to say, never Settings'; the Wright's 
   writeFileSync(path.join(manor, 'agents.json'), JSON.stringify({ agents }));
   process.env.MANOR_HOME = manor;
   try {
-    assert.deepEqual(agentPages(), { manor: 'http://manor.localhost:18585/', surveyor: 'http://surveyor.localhost:19008/', wright: '', bailiff: '', reeve: 'http://reeve.localhost:19005/', seneschal: '' }, "the Wright and the Bailiff not installed: not read, though Manor knows them");
+    assert.deepEqual(agentPages(), { manor: 'http://castellan.localhost:18585/', surveyor: 'http://surveyor.localhost:19008/', wright: '', bailiff: '', reeve: 'http://reeve.localhost:19005/', seneschal: '' }, "the Wright and the Bailiff not installed: not read, though Manor knows them");
     mkdirSync(path.join(process.env.WRIGHT_HOME!, 'app'), { recursive: true });
     mkdirSync(path.join(process.env.BAILIFF_HOME!, 'app'), { recursive: true });
     assert.deepEqual([agentPages().wright, agentPages().bailiff], ['http://wright.localhost:19006/', 'http://bailiff.localhost:19007/']);

@@ -186,6 +186,7 @@ test("a page's token by its address (kit 2.118.0): <id>.localhost on the port it
   assert.deepEqual(A.pageHeaders('http://wright.localhost:18989/api/work', o), { 'x-token': 'tok_wright_0123456789' });
   assert.deepEqual(A.pageHeaders(new URL('http://Wright.localhost:18989/'), o), { 'x-token': 'tok_wright_0123456789' }, 'a URL, any case');
   assert.deepEqual(A.pageHeaders('http://manor.localhost:18585/api/state', o), { 'x-token': 'tok_manor_0123456789' }, "Manor's page takes x-token too");
+  assert.deepEqual(A.pageHeaders('http://castellan.localhost:18585/api/state', o), { 'x-token': 'tok_manor_0123456789' }, "Manor's link (manorLink, since kit 2.137.2): the same page, the same token");
   assert.deepEqual(A.pageHeaders('http://wright.localhost:28989/api/work', o), {}, "a checkout's page, 10000 above, isn't sent the installed one's token");
   assert.deepEqual(A.pageHeaders('http://127.0.0.1:18989/api/work', o), {}, 'an address that names no page: staffHeaders(id) there');
   assert.deepEqual(A.pageHeaders('https://wright.localhost:18989/', o), {});
@@ -250,7 +251,7 @@ test('strict, a GET that is neither the token nor the cookie gets no data and no
     const html = await page.text();
     assert.ok(!html.includes(token), 'never the token');
     assert.match(html, new RegExp(`${APP.name} opens from Hall &lt;&amp;&gt;`));
-    assert.ok(html.includes(`<a class="button" href="http://manor.localhost:${manorPort}/open/${APP.id}?at=%2F">Open ${APP.name} from Hall &lt;&amp;&gt;</a>`), html);
+    assert.ok(html.includes(`<a class="button" href="http://castellan.localhost:${manorPort}/open/${APP.id}?at=%2F">Open ${APP.name} from Hall &lt;&amp;&gt;</a>`), html);
     const data = await get('/api/data');
     assert.equal(data.status, 401);
     assert.equal(((await data.json()) as { error: string }).error, A.SIGN_IN_FIRST);
@@ -273,7 +274,7 @@ test("strict, a browser that isn't signed in goes to Manor, which opens that sam
   const { token, close } = await agentPage();
   const manor = http.createServer((req, res) => (req.url === '/api/ping' ? res.writeHead(200, { 'content-type': 'application/json' }).end('{"app":"manor"}') : res.writeHead(404).end()));
   try {
-    const openUrl = `http://manor.localhost:${manorPort}/open/${APP.id}?at=%2Fprint%3Fx%3D1`;
+    const openUrl = `http://castellan.localhost:${manorPort}/open/${APP.id}?at=%2Fprint%3Fx%3D1`;
     // Castellan stopped: a bookmark lands on a page that says so, never a dead one, and never a used code's.
     const down = await nav(`/print?x=1&launch=${'0'.repeat(36)}`);
     assert.equal(down.status, 200);

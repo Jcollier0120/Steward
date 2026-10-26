@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.239
+
+**It hands out the kit 2.137.2: video copies leave out where they were filmed, folders with names in any script are found, and "Back to Castellan" opens Castellan's own address.**
+
+### What changed
+
+- **Video copies keep only when they were recorded and their tracks' languages.** Where a video was filmed, the camera, its serial number and the owner's name stay with the original, as they already do for photos. A staff member that lets you keep them gives you a setting for it, off by default.
+- **Your folders are found whatever script their names are in.** Staff that look in your Downloads, Pictures, Videos, Screenshots or Game Bar captures folders now find them when your user name or a folder's name is in another script (Jürgen, Документы, 書類). Before, those names came back garbled and the staff looked in the wrong place.
+- **A Downloads folder you moved is found.** Before, the staff always looked in the usual Downloads folder.
+- **"Back to Castellan"** on each staff member's page opens Castellan at castellan.localhost, the address Castellan uses itself, instead of the old manor.localhost, which only sent you on.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.238
 
 **It hands out the kit 2.137.1: the small program that runs our own text-reading model comes signed again, so a PC doesn't build its own copy.**
