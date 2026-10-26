@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { APP } from '../app.ts';
 import { claimsOn, employeeFor, highest, pushesHere } from '../claims.ts';
 import { identityOf } from '../employ.ts';
 import { CHANGES_README } from '../entries.ts';
@@ -15,6 +16,7 @@ import { checkKind, runChecks, type AffectedScope } from './bump.ts';
 import type { StoodIn } from './standin.ts';
 import type { Ctx } from './common.ts';
 import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
+import { kitContentOf, kitTrialOfClone } from './trial.ts';
 import { noteVouchTime, vouchLimit } from './vouchtime.ts';
 import { hostFor } from '../hosts/index.ts';
 
@@ -31,7 +33,8 @@ import { hostFor } from '../hosts/index.ts';
  * of the whole checks on exactly that tree, on this PC or another on the licence (standin.ts). Checks that run
  * five minutes past the vouch's average time are stopped, and nothing is set (vouchtime.ts). Before any of that, HEAD's
  * version files must agree, as a kit's trial needs them to (versionTrouble): a PR whose files disagree is refused, and
- * nothing is run or set.
+ * nothing is run or set. A PR of the Steward's own that changes what the agents take from the kit then has that kit
+ * tried on them, as main's trial will try it (vouchTrial), and an agent's test it breaks fails the vouch.
  *
  * A build (stages/mainbuild.ts) trusts it only when a team member's account set it (Settings' team, read from GitHub's
  * record of who created the status), on main's head itself, or on the PR head a merge commit brought in unchanged (a PR
@@ -213,9 +216,52 @@ async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: str
   // A person waits on a vouch: the Seneschal's first lane (stages/seneschal.ts).
   const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind, files) => vouchLimit(e.id, kind, { overMs: o.overMs, files }), stoodIn, task: { lane: 'person' } });
   if (failed) return failed;
-  if (stoodIn.by) return setVouch(ctx, e, o.repo, o.head, stoodInDescription(e, stoodIn, o.head));
-  noteVouchTime(e.id, checkKind(scope), Date.now() - started, scope?.files);
-  return setVouch(ctx, e, o.repo, o.head, vouchDescription(e, scope, o.head));
+  const took = Date.now() - started;
+  // A kit PR's kit tried on the agents, as main's trial will try it once it's merged.
+  const trial = await vouchTrial(ctx, e, o);
+  if (trial && 'failed' in trial) return trial.failed;
+  const tried = trial ? `; ${trial.passed}` : '';
+  if (stoodIn.by) return setVouch(ctx, e, o.repo, o.head, withTrial(stoodInDescription(e, stoodIn, o.head), tried));
+  noteVouchTime(e.id, checkKind(scope), took, scope?.files);
+  return setVouch(ctx, e, o.repo, o.head, withTrial(vouchDescription(e, scope, o.head), tried));
+}
+
+/** A vouch's description and its kit trial's words after it, as far as GitHub keeps (140 characters). Pure. */
+const withTrial = (description: string, tried: string) => `${description}${tried}`.slice(0, 140);
+
+/**
+ * A PR of the Steward's own that changes the kit an agent gets (kitContentOf: kit\'s parts and tools/kit.ts, at its
+ * head against where it left main) has its kit tried on the agents at its vouch, once its own checks pass: each agent
+ * main's trial would try, as that trial tries them (trial.ts's kitTrialOfClone), one at a time. Through Steward 0.36.239
+ * only main's trial did, after the merge: kit 2.137.2's PR passed its own checks while Reeve's and the Surveyor's tests
+ * still expected manor.localhost, and only test-only PRs in their repositories, made by hand first, kept its trial from
+ * holding the kit and every Steward PR behind it.
+ *
+ * Null for any other repository, or a PR whose kit is main's: nothing to try. `failed` names each agent and the tests
+ * that broke; a try the network cut short fails it too (vouch again), as no verdict on the kit. `passed`: what it came
+ * to, for the vouch's description.
+ */
+export async function vouchTrial(ctx: Ctx, e: Employee, o: { dir: string; head: string; say: (line: string) => void }): Promise<{ failed: string } | { passed: string } | null> {
+  if (e.id !== APP.id) return null;
+  const base = (await gitMaybe(ctx.run, o.dir, 'merge-base', `origin/${e.branch}`, o.head))?.trim();
+  const now = await kitContentOf(ctx, o.dir, o.head);
+  if (!now || (base && now === (await kitContentOf(ctx, o.dir, base)))) {
+    o.say(`no kit trial: what the agents take from the kit is ${e.branch}'s`);
+    return null;
+  }
+  const kit = (await showFile(ctx.run, o.dir, o.head, 'kit/VERSION'))?.trim();
+  if (!kit) return { failed: `its kit changes, and its kit/VERSION can't be read at ${o.head.slice(0, 7)}: the kit can't be tried on the agents` };
+  o.say(`its kit ${kit} changes what the agents take from it: tried on each of them, one at a time, as main's trial will try it`);
+  const t = await kitTrialOfClone(ctx, { dir: o.dir, head: o.head, kit }, o.say);
+  if (t.cut) return { failed: `${t.cut}: no verdict on the kit, so vouch again` };
+  const own = t.own.length ? `; ${t.own.map((f) => f.name).join(', ')} failed without it too, so not held against it` : '';
+  if (t.failed.length) {
+    const each = t.failed.map((f) => `${f.name}: ${f.message}`).join('; ');
+    return { failed: `kit ${kit} fails ${t.failed.length} agent${t.failed.length === 1 ? "'s" : "s'"} checks (${t.failed.map((f) => f.name).join(', ')}), as main's trial would: ${each}${own}. Fix the kit, or the agents' tests on their own mains so they pass with the kit and without it` };
+  }
+  const passed = `kit ${kit} passed ${t.passed} of ${t.staff} agents' checks`;
+  o.say(`${passed}${t.staff - t.passed - t.own.length ? ` (the rest not tried: nothing they take from the kit changes)` : ''}${own}`);
+  return { passed };
 }
 
 /** The vouch's description when a pass stood in for running the checks: whose, and at which commit. */

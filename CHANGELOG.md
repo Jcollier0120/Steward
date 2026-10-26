@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.240
+
+**Vouching for a pull request that changes the kit now tries that kit on your staff first, so a staff member's test it breaks is found before the merge, not after.**
+
+### What changed
+
+- **`steward vouch` on a Steward pull request that changes what the staff take from the kit tries that kit on each staff member,** the way the build's kit trial will once it's merged: each in a copy of its own, only the tests the kit's changes reach, nothing committed or pushed. They're tried one at a time, so the PC you're working at isn't loaded with more than one at once.
+- **A staff member's test the kit breaks fails the vouch, named** with the test and what it said, so you can fix the kit, or that staff member's test so it passes with the kit and without it, before you merge. Before, only the build found it after the merge, and the kit, with every Steward update behind it, waited until it was fixed.
+- A staff member that fails without the new kit too isn't held against it, and one whose failure looks like the PC being busy is tried once more, alone, after the rest, as in the build's trial. A pull request that leaves the kit as it is, or changes only its notes or version, is vouched for as before.
+- The pass recorded on GitHub says how many staff members the kit passed.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.239
 
 **It hands out the kit 2.137.2: video copies leave out where they were filmed, folders with names in any script are found, and "Back to Castellan" opens Castellan's own address.**

@@ -124,34 +124,40 @@ const goingWords = (t: KitTrial): string => {
   return `${TRIAL_GOING}: ${total - left} of ${total} so far${failing}${again}`;
 };
 
-/** Each employee tried with the kit in `dir` (the Steward's worktree of main), its worktree and branch removed after. */
+/**
+ * Each employee tried with the kit in `dir` (the Steward's worktree of main, or a kit PR's clone at its vouch), its
+ * worktree and branch removed after, while its repository is still held: a vouch's trial (another process) tries the
+ * same agents in the same worktrees, and must find nothing of this one's there, nor have its own removed under it.
+ */
 async function tryEach(ctx: Ctx, employees: Employee[], kit: string, dir: string, reachFrom?: { repo: string; head: string }): Promise<EmployeeResult[]> {
   // main's own kit changelog, so each trial bump writes the entry its real bump will (its tests read it too).
   const changelogFile = path.join(dir, 'kit', 'CHANGELOG.md');
   const changelog = existsSync(changelogFile) ? readFileSync(changelogFile, 'utf8') : null;
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
-    let r: EmployeeResult;
-    try {
-      r = await withRepo(ctx.log, e.id, () =>
-        bumpOne(ctx, e, {
+    const tryIt = async (): Promise<EmployeeResult> => {
+      let r: EmployeeResult;
+      try {
+        r = await bumpOne(ctx, e, {
           kit,
           kitFrom: path.join(dir, 'kit'),
           tool: path.join(dir, 'tools', 'kit.ts'),
           trial: true,
           changelog,
           ...(reachFrom ? { reach: (_e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean) => kitReach(ctx, { ...reachFrom, pin, toolChanged }) } : {}),
-        }),
-      );
-    } catch (err) {
-      r = result(e, 'failed', (err as Error).message);
-    }
-    const repo = checkoutOf(e);
-    try {
-      if (existsSync(repo)) await removeWorktree(ctx.run, repo, trialDirOf(ctx.settings, e), trialBranch(kit));
-      removeProfile(trialProfileOf(trialDirOf(ctx.settings, e)));
-    } catch (err) {
-      ctx.log(`[${e.id}] couldn't remove its trial: ${(err as Error).message}`);
-    }
+        });
+      } catch (err) {
+        r = result(e, 'failed', (err as Error).message);
+      }
+      const repo = checkoutOf(e);
+      try {
+        if (existsSync(repo)) await removeWorktree(ctx.run, repo, trialDirOf(ctx.settings, e), trialBranch(kit));
+        removeProfile(trialProfileOf(trialDirOf(ctx.settings, e)));
+      } catch (err) {
+        ctx.log(`[${e.id}] couldn't remove its trial: ${(err as Error).message}`);
+      }
+      return r;
+    };
+    const r = await withRepo(ctx.log, e.id, tryIt).catch((err: Error) => result(e, 'failed', err.message));
     ctx.log(`[${e.id}] kit ${kit} trial: ${r.outcome}: ${r.message}`);
     return r;
   });
@@ -324,6 +330,65 @@ async function movedOn(ctx: Ctx, t: KitTrial): Promise<Employee[]> {
   return moved;
 }
 
+/** The agents a kit's trial tries: those on the kit that Manor hasn't retired, with a clone here. */
+const trialStaff = (ctx: Ctx, retired: ReadonlySet<string>): Employee[] => ctx.settings.employees.filter((e) => e.usesKit && !retired.has(e.id) && existsSync(checkoutOf(e)));
+
+/** What a kit PR's trial at its vouch came to (kitTrialOfClone). */
+export interface CloneTrial {
+  kit: string;
+  /** How many agents it was to try: every one main's trial would. */
+  staff: number;
+  passed: number;
+  /** Each agent whose checks failed with the kit, what failed (the tests by name), and the first lines that say why. */
+  failed: KitTrial['failed'];
+  /** The ones that failed without the kit too: not the kit's doing. */
+  own: NonNullable<KitTrial['own']>;
+  /** Why it stopped short (the network cut a try short): no verdict on the kit. */
+  cut: string | null;
+}
+
+/**
+ * A kit PR's trial at its vouch (vouch.ts, Steward 0.36.240): the kit in the PR's clone at `dir`, at its head (its kit\
+ * and tools/kit.ts; `kit` its kit/VERSION), tried on every agent main's trial would try (trialStaff), as main's trial
+ * tries them (tryEach: a worktree and branch of each agent's own, only the tests the kit reaches, in a scratch profile,
+ * nothing committed or pushed), but one at a time: a person waits on a vouch, on a PC they're working at. One that fails
+ * as under load (underLoad) is tried once more, alone, after the rest, as main's trial does. A try the network cut
+ * short stops it (`cut`). `say` hears each agent's turn and what it came to.
+ */
+export async function kitTrialOfClone(ctx: Ctx, at: { dir: string; head: string; kit: string }, say: (line: string) => void): Promise<CloneTrial> {
+  const staff = trialStaff(ctx, retiredOf(ctx));
+  const t: CloneTrial = { kit: at.kit, staff: staff.length, passed: 0, failed: [], own: [], cut: null };
+  const retry: Employee[] = [];
+  const tryOne = async (e: Employee, again: boolean): Promise<void> => {
+    const [r] = await tryEach(ctx, [e], at.kit, at.dir, { repo: at.dir, head: at.head });
+    if (r.outcome === 'failed' && (await networkFailure(ctx, r.message))) {
+      t.cut = `kit ${at.kit}'s trial on ${r.name} was cut short by the network (${r.message.split('\n')[0].slice(0, 200)})`;
+      return;
+    }
+    if (!again && underLoad(r)) {
+      say(`${r.name}: its failure may be this PC's load, not the kit's: tried once more, alone, after the rest (${r.message.split('\n')[0].slice(0, 200)})`);
+      retry.push(e);
+      return;
+    }
+    const settled = again && r.outcome === 'failed' ? { ...r, message: `${r.message}; tried once more, alone, after the rest: it failed again` } : r;
+    say(`${r.name}: ${settled.outcome === 'done' ? 'passed' : settled.outcome}: ${settled.message}`);
+    t.failed.push(...failuresOf([settled]));
+    t.passed += settled.outcome === 'done' ? 1 : 0;
+    t.own.push(...ownFailuresOf([settled]));
+  };
+  for (const [i, e] of staff.entries()) {
+    say(`kit ${at.kit} tried on ${e.name} (${i + 1} of ${staff.length})`);
+    await tryOne(e, false);
+    if (t.cut) return t;
+  }
+  for (const e of retry) {
+    say(`kit ${at.kit} tried on ${e.name} once more, alone`);
+    await tryOne(e, true);
+    if (t.cut) return t;
+  }
+  return t;
+}
+
 /** What a kit's trial at main came to: passed, failing agents (the kit waits), or still going (the build waits for it). */
 export type MainTrial = { state: 'passed'; t: KitTrial } | { state: 'failed'; t: KitTrial; why: string } | { state: 'going'; why: string };
 
@@ -357,7 +422,7 @@ export async function kitTrialAtMain(ctx: Ctx, steward: Employee, at: { commit: 
       ctx.log(`[${APP.id}] kit ${at.kit} at ${sha} is the kit ${k} tried (kit ${s.kit}), but for versions and changelogs: not tried again`);
       t = { kit: at.kit, failed: s.failed, passed: s.passed, at: s.at, ...tried, mains: { ...s.mains }, ...(s.untouched ? { untouched: s.untouched } : {}), ...(s.own?.length ? { own: s.own } : {}), steward: s.steward, commit: at.commit, content: content!, from: k };
     } else {
-      const employees = ctx.settings.employees.filter((e) => e.usesKit && !retired.has(e.id) && existsSync(checkoutOf(e)));
+      const employees = trialStaff(ctx, retired);
       ctx.log(`[${APP.id}] kit ${at.kit} on main (${sha}) has no release: trying it on ${employees.length} agents before it is released, ${trialParallel(ctx.settings.parallel)} at a time`);
       t = { kit: at.kit, failed: [], passed: 0, at: new Date().toISOString(), ...tried, mains: {}, pending: employees.map((e) => e.id), steward: APP.version, commit: at.commit, ...(content ? { content } : {}) };
     }

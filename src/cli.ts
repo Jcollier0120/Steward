@@ -97,6 +97,9 @@ const USAGE = `${APP.id}: ${APP.role}
                    Without a number: the PR for this branch.
                    First, HEAD's version files must agree (as a kit's trial needs): if they don't, it says
                    what to set where, and runs and records nothing.
+                   A PR of the Steward's that changes what the agents take from the kit then has that kit
+                   tried on each agent main's trial would try, one at a time; an agent's test it breaks
+                   fails the vouch, named.
                    The checks run at the checks pace, a share of the processor (Manor's Settings change it).
                    When the Assayer already passed every check on exactly HEAD's tree (same
                    dependencies and kit, within a day), nothing runs again: its pass is taken.
