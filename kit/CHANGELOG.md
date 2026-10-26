@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.142.3
+
+**The shared video switch is called "Keep GPS and camera details in video copies". Its old name, "Keep a video's place and camera details", read as where the videos are kept, and sent the owner to Manor's Staff settings looking for a folder setting that isn't there.**
+
+### What changed
+
+- **node/shared-settings.ts, `keepVideoTagsField()`:** the label is "Keep GPS and camera details in video copies", and its default help says "where it was filmed (GPS)" without "its place included". The key (`keepVideoTags`), its values and what it does are unchanged, on an agent's own Settings and on Manor's.
+
+### Before you update
+
+- Nothing, unless the agent passes its own `help` that speaks of "a video's place" (the Miller's does): say "where it was filmed" there instead.
+
 ## 2.142.2
 
 **spec/RELEASE-NOTES.md says how every agent rides the build pipeline: its work writes its changelog entry in changes/, and the Steward's build sets the version.**
