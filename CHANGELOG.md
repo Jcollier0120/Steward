@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.245
+
+**It hands out the kit 2.142.0: a tile or link to part of a staff member's page opens the tab it's in, and times to come read "in 6 hours".**
+
+### What changed
+
+- **A tile at a glance, or a link to part of a page, opens the tab that part is in** and scrolls to it, instead of scrolling to a tab not shown.
+- **A time still to come reads "in 6 hours"**, not "just now".
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.244
 
 **It hands out the kit 2.141.0: Settings and the staff's tabbed pages are tidier, and its own Release card says less.**
