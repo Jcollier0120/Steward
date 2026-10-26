@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.241
+
+**It hands out the kit 2.138.0, so your whole staff can be employed at once without loading the PC down: their rounds are spread out, models load only when there's room, and fewer text readers run together.**
+
+### What changed
+
+- **Rounds are spread across the hour on each PC.** Castellan places each staff member's rounds where the PC is least busy, so heavy rounds don't all fall in the same minutes, and two PCs don't run them at the same times.
+- **After you sign in, or your PC wakes, the staff start one by one** over the next few minutes, each at its own place, instead of all at once.
+- **A model loads only when there's room for it.** Before a model loads, the staff stop other models nobody has used for 30 seconds to make room. If there's still no room, background work waits and tries again later rather than push the PC past 85% of its memory; something you're waiting on still goes ahead after at most 2 minutes.
+- **At most 2 staff members read text from pictures at once** (4 on a PC with 24 GB of memory or more). A reader waiting its turn gets one as soon as another finishes its batch.
+- It brings the kit 2.137.2's fixes too: video copies leave out where they were filmed, folders with names in any script are found, and "Back to Castellan" opens Castellan's own address.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.240
 
 **Vouching for a pull request that changes the kit now tries that kit on your staff first, so a staff member's test it breaks is found before the merge, not after.**

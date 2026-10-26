@@ -652,6 +652,13 @@ export class ModelLoading extends AcceleratorDown {}
 export class ServerNotRunning extends Error {}
 
 /**
+ * The server isn't running, and there's no room under the manor's memory ceiling to load its model (memory-guard.ts,
+ * kit 2.138.0): background work (`whenShort: 'defer'`) steps back for later rather than take the PC over it. Not a
+ * failure: nothing is marked, and npu.ts defers the work, as for a model still loading.
+ */
+export class NoRoomToLoad extends Error {}
+
+/**
  * The server isn't running, and the manor is stopped (Manor's Settings, manor.ts' manorStopped): no model server starts
  * until it's started again (kit 2.99.1). A server already running still serves. Not a failure: nothing is marked.
  */
@@ -853,8 +860,10 @@ export interface ServerReady {
  * restarts (keeper.ts) keep a log per server; a request's start keeps none, as before.
  * `onWaking` is told, before any waiting, that the server is being started (it wasn't running: the keeper stopped it
  * when nobody used it) or is busy loading: the request will wait for its model to load. A throw from it is ignored.
+ * Before a start, the memory guard looks for room for its model (memory-guard.ts, kit 2.138.0): with none, it starts
+ * anyway, or with `whenShort: 'defer'` (background work) throws NoRoomToLoad and starts nothing.
  */
-export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv; onWaking?: (how: 'starting' | 'loading') => void; readBlocks?: ReadLog } = {}): Promise<ServerReady> {
+export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv; onWaking?: (how: 'starting' | 'loading') => void; readBlocks?: ReadLog; whenShort?: 'start' | 'defer'; room?: StartOptions['room'] } = {}): Promise<ServerReady> {
   const readyMs = opts.readyMs ?? READY_WAIT_MS;
   const lists = { listsWhenLoaded: listsWhenLoaded(ep.startCommand) };
   const state = await probe(ep.baseUrl, PROBE_MS, lists);
@@ -899,6 +908,10 @@ interface StartOptions {
   logFile?: string;
   env?: NodeJS.ProcessEnv;
   readBlocks?: ReadLog;
+  /** What comes of no room for its model: it starts anyway (a person's request, the keeper's), or it's deferred. */
+  whenShort?: 'start' | 'defer';
+  /** A stand-in for the memory guard's look (memory-guard.ts' makeRoom), for tests. */
+  room?: (ep: Endpoint, o: { then: 'start' | 'defer' }) => Promise<{ did: 'room' | 'short'; freeBytes: number; needBytes: number } | null>;
 }
 
 /** A start that Smart App Control (or another application control policy) blocked part of. */
@@ -913,6 +926,15 @@ export const BLOCKED_AGAIN_MS = 2_000;
  * can spare the asker a failure. When it's blocked again, that's said as before.
  */
 async function start(ep: Endpoint, waitMs: number, readyMs: number, o: StartOptions = {}): Promise<ServerReady> {
+  // Room for its model under the manor's ceiling first (memory-guard.ts, kit 2.138.0): the manor's other servers, unused,
+  // stop for it; with none, background work steps back. Not looked at under node --test, unless a test gives `room`.
+  const then = o.whenShort ?? 'start';
+  const room = o.room ?? (process.env.NODE_TEST_CONTEXT ? null : async (e: Endpoint, ro: { then: 'start' | 'defer' }) => (await import('./memory-guard.ts')).makeRoom(e, ro));
+  const r = room ? await room(ep, { then }).catch(() => null) : null;
+  if (r?.did === 'short' && then === 'defer') {
+    const { shortWords } = await import('./memory-guard.ts');
+    throw new NoRoomToLoad(`${ep.baseUrl} wasn't started: ${shortWords(r)}`);
+  }
   try {
     return await startOnce(ep, waitMs, readyMs, o);
   } catch (e) {

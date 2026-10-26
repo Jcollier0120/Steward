@@ -1,13 +1,14 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { startFailed } from './console.ts';
 import { paceStarted } from './gentle.ts';
-import { locksDir, LockTimeout, withLock } from './lock.ts';
+import { lockDirFor, locksDir, LockTimeout, withLock } from './lock.ts';
 import { acceleratorTurn, NpuBusy } from './npu.ts';
-import { currentLane, type Lane } from './npu-queue.ts';
+import { currentLane, type Lane, lineState, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
 import { type NpuReport, readNpuReport } from './npu-report.ts';
 import { compileHelperScript, prebuiltName, signedHelper } from './prebuilt.ts';
 import { powershell, psStart } from './ps.ts';
@@ -743,6 +744,34 @@ export async function startReader(on: 'npu' | 'cpu', o: { env?: NodeJS.ProcessEn
 
 /** How long the model is left alone after it couldn't be used here (no program, an NPU that failed its self-check). */
 const REFUSED_MS = 6 * 3600_000;
+
+/**
+ * How many agents' text readers may run at once on this PC (kit 2.138.0): 2 under 24 GB of memory, 4 with 24 GB or
+ * more. Each program holds its model (and on an NPU its graphs: 317 MB on a Snapdragon X2 after its compile) until two
+ * idle minutes have passed, so with the whole staff employed a dozen agents' readers could sit in memory at once. An
+ * agent's readers (the NPU's, and the processor's beside it) take one place between them, in a line every agent on the
+ * PC shares (READERS_LOCK), before either starts and never inside the NPU's turn, and keep it while one runs. When
+ * another agent waits for a place, they end after the batch they're reading (the next batch starts them again, from
+ * the cache) and give it up. A place not had in READERS_WAIT_MS is gone without: the reader starts anyway, since the
+ * model reads more exactly than Windows' OCR.
+ */
+export const readersAtOnce = (ramBytes = os.totalmem()) => (ramBytes < 24 * 1024 ** 3 ? 2 : 4);
+export const READERS_LOCK = 'ocr-readers';
+export const READERS_WAIT_MS = 5 * 60_000;
+/** How often an agent holding a place looks whether another waits for one, or its readers have ended. */
+export const READERS_LOOK_MS = 2_000;
+/** A place is kept while its reader runs, hours on a busy PC: only a holder whose process has gone gives it up sooner. */
+const READERS_STALE_MS = 24 * 3_600_000;
+
+/** The readers' places: the line's folders, one a place, and (for tests) its waits. */
+export interface ReadersCap {
+  dirs: string[];
+  waitMs?: number;
+  lookMs?: number;
+}
+
+/** This PC's places; none under node --test, unless a test gives its own. */
+export const pcReadersCap = (): ReadersCap | null => (process.env.NODE_TEST_CONTEXT ? null : { dirs: slotDirs(lockDirFor(READERS_LOCK), readersAtOnce()) });
 /** How long before looking again when another agent on the PC is compiling AMD's NPU's graphs. */
 const PREPARE_WAIT_MS = 10 * 60_000;
 
@@ -763,8 +792,60 @@ interface EngineState {
    */
   npuWaitUntil: number;
   said: Set<string>;
+  /** This agent's place among the readers (ReadersCap): let go with `release`, looked at every READERS_LOOK_MS. */
+  place: { release: () => void; timer: NodeJS.Timeout } | null;
+  placing: Promise<void> | null;
+  /** Batches being read now: a place isn't given up in the middle of one. */
+  reading: number;
 }
-const state: EngineState = { host: null, starting: null, cpuHost: null, cpuStarting: null, refusedUntil: 0, npuFailed: false, preparing: false, npuWaitUntil: 0, said: new Set() };
+const state: EngineState = { host: null, starting: null, cpuHost: null, cpuStarting: null, refusedUntil: 0, npuFailed: false, preparing: false, npuWaitUntil: 0, said: new Set(), place: null, placing: null, reading: 0 };
+
+/** Lets this agent's place go, its readers ended first when they still run. */
+function giveUpPlace(): void {
+  const p = state.place;
+  if (!p) return;
+  state.host?.close();
+  state.cpuHost?.close();
+  clearInterval(p.timer);
+  state.place = null;
+  p.release();
+}
+
+/** Whether this agent's readers still run (or are starting). */
+const readersRun = () => !!(state.host?.alive || state.cpuHost?.alive || state.starting || state.cpuStarting);
+
+/**
+ * This agent's place among the readers, had before one starts: at once when it holds one (or there are no places);
+ * else in the line, up to its wait, then without one (`say` told). Kept until its readers have ended by themselves, or
+ * another agent waits while no batch is being read.
+ */
+function readersPlace(cap: ReadersCap | null, lane: Lane, say: (line: string) => void): Promise<void> {
+  if (!cap || state.place) return Promise.resolve();
+  return (state.placing ??= new Promise<void>((had) => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    withAcceleratorTurn(
+      cap.dirs,
+      async () => {
+        const timer = setInterval(() => {
+          if (state.place?.timer !== timer) return clearInterval(timer);
+          if (readersRun() && (state.reading > 0 || lineState(cap.dirs).waiting === 0)) return;
+          giveUpPlace();
+        }, cap.lookMs ?? READERS_LOOK_MS);
+        timer.unref();
+        state.place = { release, timer };
+        had();
+        await held;
+      },
+      { lane, who: 'text reader', doing: 'reading text', waitMs: cap.waitMs ?? READERS_WAIT_MS, staleMs: READERS_STALE_MS },
+    ).catch((e) => {
+      say(`the text reader started without waiting longer for a place (${cap.dirs.length} at once on this PC: ${String(e?.message ?? e).slice(0, 200)})`);
+      had();
+    });
+  }).finally(() => {
+    state.placing = null;
+  }));
+}
 
 /** For tests: forget the program and any refusal. */
 export function resetModelReader(): void {
@@ -779,6 +860,9 @@ export function resetModelReader(): void {
   state.preparing = false;
   state.npuWaitUntil = 0;
   state.said.clear();
+  giveUpPlace();
+  state.placing = null;
+  state.reading = 0;
 }
 
 export interface ReaderOptions {
@@ -794,6 +878,8 @@ export interface ReaderOptions {
   /** A stand-in for gentle.ts' paceStarted: a program started on the processor, set to the agent's pace. */
   paced?: (pid: number | undefined) => Promise<unknown>;
   now?: number;
+  /** The readers' places (ReadersCap); this PC's when not given (pcReadersCap), null for none. */
+  cap?: ReadersCap | null;
 }
 
 /**
@@ -935,7 +1021,18 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
   const turn = o.turn ?? acceleratorTurn;
   /** The program within the NPU's turn when it will start on the NPU (loading its graphs is NPU work). */
   const ready = (lane: Lane): Promise<ReaderHost | null> => ((state.host?.alive && state.host.hello.on === 'npu') || !npu() ? ensure() : turn(NPU, ensure, { lane }));
-  const first = await ready(currentLane()).catch(busyOrNull);
+  const cap = o.cap === undefined ? pcReadersCap() : o.cap;
+  /** A batch: its place among the readers had first, outside any turn, and kept while it reads. */
+  const batch = async <T>(lane: Lane, fn: () => Promise<T>): Promise<T> => {
+    state.reading++;
+    try {
+      await readersPlace(cap, lane, say);
+      return await fn();
+    } finally {
+      state.reading--;
+    }
+  };
+  const first = await batch(currentLane(), () => ready(currentLane()).catch(busyOrNull));
   if (!first) return null;
   const engineOf = (h: ReaderHost): ModelEngine => (h.hello.on === 'npu' ? 'model-npu' : 'model-cpu');
 
@@ -947,40 +1044,44 @@ export async function modelReader(o: ReaderOptions = {}): Promise<ModelReader | 
     }
   };
 
+  const readPages = async (pages: PageAsk[], lane: Lane, ro: { timeoutMs?: number }): Promise<(PageAnswer | null)[]> => {
+    const out: (PageAnswer | null)[] = pages.map(() => null);
+    for (let at = 0; at < pages.length; at += TURN_PAGES) {
+      const chunk = pages.slice(at, at + TURN_PAGES);
+      if (!npu()) {
+        const h = await ready(lane);
+        if (!h) break;
+        await readAll(h, chunk, out, at, ro.timeoutMs);
+        if (!h.alive) break;
+        continue;
+      }
+      try {
+        const more = await turn(
+          NPU,
+          async () => {
+            const h = await ensure();
+            if (!h) return false;
+            await readAll(h, chunk, out, at, ro.timeoutMs);
+            return h.alive;
+          },
+          { lane },
+        );
+        if (!more) break;
+      } catch (e) {
+        if (!(e instanceof NpuBusy)) throw e;
+        const h = await busyOrNull(e);
+        if (h) await readAll(h, pages.slice(at), out, at, ro.timeoutMs);
+        break;
+      }
+    }
+    return out;
+  };
+
   return {
     engine: engineOf(first),
-    async read(pages, ro = {}) {
-      const out: (PageAnswer | null)[] = pages.map(() => null);
+    read(pages, ro = {}) {
       const lane = currentLane(ro.lane);
-      for (let at = 0; at < pages.length; at += TURN_PAGES) {
-        const chunk = pages.slice(at, at + TURN_PAGES);
-        if (!npu()) {
-          const h = await ready(lane);
-          if (!h) break;
-          await readAll(h, chunk, out, at, ro.timeoutMs);
-          if (!h.alive) break;
-          continue;
-        }
-        try {
-          const more = await turn(
-            NPU,
-            async () => {
-              const h = await ensure();
-              if (!h) return false;
-              await readAll(h, chunk, out, at, ro.timeoutMs);
-              return h.alive;
-            },
-            { lane },
-          );
-          if (!more) break;
-        } catch (e) {
-          if (!(e instanceof NpuBusy)) throw e;
-          const h = await busyOrNull(e);
-          if (h) await readAll(h, pages.slice(at), out, at, ro.timeoutMs);
-          break;
-        }
-      }
-      return out;
+      return batch(lane, () => readPages(pages, lane, ro));
     },
   };
 }

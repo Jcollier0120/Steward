@@ -747,8 +747,8 @@ const pcReapers = new WeakSet<Reaper>();
 /** Whether keeperLook asks the PC itself before its look: only with the PC's own reaper (pcReaper's), never a test's. */
 export const asksPc = (reaper: Reaper) => pcReapers.has(reaper);
 
-/** The real PC's reaper. `who` names it in the lines it waits in ("smith", "reeve"). */
-export function pcReaper(o: { who?: string; logFile?: string; config?: () => Record<string, any>; options?: ReaperOptions } = {}): Reaper {
+/** The real PC's reaper. `who` names it in the lines it waits in ("smith", "reeve"); `log` takes its lines in the keeper's log's place. */
+export function pcReaper(o: { who?: string; logFile?: string; log?: (line: string) => void; config?: () => Record<string, any>; options?: ReaperOptions } = {}): Reaper {
   const logFile = o.logFile ?? reaperLog();
   const config = o.config ?? (() => readConfigFile().raw);
   const reaper = new Reaper(
@@ -774,7 +774,7 @@ export function pcReaper(o: { who?: string; logFile?: string; config?: () => Rec
         return card?.busy ? card.by : null;
       },
       start: (spec) => ensureServer({ baseUrl: spec.base, model: '', startCommand: spec.startCommand, ...(spec.serverEnv ? { env: spec.serverEnv } : {}) }, { logFile: spec.logFile, env: spec.env }),
-      log: (line) => logLine(logFile, line),
+      log: o.log ?? ((line) => logLine(logFile, line)),
       allProcesses: () => modelServerProcesses(configuredAccelerators(config()).flatMap((a) => ENDPOINT_KINDS.map((k) => a[k]?.startCommand?.[0] ?? '')).filter(Boolean).map((p) => expandEnv(p))),
       owned: (p) => manorOwns(p, { dirs: manorServerDirs(), started: readStarted() }),
     },

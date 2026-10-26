@@ -7,7 +7,8 @@ import { needsSettings } from './required.ts';
 import { offlineFailure } from './net.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { paceProcess } from './gentle.ts';
-import { FIRST_ROUND_WAITING, MEMORY_WAITING, NoRoom, WORK_WAITING, inFirstRoundTurn, inWorkTurn, pace } from './pace.ts';
+import { FIRST_ROUND_WAITING, MEMORY_WAITING, NoRoom, WORK_WAITING, inFirstRoundTurn, inWorkTurn, pace, type Pace } from './pace.ts';
+import { rotaPhase, rotaStartAt } from './rota.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 import { inWork, startWork } from './work-tasks.ts';
 import { updateHold } from './update-hold.ts';
@@ -64,6 +65,11 @@ export interface RoundRecord {
   everyMs: number;
   /** On the clock (kit 2.72.0): how far into each of its slots its rounds fall, in milliseconds (clockPhase). Absent off the clock. */
   phaseMs?: number;
+  /**
+   * Where `phaseMs` came from (kit 2.138.0): `agent`, every()'s own `phaseMs`; `rota`, Manor's rota.json (rota.ts);
+   * `clock`, clockPhase(). Manor's rota keeps an agent's own where it is and places the others around it.
+   */
+  phaseFrom?: 'agent' | 'rota' | 'clock';
   /** When the next scheduled round is due; null off duty, or once stopped (as /api/ping's nextRunAt). */
   next: string | null;
   /** A round held for the agent's required settings (required.ts), or because the trial has ended (license-check.ts): what it waits for, in words. `ok` is null then. */
@@ -142,6 +148,20 @@ export function nextOnClock(notBefore: number, everyMs: number, phaseMs: number)
   const local = notBefore - offset;
   return Math.ceil((local - phaseMs) / ms) * ms + phaseMs + offset;
 }
+
+/**
+ * The window a schedule's first round falls in after a start (kit 2.50.0): at a gentle pace 2 to 15 minutes, so a PC
+ * that has just started isn't ground down by every agent at once; at a full pace 30 s to 3 minutes. Where in it, Manor's
+ * rota says (rota.ts, kit 2.138.0), else chance.
+ */
+export const startWindow = (p: Pace) => (p === 'gentle' ? { fromMs: 120_000, spanMs: 780_000 } : { fromMs: 30_000, spanMs: 150_000 });
+
+/**
+ * A scheduled round this late (its timer fired this long past when it was due) was held up by the PC sleeping (kit
+ * 2.138.0): it waits its place in the start window first, as after a start, so the staff don't all start their rounds
+ * the moment the PC wakes.
+ */
+export const WOKE_LATE_MS = 2 * 60_000;
 
 /** A round that ran past its time limit: every() lets it go, records it, and the next round tries again. */
 export class RoundTimeout extends Error {
@@ -274,14 +294,17 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  * Runs `job` soon after start and then every `everyMs` after the last run ended, never two at once.
  * The agent works only while it is employed (running): there's no Task Scheduler entry to leave behind.
  *
- * Staggered: Manor may start every agent at once, so the first round comes a while after start (random: 2 to 15
- * minutes at a gentle pace, kit 2.50.0, so a PC that has just started isn't ground down by every agent at once; 30 s
- * to 3 min at a full pace).
+ * Staggered: Manor may start every agent at once, so the first round comes a while after start, in the start window
+ * (startWindow: 2 to 15 minutes at a gentle pace, 30 s to 3 min at a full pace), at the place Manor's rota gives the
+ * schedule or its agent (rota.ts, kit 2.138.0), else by chance; `firstDelayMs` says otherwise. A scheduled round whose
+ * time came while the PC slept (WOKE_LATE_MS late) waits its place in the window again first, `firstDelayMs` or not,
+ * unless its rounds are light.
  *
  * On the clock (kit 2.72.0): an interval that fits the manor's shared 30-minute clock (fitsClock: 5, 10, 15 or 30
- * minutes, 1, 3 or 6 hours…) puts each later round on its slots (nextOnClock), at the schedule's own phase (clockPhase:
- * whole minutes from the agent's id and the schedule's name, unless `phaseMs` says), and at least half an interval
- * after the last round ended. So rounds don't drift, and the staff don't all fire in the same minute. Any other
+ * minutes, 1, 3 or 6 hours…) puts each later round on its slots (nextOnClock), at the schedule's own phase (`phaseMs`
+ * when the agent gives one; else the rota's, placed for this interval on this PC, anywhere in it, kit 2.138.0; else
+ * clockPhase: whole minutes from the agent's id and the schedule's name), and at least half an interval after the last
+ * round ended. round.json's `phaseFrom` says which. So rounds don't drift, and the staff don't all fire in the same minute. Any other
  * interval keeps the old way: each wait counted from when the last round ended, varied by ±10%, so the staff don't
  * all reach for the NPU together.
  *
@@ -347,7 +370,7 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
 export function every(
   everyMs: number | (() => number),
   job: (round: { signal: AbortSignal; awake: (what: string) => () => void }) => Promise<void>,
-  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean | (() => boolean); phaseMs?: number; room?: { inUse: () => number | Promise<number>; lookMs?: number }; stopAfterFailures?: number } = {},
+  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean | (() => boolean); phaseMs?: number; room?: { inUse: () => number | Promise<number>; lookMs?: number }; stopAfterFailures?: number; rotaHome?: string } = {},
 ) {
   const name = opts.name ?? 'round';
   const stopAfter = opts.stopAfterFailures ?? STOP_AFTER_FAILURES;
@@ -372,8 +395,20 @@ export function every(
   let firstNow: RoundState['firstRound'] = null;
   let jitter = 1;
   const interval = () => wholeInterval(typeof everyMs === 'function' ? everyMs() : everyMs);
-  /** Its phase on the clock at the interval now; null when the interval doesn't fit the clock. */
-  const phase = (ms = interval()) => (!fitsClock(ms) ? null : opts.phaseMs !== undefined ? ((opts.phaseMs % ms) + ms) % ms : clockPhase(APP.id, opts.name ?? 'round', ms));
+  /** Its phase on the clock at the interval now, and where it comes from; null when the interval doesn't fit the clock. */
+  const placed = (ms = interval()): { phaseMs: number; from: 'agent' | 'rota' | 'clock' } | null => {
+    if (!fitsClock(ms)) return null;
+    if (opts.phaseMs !== undefined) return { phaseMs: ((opts.phaseMs % ms) + ms) % ms, from: 'agent' };
+    const rota = rotaPhase(APP.id, name, ms, opts.rotaHome);
+    return rota !== null ? { phaseMs: rota, from: 'rota' } : { phaseMs: clockPhase(APP.id, name, ms), from: 'clock' };
+  };
+  const phase = (ms = interval()) => placed(ms)?.phaseMs ?? null;
+  const isLight = () => (typeof opts.light === 'function' ? opts.light() : opts.light) === true;
+  /** Its wait after a start, or a wake: its place in the start window at the pace now, the rota's or chance's. */
+  const startWait = (p: Pace = pace()) => {
+    const w = startWindow(p);
+    return w.fromMs + (rotaStartAt(APP.id, name, opts.rotaHome) ?? Math.random()) * w.spanMs;
+  };
   /** When the round after one that ended at `ended` is due: its next slot on the clock, or an interval on, varied. */
   const dueAfter = (ended: number) => {
     const ms = interval();
@@ -396,6 +431,11 @@ export function every(
     if (running) return;
     // Stopped after failing too many rounds in a row (kit 2.136.2): only a round the person asks for runs.
     if (!asked && halted) return;
+    // Its time came while the PC slept (kit 2.138.0): its place in the start window first, once (the wait it sets is on time).
+    if (!asked && dueAt !== null && Date.now() - dueAt > WOKE_LATE_MS && !isLight()) {
+      if (!stopped) waitFor(startWait());
+      return;
+    }
     // Off duty, only the rounds asked for run.
     if (!asked && !duty().onDuty) {
       if (!stopped) wait();
@@ -483,7 +523,7 @@ export function every(
       // A scheduled round takes its turn in the work line (pace.ts, kit 2.56.0), after its first-round turn if it
       // needs one; a round someone asked for never waits.
       const inTurn = () => {
-        if (asked || (typeof opts.light === 'function' ? opts.light() : opts.light)) return run();
+        if (asked || isLight()) return run();
         inLine = 'work';
         task.waitIn('work');
         // Said while it waits, so a reader of its state (the Surveyor) never takes it for a schedule with nothing coming.
@@ -556,6 +596,7 @@ export function every(
         clearTimeout(timer);
         dueAt = null;
       }
+      const at = placed();
       recordRound(name, {
         started: new Date(started).toISOString(),
         finished: new Date(ended).toISOString(),
@@ -565,7 +606,7 @@ export function every(
         ...(timedOut ? { timedOut: true } : {}),
         error,
         everyMs: interval(),
-        ...(phase() !== null ? { phaseMs: phase()! } : {}),
+        ...(at ? { phaseMs: at.phaseMs, phaseFrom: at.from } : {}),
         next: state().nextRunAt,
         ...(waitedMs >= 1000 ? { waitedMs } : {}),
         ...measured,
@@ -577,7 +618,7 @@ export function every(
   const startPace = pace();
   void paceProcess(startPace);
   if (halted) console.log(`${new Date().toISOString()} ${name}: ${stoppedWaiting(failures)}`);
-  else waitFor(opts.firstDelayMs ?? (startPace === 'gentle' ? 120_000 + Math.random() * 780_000 : 30_000 + Math.random() * 150_000));
+  else waitFor(opts.firstDelayMs ?? startWait(startPace));
 
   const state = (): RoundState => ({
     name: opts.name ?? 'round',

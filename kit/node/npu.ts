@@ -20,6 +20,7 @@ import {
   noteEmbedded,
   MAX_AHEAD,
   ModelLoading,
+  NoRoomToLoad,
   noteServed,
   parseAccelerators,
   pick as pickFrom,
@@ -575,7 +576,8 @@ export class Npu {
             // A server loading its model is waited on as long as its accelerator's cold load allows (an NPU compiling it).
             const onWaking = opts.onWaking;
             const timeouts = core.timeoutsFor(acc, work);
-            const server = await ensureServer(ep, { start: opts.start, readyMs: Math.max(READY_WAIT_MS, timeouts?.coldLoadMs ?? 0), ...(onWaking ? { onWaking: (how) => onWaking(wakingOf(acc, work, ep, how)) } : {}) });
+            // Background work steps back when there's no room to load its model (memory-guard.ts); a person's starts it anyway.
+            const server = await ensureServer(ep, { start: opts.start, readyMs: Math.max(READY_WAIT_MS, timeouts?.coldLoadMs ?? 0), whenShort: lane === 'background' ? 'defer' : 'start', ...(onWaking ? { onWaking: (how) => onWaking(wakingOf(acc, work, ep, how)) } : {}) });
             // No warm-up when the server, already up, answered this same model within its keepalive: it has it loaded.
             const fresh = server.started || server.waited;
             const warmed = warmsUp(acc, work) && (fresh || !servedRecently(acc.id, ep));
@@ -608,6 +610,12 @@ export class Npu {
           notRunning.push(acc);
           if (e instanceof ManorStopped) manorWasStopped = true;
           continue;
+        }
+        // No room under the manor's memory ceiling to load its model (memory-guard.ts, kit 2.138.0): background work
+        // steps back, this accelerator left alone a while, and comes again when there's room. Nothing is marked.
+        if (e instanceof NoRoomToLoad) {
+          busyUntil.set(turn.id, Date.now() + BACK_OFF_MS);
+          throw new NpuBusy(core.say.modelWorkDeferred(e.message, BACK_OFF_MS / 60_000));
         }
         // Its model was still loading: slow, not failed. Nothing is marked; this agent leaves it alone a
         // while (a background request), and the request goes to the next candidate, if there is one.
