@@ -36,9 +36,11 @@ test("the first data is safe in the page's <script>, and reads back as it was", 
 
 test("the browser's ago() says what the server's says", () => {
   const now = Date.parse('2026-10-05T12:00:00Z');
-  for (const s of [null, 'x', '2026-10-05T11:59:30Z', '2026-10-05T11:59:00Z', '2026-10-05T11:30:00Z', '2026-10-05T10:59:00Z', '2026-10-05T09:00:00Z', '2026-10-04T12:00:00Z', '2026-09-20T12:00:00Z']) {
+  for (const s of [null, 'x', '2026-10-05T11:59:30Z', '2026-10-05T11:59:00Z', '2026-10-05T11:30:00Z', '2026-10-05T10:59:00Z', '2026-10-05T09:00:00Z', '2026-10-04T12:00:00Z', '2026-09-20T12:00:00Z', '2026-10-05T12:00:30Z', '2026-10-05T12:01:00Z', '2026-10-05T18:00:00Z', '2026-10-07T12:00:00Z']) {
     assert.equal(browserAgo(s, now), serverAgo(s, now), String(s));
   }
+  assert.equal(browserAgo('2026-10-05T18:00:00Z', now), 'in 6 hours', 'a time still to come');
+  assert.equal(browserAgo('2026-10-05T12:00:30Z', now), 'just now', 'a clock a moment ahead');
 });
 
 test('the shell: the token, the theme at first paint, the first data, and the bundle', () => {
@@ -295,4 +297,39 @@ test("a Section titled as the page tab it's in leaves its title and count to the
   assert.match(h, /id="page-panel-findings"[^>]*><section class="ui-section ui-gap-md">A<\/section>/, "the tab's own name: no heading row");
   assert.match(h, /<h2>Older<\/h2><span class="muted ui-count">· 5<\/span>/, 'another name: its heading');
   assert.match(h, /id="page-panel-files"[^>]*><section class="ui-section ui-gap-md"><div class="ui-section-head"><div class="ui-section-name"><\/div><div class="ui-section-right"><button>Tick all<\/button><\/div><\/div>C/, 'a right-hand part: the row, without the title');
+});
+
+test('showSection (a Glance tile, a link): a part in a hidden page tab has its tab chosen, and is scrolled to once drawn', async () => {
+  const { show } = await bundleForNode<{ show: (tour: string) => void }>(
+    `import { showSection } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
+     export const show = showSection;`,
+  );
+  const scrolled: string[] = [];
+  const sent: unknown[] = [];
+  const frames: (() => void)[] = [];
+  const panel = { id: 'page-panel-moves', hidden: true };
+  const part = (name: string, inPanel: typeof panel | null) => ({ scrollIntoView: () => scrolled.push(name), closest: () => inPanel });
+  const parts: Record<string, unknown> = { files: part('files', null), moves: part('moves', panel) };
+  const g = globalThis as Record<string, unknown>;
+  const was = { document: g.document, window: g.window, requestAnimationFrame: g.requestAnimationFrame };
+  g.document = { querySelector: (q: string) => parts[/data-tour="(\w+)"/.exec(q)?.[1] ?? ''] ?? null };
+  g.window = { dispatchEvent: (e: CustomEvent) => sent.push([e.type, e.detail]) };
+  g.requestAnimationFrame = (f: () => void) => frames.push(f);
+  try {
+    show('files');
+    assert.deepEqual(scrolled, ['files'], 'one in sight: scrolled to at once');
+    assert.deepEqual(sent, [], 'no tab chosen');
+    show('moves');
+    assert.deepEqual(sent, [['kit-show-tab', 'moves']], 'its tab chosen, as the tour chooses it');
+    assert.deepEqual(scrolled, ['files'], 'not yet: its tab is still hidden');
+    frames.shift()!();
+    assert.equal(frames.length, 1, 'still hidden: another frame');
+    panel.hidden = false;
+    frames.shift()!();
+    assert.deepEqual(scrolled, ['files', 'moves'], 'scrolled to once its tab is drawn');
+    show('gone');
+    assert.deepEqual(scrolled, ['files', 'moves'], 'a part not on the page: nothing');
+  } finally {
+    Object.assign(g, was);
+  }
 });

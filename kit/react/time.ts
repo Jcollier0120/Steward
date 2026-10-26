@@ -8,11 +8,13 @@ export function ago(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return 'never';
   const s = Math.round((now - Date.parse(iso)) / 1000);
   if (!Number.isFinite(s)) return 'never';
-  if (s < 45) return 'just now';
+  const a = Math.abs(s);
+  if (a < 45) return 'just now';
   const units: [number, string][] = [[86400, 'day'], [3600, 'hour'], [60, 'minute']];
-  for (const [n, u] of units) if (s >= n) {
-    const v = Math.round(s / n);
-    return `${v} ${u}${v === 1 ? '' : 's'} ago`;
+  for (const [n, u] of units) if (a >= n) {
+    const v = Math.round(a / n);
+    const said = `${v} ${u}${v === 1 ? '' : 's'}`;
+    return s < 0 ? `in ${said}` : `${said} ago`;
   }
   return 'just now';
 }
