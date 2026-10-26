@@ -101,8 +101,8 @@ test('the page while it settles in: the pill, and the banner only where its firs
   assert.deepEqual([pillOf({ look: plain, duty, first: 'waiting' }).text, pillOf({ look: plain, duty, first: 'waiting' }).kind], ['Settling in', 'busy']);
   assert.equal(pillOf({ look: reeve, duty, busy: true, first: 'running' }).text, 'Settling in');
   assert.equal(pillOf({ look: plain, duty, busy: true, first: 'running' }).text, reeve.busy, 'a first round like any other: its usual words');
-  assert.match(settlingText('Reeve', plain, 'waiting')!, /^Reeve is new to the manor and waits its turn/);
-  assert.match(settlingText('Reeve', reeve, 'running')!, /^Reeve's first round is under way: finding every repository .* It takes longer than the rounds after it/);
+  assert.match(settlingText('Reeve', plain, 'waiting')!, /^Reeve is new to the manor and waits their turn at the door/);
+  assert.match(settlingText('Reeve', reeve, 'running')!, /^Reeve is learning the lay of the land in their first round: finding every repository .* It takes longer than the rounds after it/);
   assert.equal(settlingText('Reeve', plain, 'running'), null);
   assert.equal(settlingText('Reeve', reeve, null), null);
   assert.match(lookFor('heiward').firstRound!, /every drive/);

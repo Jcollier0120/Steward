@@ -318,7 +318,7 @@ export function Page<Body>({ data, reload, action, settings, settingsTabs, about
           <div className="banners">
             <div className="banner-note offduty" role="status">
               <span>
-                <strong>Waiting for its settings</strong>: {s.app.name} can't start until you fill in {s.needs.text}.
+                <strong>Awaiting orders</strong>: {s.app.name} can't start until you fill in {s.needs.text}.
               </span>
               <Button title="Fill them in" variant="secondary" onPress={() => { location.hash = '#/tour?step=settings'; }} />
             </div>
@@ -345,7 +345,7 @@ export function Page<Body>({ data, reload, action, settings, settingsTabs, about
           <div className="banners">
             <div className="banner-note offduty" role="status">
               <span>
-                <strong>Off duty</strong> since {s.offDutySince}: its scheduled rounds are paused. Run now still works.
+                <strong>Off duty</strong> since {s.offDutySince}, feet up by the fire: its scheduled rounds are paused. Run now still works.
               </span>
               <PostButton title="Back on duty" variant="secondary" path="/api/duty" body={{ onDuty: true }} />
             </div>

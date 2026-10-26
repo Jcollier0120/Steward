@@ -111,14 +111,14 @@ export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?:
 /** The status pill as data: its kind (busy, off, on: its class), its words and its tooltip. A React page draws it from this. */
 export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; needs?: string | null; first?: RoundState['firstRound']; ended?: string | null }): { kind: 'busy' | 'off' | 'on'; text: string; title: string } {
   // Settling into the manor (kit 2.43.3): its first round waits its turn, or a long one runs (the look's firstRound).
-  if (o.first === 'waiting') return { kind: 'busy', text: 'Settling in', title: 'Its first round waits its turn: agents new to the manor do their first rounds one at a time, so this PC is never swamped.' };
+  if (o.first === 'waiting') return { kind: 'busy', text: 'Settling in', title: 'Its first round waits its turn: newcomers to the manor do their first rounds one at a time, so this PC is never swamped.' };
   if (o.first === 'running' && o.look.firstRound) return { kind: 'busy', text: 'Settling in', title: `Its first round: ${o.look.firstRound}. It takes longer than the rounds after it, which only catch up on what changed.` };
   if (o.busy) return { kind: 'busy', text: o.look.busy, title: "A round is under way. This page refreshes itself until it's done." };
   // The trial has ended, or this PC holds no license (license-check.ts): nothing runs until a license brings it back.
   if (o.ended) return { kind: 'off', text: holdPill(o.ended), title: `${o.ended}. Its settings and data are kept.` };
   // Its required settings not filled in yet (required.ts): nothing runs until they are.
-  if (o.needs) return { kind: 'off', text: 'Needs settings', title: `Waiting for its settings before it can start: ${o.needs}.` };
-  if (!o.duty.onDuty) return { kind: 'off', text: 'Off duty', title: `Off duty since ${ago(o.duty.since, o.now)}: its scheduled rounds are paused. Run now still works.` };
+  if (o.needs) return { kind: 'off', text: 'Awaiting orders', title: `Waiting for its settings before it can start: ${o.needs}.` };
+  if (!o.duty.onDuty) return { kind: 'off', text: 'Off duty', title: `Off duty since ${ago(o.duty.since, o.now)}, feet up by the fire: its scheduled rounds are paused. Run now still works.` };
   const next = until(o.nextAt, o.now);
   return { kind: 'on', text: `On duty${next ? ` · next round ${next}` : ''}`, title: "On duty: its rounds run on their schedule. Castellan's Stop pauses them." };
 }
@@ -502,8 +502,8 @@ export const SETTLING_SVG = `<svg class="settling-mark" viewBox="0 0 44 28" widt
  * while a first round runs that takes longer (the look's firstRound). A first round like any other gets none.
  */
 export function settlingText(name: string, look: Look, first: RoundState['firstRound']): string | null {
-  if (first === 'waiting') return `${name} is new to the manor and waits its turn: agents settling in do their first rounds one at a time, so this PC is never swamped. It starts as soon as the one before it has finished.`;
-  if (first === 'running' && look.firstRound) return `${name}'s first round is under way: ${look.firstRound}. It takes longer than the rounds after it, which only catch up on what changed.`;
+  if (first === 'waiting') return `${name} is new to the manor and waits their turn at the door: newcomers do their first rounds one at a time, so this PC is never swamped. They start as soon as the one before them has finished.`;
+  if (first === 'running' && look.firstRound) return `${name} is learning the lay of the land in their first round: ${look.firstRound}. It takes longer than the rounds after it, which only catch up on what changed.`;
   return null;
 }
 
@@ -521,7 +521,7 @@ function heldBanner(): string {
 
 function offDuty(d: Duty): string {
   if (d.onDuty) return '';
-  return `<div class="banners"><div class="banner-note offduty" role="status"><span><strong>Off duty</strong> since ${esc(ago(d.since))}: its scheduled rounds are paused. Run now still works.</span>
+  return `<div class="banners"><div class="banner-note offduty" role="status"><span><strong>Off duty</strong> since ${esc(ago(d.since))}, feet up by the fire: its scheduled rounds are paused. Run now still works.</span>
 <button class="quiet" data-post="/api/duty" data-body='{"onDuty":true}'>Back on duty</button></div></div>
 `;
 }

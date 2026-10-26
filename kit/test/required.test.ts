@@ -73,7 +73,7 @@ test('needsSettings: null without required settings or a settings spec; else wha
 test('the pill says it needs settings, before it says off duty', () => {
   const look = { busy: 'Working' } as Parameters<typeof pillOf>[0]['look'];
   const pill = pillOf({ look, duty: { onDuty: false, since: new Date().toISOString() }, needs: 'Thunderbird or Mail accounts' });
-  assert.equal(pill.text, 'Needs settings');
+  assert.equal(pill.text, 'Awaiting orders');
   assert.match(pill.title, /Thunderbird or Mail accounts/);
 });
 

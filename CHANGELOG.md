@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.242
+
+**It hands out the kit 2.139.0, so your staff's own pages talk like the manor too.**
+
+### What changed
+
+- **A staff member that still needs its settings is Awaiting orders**, on its page's status and its banner. Hover the status for what it's waiting for.
+- **Off duty, they put their feet up by the fire**: "Off duty since 2 hours ago, feet up by the fire: its scheduled rounds are paused. Run now still works."
+- **Newcomers wait their turn at the door**, doing their first rounds one at a time so your PC is never swamped, then **learn the lay of the land** in a first round that takes longer than the ones after it.
+- **A round held for an update waits for Castellan to teach it the new skills** of the new version, and lessons wait until it's idle.
+- What went wrong is still said plainly.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.241
 
 **It hands out the kit 2.138.0, so your whole staff can be employed at once without loading the PC down: their rounds are spread out, models load only when there's room, and fewer text readers run together.**

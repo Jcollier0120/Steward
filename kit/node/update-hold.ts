@@ -23,7 +23,7 @@ const MANOR_TRIES = 3;
 const MANOR_RETRY_MS = 30 * 60_000;
 
 /** What a round waiting for Manor's update says it waits for (RoundState's waiting). */
-export const updateWaiting = (version: string) => `Manor to update it to ${version}, a few minutes at most: Manor updates an agent only while it's idle`;
+export const updateWaiting = (version: string) => `Castellan to teach it the new skills of ${version} (its update), a few minutes at most: lessons wait until it's idle`;
 
 /** As Manor keeps them: updates.json (its last look at the releases, and its failed tries) and settings.json's switches. */
 interface ManorUpdates {
