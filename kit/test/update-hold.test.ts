@@ -81,7 +81,7 @@ test('the rounds wait 5 minutes at most for a version, then go on, and wait agai
   const hold = updateHolder();
   const t0 = NOW;
   assert.equal(hold(t0, null), null, 'nothing due: no wait');
-  assert.match(hold(t0, '0.0.2')!, /Manor to update it to 0\.0\.2, a few minutes at most/);
+  assert.match(hold(t0, '0.0.2')!, /Castellan to teach it the new skills of 0\.0\.2 \(its update\), a few minutes at most/);
   assert.ok(hold(t0 + UPDATE_HOLD_MS - 1, '0.0.2'));
   assert.equal(hold(t0 + UPDATE_HOLD_MS, '0.0.2'), null, 'its 5 minutes are up');
   assert.equal(hold(t0 + UPDATE_HOLD_MS + UPDATE_HOLD_AGAIN_MS - 1, '0.0.2'), null);
@@ -100,7 +100,7 @@ test('a scheduled round waits while the update is due, saying so; a round asked 
   const job = every(60 * MIN, async () => void rounds++, { firstDelayMs: 0, name: 'held-for-update', light: true });
   try {
     await until(() => job.state.waiting !== null, 5_000, 'the round to wait for the update');
-    assert.match(job.state.waiting!, /Manor to update it to 0\.0\.2/);
+    assert.match(job.state.waiting!, /Castellan to teach it the new skills of 0\.0\.2/);
     assert.equal(rounds, 0, 'no round ran');
     const next = Date.parse(job.state.nextRunAt!) - Date.now();
     assert.ok(next > 0 && next <= 30_000, `it looks again within 30 s (${next} ms)`);

@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.139.0
+
+**The kit's page talks like the manor: newcomers wait their turn at the door, the off-duty put their feet up by the fire, and an agent short of settings is awaiting orders.**
+
+### What changed
+
+- **node/page.ts and react/shell.tsx**, the wording only:
+  - The status pill for missing required settings says **Awaiting orders** (was "Needs settings"). Its title stays plain: "Waiting for its settings before it can start: …". The React shell's banner leads with **Awaiting orders** too.
+  - Off duty, in the pill's title and both banners: "Off duty since 2 hours ago, feet up by the fire: its scheduled rounds are paused. Run now still works."
+  - Settling in (`settlingText`): "Reeve is new to the manor and waits their turn at the door: newcomers do their first rounds one at a time, so this PC is never swamped. They start as soon as the one before them has finished." While it runs: "Reeve is learning the lay of the land in their first round: …". The waiting pill's title says "newcomers to the manor" for "agents new to the manor".
+- **node/update-hold.ts, `updateWaiting`:** a round held for Manor's update waits for "Castellan to teach it the new skills of 0.4.2 (its update), a few minutes at most: lessons wait until it's idle".
+- Left plain on purpose: what went wrong (`stoppedWaiting`, which the Surveyor reads), `ping`'s summary, the installer's lines Manor reads, the logs, and license and held-back text.
+
+### Before you update
+
+- A test that pins any of these lines needs the new words: `Awaiting orders`, `waits their turn at the door`, `is learning the lay of the land in their first round`, `Castellan to teach it the new skills of`, and `, feet up by the fire` after the off-duty time.
+- Nothing else: the page's structure, classes and every value Manor reads are as they were.
+
 ## 2.138.0
 
 **The whole staff employed at once: rounds placed apart on each PC by Manor's rota, staggered after a start or a wake, a model loaded only under the manor's memory ceiling, and at most 2 or 4 agents' text readers at once.**

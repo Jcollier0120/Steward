@@ -210,7 +210,7 @@ test('the pill: busy first, then off duty, then on duty with its next round when
   const on = { onDuty: true, since: null };
   const off = { onDuty: false, since: '2026-10-02T09:00:00Z' };
   assert.match(statusPill({ look: LOOK.aletaster, busy: true, duty: off, now }), />Tasting<\/span>$/);
-  assert.match(statusPill({ look: LOOK.aletaster, duty: off, now }), /title="Off duty since 3 hours ago: [^"]+">Off duty</);
+  assert.match(statusPill({ look: LOOK.aletaster, duty: off, now }), /title="Off duty since 3 hours ago, feet up by the fire: [^"]+">Off duty</);
   assert.match(statusPill({ look: LOOK.aletaster, duty: on, now }), />On duty<\/span>$/);
   assert.match(statusPill({ look: LOOK.aletaster, duty: on, nextAt: now + 25 * 60_000, now }), />On duty · next round in 25 min<\/span>$/);
   assert.match(statusPill({ look: LOOK.aletaster, duty: on, nextAt: '2026-10-02T18:00:00Z', now }), />On duty · next round in 6 hours<\/span>$/);
