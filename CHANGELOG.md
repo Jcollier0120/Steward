@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.243
+
+**It hands out the kit 2.140.0: the settings your staff share are set once, on Castellan's Settings, and long lists of short names take less room.**
+
+### What changed
+
+- **One place for what the staff share.** How often each one works, how many local AI requests it makes in a round, plain-words notes, re-ranking search by meaning, video quality and whether video copies keep where they were filmed are set on Castellan's Settings, Staff settings. A staff member's own Settings says where they are, with a link.
+- **Short lists in columns.** A list of short names in Settings, such as the Pinder's runtimes, takes a few lines instead of one each.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member moves its shared settings to Castellan's Settings when it takes this kit, and keeps the values you set.
+
 ## 0.36.242
 
 **It hands out the kit 2.139.0, so your staff's own pages talk like the manor too.**

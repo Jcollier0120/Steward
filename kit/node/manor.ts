@@ -66,7 +66,7 @@ export function manorLink(home = manorHome()): ManorLink | null {
 }
 
 /** Manor's link, and whether its settings say gpuWithNpu at all (true or false). */
-function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean; notify: unknown } | null {
+function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean; notify: unknown; shared: unknown } | null {
   const file = path.join(home, 'settings.json');
   // One stat while settings.json is unchanged (file-cache.ts): every ping and page load asks.
   let text: string | null;
@@ -76,7 +76,7 @@ function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean; no
     text = '';
   }
   if (text === null || !existsSync(path.join(home, 'app'))) return null;
-  let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown; gpuWithNpu?: unknown; notify?: unknown } = {};
+  let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown; gpuWithNpu?: unknown; notify?: unknown; shared?: unknown } = {};
   try {
     const parsed = JSON.parse(text.replace(/^﻿/, ''));
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) raw = parsed;
@@ -93,7 +93,7 @@ function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean; no
   }
   const developerOptions = typeof raw.developerOptions === 'boolean' ? raw.developerOptions : null;
   const saysGpuWithNpu = typeof raw.gpuWithNpu === 'boolean';
-  return { link: { name, port, url: `http://${MANOR_HOST}:${port}/`, theme, developerOptions, gpuWithNpu: raw.gpuWithNpu !== false }, saysGpuWithNpu, notify: raw.notify };
+  return { link: { name, port, url: `http://${MANOR_HOST}:${port}/`, theme, developerOptions, gpuWithNpu: raw.gpuWithNpu !== false }, saysGpuWithNpu, notify: raw.notify, shared: raw.shared };
 }
 
 /** Manor's Settings page (Manor's page at #/settings). */
@@ -101,6 +101,30 @@ export const manorSettingsUrl = (m: ManorLink) => `${m.url}#/settings`;
 
 /** Manor's Settings, Employees: the staff, and why developer features are on or off (#/settings/employees). */
 export const manorStaffUrl = (m: ManorLink) => `${m.url}#/settings/employees`;
+
+/** Manor's Settings, Staff settings: the settings the staff share, set once for the manor (#/settings/staff, kit 2.140.0). */
+export const manorStaffSettingsUrl = (m: ManorLink) => `${m.url}#/settings/staff`;
+
+/**
+ * The manor's value for a setting the staff share (settings.json's "shared", on Manor's Settings, Staff settings:
+ * shared-settings.ts), read afresh; undefined without an installed Manor, or one that doesn't say (no "shared", or no
+ * such key in it). The caller checks the value's kind: one it can't use counts as unsaid. Under node --test none is
+ * read unless the test gives `home`.
+ */
+export function manorShared(key: string, home?: string): unknown {
+  if (home === undefined && process.env.NODE_TEST_CONTEXT) return undefined;
+  const shared = readManor(home ?? manorHome())?.shared;
+  return shared && typeof shared === 'object' && !Array.isArray(shared) ? (shared as Record<string, unknown>)[key] : undefined;
+}
+
+/**
+ * The manor whose Settings show the settings the staff share (settingsReply's `inManor`, kit 2.140.0): the installed
+ * Manor, read afresh, or null without one. Under node --test, null unless the test gives `home`.
+ */
+export function sharedSettingsManor(home?: string): ManorLink | null {
+  if (home === undefined && process.env.NODE_TEST_CONTEXT) return null;
+  return manorLink(home ?? manorHome());
+}
 
 /**
  * Whether an agent's developer features are on. With Manor installed and saying (its "developerOptions": whether

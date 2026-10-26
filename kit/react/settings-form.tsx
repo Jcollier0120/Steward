@@ -145,7 +145,7 @@ function List({ f, value, onChange, path }: EdProps) {
   if (f.item.options) return <PickList f={f} items={items} noun={noun} path={path} onChange={onChange} />;
   return (
     <div>
-      <ul className="sf-list">
+      <ul className={short(f, items) ? 'sf-list sf-short' : 'sf-list'}>
         {items.map((x, i) => (
           <li key={i}>
             <div className="sf-item">
@@ -161,6 +161,12 @@ function List({ f, value, onChange, path }: EdProps) {
   );
 }
 
+/** The longest item a list of short words (runtimes, names) has, for its columns: no path, and none longer than this. */
+const SHORT_ITEM = 24;
+
+/** A list of a few short words each (runtimes, process names), drawn in columns rather than one a line (kit 2.140.0). */
+const short = (f: SettingsField & { kind: 'list' }, items: string[]) => items.length > 2 && !f.item.path && items.every((x) => x.length <= SHORT_ITEM);
+
 /**
  * A list whose items are picked, not typed (`item.options`): each item by its option's label, with Remove, and a
  * dropdown of the options not in it yet. An item no longer offered shows as it is, until it's removed.
@@ -169,9 +175,10 @@ function PickList({ f, items, noun, path, onChange }: { f: SettingsField & { kin
   const options = f.item.options ?? [];
   const left = options.filter((o) => !items.includes(o.value));
   const full = f.maxItems !== undefined && items.length >= f.maxItems;
+  const labels = items.map((x) => options.find((o) => o.value === x)?.label ?? x);
   return (
     <div>
-      <ul className="sf-list">
+      <ul className={short(f, labels) ? 'sf-list sf-short' : 'sf-list'}>
         {items.map((x, i) => (
           <li key={x}>
             <div className="sf-item">
@@ -527,7 +534,7 @@ const PanelNote = ({ children }: { children: ReactNode }) => (
  * The settings' state: GET /api/settings's answer (or `initial`, in hand), the values being edited, the ones saved, the
  * server's messages, and the status line; `save` POSTs the changed values of `fields`, tidied first.
  */
-function useSettings(initial: SettingsData | undefined, onSaved?: () => void) {
+function useSettings(initial: SettingsData | undefined, onSaved?: () => void, api = '/api/settings') {
   const [data, setData] = useState<SettingsData | null>(initial ?? null);
   const [failed, setFailed] = useState<string | null>(null);
   const [draft, setDraft] = useState<Obj>(() => clone(initial?.values ?? {}));
@@ -544,7 +551,7 @@ function useSettings(initial: SettingsData | undefined, onSaved?: () => void) {
   const load = async () => {
     setFailed(null);
     try {
-      const r = await fetch('/api/settings', { headers: { accept: 'application/json' } });
+      const r = await fetch(api, { headers: { accept: 'application/json' } });
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       const d = (await r.json()) as SettingsData;
       fresh(d, d.values);
@@ -566,7 +573,7 @@ function useSettings(initial: SettingsData | undefined, onSaved?: () => void) {
     setBusy(true);
     setStatus({ text: 'Saving…' });
     try {
-      const r = await post('/api/settings', { values });
+      const r = await post(api, { values });
       if (!r.ok) {
         setMsgs(toMsgs(r.json.errors as Messages, {}));
         return setStatus({ text: r.json.error ?? 'Not saved.', error: true });
@@ -586,9 +593,10 @@ function useSettings(initial: SettingsData | undefined, onSaved?: () => void) {
 /**
  * Above the fields: where they're saved and when they're used, what's wrong with the file, and the form's own message.
  * The file's path and its problems' own words are a developer's: the server sends them only while the manor's
- * Developer options are on (settings-kit.ts), and an empty `file` says they're off.
+ * Developer options are on (settings-kit.ts), and an empty `file` says they're off. The whole form (`whole`, not
+ * onboarding's few) also says which settings are set on Manor's Settings instead (InManor).
  */
-function FormHead({ data, later, general }: { data: SettingsData; later: string[]; general?: Msgs[string] }) {
+function FormHead({ data, later, general, whole }: { data: SettingsData; later: string[]; general?: Msgs[string]; whole: boolean }) {
   const usedFrom = data.usedFrom || 'from the next round on';
   const dev = !!data.file;
   return (
@@ -597,6 +605,7 @@ function FormHead({ data, later, general }: { data: SettingsData; later: string[
         Changes are checked and saved here{dev && <>, into <code>{data.file}</code></>}
         {later.length ? `. They are used ${usedFrom}, except those marked ${later.map((n) => `"${n}"`).join(' or ')}.` : `. They are used ${usedFrom}.`}
       </p>
+      {whole && data.inManor && <InManor {...data.inManor} />}
       <div className="sf-problems">
         {data.problems.map((p, i) => (
           <p key={i} className="sf-msg warning">
@@ -610,6 +619,16 @@ function FormHead({ data, later, general }: { data: SettingsData; later: string[
         </p>
       )}
     </>
+  );
+}
+
+/** The settings this form leaves out, set on Manor's Settings with the rest of the staff's (kit 2.140.0), in a line. */
+function InManor({ manor, url, labels }: NonNullable<SettingsData['inManor']>) {
+  const named = labels.length <= 1 ? labels.join('') : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+  return (
+    <p className="sf-intro muted sf-in-manor">
+      {named} {labels.length === 1 ? 'is' : 'are'} set with the rest of the staff's settings, on {manor}'s <a href={url}>Staff settings</a>.
+    </p>
   );
 }
 
@@ -708,10 +727,11 @@ export const TAB_FIELDS = 10;
  * TAB_FIELDS ordinary settings) is in tabs instead: General (the settings in no group, and Advanced), then a tab for
  * each group; one Save for them all, and a tab with a problem in it marked, and shown when a save is refused. A field
  * with `shownWhen` shows only while its key holds one of those values. `initial` is GET /api/settings's answer, already
- * in hand (a test's).
+ * in hand (a test's). `api` is where it's read and saved, /api/settings unless said: Manor's Staff settings draws each
+ * employee's shared settings from its own address for them (kit 2.140.0).
  */
-export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: string[]; onSaved?: () => void; onDirty?: (dirty: boolean) => void; initial?: SettingsData }) {
-  const s = useSettings(initial, onSaved);
+export function SettingsForm({ keys, onSaved, onDirty, initial, api }: { keys?: string[]; onSaved?: () => void; onDirty?: (dirty: boolean) => void; initial?: SettingsData; api?: string }) {
+  const s = useSettings(initial, onSaved, api);
   const { data, draft, saved, msgs } = s;
   const [opened, setOpened] = useState<Record<string, boolean>>({});
   // A long form's tab (in tabs: see above): its panel's id; none yet, its first.
@@ -781,7 +801,7 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
               ))}
             </nav>
           )}
-          <FormHead data={data} later={laterNotes(fields)} general={msgs['']} />
+          <FormHead data={data} later={laterNotes(fields)} general={msgs['']} whole={!keys} />
           <BusyArea busy={s.busy} className="sf-busy">
             <form className="sf-form" noValidate onSubmit={(e) => (e.preventDefault(), void s.save(fields))}>
               {tabbed ? (

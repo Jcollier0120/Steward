@@ -270,3 +270,20 @@ test('a list with item.options is picked, not typed: each item by its label with
   const none = m.form({ schema: [{ ...field, item: { label: 'Repository', options: [] } }], values: { repos: [] }, defaults: { repos: [] }, problems: [], warnings: {}, file: 's.json' });
   assert.match(none, /No repository to pick from yet\./);
 });
+
+test("with Manor installed: the settings set on its Staff settings are said in a line, with the way there (kit 2.140.0)", () => {
+  const inManor = { manor: 'Oakfield Manor', url: 'http://castellan.localhost:18585/#/settings/staff', labels: ['Plain-words notes', 'A round every'] };
+  const html = m.form({ ...short(), inManor });
+  assert.match(html, /<p class="sf-intro muted sf-in-manor">Plain-words notes and A round every are set with the rest of the staff&#x27;s settings, on Oakfield Manor&#x27;s <a href="http:\/\/castellan\.localhost:18585\/#\/settings\/staff">Staff settings<\/a>\.<\/p>/);
+  assert.match(m.form({ ...short(), inManor: { ...inManor, labels: ['Video quality'] } }), /Video quality is set with/);
+  assert.doesNotMatch(m.form(short()), /sf-in-manor/, 'without Manor, nothing');
+  assert.doesNotMatch(m.form({ ...short(), inManor }, ['notes']), /sf-in-manor/, "onboarding's few settings say nothing of it");
+});
+
+test('a list of short words is drawn in columns; a list of paths, or of two, one a line (kit 2.140.0)', () => {
+  const list = (item: object, v: string[]) => m.form({ schema: [{ key: 'l', kind: 'list', label: 'L', item: { label: 'Item', ...item } }], values: { l: v }, defaults: { l: [] }, problems: [], warnings: {}, file: '' });
+  assert.match(list({}, ['node', 'python', 'dotnet']), /<ul class="sf-list sf-short">/);
+  assert.doesNotMatch(list({}, ['node', 'python']), /sf-short/, 'two fit on their lines');
+  assert.doesNotMatch(list({ path: { is: 'folder' } }, ['C:\a', 'D:\b', 'E:\c']), /sf-short/, 'paths get the width');
+  assert.doesNotMatch(list({}, ['node', 'python', 'a command line far longer than a word']), /sf-short/);
+});
