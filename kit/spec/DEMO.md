@@ -20,7 +20,7 @@ In demo mode the page server (node/server.ts, node/demo.ts):
 - lays the demo folder's file for a GET over the agent's own answer, key by key at the top: `/api/page` with `demo/api/page.json` holding `{ "body": … }` keeps the frame the kit builds (title, themes, tour) and shows the made-up body. A GET with no handler of its own is the file alone. The query is ignored.
 - answers the rest with the agent's own handlers, which see the empty data folder.
 - shows the page everyone sees: developer content is off, whatever the PC's own Developer options say, unless the demo's `hero.json` says `"developer": true` (a developer agent, whose pictures only developers see): then it's on.
-- runs no rounds (schedule.ts), so nothing of the PC taking the picture is read, and holds nothing for required settings (required.ts): the page as it is once set up. The developer view's footer names `C:\Users\Alex\.<id>` as its data folder.
+- runs no rounds (schedule.ts), so nothing of the PC taking the picture is read, holds nothing for required settings (required.ts), and shows no license hold (license-check.ts `shownHold`, kit 2.142.1): the page as it is once set up, on a licensed PC. The developer view's footer names `C:\Users\Alex\.<id>` as its data folder.
 - says `demo: true` in `/api/ping`, with `demo/api/ping.json` laid over its own ping (a round under way, a summary).
 - refuses every button (`POST`, but `/api/stop`) with 403: nothing changes.
 

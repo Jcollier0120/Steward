@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.142.1
+
+**A page in demo mode no longer shows "This PC holds no license for it", so Manor's hero pictures show each page as it is on a licensed PC.**
+
+### What changed
+
+- **node/license-check.ts, `shownHold()`:** what the page shows of a license hold, the same as `licenseHeld()` but none in demo mode (`KIT_DEMO`). The kit's page (node/page.ts) and React shell (node/react-page.ts) use it for the banner and the status pill.
+- Only what the page shows changed: a demo's rounds and Run now still hold without a license, its ping still says so, and a demo runs no rounds anyway.
+
+### Before you update
+
+- Nothing.
+
 ## 2.142.0
 
 **A link to a part of the page in a tab not shown opens that tab, a time still to come reads "in 6 hours", and an empty number setting says what empty means.**
