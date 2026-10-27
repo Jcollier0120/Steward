@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.143.0
+
+**Every agent's About page opens with What's new: its own changelog's entries for the versions its latest updates brought, newest first, so a person sees what changed after an update that moved through several versions, not just the last one's notes.**
+
+### What's new
+
+- **react/whats-new.tsx, at the top of the About view (`#/about`):** a **What's new** section, each version under its own heading ("Version 0.4.31 · updated 27 October"); with several, the newest is open and the older are folded. Entries are drawn as text, never as HTML: the bold line, `###` headings as small headings, `- ` points as a list, `**bold**` and `` `code` ``, a link as its words. The page asks for them as About first opens, so nothing is read on any other look. About is there whenever it has a What's new, even with nothing else to say.
+- **node/whats-new.ts:** `versions.json` in the data folder records each version the agent first started at, and when (`{ "versions": [{ "version", "since" }] }`, oldest first, at most 30). `serve()` writes it as the page starts, only when the version changed; a copy with no record yet starts it after the version its update kept in `app.prev`. About shows the entries of every version newer than the one that ran before the latest update, and those of its other updates in the last 30 days, at most 10; a fresh install shows its own version's entry. `GET /api/whats-new` is a new kit route (`{ versions: [{ version, since, entry }] }`), and `PageShell.whatsNew` says whether there is anything to show.
+- **node/release.ts:** a release carries `CHANGELOG.md`, cut to its opening and newest 20 entries (notes.ts's `releaseChangelog`). Until now an installed copy held no changelog at all. notes.ts also gives `entriesOf()` (every entry in one pass) and `compareVersions()`.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The section appears from the agent's first release on this kit, which is the first to carry its changelog; until its next update it shows that version's entry, or the versions since the one in `app.prev`. An agent with its own route named `/api/whats-new` must rename it (none has one). Reeve's and Manor's own release scripts don't carry the changelog yet, so their About shows no What's new until they do.
+
 ## 2.142.3
 
 **The shared video switch is called "Keep GPS and camera details in video copies". Its old name, "Keep a video's place and camera details", read as where the videos are kept, and sent the owner to Manor's Staff settings looking for a folder setting that isn't there.**

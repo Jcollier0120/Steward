@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.250
+
+**It hands out the kit 2.143.0: each staff member's About page opens with What's new, the notes of the versions its latest updates brought, newest first.**
+
+### What's new
+
+- **What's new on About**, on the Steward's own page and every staff member's: after an update, About shows the notes of each version it brought, newest first, each under its version; the newest is open and the older ones are folded. Updates of the last 30 days are there too, up to ten versions.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The notes start with each staff member's next release, the first to carry them.
+
 ## 0.36.249
 
 **It hands out the kit 2.142.3: the shared video switch is called "Keep GPS and camera details in video copies", not "Keep a video's place and camera details", which read as where the videos are kept.**

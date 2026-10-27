@@ -36,6 +36,8 @@ export interface PageShell {
    */
   developer?: boolean;
   work: string;
+  /** Whether About has a What's new (the node part's whats-new.ts, kit 2.143.0), which it asks /api/whats-new for. Missing: none. */
+  whatsNew?: boolean;
   dataDir: string;
   /** Its onboarding, drawn as the page's tour at #/tour (tour.tsx); null for none. */
   onboarding: Onboarding | null;

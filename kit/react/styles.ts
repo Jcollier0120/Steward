@@ -182,6 +182,21 @@ details.ui-connect.ui-connect-todo { border-left: 4px solid var(--accent); }
 .ui-list-row:first-child { padding-top: 2px; }
 .ui-line-more { margin: 6px 0 2px; padding-left: 12px; border-left: 2px solid var(--line); }
 .ui-line-more > :first-child { margin-top: 0; }
+/* What's new, at the top of About (whats-new.tsx): each version a card, the older folded. Long words and code wrap,
+   so a narrow window never scrolls sideways. */
+.whats-new { margin: 0 0 18px; }
+.whats-new > h3 { margin: 0 0 6px; color: var(--fg); }
+.whats-new-note { margin: 0 0 8px; font-size: 13px; }
+.release-entry { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; margin: 8px 0; overflow-wrap: anywhere; }
+details.release-entry > summary { cursor: pointer; }
+details.release-entry:not([open]) > summary { margin: 0; }
+.release-head { margin: 0 0 6px; }
+.release-version { font-weight: 600; color: var(--fg); }
+.release-when { font-size: 13px; }
+.release-entry h4 { margin: 12px 0 4px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.release-entry p { margin: 6px 0; }
+.release-entry ul { margin: 4px 0 8px; padding-left: 20px; }
+.release-entry li { margin: 3px 0; }
 /* Phones: two tiles a row. */
 @media (max-width: 520px) {
   .ui-glance, .ui-kept-stats { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }

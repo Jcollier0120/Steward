@@ -8,7 +8,7 @@ import path from 'node:path';
  * stayed up. serve() refuses such a route as it starts, and agent-checks.ts finds one in the agent's source first.
  */
 export const KIT_ROUTES = {
-  get: ['/api/ping', '/favicon.svg', '/manor-icon.svg', '/settings.js', '/settings.css', '/page.js', '/api/peer/work', '/api/peer/result'],
+  get: ['/api/ping', '/favicon.svg', '/manor-icon.svg', '/settings.js', '/settings.css', '/page.js', '/api/peer/work', '/api/peer/result', '/api/whats-new'],
   post: ['/api/stop', '/api/duty', '/api/repair', '/api/page-launch'],
 } as const;
 

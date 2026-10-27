@@ -78,6 +78,44 @@ function compare(a: string, b: string): number {
   for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0) ? -1 : 1;
   return 0;
 }
+/** Two versions' order, number by number (a suffix aside): below 0 when `a` is the older. */
+export const compareVersions = compare;
+
+/**
+ * Every entry the changelog has, in one pass, as it orders them (newest first): each `## <version>` heading's version
+ * and what is under it, trimmed. A heading with nothing under it, or one that names no version, gives none; a version
+ * given twice, its first.
+ */
+export function entriesOf(changelog: string): { version: string; entry: string }[] {
+  const out: { version: string; entry: string }[] = [];
+  let at: { version: string | null; lines: string[] } | null = null;
+  const close = () => {
+    const entry = at?.lines.join('\n').trim();
+    if (at?.version && entry && !out.some((x) => x.version === at!.version)) out.push({ version: at.version, entry });
+  };
+  for (const l of lf(changelog).split('\n')) {
+    if (l.startsWith('## ')) {
+      close();
+      at = { version: headingVersion(l), lines: [] };
+    } else at?.lines.push(l);
+  }
+  close();
+  return out;
+}
+
+/** The entries a release's own CHANGELOG.md keeps (releaseChangelog): twice what About shows (whats-new.ts), for versions skipped or gone back over. */
+export const RELEASE_ENTRIES = 20;
+
+/**
+ * The CHANGELOG.md a release carries (release.ts, kit 2.143.0): the changelog's opening and its newest `keep` entries,
+ * for the About view's What's new (whats-new.ts). A whole history is hundreds of KB that nobody reads there.
+ */
+export function releaseChangelog(text: string, keep = RELEASE_ENTRIES): string {
+  const lines = lf(text).split('\n');
+  const heads = lines.flatMap((l, i) => (l.startsWith('## ') ? [i] : []));
+  if (heads.length <= keep) return text;
+  return `${lines.slice(0, heads[keep]).join('\n').trimEnd()}\n`;
+}
 
 /**
  * A commit's line for the notes: a pull request's merge says its title (the second line of its message), a commit its

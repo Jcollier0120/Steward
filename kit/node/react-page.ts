@@ -15,6 +15,7 @@ import { AGENT_ONBOARDING, needsSettings, type NeedsSettings } from './required.
 import { firstRoundNow, roundTimes } from './schedule.ts';
 import type { Handler } from './server.ts';
 import { groupLabel, themes, themesCss } from './themes.ts';
+import { whatsNew } from './whats-new.ts';
 import { workSection } from './work.ts';
 
 /**
@@ -74,6 +75,8 @@ export interface PageShell {
   developer: boolean;
   /** "Where its work runs" (work.ts), the kit's own markup, for the About view: in plain words when developer is off. */
   work: string;
+  /** Whether About has a What's new to show (whats-new.ts, kit 2.143.0): the page asks /api/whats-new for it as About opens. */
+  whatsNew: boolean;
   /** The agent's data folder, for the footer: empty when developer is off (a path is developer content). */
   dataDir: string;
   /** Its onboarding (onboarding.ts), drawn as the page's tour at #/tour; null for none. */
@@ -110,6 +113,7 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
     themeKey: `${APP.id}:theme`,
     developer: dev,
     work: workSection({ developer: dev }),
+    whatsNew: whatsNew().length > 0,
     dataDir: dev ? shownDataDir() : '',
     onboarding,
     needs,
