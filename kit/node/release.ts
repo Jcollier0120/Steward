@@ -40,8 +40,9 @@
  * release.json, which names the kit; and kit.json and tools\kit.ts, so the copy can fill its kit again (and the
  * Steward, installed, has the tools\kit.ts it hands out). So an installed agent needs neither the Steward nor GitHub.
  * No document goes (kit 2.134.0): not a .md anywhere in it (the kit's specs and READMEs in src\kit\ included), which
- * are for the repository, but a license or notice file. THIRD-PARTY-NOTICES.txt goes beside them, made from what the
- * zip carries of others' (notices.ts): a release that carries something with no notice for it isn't built.
+ * are for the repository, but a license or notice file, and CHANGELOG.md's newest 20 entries (kit 2.143.0), for the
+ * About view's What's new (whats-new.ts). THIRD-PARTY-NOTICES.txt goes beside them, made from what the zip carries of
+ * others' (notices.ts): a release that carries something with no notice for it isn't built.
  *
  * Its notes are the agent's CHANGELOG.md entry for the version (notes.ts, spec/RELEASE-NOTES.md): what's new, what
  * changed, and what to do before updating. A version with no entry is published with its commits instead, and the
@@ -71,7 +72,7 @@ import type { Release } from './install.ts';
 import { isUrgent, letOut, NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, saleOf, type ExchequerOutcome } from './exchequer.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
 import { buildNative, CERTUM_TIMESTAMP, nativeOf, nativeSources, runBuild, stageNative, type Arch, type Native, type NativeBuilt } from './native.ts';
-import { releaseNotes, type Notes } from './notes.ts';
+import { CHANGELOG, readChangelog, releaseChangelog, releaseNotes, type Notes } from './notes.ts';
 import { SIGNED_BY } from './prebuilt.ts';
 import { isLicenseFile, NOTICES, writeNotices } from './notices.ts';
 import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
@@ -411,6 +412,9 @@ async function build(readable = false, publishing = false): Promise<Built> {
       mkdirSync(path.dirname(path.join(stage, f)), { recursive: true });
       cpSync(path.join(root, f), path.join(stage, f));
     }
+    // The one document it carries: its changelog's newest entries, which About's What's new reads (whats-new.ts).
+    const changelog = readChangelog(root);
+    if (changelog) writeFileSync(path.join(stage, CHANGELOG), releaseChangelog(changelog));
     writeFileSync(path.join(stage, 'release.json'), JSON.stringify(release, null, 2) + '\n');
     // A React page (react-page.ts) is bundled first, readable or not: the browser can't run its .tsx.
     const pageEsbuild = existsSync(path.join(stage, PAGE_ENTRY)) ? (esbuild ?? (await loadEsbuild(root))) : null;
@@ -456,7 +460,7 @@ async function build(readable = false, publishing = false): Promise<Built> {
     const hash = sha256(zip);
     const listed = [{ name, hash }, ...(announced ? [{ name: ANNOUNCEMENT, hash: sha256(announcement) }] : [])];
     writeFileSync(sums, sumsText(listed));
-    console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 2 + nativeCount} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
+    console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 2 + (changelog ? 1 : 0) + nativeCount} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
     console.log(`  sha256 ${hash} (${path.relative(root, sums)})`);
     if (minified) console.log(`  built with esbuild ${esbuild!.version}: ${minified.ts} TypeScript and ${minified.js} JavaScript files, ${Math.ceil(minified.before / 1024)} KB of code to ${Math.ceil(minified.after / 1024)} KB`);
     else console.log('  readable: not built, so it can be looked into here; it is never published');

@@ -841,6 +841,9 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   writeFileSync(path.join(repo, 'kit.json'), JSON.stringify({ kit: readFileSync(path.join(appRoot, 'src', 'kit', 'VERSION'), 'utf8').trim() }) + '\n');
   writeFileSync(path.join(repo, '.gitignore'), 'artifacts/\nsrc/kit/\n');
   writeFileSync(path.join(repo, ANNOUNCEMENT), JSON.stringify(announcement(), null, 2) + '\n');
+  // A changelog of 25 versions: the release carries its opening and newest 20, for About's What's new (kit 2.143.0).
+  const versions = Array.from({ length: 25 }, (_, i) => `0.0.${25 - i}`);
+  writeFileSync(path.join(repo, 'CHANGELOG.md'), ["# Fixture's changelog", '', ...versions.flatMap((v) => [`## ${v}`, '', `**${v}.**`, ''])].join('\n'));
   const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'core.autocrlf=false', ...a], { cwd: repo, encoding: 'utf8', windowsHide: true });
   git('init', '-q');
   git('remote', 'add', 'origin', 'https://github.com/Jcollier0120/Fixture.git');
@@ -867,11 +870,14 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   assert.deepEqual(files.filter((f) => f.endsWith('.ts') && !f.startsWith('tools/')), ['src/cli.ts']);
   assert.ok(files.includes('src/cli.js') && files.includes('src/kit/install.js') && files.includes('src/kit/release.js'));
   assert.ok(!files.includes('README.md'));
-  assert.deepEqual(files.filter((f) => /\.md$/i.test(f)), [], 'no document, the kit\'s included');
+  assert.deepEqual(files.filter((f) => /\.md$/i.test(f)), ['CHANGELOG.md'], 'no document, the kit\'s included, but its changelog\'s newest entries');
   assert.ok(files.includes('THIRD-PARTY-NOTICES.txt') && files.includes('src/kit/geniex/NOTICE'));
   const built = path.join(tmp, 'built');
   mkdirSync(built, { recursive: true });
-  execFileSync(tar, ['-x', '-f', zipOf(), '-C', built, 'src', 'package.json', 'release.json', 'THIRD-PARTY-NOTICES.txt'], { windowsHide: true });
+  execFileSync(tar, ['-x', '-f', zipOf(), '-C', built, 'src', 'package.json', 'release.json', 'THIRD-PARTY-NOTICES.txt', 'CHANGELOG.md'], { windowsHide: true });
+  const carried = readFileSync(path.join(built, 'CHANGELOG.md'), 'utf8');
+  assert.deepEqual([...carried.matchAll(/^## (.+)$/gm)].map((m) => m[1]), versions.slice(0, 20), 'its newest 20 entries');
+  assert.ok(carried.startsWith("# Fixture's changelog\n\n## 0.0.25\n\n**0.0.25.**\n"));
   // Its notices: the kit's vendored builds, each with its license and notice (the fixture has no page to bundle).
   const notices = readFileSync(path.join(built, 'THIRD-PARTY-NOTICES.txt'), 'utf8');
   assert.deepEqual(noticeHeadings(notices), ['src\\kit\\geniex', 'src\\kit\\openvino']);

@@ -7,12 +7,13 @@ import { UI_CSS } from './styles.ts';
 import { Tour } from './tour.tsx';
 import { Tabs, useSettingsTab, type SettingsTab } from './tabs.tsx';
 import { Button, PostButton, ReloadProvider } from './ui.tsx';
+import { WhatsNew } from './whats-new.tsx';
 
 /**
  * The kit's frame of every React page, as page.ts draws it for a string-built one, element for element and class for
  * class (page.ts's CSS styles both): the title bar (back to the manor, the agent's icon, name, and role with the status
  * pill after it, its scene, About, Settings, the Theme menu, and the agent's own action, Run now), the off-duty notice, the page,
- * the About view at #/about (what's read once: the agent's own, then "Where its work runs"), the Settings view at
+ * the About view at #/about (what's read once: What's new, the agent's own, then "Where its work runs"), the Settings view at
  * #/settings (the Settings panel), and the footer. About and Settings are where Manor's title bar has them.
  *
  * The agent gives its page as children, its title-bar action as `action`, anything of its own for the Settings view as
@@ -291,8 +292,9 @@ export function useRoute(): Route {
  * `data-tour` names: the frame's are titlebar, status, about, settings, theme, action, settings-panel and work, and an
  * agent names its own sections the same way.
  *
- * The About view holds what a person reads once, not every day: `about` (how it works, what it sets up, setting it up
- * again), then "Where its work runs". Its button is in the title bar whenever it has either.
+ * The About view holds what a person reads once, not every day: What's new, the changelog's entries for its latest
+ * updates (whats-new.tsx, kit 2.143.0, asked for as About first opens), `about` (how it works, what it sets up, setting
+ * it up again), then "Where its work runs". Its button is in the title bar whenever it has any of them.
  *
  * The Settings view is the kit's Settings form (settings-form.tsx), drawn again after onboarding saves. With
  * `settingsTabs`, Settings is in tabs (tabs.tsx): the kit's form, with `settings` above it, is the first, General,
@@ -304,7 +306,7 @@ export function useRoute(): Route {
 export function Page<Body>({ data, reload, action, settings, settingsTabs, about, tour, children }: { data: PageData<Body>; reload: () => void | Promise<void>; action?: ReactNode; settings?: ReactNode; settingsTabs?: SettingsTab[]; about?: ReactNode; tour?: ReactNode; children: ReactNode }) {
   const s = data.shell;
   const route = useRoute();
-  const hasAbout = !!about || !!s.work;
+  const hasAbout = !!about || !!s.work || !!s.whatsNew;
   const [settingsDrawn, setSettingsDrawn] = useState(0);
   const dev = s.developer === true;
   // After onboarding saves, the Settings view is drawn again, and the page's data read again: what it still needs may have changed.
@@ -376,6 +378,7 @@ export function Page<Body>({ data, reload, action, settings, settingsTabs, about
                 Back to {s.app.name}
               </a>
               <h2>About {s.app.name}</h2>
+              {s.whatsNew && <WhatsNew open={route === 'about'} name={s.app.name} />}
               {about}
               <div data-tour="work" style={{ display: 'contents' }}>
                 <Markup html={s.work} />

@@ -20,6 +20,7 @@ import { shadowedRoutes } from './kit-routes.ts';
 import { dataFile, writeJson } from './store.ts';
 import { repair, repairKinds } from './repair.ts';
 import { peerResult, workStatus, type WorkExtra } from './work-status.ts';
+import { noteVersion, whatsNew } from './whats-new.ts';
 
 /**
  * The agent's page and API, on 127.0.0.1 only. On top of that, the same rules as Manor's server:
@@ -209,6 +210,8 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
   watchRequired(opts.settings);
   // The trial's end (license-check.ts): read now, then every hour.
   startLicenseCheck();
+  // The version it starts at, in versions.json when it changed (whats-new.ts): About's What's new follows from it.
+  noteVersion();
 
   const stop: Handler = () => {
     setTimeout(async () => {
@@ -250,6 +253,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     // Its result for one code tree (work-status.ts, kit 2.77.0), for an agent on another PC about to run the same checks
     // (over Manor's link: GET /agents/<id>/result). Read only.
     '/api/peer/result': ({ query }) => peerResult(query),
+    // What's new (whats-new.ts, kit 2.143.0): its changelog's entries for its latest updates, newest first, which the
+    // About view asks for as it opens. The changelog is read at the first ask, and kept.
+    '/api/whats-new': () => ({ json: { versions: whatsNew() } }),
     ...opts.get,
   };
   const post: Record<string, Handler> = {

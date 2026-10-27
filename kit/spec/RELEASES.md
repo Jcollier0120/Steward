@@ -14,6 +14,7 @@ The agents' source stays in their private repositories. What a PC installs is a 
 - Names are kept (`keepNames`), so stack traces in the logs, and an error's or a class's name, read as they did.
 - The **README stays out** of the zip: it's for the repository. LICENSE, `kit.json` and `tools/kit.ts` (the kit's own, public) go in, as before.
 - **No document goes** (kit 2.134.0, `isDoc`): not a `.md` anywhere in the zip, the kit's own pages in `src\kit\spec\` and the READMEs beside its vendored builds included. They're for whoever works on the agent, and nothing reads them at run time (the spec part's `.json` files still go). A license or notice file written as `.md` (`LICENSE.md`) still goes.
+- **`CHANGELOG.md` goes, cut to its newest 20 entries** (kit 2.143.0, notes.ts's `releaseChangelog`): its opening and those entries, at the zip's top level, which the About view's **What's new** reads (`node/whats-new.ts`). The whole history (hundreds of KB) stays in the repository.
 - **`THIRD-PARTY-NOTICES.txt`** goes at the zip's top level (kit 2.134.0), below.
 
 ## Notices: `node/notices.ts`

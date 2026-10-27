@@ -50,7 +50,23 @@ The kit's `release.ts` (and Manor's and Reeve's own, with `notes.ts`) publishes 
 2. The entry, as written, without its `## ` heading. Where versions were merged since the release before and never released on their own (the Steward releases once for all it merged in a round), their entries follow, each under its own `## <version>`, after a line that names them (`combinedEntry`).
 3. **Installing**: how to install the release by hand.
 
+The release carries the changelog too, cut to its newest 20 entries (kit 2.143.0): an agent's **About** view opens with a **What's new** that shows the entries for the versions its latest updates brought (below).
+
 `npm run release` says where the notes came from, and warns when the entry lacks **Before you update**, or has neither **What's new** nor **What changed**. A version with **no entry** still gets notes: a **What changed** that says no entry was written and lists its commits since the release before (each pull request's title, on the branch's first-parent line), with a warning at build time. A release never goes out saying nothing.
+
+## What's new on About
+
+From kit 2.143.0 every agent's **About** view (`#/about`, react/shell.tsx) opens with **What's new**: its own changelog's entries for the versions its latest updates brought, newest first, each under its version; with several, the newest is open and the older are folded. They're drawn as text, never as HTML: the bold line, `###` headings, `- ` points, `**bold**` and `` `code` `` (a link shows its words).
+
+Which versions (`node/whats-new.ts`): the agent keeps `versions.json` in its data folder, each version it first started at and when, oldest first, at most 30:
+
+```json
+{ "versions": [{ "version": "0.4.28", "since": "2026-10-20T14:02:11.000Z" }, { "version": "0.4.31", "since": "2026-10-27T14:01:56.000Z" }] }
+```
+
+Its page writes it as it starts, only when the version changed. About shows the entries of every version newer than the one that ran before the latest update, up to the one running, and those of its other updates in the last 30 days; at most 10. A copy with no record yet starts one after the version its update kept in `app.prev`, when there is one (with no date), or shows just its own version's entry. A version with no entry is passed over, and a missing or odd `CHANGELOG.md` or `versions.json` means no section. The page asks `/api/whats-new` for the entries as About first opens; the changelog is read at the first ask and kept.
+
+So an entry is read twice: in Manor, as the update's notes, and on the agent's own About afterwards. Write it for the person using the agent.
 
 ## The kit bump
 
