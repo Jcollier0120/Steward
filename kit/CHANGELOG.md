@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.143.3
+
+**A page left open while its agent updated, or restarted, saves again: its server starts with a new token each time, so the tab's POSTs were refused, and Save said only "forbidden" until the tab was reloaded.**
+
+### What changed
+
+- **react/page-data.ts, `post`:** a POST the server refuses for its token (403, `forbidden`) reads the token as the server has it now from the page itself (`GET /`, which the browser's cookie signs in where GETs are strict, open where they aren't), keeps it for the POSTs after, and sends the same POST once more, never more than once. Where the page gives no token (strict, and the cookie no longer taken), nothing is sent again, and the error says plainly that the page is out of date since the agent updated (or restarted), to reload it and try again.
+- **react/shell.tsx and react/settings-form.tsx:** then a banner at the top of the page says the same with a Reload button, and the Settings form's bar offers Reload beside Save. Neither reloads by itself: with changes not saved, the browser asks first, as before.
+- **react/index.ts:** exports `freshToken` (the token as the server has it now, kept in the page) and `useOutOfDate` (the out-of-date words, or null), for a page whose own code POSTs with `pageToken()` and its own fetch rather than `post`.
+- **test/page-restart.test.ts:** `post` against the fixture's server started again with a new token, strict and not: it saves; with the cookie no longer taken, it says to reload; and a POST refused again is sent twice at most.
+
+### Before you update
+
+- Nothing for a page that POSTs with `post` (its Settings form and its PostButtons do): a tab opened from this kit on recovers by itself; one opened before needs a reload once. A page whose own code POSTs with `pageToken()` and its own fetch gets none of this until it uses `post`, or `freshToken` on a 403 `forbidden`.
+
 ## 2.143.2
 
 **The keeper's looks no longer set a lock folder's time against the clock: on Windows a folder's time often runs a millisecond or two ahead of `Date.now()`, so a slot taken just before a look could make the next look count the shared folder's next change, an agent's work turn say, as this accelerator's let-go.**

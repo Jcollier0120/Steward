@@ -3,7 +3,7 @@ import { BusyArea } from './busy.tsx';
 import { ErrorNote } from './feedback.tsx';
 import { Switch } from './forms.tsx';
 import { Tabs } from './tabs.tsx';
-import { post } from './page-data.ts';
+import { post, useOutOfDate } from './page-data.ts';
 import { APPLIES_NOTE, blank, canon, clone, laterNotes, same, SCALAR, shown, shownNow, tidy, words, type Messages, type SettingsData, type SettingsField } from './settings-values.ts';
 import { Badge, Button, LinkButton, Text } from './ui.tsx';
 
@@ -638,8 +638,13 @@ function InManor({ manor, url, labels }: NonNullable<SettingsData['inManor']>) {
   );
 }
 
-/** The bar that stays in view below the fields: Save, Cancel, what happened, and Set every field to its default. */
+/**
+ * The bar that stays in view below the fields: Save, Cancel, what happened, and Set every field to its default. Once the
+ * page is out of date (page-data.ts' post), a Reload beside what happened: the browser asks first while changes aren't
+ * saved (useFormGuards).
+ */
 function FormActions({ dirty, busy, status, onCancel, onDefaults }: { dirty: boolean; busy: boolean; status: { text: string; error?: boolean }; onCancel: () => void; onDefaults: () => void }) {
+  const outOfDate = useOutOfDate();
   return (
     <div className="sf-actions">
       <Button title="Save" submit disabled={!dirty || busy} loading={busy} />
@@ -647,6 +652,7 @@ function FormActions({ dirty, busy, status, onCancel, onDefaults }: { dirty: boo
       <p className={`sf-status ${status.error ? 'error' : 'muted'}`} role="status" aria-live="polite">
         {status.text}
       </p>
+      {outOfDate && <Button title="Reload" variant="secondary" onPress={() => location.reload()} />}
       <span className="sf-spacer" />
       <LinkButton title="Set every field to its default" onPress={onDefaults} />
     </div>

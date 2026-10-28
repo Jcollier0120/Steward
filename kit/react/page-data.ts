@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 /**
  * A React page's data: what the server put in the page (#page-data), then /api/page's answer each time the page looks
@@ -71,7 +71,7 @@ export const PING_LOOK_MS = 5000;
 /** A ping's round state: whether busy, when the last round ended, and since when one runs. A change means news. */
 export const roundState = (p: { busy?: unknown; lastRunAt?: unknown; runningSince?: unknown }) => JSON.stringify([!!p.busy, p.lastRunAt ?? null, p.runningSince ?? null]);
 
-/** The token this page's server gave it: every POST carries it (server.ts). */
+/** The token this page's server gave it: every POST carries it (server.ts). One read since (freshToken) takes its place. */
 export const pageToken = () => document.querySelector('meta[name="page-token"]')?.getAttribute('content') ?? '';
 
 /** The data the server put in the page. */
@@ -81,10 +81,89 @@ export function initialData<Body>(): PageData<Body> {
   return JSON.parse(el.textContent) as PageData<Body>;
 }
 
-/** A POST with the page's token. What the server answers, or its error in words. */
-export async function post(path: string, body?: unknown): Promise<{ ok: boolean; json: { error?: string; message?: string; [k: string]: unknown } }> {
-  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': pageToken() }, body: JSON.stringify(body ?? {}) });
-  const json = await r.json().catch(() => ({}));
+/** The page's token in its HTML (react-page.ts, page.ts): what freshToken reads. */
+const TOKEN_IN_PAGE = /<meta name="page-token" content="([0-9A-Za-z_-]{16,200})">/;
+
+/**
+ * The page's token as its server has it now (kit 2.143.3): the page asked for again (GET /, which its cookie signs in,
+ * or open where its GETs aren't strict), the token read from it and kept in this page for every POST after. Null when
+ * it gives none: not signed in (strict, and the cookie not taken), or not answering.
+ */
+export async function freshToken(): Promise<string | null> {
+  try {
+    const r = await fetch('/', { headers: { accept: 'text/html' }, cache: 'no-store' });
+    const token = r.ok ? (TOKEN_IN_PAGE.exec(await r.text())?.[1] ?? null) : null;
+    if (token) document.querySelector('meta[name="page-token"]')?.setAttribute('content', token);
+    return token;
+  } catch {
+    return null;
+  }
+}
+
+/** What the page says once a POST was refused for a token it couldn't get again (outOfDateWords); null until then. */
+let outOfDate: string | null = null;
+const outOfDateSeen = new Set<() => void>();
+
+/** That, for the parts that offer a Reload with it (shell.tsx's banner, the Settings form's bar). Drawn to HTML (a test), the same. */
+const outOfDateNow = () => outOfDate;
+export const useOutOfDate = () =>
+  useSyncExternalStore(
+    (changed) => {
+      outOfDateSeen.add(changed);
+      return () => outOfDateSeen.delete(changed);
+    },
+    outOfDateNow,
+    outOfDateNow,
+  );
+
+/**
+ * The page's words when it can't get its server's new token: out of date since its agent updated (the version it was
+ * opened at isn't the one /api/ping gives now) or restarted.
+ */
+async function outOfDateWords(): Promise<string> {
+  let app: Partial<PageShell['app']> = {};
+  try {
+    app = initialData<unknown>().shell.app;
+  } catch {
+    // a page without the kit's #page-data: its words without the name
+  }
+  const now = await fetch('/api/ping', { cache: 'no-store' })
+    .then((r) => r.json())
+    .then((p: { version?: unknown }) => p.version)
+    .catch(() => undefined);
+  const name = app.name || 'its agent';
+  const since = typeof now === 'string' && app.version && now !== app.version ? 'updated' : 'restarted';
+  return `This page is out of date since ${name} ${since}. Reload it, then try again.`;
+}
+
+type Answer = { error?: string; message?: string; [k: string]: unknown };
+
+/** What the kit's server says to a POST without its token (server.ts), before any handler runs. */
+const refused = (r: Response, json: Answer) => r.status === 403 && json.error === 'forbidden';
+
+/**
+ * A POST with the page's token. What the server answers, or its error in words.
+ *
+ * Refused for its token (kit 2.143.3): the page's server started again since the page opened (an update, say), with a
+ * new token. The page reads the new one (freshToken) and sends the same POST once more, never again; where it can't,
+ * it says it is out of date, and offers a Reload (useOutOfDate). It never reloads by itself: a form may hold changes.
+ */
+export async function post(path: string, body?: unknown): Promise<{ ok: boolean; json: Answer }> {
+  const send = async (token: string) => {
+    const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': token }, body: JSON.stringify(body ?? {}) });
+    return { r, json: (await r.json().catch(() => ({}))) as Answer };
+  };
+  const sent = pageToken();
+  let { r, json } = await send(sent);
+  if (refused(r, json)) {
+    const token = await freshToken();
+    if (token && token !== sent) ({ r, json } = await send(token));
+    if (refused(r, json)) {
+      json = { ...json, error: await outOfDateWords() };
+      outOfDate = json.error!;
+      for (const changed of outOfDateSeen) changed();
+    }
+  }
   return { ok: r.ok, json: r.ok ? json : { ...json, error: json.error ?? r.statusText } };
 }
 

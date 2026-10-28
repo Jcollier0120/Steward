@@ -1,7 +1,7 @@
 import { memo, StrictMode, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DeveloperProvider } from './developer.tsx';
-import type { PageData, PageShell, ShellTheme } from './page-data.ts';
+import { useOutOfDate, type PageData, type PageShell, type ShellTheme } from './page-data.ts';
 import { SettingsForm } from './settings-form.tsx';
 import { UI_CSS } from './styles.ts';
 import { Tour } from './tour.tsx';
@@ -309,6 +309,8 @@ export function Page<Body>({ data, reload, action, settings, settingsTabs, about
   const hasAbout = !!about || !!s.work || !!s.whatsNew;
   const [settingsDrawn, setSettingsDrawn] = useState(0);
   const dev = s.developer === true;
+  // A POST refused for a token the page couldn't get again (page-data.ts' post): its words, and the Reload that mends it.
+  const outOfDate = useOutOfDate();
   // After onboarding saves, the Settings view is drawn again, and the page's data read again: what it still needs may have changed.
   const walkthrough = tour ?? (s.onboarding && <Tour onboarding={s.onboarding} app={s.app} needs={s.needs ?? null} manorName={s.manor?.name ?? null} onSettingsSaved={() => { setSettingsDrawn((n) => n + 1); void reload(); }} />);
   return (
@@ -316,6 +318,14 @@ export function Page<Body>({ data, reload, action, settings, settingsTabs, about
       <ReloadProvider value={reload}>
         <style>{UI_CSS}</style>
         <TitleBar shell={s} route={route} about={hasAbout} action={action} />
+        {outOfDate && (
+          <div className="banners">
+            <div className="banner-note offduty out-of-date" role="alert">
+              <span>{outOfDate}</span>
+              <Button title="Reload" variant="secondary" onPress={() => location.reload()} />
+            </div>
+          </div>
+        )}
         {s.needs && route !== 'tour' && (
           <div className="banners">
             <div className="banner-note offduty" role="status">
