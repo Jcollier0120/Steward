@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.143.2
+
+**The keeper's looks no longer set a lock folder's time against the clock: on Windows a folder's time often runs a millisecond or two ahead of `Date.now()`, so a slot taken just before a look could make the next look count the shared folder's next change, an agent's work turn say, as this accelerator's let-go.**
+
+### What changed
+
+- **node/keeper.ts, `lastUseMs` (the NPU refresh's and patch's quiet wait) and the Reaper's let-go (`letGoMs`):** "in use since the last look" is the accelerator's own lock folders' time having moved since that look (one file time against another), or held then. It was that time set against the clock at the look. A slot taken a moment before a look no longer lets a work turn, or another accelerator's let-go, count as this one's use, which kept the NPU's quiet wait, or a server's idle time, going longer than it should. Nothing else changes.
+- **test/keeper.test.ts:** the quiet wait's taken-and-let-go-between-looks case no longer depends on the disk and the clock agreeing to the millisecond (it failed once in 2.143.1's whole suite, and 1 run in 400 under load on a Snapdragon X2), and a new case sets the folders' times a little ahead of the clock, as Windows' often are.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.143.1
 
 **A call Envoy captions on the NPU comes first: the staff's background model work waits for the call's end, and when the call doesn't translate, the NPU's servers stop once unused for two minutes. Beside the NPU's chat model answering, Envoy's speech slowed (Whisper small's decoder steps tripled on a Ryzen AI 7 350), and on AMD the NPU itself timed out.**
