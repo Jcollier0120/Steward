@@ -530,6 +530,52 @@ export async function gameNow(o: { file?: string; hw?: Hardware | null; now?: nu
   }
 }
 
+// ---------------------------------------------------------------- calls
+
+export type NpuCall = core.NpuCall;
+
+/**
+ * npu-call.json, beside games.json: a call being captioned on the NPU (Envoy's, kit 2.143.1). While it's on, the staff's
+ * background work leaves the NPU to it, and while it doesn't translate the keeper stops the NPU's servers once unused
+ * (spec/ACCELERATORS.md, "Calls").
+ */
+export const npuCallFile = () => path.join(acceleratorsDir, 'npu-call.json');
+
+/** How often the agent captioning a call writes npu-call.json again: a third of callFreshMs, so a late write never ends it. */
+export const NPU_CALL_EVERY_MS = Math.floor(RULES.accelerators.callFreshMs / 3);
+
+/** npu-call.json as written, or null when there's none or it can't be read. */
+export function readNpuCall(): NpuCall | null {
+  return core.callOf(readText(npuCallFile()));
+}
+
+/** The call on the NPU now (the core's callNow: npu-call.json written within callFreshMs), or null. Never throws. */
+export function npuCallNow(now = Date.now()): NpuCall | null {
+  try {
+    return core.callNow(RULES, readNpuCall(), now);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The agent captioning a call on the NPU says so: at the call's start, again every NPU_CALL_EVERY_MS while it lasts, and
+ * when whether it translates changes (`since` keeps the call's start). Returns what it wrote.
+ */
+export function holdNpuForCall(o: { by: string; translating: boolean; since?: string; now?: number }): NpuCall {
+  const at = core.isoTime(o.now ?? Date.now());
+  const call: NpuCall = { by: o.by, pid: process.pid, since: o.since ?? at, at, translating: o.translating };
+  writeWhole(npuCallFile(), call);
+  return call;
+}
+
+/** The call is over: npu-call.json goes, unless another agent's call wrote it since. */
+export function releaseNpuForCall(by: string): void {
+  const call = readNpuCall();
+  if (call && call.by !== by) return;
+  rmSync(npuCallFile(), { force: true });
+}
+
 // ---------------------------------------------------------------- choosing
 
 /** A background request doesn't join a line with this many already waiting. */
@@ -542,7 +588,8 @@ export type WorkOrder = core.WorkOrder;
 /**
  * The candidates for a request, in order: they serve its kind, its size fits their cap, they haven't
  * failed in the last 10 minutes (unless every one that would do has: then they all may, as a last
- * resort), a game isn't using them (background work only), and this agent isn't leaving them alone
+ * resort), a game isn't using them (background work only), the NPU isn't captioning a call (`call`, npuCallNow's:
+ * background work only), and this agent isn't leaving them alone
  * after a line that was too long (`deferredMs`). The config's `workOrder` for its kind, when it has one, orders them
  * first, with `running` (serversUp) for its runningFirst, and `waiting` (how many of the work wait, this one included)
  * for its batchAt.
@@ -550,12 +597,13 @@ export type WorkOrder = core.WorkOrder;
 export function candidates(
   accs: Accelerator[],
   need: Need,
-  state: { failure?: (id: string) => Failure | null; games?: Games | null; deferredMs?: (id: string) => number; now?: number; workOrder?: WorkOrder | null; running?: (id: string) => boolean; waiting?: number } = {},
+  state: { failure?: (id: string) => Failure | null; games?: Games | null; call?: NpuCall | null; deferredMs?: (id: string) => number; now?: number; workOrder?: WorkOrder | null; running?: (id: string) => boolean; waiting?: number } = {},
 ): { list: Accelerator[]; skipped: Skipped[]; npuFirst: boolean } {
   const asked = accs.filter((a) => core.serves(a, need.work));
   return core.candidates(RULES, accs, need, {
     failures: state.failure ? Object.fromEntries(asked.map((a) => [a.id, state.failure!(a.id)])) : undefined,
     games: state.games ?? null,
+    call: state.call ?? null,
     deferredMs: state.deferredMs ? Object.fromEntries(asked.map((a) => [a.id, state.deferredMs!(a.id)])) : undefined,
     nowMs: state.now ?? Date.now(),
     ...(state.workOrder ? { workOrder: state.workOrder } : {}),

@@ -26,6 +26,7 @@ import {
   pick as pickFrom,
   postJson,
   probe,
+  npuCallNow,
   readFailure,
   readGames,
   READY_WAIT_MS,
@@ -399,7 +400,7 @@ export class Npu {
     if (!serving.length) return 0;
     const games = readGames();
     const workOrder = 'error' in this.cfg ? null : this.cfg.workOrder;
-    const { list } = candidates(serving, { work, tokens: 0, lane: 'background' }, { failure: readFailure, games: gamesStale(games) ? null : games, deferredMs, workOrder });
+    const { list } = candidates(serving, { work, tokens: 0, lane: 'background' }, { failure: readFailure, games: gamesStale(games) ? null : games, call: npuCallNow(), deferredMs, workOrder });
     return Math.max(...(list.length ? list : serving).map((a) => core.capFor(a, work))) - maxTokens;
   }
 
@@ -517,6 +518,8 @@ export class Npu {
     const refused = core.tooBig(serving, promptTokens, maxTokens, work);
     if (refused) throw new NpuError(refused);
     const games = lane === 'background' && serving.some((a) => a.kind === 'gpu') ? await currentGames(cfg.accelerators) : null;
+    // A call captioned on the NPU (npu-call.json, Envoy's): background work leaves the NPU to it (kit 2.143.1).
+    const call = lane === 'background' && serving.some((a) => a.kind === 'npu') ? npuCallNow() : null;
     // The work's own order, where its NPU's generation has one (config.json's workOrder): by whose servers are up, when it
     // goes by that (its runningFirst: AMD's pictures until kit 2.135.1; they go to the Radeon whoever's is up now).
     const running = await this.serversUp(serving, work, cfg.workOrder);
@@ -541,7 +544,7 @@ export class Npu {
       const { list, skipped, npuFirst } = candidates(
         serving.filter((a) => !tried.has(a.id)),
         { work, tokens, lane },
-        { failure: readFailure, games, deferredMs: lane === 'background' ? (id) => deferredMs(turnIdOf(id)) : undefined, workOrder: cfg.workOrder, running, waiting },
+        { failure: readFailure, games, call, deferredMs: lane === 'background' ? (id) => deferredMs(turnIdOf(id)) : undefined, workOrder: cfg.workOrder, running, waiting },
       );
       if (!list.length) {
         if (loadingOn && !first) {

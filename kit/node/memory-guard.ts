@@ -151,7 +151,7 @@ export function needOf(ep: Pick<Endpoint, 'baseUrl' | 'startCommand'>, raw: Reco
   return { needBytes: (modelBytes(ep.startCommand ?? [], o.size) ?? UNKNOWN_MODEL_BYTES) + headroomBytes(o.totalBytes), accId: acc?.id ?? null };
 }
 
-const STOPPED: ReadonlySet<ReapOutcome['did']> = new Set(['stopped', 'stopped-kept-out', 'stopped-for-game']);
+const STOPPED: ReadonlySet<ReapOutcome['did']> = new Set(['stopped', 'stopped-kept-out', 'stopped-for-game', 'stopped-for-call']);
 
 /**
  * This PC's guard for a server starting at `ep`: its memory, the manor's other servers in config.json, and the keeper's
@@ -165,7 +165,7 @@ export async function makeRoom(ep: Pick<Endpoint, 'baseUrl' | 'startCommand'>, o
     if (!need) return null;
     const log = (line: string) => logLine(reaperLog(), `memory guard: ${line}`);
     // A reaper of its own: unused GUARD_IDLE_MS is idle here, and it neither recycles nor restarts anything.
-    const reaper = pcReaper({ who: 'memory guard', log, options: { idleMs: GUARD_IDLE_MS, recycleBytes: 0, unansweredMs: Number.MAX_SAFE_INTEGER, gameGraceMs: Number.MAX_SAFE_INTEGER } });
+    const reaper = pcReaper({ who: 'memory guard', log, options: { idleMs: GUARD_IDLE_MS, recycleBytes: 0, unansweredMs: Number.MAX_SAFE_INTEGER, gameGraceMs: Number.MAX_SAFE_INTEGER, callGraceMs: Number.MAX_SAFE_INTEGER } });
     const others = () =>
       serversToReap(readConfigFile().raw)
         .filter((s) => s.base !== ep.baseUrl && s.acc.id !== need.accId && s.idleMs !== 0)

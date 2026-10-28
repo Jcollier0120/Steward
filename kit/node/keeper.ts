@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, kindOfId, readableConfigFile, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverLogsDir, serves, toolsHome } from './accelerator-config.ts';
-import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
+import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, npuCallNow, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
 import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
 import { withLock } from './lock.ts';
@@ -50,6 +50,10 @@ import { kitVersion, refreshCardVision, refreshSmallModel, setupCommand, testNpu
  *   gives way when the keeper's turn wasn't had at once (TURN_AT_ONCE_MS): someone took the accelerator after the look.
  * - **A game**: when a game is using its graphics card (games.json) and nobody has used the card for 2 minutes, it
  *   is stopped, so the game gets the card's memory.
+ * - **A call** (kit 2.143.1): when a call is being captioned on the NPU without translating (npu-call.json's
+ *   `translating` false: Envoy then asks the NPU's chat model nothing) and nobody has used the NPU for 2 minutes, the
+ *   NPU's servers are stopped, so the call's speech models have the NPU and its memory to themselves. A call that
+ *   translates keeps them, so its translations don't wait for a model to load.
  * - **The graphics card is kept out**: when Manor's settings say `"gpuWithNpu": false` (kit 2.10.0) and an NPU serves here, a
  *   graphics card's servers for the NPU's own work are stopped as soon as nobody uses the card, and never restarted.
  *   Its servers for work no NPU here serves (vision, beside Intel's NPU: kit 2.69.0, the card on demand) are the
@@ -136,6 +140,8 @@ export const UNANSWERED_MS = RULES.keeper.unansweredMs;
 export const RECYCLE_BYTES = RULES.keeper.recycleBytes;
 /** How long nobody must have used a graphics card before its servers are stopped for a game. */
 export const GAME_GRACE_MS = RULES.keeper.gameGraceMs;
+/** How long nobody must have used the NPU before its servers are stopped for a call that doesn't translate. */
+export const CALL_GRACE_MS = RULES.keeper.callGraceMs;
 /** How often the keeper looks. */
 export const REAP_EVERY_MS = RULES.keeper.lookEveryMs;
 /** How long an orphan is seen before it is stopped; 0 never stops one. */
@@ -182,6 +188,7 @@ export type ReapOutcome =
   | { base: string; did: 'not-answering'; forMs: number }
   | { base: string; did: 'stopped'; pids: number[]; idleMs: number }
   | { base: string; did: 'stopped-for-game'; pids: number[]; by: string[] }
+  | { base: string; did: 'stopped-for-call'; pids: number[]; by: string }
   | { base: string; did: 'stopped-kept-out'; pids: number[] }
   | { base: string; did: 'restarted'; pids: number[]; silentMs: number }
   | { base: string; did: 'recycled'; pids: number[]; workingSetBytes: number }
@@ -211,6 +218,8 @@ export interface ReaperDeps {
   withTurn: <T>(s: ReapedServer, fn: () => Promise<T>) => Promise<T>;
   /** The programs of a game using its graphics card now; empty or null when none is (or it isn't a card). */
   gameOn?: (s: ReapedServer) => Promise<string[] | null>;
+  /** The call being captioned on the NPU now (npu-call.json, npuCallNow's), or null. */
+  callOn?: () => core.NpuCall | null;
   start: (spec: ServerSpec) => Promise<unknown>;
   log: (line: string) => void;
   /** Every model server's process on this PC (llama-server, GenieX, and the configured programs), for the orphan check. */
@@ -230,6 +239,7 @@ export interface ReaperOptions {
   unansweredMs?: number;
   recycleBytes?: number;
   gameGraceMs?: number;
+  callGraceMs?: number;
   orphanGraceMs?: number;
   turnAtOnceMs?: number;
 }
@@ -312,6 +322,15 @@ export class Reaper {
         if (!pids) return taken;
         d.log(`stopped ${program} (${pids.join(', ')}) at ${s.base}: ${by.join(', ')} is using ${theAcc(s)}, and gets its memory back`);
         return { base: s.base, did: 'stopped-for-game', pids, by };
+      }
+    }
+    if (s.acc.kind === 'npu' && d.callOn && idleMs >= (this.o.callGraceMs ?? CALL_GRACE_MS)) {
+      const call = d.callOn();
+      if (call && !call.translating) {
+        const pids = await this.inTurn(s, false);
+        if (!pids) return taken;
+        d.log(`stopped ${program} (${pids.join(', ')}) at ${s.base}: ${call.by} is captioning a call on the NPU without translating, and has it to itself`);
+        return { base: s.base, did: 'stopped-for-call', pids, by: call.by };
       }
     }
     const ws = Math.max(0, ...procs.map((p) => p.workingSetBytes ?? 0));
@@ -773,6 +792,7 @@ export function pcReaper(o: { who?: string; logFile?: string; log?: (line: strin
         const card = games?.cards?.[s.acc.id];
         return card?.busy ? card.by : null;
       },
+      callOn: () => npuCallNow(),
       start: (spec) => ensureServer({ baseUrl: spec.base, model: '', startCommand: spec.startCommand, ...(spec.serverEnv ? { env: spec.serverEnv } : {}) }, { logFile: spec.logFile, env: spec.env }),
       log: o.log ?? ((line) => logLine(logFile, line)),
       allProcesses: () => modelServerProcesses(configuredAccelerators(config()).flatMap((a) => ENDPOINT_KINDS.map((k) => a[k]?.startCommand?.[0] ?? '')).filter(Boolean).map((p) => expandEnv(p))),

@@ -28,6 +28,7 @@ const { unverified } = await import('./fixture/src/kit/page.ts');
 const { APP } = await import('./fixture/src/app.ts');
 const { readTally } = await import('./fixture/src/kit/token-tally.ts');
 const V = await import('./fixture/src/kit/npu-vendors.ts');
+const { RULES } = await import('./fixture/src/kit/rules.ts');
 
 type Accelerator = import('./fixture/src/kit/accelerators.ts').Accelerator;
 type AcceleratorConfig = import('./fixture/src/kit/accelerators.ts').AcceleratorConfig;
@@ -266,6 +267,45 @@ test("a card's id and name are Heiward's: software adapters left out, a second c
 });
 
 // ---------------------------------------------------------------- choosing
+
+test("a call captioned on the NPU: background work waits for its end, off the cards too; a person waiting still has the NPU", () => {
+  const list = config({
+    accelerators: [
+      gpu('gpu-a', { memoryGb: 24, chat: { baseUrl: 'http://x:1', model: 'm' } } as any),
+      { id: 'npu', kind: 'npu', maxContextTokens: 2400, chat: { baseUrl: 'http://x:3', model: 'm' } },
+      { id: 'cpu', kind: 'cpu', maxContextTokens: 4000, chat: { baseUrl: 'http://x:4', model: 'm' }, embed: { baseUrl: 'http://x:5', model: 'e' } },
+    ],
+  }).accelerators;
+  const ids = (r: { list: Accelerator[] }) => r.list.map((a) => a.id);
+  const call = { by: 'envoy', pid: 77, since: new Date().toISOString(), at: new Date().toISOString(), translating: true };
+  const r = A.candidates(list, { work: 'chat', tokens: 500, lane: 'background' }, { call });
+  assert.deepEqual([ids(r), r.skipped.map((s) => [s.acc.id, s.why])], [[], [['npu', 'call']]], 'the NPU first: none other takes it meanwhile');
+  assert.equal(r.skipped[0].detail, 'Envoy is captioning a call on the NPU');
+  assert.equal(core.whyNone(r.skipped, null).busy, true, 'deferred, not a fault');
+  assert.deepEqual(ids(A.candidates(list, { work: 'chat', tokens: 500, lane: 'interactive' }, { call })), ['npu'], 'a person waiting');
+  assert.deepEqual(ids(A.candidates(list, { work: 'embed', tokens: 50, lane: 'background' }, { call })), ['cpu'], "work the NPU doesn't do goes on");
+  assert.deepEqual(ids(A.candidates(list, { work: 'chat', tokens: 500, lane: 'background' }, { call: null })), ['npu'], 'no call');
+});
+
+test("npu-call.json: the call's agent writes it, it holds for callFreshMs after each write, and goes at the call's end", () => {
+  const t = Date.parse('2026-10-28T10:00:00.000Z');
+  assert.equal(A.npuCallNow(t), null, 'none written');
+  const first = A.holdNpuForCall({ by: 'envoy', translating: false, now: t });
+  assert.deepEqual(A.readNpuCall(), first);
+  assert.deepEqual(A.npuCallNow(t + RULES.accelerators.callFreshMs), first);
+  assert.equal(A.npuCallNow(t + RULES.accelerators.callFreshMs + 1), null, 'not written again: its agent stopped without saying');
+  assert.equal(A.npuCallNow(t - RULES.accelerators.callFreshMs - 1), null, 'from a clock that far ahead');
+  const again = A.holdNpuForCall({ by: 'envoy', translating: true, since: first.since, now: t + A.NPU_CALL_EVERY_MS });
+  assert.equal(again.since, first.since, "the call's start stays");
+  assert.ok(A.NPU_CALL_EVERY_MS * 2 < RULES.accelerators.callFreshMs, 'a late write never ends it');
+  A.releaseNpuForCall('someone-else');
+  assert.ok(A.readNpuCall(), "another agent's end leaves it");
+  A.releaseNpuForCall('envoy');
+  assert.equal(A.readNpuCall(), null);
+  writeFileSync(A.npuCallFile(), '{"by":"envoy"}');
+  assert.equal(A.readNpuCall(), null, 'unreadable: no call');
+  A.releaseNpuForCall('envoy');
+});
 
 test('candidates serve the kind, fit the cap, have not failed, and (for background work) no game is on them; the NPU first, alone', () => {
   const list = config({

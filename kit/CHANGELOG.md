@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.143.1
+
+**A call Envoy captions on the NPU comes first: the staff's background model work waits for the call's end, and when the call doesn't translate, the NPU's servers stop once unused for two minutes. Beside the NPU's chat model answering, Envoy's speech slowed (Whisper small's decoder steps tripled on a Ryzen AI 7 350), and on AMD the NPU itself timed out.**
+
+### What's new
+
+- **node/accelerators.ts:** `npu-call.json` in the shared accelerators folder, beside `games.json`: `{ by, pid, since, at, translating }`. The agent captioning a call writes it with `holdNpuForCall({ by, translating, since? })` at the call's start, every `NPU_CALL_EVERY_MS` (20 s) while it lasts and when `translating` changes, and removes it with `releaseNpuForCall(by)`. `npuCallNow()` reads the call on now: the file not written again for `callFreshMs` (60 s, rules.json's accelerators) counts as no call. `readNpuCall()` and `npuCallFile()` are there too.
+- **core/accelerators.js, `candidates`:** a new `call` (the core's `callOf` and `callNow`). While one is on, a background request doesn't take the NPU (skipped as `call`, "Envoy is captioning a call on the NPU"). With the NPU first, that leaves it no candidate, so it is deferred as on a busy NPU (`whyNone`'s busy), never moved to a graphics card or the processor. A request someone is waiting on still has the NPU. npu.ts reads the call for every background request and for `budget`.
+- **node/keeper.ts:** while a call that doesn't translate is on and nobody has used the NPU for `callGraceMs` (2 minutes, rules.json's keeper), the NPU's servers stop (`stopped-for-call`), in the NPU's turn, as a game's card does. A call that translates keeps them. The memory guard's own reaper doesn't stop for calls.
+- **spec/ACCELERATORS.md:** "Calls", and `npu-call.json` under "Shared files".
+
+### Before you update
+
+- Nothing for most agents: it updates itself as usual. Background work on the NPU now waits while Envoy captions a call, so a round during a call defers its model work to a later round. Envoy writes `npu-call.json` from its next release on this kit; until then, nothing changes. Reeve's own routing reads the file from its own release.
+
 ## 2.143.0
 
 **Every agent's About page opens with What's new: its own changelog's entries for the versions its latest updates brought, newest first, so a person sees what changed after an update that moved through several versions, not just the last one's notes.**

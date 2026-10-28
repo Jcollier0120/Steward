@@ -27,7 +27,9 @@ const LLAMA = 'C:\\Users\\x\\.reeve\\servers\\llama\\llama-server.exe';
 const card = { base: CARD, program: LLAMA, spec: { base: CARD, startCommand: [LLAMA, '--port', '18191'] }, acc: { id: 'gpu-rtx', kind: 'gpu' as const, name: 'NVIDIA GeForce RTX 4080' }, lockDirs: [], idleMs: 10 * MIN };
 
 /** A PC with one GenieX started at 0, the NPU last used at `lastUse`, and a clock that moves when told. */
-function fakePc(o: { lastUse?: number; inUse?: boolean; state?: 'ready' | 'loading' | 'down'; line?: boolean; games?: string[] | null } = {}) {
+type Call = { by: string; pid: number; since: string; at: string; translating: boolean };
+
+function fakePc(o: { lastUse?: number; inUse?: boolean; state?: 'ready' | 'loading' | 'down'; line?: boolean; games?: string[] | null; call?: Call | null } = {}) {
   const log: string[] = [];
   const pc = {
     clock: 0,
@@ -38,6 +40,7 @@ function fakePc(o: { lastUse?: number; inUse?: boolean; state?: 'ready' | 'loadi
     held: false,
     games: o.games ?? null,
     gamesAsked: 0,
+    call: o.call ?? null,
     stopped: [] as number[],
     started: 0,
     stoppedOutsideTurn: false,
@@ -58,6 +61,7 @@ function fakePc(o: { lastUse?: number; inUse?: boolean; state?: 'ready' | 'loadi
       pc.gamesAsked++;
       return pc.games;
     },
+    callOn: () => pc.call,
     withTurn: async (_s, fn) => {
       if (o.line) throw new QueueFull('1 already waiting');
       pc.held = true;
@@ -543,6 +547,35 @@ test("the NPU's servers are never stopped for a game, and only the NPU's are rec
   pc.procs = [{ pid: 9001, startedMs: 0, workingSetBytes: 12 * 1024 ** 3 }];
   pc.games = null;
   assert.equal((await reaper.look([{ ...card, idleMs: 0 }]))[0].did, 'answering', 'a server on the processor holds its model in memory: not a leak');
+});
+
+const envoyCall = (translating: boolean): Call => ({ by: 'envoy', pid: 77, since: '2026-10-28T10:00:00.000Z', at: '2026-10-28T10:00:20.000Z', translating });
+
+test("a call captioned on the NPU without translating: the NPU's servers stop after 2 minutes unused, in its turn", async () => {
+  const { pc, deps } = fakePc({ call: envoyCall(false) });
+  const reaper = new Reaper(deps, { idleMs: 10 * MIN });
+  pc.lastUse = 3 * MIN;
+  pc.clock = 4 * MIN;
+  assert.equal((await reaper.look([server]))[0].did, 'answering', 'used a minute ago: a request may follow');
+  pc.clock = 5 * MIN;
+  const [r] = await reaper.look([server]);
+  assert.deepEqual(r, { base: BASE, did: 'stopped-for-call', pids: [4242], by: 'envoy' });
+  assert.equal(pc.stoppedOutsideTurn, false);
+  assert.equal(pc.started, 0, 'a request someone asks for starts it again');
+  assert.match(pc.log[0], /stopped .*geniex.* \(4242\) at .*: envoy is captioning a call on the NPU without translating, and has it to itself/i);
+  pc.procs = [{ pid: 9001, startedMs: 0 }];
+  assert.equal((await reaper.look([card]))[0].did, 'answering', "a graphics card's servers aren't the call's");
+});
+
+test("a call that translates, or none: the NPU's servers stay until they're idle as ever", async () => {
+  for (const call of [envoyCall(true), null]) {
+    const { pc, deps } = fakePc({ call });
+    const reaper = new Reaper(deps, { idleMs: 10 * MIN });
+    pc.clock = 9 * MIN;
+    assert.equal((await reaper.look([server]))[0].did, 'answering', call ? "Envoy's translations ask the NPU's chat model" : 'no call');
+    pc.clock = 10 * MIN;
+    assert.equal((await reaper.look([server]))[0].did, 'stopped', 'the idle stop is unchanged');
+  }
 });
 
 test("the reaper's turn on a card with two slots holds both, and none while someone holds one", async () => {
