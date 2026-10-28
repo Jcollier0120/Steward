@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.252
+
+**A stamp cut short no longer blocks a repository, and a release waits for its stamp, so its notes never leave a change out.**
+
+### What changed
+
+- **A stamp cut short is finished at the next build.** A build stopped after it pushed a repository's stamp branch, but before it opened the stamp's PR, left that branch behind, and every build after was refused the push until main moved (Reeve, on 2026-10-28, when an update of the Steward was pressed in the middle of a build). Now the next build recognizes its own stamp of the same commit, replaces it (only over the commit it saw there), opens the PR and merges it, and its log says so. Anything else on that branch is left as it is, and the stamp stops with a note saying what's there.
+- **Leftover stamp branches are tidied away.** A stamp branch of the Steward's own with no PR, for a commit main has moved past, is deleted at the repository's next stamp, as a closed stamp's branch already was.
+- **A release waits for its stamp.** While main still carries entries in `changes/` that aren't stamped into a version (its stamp failed, or waits), the repository isn't released: its notes would have left those changes out, as Reeve 0.19.2's did. The next build stamps them, then releases. The Steward's own releases wait the same way.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Reeve's leftover stamp branch is replaced at the first build after the update, which stamps its waiting entry into its next version.
+
 ## 0.36.251
 
 **It hands out the kit 2.143.1: while Envoy captions a call on the NPU, the staff's background model work waits for the call to end, and when the call isn't translated, the NPU's chat model is stopped after two minutes unused, so the call's captions have the NPU to themselves.**
