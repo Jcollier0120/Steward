@@ -2,6 +2,29 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.144.0
+
+**While a button's action runs, the whole page waits: the button pressed spins, and every control on the page is disabled until the action is done, has failed or has timed out, then focus is back where it was. A page's own button whose handler awaits `post()` gets it too.**
+
+### What's new
+
+- **react/page-busy.ts:** the page's wait. `holdPage()` holds it until the call it returns, or `PAGE_WAIT_MS` (30 s; `pageWait(ms)` sets another) at most; `pageHeld()` says whether it waits. `openDialog()` marks a dialog open (`ModalCard`, `SidePanel` and the page's own confirm and alert do): one opened while an action runs is usable, one opened before it waits with the page. A listener on the document notes the last press (a click on a button, a link, a switch, a box or a tab, a form's submit, a choice in a list) and forgets it as someone types in a text field.
+- **react/busy.tsx, `PageArea`:** the page's own busy area, a fieldset with no box of its own (`display: contents`), so the page lays out as it did. While the page waits it is disabled, with `aria-busy` and the busy cursor, and its links and pressable cards take no presses; its controls dim only after 0.3 s, so a quick action doesn't flash the page. Focus comes back to where it was once the button pressed is enabled again.
+- **react/shell.tsx, `Page`:** the banners, the page, Settings, About, the tour and the footer are in one `PageArea`, the title bar's action (Run now) in another. The title bar's way out (back to the manor, the agent's name, About, Settings) and its Theme menu stay usable, so a request that doesn't answer never traps anyone; so does the out-of-date banner's Reload.
+- **spec/PAGE-ACTIONS.md:** what an action button is (`PostButton`, a `Button` whose `onPress` returns its promise, `BusyButton`; never a bare `<button onClick>` with a `fetch` of its own), what holds the page and what doesn't. spec/STAFF-PAGE.md's rules and react/index.ts say the same.
+
+### What changed
+
+- **react/busy.tsx, `useTracked`:** the work a kit button tracks (`Button`'s `onPress` promise, `BusyButton`'s `onClick` promise, `PostButton`'s POST and its look for news after) holds the whole page, as well as its `BusyArea`. A button's own `loading` or `busy` doesn't: that is long work the page shows itself.
+- **react/page-data.ts, `post`:** a POST a press started (within 10 s of it with no typing between; a handler that asks first, even with the browser's `confirm()`, still counts) holds the page while it runs, 2.143.3's retry with the new token included, and the button pressed spins (`data-ui-busy`; styles.ts draws the spinner in its icon's place). A `post()` no press started (an auto-save as someone types, a timer's) doesn't, nor does polling (`usePageData`'s looks are GETs of their own).
+- **react/modal.tsx, `ModalCard`, and react/staff.tsx, `SidePanel`:** each tells the page it is open (`openDialog`), before focus moves into it.
+- **react/index.ts:** exports `PageArea`, `holdPage`, `pageHeld`, `pageWait`, `PAGE_WAIT_MS` and `openDialog`.
+- **test/react-page-busy.test.ts (new), with test/browser.ts:** a page on the kit's `Page` in a real browser (Edge, Chrome or Chromium, headless; skipped on a PC without one). `BusyButton`, `PostButton` and a plain button awaiting `post()` each disable the whole page and spin, then come back on success, failure, a refused token and a timeout, focus where it was. Polling and a `post()` as someone types don't hold it. A confirm the action asks and a dialog it opens are answerable; a dialog open before it waits. A `BusyArea` inside still works, links and cards wait, and the title bar's Settings link doesn't.
+
+### Before you update
+
+- Nothing for a page whose actions are `PostButton`s, kit `Button`s whose `onPress` returns its promise, `BusyButton`s, or handlers that `post()`: from this kit on, the whole page waits on them. A page whose own code sends an action with `fetch` gets none of it: send it with `post()`, or hold the page with `holdPage()` until its request answers (a streamed answer, say). A dialog of the page's own making that an action opens while it runs waits with the page: make it a `ModalCard`. A handler that asks with the browser's `confirm()` still works; `confirmDialog` is the page's own.
+
 ## 2.143.3
 
 **A page left open while its agent updated, or restarted, saves again: its server starts with a new token each time, so the tab's POSTs were refused, and Save said only "forbidden" until the tab was reloaded.**

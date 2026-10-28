@@ -1,11 +1,14 @@
 import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { openDialog } from './page-busy.ts';
 
 /**
  * The page's own modals, never the browser's: a modal card (ModalCard), and the questions and messages a page asked
  * with confirm() and alert() before (confirmDialog, alertDialog), in the manor's look. Each one moves focus into
  * itself and keeps it there (Tab and Shift+Tab go round its buttons), Escape closes the top one only, and focus goes
  * back to where it was. page.ts's script draws the same dialog for a string-built page.
+ *
+ * One opened while the page waits on an action (page-busy.ts) is usable: a question the action asks, a sign-in it needs.
  */
 
 /** What Tab can reach inside a modal, in order. */
@@ -51,6 +54,8 @@ export function ModalCard({ visible, onClose, children, maxHeightRatio = 0.8, cl
   close.current = onClose;
   useEffect(() => {
     if (!visible) return;
+    // First: a page waiting on the work that opened it lets it be answered (page-busy.ts), before focus moves into it.
+    const shut = openDialog();
     const me = {};
     open.push(me);
     const before = document.activeElement as HTMLElement | null;
@@ -67,7 +72,9 @@ export function ModalCard({ visible, onClose, children, maxHeightRatio = 0.8, cl
     return () => {
       document.removeEventListener('keydown', keys);
       open.splice(open.indexOf(me), 1);
+      // Focus back first, while the page still lets it: a page that waits on again has it back when the work is done.
       if (before?.isConnected) before.focus?.();
+      shut();
     };
   }, [visible]);
   if (!visible) return null;

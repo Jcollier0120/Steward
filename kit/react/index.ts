@@ -20,6 +20,18 @@
  * Busy and asking: a Button whose onPress returns a promise spins until it settles, BusyButton does the same for a
  * button of the page's own classes, and BusyArea disables the part of the page the work changes. confirmDialog and
  * alertDialog are the page's own confirm() and alert(): never the browser's.
+ *
+ * The whole page waits on an action (kit 2.144.0, page-busy.ts; spec/PAGE-ACTIONS.md): while one runs, every control on
+ * the page is disabled, with the busy cursor and aria-busy, and the button pressed spins; a dialog the action opens is
+ * usable. An action button is therefore one of these, never a bare <button onClick> with a fetch of its own:
+ *
+ *   <PostButton title="Run now" path="/api/run" />                              a POST, then the page looks for news
+ *   <Button title="Save" onPress={() => save()} />                               onPress returns the work's promise
+ *   <BusyButton className="mine" onClick={() => save()}>Save</BusyButton>         the same, in the page's own classes
+ *
+ * where the work POSTs with post(): a post() a press started holds the page by itself, and spins the button pressed,
+ * even from a plain <button>. Long work holds the page only until its request answers (Run now, a job started): its
+ * progress is the page's to show. Work that can't go through post() (a stream) holds it with holdPage() until it answers.
  */
 export { BUSY_LOOK_MS, freshToken, initialData, pageToken, PING_LOOK_MS, post, roundState, useOutOfDate, usePageData, type PageData, type PageShell, type ShellTheme } from './page-data.ts';
 export { mount, Page, ThemeMenu, useRoute, type Route } from './shell.tsx';
@@ -30,7 +42,8 @@ export { Badge, Button, Card, CardFooter, DetailRow, IconButton, LinkButton, Not
 export { ChoiceGroup, Input, SaveStatus, Segmented, Select, Switch, type ChoiceLayout, type ChoiceOption, type ChoiceValue, type SegmentedOption, type SelectOption } from './forms.tsx';
 export { EmptyNote, ErrorNote, Loading, QueryView, Toast, type QueryLike } from './feedback.tsx';
 export { alertDialog, confirmDialog, DialogHost, dialogsOpen, ModalCard, nextStop, type DialogOptions } from './modal.tsx';
-export { BusyArea, BusyButton, useTracked, type BusyButtonProps } from './busy.tsx';
+export { BusyArea, BusyButton, PageArea, useTracked, type BusyButtonProps } from './busy.tsx';
+export { holdPage, openDialog, PAGE_WAIT_MS, pageHeld, pageWait } from './page-busy.ts';
 export { UI_CSS } from './styles.ts';
 export { SettingsForm } from './settings-form.tsx';
 export { pageTabInHash, PageTabs, settingsTabInHash, SHOW_TAB, Tabs, usePageTab, useSettingsTab, type PageTab, type SettingsTab } from './tabs.tsx';

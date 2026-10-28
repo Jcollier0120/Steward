@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.255
+
+**It hands out the kit 2.144.0: while a button's action runs, its page shows a spinner on it and waits, so nothing is pressed twice.**
+
+### What changed
+
+- **The kit 2.144.0:** on an agent's page, pressing a button that does something (Save, Run now, Remove, Back on duty) shows a spinner on that button, and the whole page waits until it's done: nothing else on it takes a press meanwhile, so nothing is sent twice or changed underneath. Once the action is done or has failed, or the agent hasn't answered within 30 seconds, the page is yours again, with the cursor back on the button you pressed. The way back to the manor, About, Settings and Theme always work, and a question the action asks can still be answered.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent's page waits like this once that agent has the kit 2.144.0; a page already open needs a reload.
+
 ## 0.36.254
 
 **It hands out the kit 2.143.3: a page left open while its agent updates saves again, instead of answering "forbidden".**

@@ -1,5 +1,6 @@
 import { memo, StrictMode, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
+import { PageArea } from './busy.tsx';
 import { DeveloperProvider } from './developer.tsx';
 import { useOutOfDate, type PageData, type PageShell, type ShellTheme } from './page-data.ts';
 import { SettingsForm } from './settings-form.tsx';
@@ -236,10 +237,13 @@ function TitleBar({ shell, route, about, action }: { shell: PageShell; route: Ro
           <span>Settings</span>
         </a>
         <ThemeMenu shell={shell} />
+        {/* The agent's action waits with the page while one runs; its way back to Manor, About, Settings and Theme don't. */}
         {action && (
-          <span className="titlebar-action" data-tour="action">
-            {action}
-          </span>
+          <PageArea>
+            <span className="titlebar-action" data-tour="action">
+              {action}
+            </span>
+          </PageArea>
         )}
       </div>
     </header>
@@ -326,90 +330,92 @@ export function Page<Body>({ data, reload, action, settings, settingsTabs, about
             </div>
           </div>
         )}
-        {s.needs && route !== 'tour' && (
-          <div className="banners">
-            <div className="banner-note offduty" role="status">
-              <span>
-                <strong>Awaiting orders</strong>: {s.app.name} can't start until you fill in {s.needs.text}.
-              </span>
-              <Button title="Fill them in" variant="secondary" onPress={() => { location.hash = '#/tour?step=settings'; }} />
+        <PageArea>
+          {s.needs && route !== 'tour' && (
+            <div className="banners">
+              <div className="banner-note offduty" role="status">
+                <span>
+                  <strong>Awaiting orders</strong>: {s.app.name} can't start until you fill in {s.needs.text}.
+                </span>
+                <Button title="Fill them in" variant="secondary" onPress={() => { location.hash = '#/tour?step=settings'; }} />
+              </div>
             </div>
-          </div>
-        )}
-        {s.settling && (
-          <div className="banners">
-            <div className="banner-note settling" role="status">
-              <Markup html={s.settling.svg} />
-              <span>
-                <strong>Settling into the manor</strong>: {s.settling.text}
-              </span>
+          )}
+          {s.settling && (
+            <div className="banners">
+              <div className="banner-note settling" role="status">
+                <Markup html={s.settling.svg} />
+                <span>
+                  <strong>Settling into the manor</strong>: {s.settling.text}
+                </span>
+              </div>
             </div>
-          </div>
-        )}
-        {s.trialEnded && (
-          <div className="banners">
-            <div className="banner-note offduty trial-ended" role="status">
-              <span>{s.trialEnded}</span>
+          )}
+          {s.trialEnded && (
+            <div className="banners">
+              <div className="banner-note offduty trial-ended" role="status">
+                <span>{s.trialEnded}</span>
+              </div>
             </div>
-          </div>
-        )}
-        {s.offDutySince && !s.trialEnded && (
-          <div className="banners">
-            <div className="banner-note offduty" role="status">
-              <span>
-                <strong>Off duty</strong> since {s.offDutySince}, feet up by the fire: its scheduled rounds are paused. Run now still works.
-              </span>
-              <PostButton title="Back on duty" variant="secondary" path="/api/duty" body={{ onDuty: true }} />
+          )}
+          {s.offDutySince && !s.trialEnded && (
+            <div className="banners">
+              <div className="banner-note offduty" role="status">
+                <span>
+                  <strong>Off duty</strong> since {s.offDutySince}, feet up by the fire: its scheduled rounds are paused. Run now still works.
+                </span>
+                <PostButton title="Back on duty" variant="secondary" path="/api/duty" body={{ onDuty: true }} />
+              </div>
             </div>
-          </div>
-        )}
-        <main className="view">
-          {children}
-          <section id="settings-view">
-            <a className="back-link" href="#/">
-              Back to {s.app.name}
-            </a>
-            <h2>Settings</h2>
-            {settingsTabs?.length ? (
-              <TabbedSettings tabs={settingsTabs}>
-                {settings}
-                <SettingsForm key={`${settingsDrawn} ${dev}`} />
-              </TabbedSettings>
-            ) : (
-              <>
-                {settings}
-                <SettingsForm key={`${settingsDrawn} ${dev}`} />
-              </>
-            )}
-          </section>
-          {hasAbout && (
-            <section id="about-view">
+          )}
+          <main className="view">
+            {children}
+            <section id="settings-view">
               <a className="back-link" href="#/">
                 Back to {s.app.name}
               </a>
-              <h2>About {s.app.name}</h2>
-              {s.whatsNew && <WhatsNew open={route === 'about'} name={s.app.name} />}
-              {about}
-              <div data-tour="work" style={{ display: 'contents' }}>
-                <Markup html={s.work} />
-              </div>
+              <h2>Settings</h2>
+              {settingsTabs?.length ? (
+                <TabbedSettings tabs={settingsTabs}>
+                  {settings}
+                  <SettingsForm key={`${settingsDrawn} ${dev}`} />
+                </TabbedSettings>
+              ) : (
+                <>
+                  {settings}
+                  <SettingsForm key={`${settingsDrawn} ${dev}`} />
+                </>
+              )}
             </section>
+            {hasAbout && (
+              <section id="about-view">
+                <a className="back-link" href="#/">
+                  Back to {s.app.name}
+                </a>
+                <h2>About {s.app.name}</h2>
+                {s.whatsNew && <WhatsNew open={route === 'about'} name={s.app.name} />}
+                {about}
+                <div data-tour="work" style={{ display: 'contents' }}>
+                  <Markup html={s.work} />
+                </div>
+              </section>
+            )}
+          </main>
+          {route === 'tour' && walkthrough && (
+            <div className="tour-layer" role="dialog" aria-label={`A tour of ${s.app.name}'s page`}>
+              {walkthrough}
+            </div>
           )}
-        </main>
-        {route === 'tour' && walkthrough && (
-          <div className="tour-layer" role="dialog" aria-label={`A tour of ${s.app.name}'s page`}>
-            {walkthrough}
-          </div>
-        )}
-        <footer>
-          {s.app.name} {s.app.version} · this PC only
-          {dev && s.dataDir && (
-            <>
-              {' · its files are in '}
-              <code>{s.dataDir}</code>
-            </>
-          )}
-        </footer>
+          <footer>
+            {s.app.name} {s.app.version} · this PC only
+            {dev && s.dataDir && (
+              <>
+                {' · its files are in '}
+                <code>{s.dataDir}</code>
+              </>
+            )}
+          </footer>
+        </PageArea>
       </ReloadProvider>
     </DeveloperProvider>
   );

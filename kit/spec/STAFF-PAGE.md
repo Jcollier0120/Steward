@@ -24,6 +24,7 @@ An agent that doesn't follow it yet keeps working; its page just reads different
 - **Counts in headings**, the state in a badge, the time as `ago()` says it, with the exact time in its title.
 - **Developer content follows spec/DEVELOPER-OPTIONS.md**: with the switch off, the page is one plain line.
 - **The kit's look**: its components and classes only, every colour a theme variable (web/themes.css), so each theme applies.
+- **An action is a kit button** (spec/PAGE-ACTIONS.md): a `PostButton`, a `Button` whose `onPress` returns its work's promise, or a `BusyButton`, its work POSTing with `post()`. While it runs, the whole page waits and the button pressed spins; never a bare `<button onClick>` with a `fetch` of its own.
 
 ## The parts
 
