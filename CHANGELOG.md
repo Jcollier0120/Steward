@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.254
+
+**It hands out the kit 2.143.3: a page left open while its agent updates saves again, instead of answering "forbidden".**
+
+### What changed
+
+- **The kit 2.143.3:** an agent's page that was open while the agent updated, or restarted, refused every Save and button with "forbidden" until the page was reloaded. Now it picks up the agent's new sign-in by itself and does what you asked. Where it can't, it says the page is out of date since the agent updated, with a Reload button. It never reloads by itself, so changes you haven't saved stay until you choose.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A page already open from before needs one reload once its agent has the kit 2.143.3.
+
 ## 0.36.253
 
 **It hands out the kit 2.143.2: the staff's waits for a quiet NPU, or an idle model server, no longer take another agent's work for its use.**

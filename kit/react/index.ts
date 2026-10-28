@@ -21,7 +21,7 @@
  * button of the page's own classes, and BusyArea disables the part of the page the work changes. confirmDialog and
  * alertDialog are the page's own confirm() and alert(): never the browser's.
  */
-export { BUSY_LOOK_MS, initialData, pageToken, PING_LOOK_MS, post, roundState, usePageData, type PageData, type PageShell, type ShellTheme } from './page-data.ts';
+export { BUSY_LOOK_MS, freshToken, initialData, pageToken, PING_LOOK_MS, post, roundState, useOutOfDate, usePageData, type PageData, type PageShell, type ShellTheme } from './page-data.ts';
 export { mount, Page, ThemeMenu, useRoute, type Route } from './shell.tsx';
 export { DeveloperOnly, DeveloperProvider, useDeveloper } from './developer.tsx';
 export { ago, useNow } from './time.ts';
