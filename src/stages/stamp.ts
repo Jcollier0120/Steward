@@ -104,6 +104,13 @@ const fragmentsIn = (dir: string, sub: string) => {
   return existsSync(at) ? fragmentFiles(readdirSync(at).map((f) => `${sub}/${f}`), sub) : [];
 };
 
+/** The entries a stamp would take from one folder (changes/, or the kit's) at a commit of a clone; none when unreadable. */
+export async function unstampedAt(ctx: Ctx, repo: string, commit: string, dir = CHANGES_DIR): Promise<string[]> {
+  const tree = await gitMaybe(ctx.run, repo, 'ls-tree', '-r', '--name-only', commit, `${dir}/`);
+  const files = tree ? tree.split('\n').map((l) => l.trim()).filter(Boolean) : [];
+  return [...changeFiles(files, dir), ...(dir === CHANGES_DIR ? fragmentFiles(files, dir) : [])];
+}
+
 /** Whether repository paths (main's, listed by git) hold anything a stamp takes. Pure. */
 export const stampsAny = (files: string[]): boolean =>
   changeFiles(files, CHANGES_DIR).length + fragmentFiles(files, CHANGES_DIR).length + changeFiles(files, KIT_CHANGES_DIR).length > 0;
@@ -194,6 +201,61 @@ export function stampTree(dir: string, e: Employee, o: { released: string[]; tak
   return { changed, did, version };
 }
 
+/** A stamp's title, as stampMain commits it and its PR is named: how a stamp of the Steward's own is known on origin. */
+const stampTitle = (name: string, version: string) => `${name} ${version}: version and changelog, stamped by the Steward`;
+const STAMP_TITLE = (name: string) => new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\S+: version and changelog, stamped by the Steward$`);
+
+/** The stamp branches on origin (steward/stamp-…) and the commit each is at; null when origin couldn't be asked. */
+async function stampBranchesOn(ctx: Ctx, repo: string): Promise<Map<string, string> | null> {
+  const out = await gitMaybe(ctx.run, repo, 'ls-remote', '--heads', 'origin', 'refs/heads/steward/stamp-*');
+  if (out === null) return null;
+  const heads = out.split('\n').map((l) => l.trim().split(/\s+/)).filter(([sha, ref]) => /^[0-9a-f]{40}$/.test(sha ?? '') && ref?.startsWith('refs/heads/steward/stamp-'));
+  return new Map(heads.map(([sha, ref]) => [ref.slice('refs/heads/'.length), sha]));
+}
+
+/** Whether a version file changed nothing but its version between two commits. */
+async function onlyVersionChanged(ctx: Ctx, repo: string, file: string, from: string, to: string): Promise<boolean> {
+  const [before, after] = await Promise.all([showFile(ctx.run, repo, from, file), showFile(ctx.run, repo, to, file)]);
+  const was = before === null ? null : readVersion(file, before);
+  const now = after === null ? null : readVersion(file, after);
+  if (!was || !now) return false;
+  try {
+    return setVersion(file, before!, was, now) === after;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Why a commit on origin (fetched into the clone) isn't a stamp of the Steward's own of main's commit `of` (its sha, or
+ * the seven a stamp branch's name gives), or null when it is: one parent, that commit; a stamp's title; and nothing
+ * changed but CHANGELOG.md and the changes files, and the version line of each version file (package-lock.json's beside
+ * them); in the Steward's own repository the kit's too (kit/VERSION, its changelog, kit/changes/, kit.json's pin).
+ */
+async function notOwnStamp(ctx: Ctx, e: Employee, commit: string, of: string): Promise<string | null> {
+  const repo = checkoutOf(e);
+  const said = await gitMaybe(ctx.run, repo, 'log', '-1', '--format=%P%x1f%s', commit);
+  if (said === null) return `${commit.slice(0, 7)} couldn't be read`;
+  const [line, subject = ''] = said.trim().split('\x1f');
+  const parents = line.split(' ').filter(Boolean);
+  if (parents.length !== 1) return `${commit.slice(0, 7)} has ${parents.length} parents`;
+  const [parent] = parents;
+  if (!parent.startsWith(of)) return `${commit.slice(0, 7)} comes after ${parent.slice(0, 7)}, not ${of.slice(0, 7)}`;
+  if (!STAMP_TITLE(e.name).test(subject)) return `${commit.slice(0, 7)} is "${subject}", not a stamp's title`;
+  const files = (await gitMaybe(ctx.run, repo, 'diff', '--name-only', '--no-renames', parent, commit))?.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!files) return `what ${commit.slice(0, 7)} changes couldn't be read`;
+  const versioned = [...e.versionFiles, ...lockBeside(e.versionFiles)].map((f) => f.replace(/\\/g, '/'));
+  const kit = files.includes(KIT_VERSION_FILE);
+  const more: string[] = [];
+  for (const f of files) {
+    if (f === CHANGELOG || f.startsWith(`${CHANGES_DIR}/`)) continue;
+    if (kit && (f === KIT_VERSION_FILE || f === KIT_CHANGELOG || f === 'kit.json' || f.startsWith(`${KIT_CHANGES_DIR}/`))) continue;
+    if (versioned.includes(f) && (await onlyVersionChanged(ctx, repo, f, parent, commit))) continue;
+    more.push(f);
+  }
+  return more.length ? `${commit.slice(0, 7)} changes ${more.slice(0, 3).join(', ')}${more.length > 3 ? ` and ${more.length - 3} more` : ''}, beyond versions and entries` : null;
+}
+
 type OpenStamp = { number: number; headRefName: string; headRefOid: string; url: string };
 
 /** The stamp PRs of its own still open in an employee's repository (steward/stamp-…): none on plain git. Never throws. */
@@ -262,6 +324,26 @@ export async function stampMain(ctx: Ctx, e: Employee, o: { released: string[]; 
     const closed = await hostFor(ctx, e).closePr(e.repo, p.number, { comment: `${e.branch} has moved on to ${sha}: the Steward stamps it again from there.`, deleteBranch: true }).catch((err: Error) => ({ code: 1, out: '', err: err.message }));
     ctx.log(`[${e.id}] ${closed.code === 0 ? `closed its stamp #${p.number}, which ${e.branch} has moved past` : `couldn't close its stamp #${p.number}: ${(closed.err || closed.out).trim().split('\n').pop()}`}`);
   }
+  // Stamp branches with no PR: a build cut short between its push and its PR (on 2026-10-28 an update of the Steward,
+  // pressed in Manor, stopped it there for Reeve, and every build after was refused the push). One of its own of this very
+  // head is replaced below, pushed only over the commit seen here; one of a head main has moved past is deleted, as a
+  // closed stamp's branch is. Anything else on them is left as it is.
+  const onOrigin = await stampBranchesOn(ctx, repo);
+  const leftover = [...(onOrigin ?? [])].filter(([b]) => !own.some((p) => p.headRefName === b));
+  if (leftover.length) await gitMaybe(run, repo, 'fetch', '--quiet', '--no-tags', 'origin', ...leftover.map(([b]) => `refs/heads/${b}`));
+  for (const [b, at] of leftover) {
+    if (b === branch) continue;
+    const why = await notOwnStamp(ctx, e, at, b.slice('steward/stamp-'.length));
+    if (why) {
+      ctx.log(`[${e.id}] left ${b} on origin as it is, with no PR: ${why}`);
+      continue;
+    }
+    const gone = await run('git', ['push', '--quiet', `--force-with-lease=refs/heads/${b}:${at}`, 'origin', `:refs/heads/${b}`], { cwd: repo, timeoutMs: 5 * 60_000 });
+    ctx.log(`[${e.id}] ${gone.code === 0 ? `deleted ${b}, a stamp of its own with no PR, which ${e.branch} has moved past` : `couldn't delete ${b}: ${(gone.err || gone.out).trim().split('\n').pop()}`}`);
+  }
+  const lease = leftover.find(([b]) => b === branch)?.[1] ?? null;
+  const notOwn = lease ? await notOwnStamp(ctx, e, lease, head) : null;
+  if (notOwn) return { done: false, note: `its stamp of ${sha} wasn't pushed: ${branch} is on origin already, with no PR, and isn't a stamp of the Steward's own (${notOwn}), so it is left as it is (never forced): look at it, and delete it once it can go` };
   const dir = stampDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
   await freshWorktree(run, ctx.settings, repo, dir, head, '--detach');
@@ -270,16 +352,19 @@ export async function stampMain(ctx: Ctx, e: Employee, o: { released: string[]; 
     if (!s) return null;
     if ('error' in s) return { done: false, note: `its entries on ${e.branch} at ${sha} weren't stamped: ${s.error}` };
     await git(run, dir, 'add', '-A', '--', ...new Set(s.changed));
-    const title = `${e.name} ${s.version}: version and changelog, stamped by the Steward`;
+    const title = stampTitle(e.name, s.version);
     await git(run, dir, 'commit', '--quiet', '-m', title);
     // Another PC's turn here now (lease.ts): it stamps this.
     if (ctx.lease && !(await ctx.lease.ok(e))) return { done: false, skipped: true, note: `another PC publishes ${e.name} now, so its entries weren't stamped here` };
-    const pushed = await run('git', ['push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`], { cwd: dir, timeoutMs: 5 * 60_000 });
+    // Over a stamp of its own of this head left with no PR, only while origin still has it at the commit seen above.
+    const pushed = await run('git', ['push', '--quiet', ...(lease ? [`--force-with-lease=refs/heads/${branch}:${lease}`] : []), 'origin', `HEAD:refs/heads/${branch}`], { cwd: dir, timeoutMs: 5 * 60_000 });
     if (pushed.code !== 0) {
       // git's own line saying why (rejected, error, fatal), not the hints after it.
       const lines = (pushed.err || pushed.out).trim().split('\n');
-      return { done: false, note: `its stamp of ${sha} couldn't be pushed to ${branch} (never forced): ${(lines.find((l) => /rejected|error|fatal/i.test(l)) ?? lines[0]).trim()}` };
+      return { done: false, note: `its stamp of ${sha} couldn't be pushed to ${branch} (${lease ? `forced only over its own earlier stamp, ${lease.slice(0, 7)}` : 'never forced'}): ${(lines.find((l) => /rejected|error|fatal/i.test(l)) ?? lines[0]).trim()}` };
     }
+    const replaced = lease ? ` in place of the one an earlier build pushed and opened no PR for (${lease.slice(0, 7)})` : '';
+    if (lease) ctx.log(`[${e.id}] replaced ${branch} (${lease.slice(0, 7)}), its own stamp of ${sha} that an earlier build pushed and opened no PR for`);
     const stamped = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
     // Only versions and entries changed since main's head: what covered it covers the stamp too.
     const by = await coveredBy(ctx, e, head);
@@ -291,7 +376,7 @@ export async function stampMain(ctx: Ctx, e: Employee, o: { released: string[]; 
     const url = must(await hostFor(ctx, e).createPr(e.repo, { base: e.branch, head: branch, title, body })).trim().split('\n').pop() ?? '';
     const n = prNumberOf(url);
     const why = n ? await mergeOwn(ctx, e, { number: n, head: stamped }) : `no PR number in ${url}`;
-    const note = `stamped ${s.did.join('; ')}${why ? `, but its PR is open still (${why}): the next build merges it, and then releases it` : ', and merged it'}`;
+    const note = `stamped ${s.did.join('; ')}${replaced}${why ? `, but its PR is open still (${why}): the next build merges it, and then releases it` : ', and merged it'}`;
     ctx.log(`[${e.id}] ${note}`);
     return { done: !why, note, version: s.version, url };
   } finally {

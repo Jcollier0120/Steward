@@ -114,12 +114,13 @@ test('stampTree: nothing to stamp is null and touches nothing; an empty entry, o
 
 /**
  * A repository on changes/: main at 0.4.0 (released), `entries` merged into it unstamped beside a feature. GitHub stands
- * in: statuses kept by commit (a team member's vouch on main's head when `vouched`), PRs opened as #41, #42…, listed
+ * in: statuses kept by commit (a team member's vouch on main's head when `vouched`), PRs opened as #41, #42… (none while
+ * `createFails` says why, as when the build is stopped between its push and its PR), listed
  * while open, merged by moving main to their head and deleting their branch (unless `refuse` says why not; it may be
  * changed between builds), and closed by deleting their branch. A release it is asked to make is kept, with its commit
  * and its notes.
  */
-function onMain(name: string, entries: Record<string, string>, o: { vouched?: boolean; refuse?: string } = {}) {
+function onMain(name: string, entries: Record<string, string>, o: { vouched?: boolean; refuse?: string; createFails?: string } = {}) {
   const dir = path.join(tmp, name);
   const f = fakeEmployee(dir, { version: '0.4.0', files: { [CHANGES_README]: changesReadme('Fake'), 'CHANGELOG.md': CHANGELOG(['0.4.0', 'First.']) } });
   for (const [file, text] of Object.entries({ 'src/feature.ts': 'export const feature = 1;\n', ...entries })) {
@@ -151,6 +152,7 @@ function onMain(name: string, entries: Record<string, string>, o: { vouched?: bo
       return ok(`https://github.com/${REPO}/releases/tag/${a[2]}\n`);
     }
     if (a[0] === 'pr' && a[1] === 'create') {
+      if (o.createFails) return { code: 1, out: '', err: o.createFails };
       const branch = a[a.indexOf('--head') + 1];
       opened.push({ main: sh(f.origin, 'rev-parse', 'refs/heads/main'), branch: sh(f.origin, 'rev-parse', `refs/heads/${branch}`) });
       const number = 41 + prs.length;
@@ -280,6 +282,102 @@ test("a stamp an earlier build left open is merged by the next while main hasn't
   assert.ok(q.r.gh.find((a) => a[1] === 'close')!.includes(`main has moved on to ${moved.slice(0, 7)}: the Steward stamps it again from there.`));
   assert.equal(sh(q.origin, 'rev-parse', 'refs/heads/main^'), moved, "main's new head, stamped");
   assert.equal(q.stampRefs(), '', 'both stamp branches gone');
+});
+
+test("a stamp of its own an earlier build pushed and opened no PR for is replaced, pushed only over the commit seen, and its PR opened and merged", async () => {
+  // Reeve, 2026-10-28: an update of the Steward, pressed in Manor, stopped a build between its stamp's push and its PR,
+  // and every build after was refused the push (non-fast-forward) while main stayed where it was.
+  const p = onMain('stamp-leftover-own', { [fragmentFor('claude/feature')]: ENTRY('A feature.') }, { createFails: 'the build stopped here' });
+  const sha = p.head.slice(0, 7);
+  await assert.rejects(stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] }), /the build stopped here/);
+  const left = sh(p.origin, 'rev-parse', `refs/heads/steward/stamp-${sha}`);
+  assert.equal(p.main(), p.head, 'no PR, main as it was');
+
+  // v0.4.1 released from main meanwhile, as Reeve's v0.19.2 was: the stamp takes v0.4.2 now, and replaces the one left.
+  delete p.o.createFails;
+  const s = await stampMain(p.ctx, p.e, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.deepEqual(s, { done: true, note: `stamped v0.4.2 in place of the one an earlier build pushed and opened no PR for (${left.slice(0, 7)}), and merged it`, version: '0.4.2', url: PR_URL }, p.ctx.lines.join('\n'));
+  assert.ok(p.ctx.lines.includes(`[fake] replaced steward/stamp-${sha} (${left.slice(0, 7)}), its own stamp of ${sha} that an earlier build pushed and opened no PR for`), p.ctx.lines.join('\n'));
+  const stamp = p.main();
+  assert.notEqual(stamp, left);
+  assert.equal(sh(p.origin, 'rev-parse', `${stamp}^`), p.head);
+  assert.equal(JSON.parse(p.at(stamp, 'package.json')).version, '0.4.2');
+  assert.deepEqual(p.r.gh.filter((a) => a[1] === 'merge').map((a) => a[a.indexOf('--match-head-commit') + 1]), [stamp]);
+  assert.equal(p.stampRefs(), '');
+});
+
+test('anything else on a stamp branch with no PR is left as it is, never forced, and the stamp fails saying what is there', async () => {
+  const p = onMain('stamp-leftover-other', { [fragmentFor('claude/feature')]: ENTRY('A feature.') });
+  const sha = p.head.slice(0, 7);
+  // A commit on main's head, titled as a stamp is, that changes code too.
+  writeFileSync(path.join(p.checkout, 'src/feature.ts'), 'export const feature = 2;\n');
+  sh(p.checkout, 'commit', '--quiet', '-am', 'Fake 0.4.1: version and changelog, stamped by the Steward');
+  const theirs = sh(p.checkout, 'rev-parse', 'HEAD');
+  sh(p.checkout, 'push', '--quiet', 'origin', `HEAD:refs/heads/steward/stamp-${sha}`);
+  const s = await stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] });
+  assert.deepEqual(s, {
+    done: false,
+    note: `its stamp of ${sha} wasn't pushed: steward/stamp-${sha} is on origin already, with no PR, and isn't a stamp of the Steward's own (${theirs.slice(0, 7)} changes src/feature.ts, beyond versions and entries), so it is left as it is (never forced): look at it, and delete it once it can go`,
+  });
+  assert.equal(sh(p.origin, 'rev-parse', `refs/heads/steward/stamp-${sha}`), theirs, 'left where it was');
+  assert.equal(p.main(), p.head);
+  assert.ok(!p.r.gh.some((a) => a[1] === 'create'));
+  assert.equal(existsSync(stampDirOf(p.ctx.settings, p.e)), false, 'no worktree made for it');
+
+  // A version file changed beyond its version isn't a stamp's either.
+  sh(p.checkout, 'reset', '--quiet', '--hard', p.head);
+  writeFileSync(path.join(p.checkout, 'package.json'), `${p.at(p.head, 'package.json').replace('"version": "0.4.0"', '"version": "0.4.1",\n  "private": true')}`);
+  sh(p.checkout, 'commit', '--quiet', '-am', 'Fake 0.4.1: version and changelog, stamped by the Steward');
+  sh(p.checkout, 'push', '--quiet', '--force', 'origin', `HEAD:refs/heads/steward/stamp-${sha}`);
+  assert.match((await stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] }))?.note ?? '', /changes package\.json, beyond versions and entries/);
+});
+
+test("stamp branches with no PR that main has moved past are deleted when they are the Steward's own, and left when they aren't", async () => {
+  const p = onMain('stamp-leftover-moved', { [fragmentFor('claude/feature')]: ENTRY('A feature.') }, { createFails: 'the build stopped here' });
+  const old = p.head.slice(0, 7);
+  await assert.rejects(stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] }));
+  // Another's branch, named as a stamp's.
+  sh(p.checkout, 'push', '--quiet', 'origin', `${p.head}:refs/heads/steward/stamp-0000000`);
+  // Main moves on, with another entry.
+  writeFileSync(path.join(p.checkout, 'src/more.ts'), 'export const more = 1;\n');
+  writeFileSync(path.join(p.checkout, fragmentFor('claude/more')), ENTRY('More.'));
+  sh(p.checkout, 'add', '-A');
+  sh(p.checkout, 'commit', '--quiet', '-m', 'More');
+  sh(p.checkout, 'push', '--quiet', 'origin', 'main');
+  delete p.o.createFails;
+  const s = await stampMain(p.ctx, p.e, { released: ['0.4.0'], taken: [] });
+  assert.equal(s?.done, true, s?.note);
+  assert.ok(p.ctx.lines.includes(`[fake] deleted steward/stamp-${old}, a stamp of its own with no PR, which main has moved past`), p.ctx.lines.join('\n'));
+  assert.ok(p.ctx.lines.includes(`[fake] left steward/stamp-0000000 on origin as it is, with no PR: ${old} comes after ${sh(p.origin, 'rev-parse', `${p.head}^`).slice(0, 7)}, not 0000000`), p.ctx.lines.join('\n'));
+  assert.equal(p.stampRefs(), 'refs/heads/steward/stamp-0000000');
+});
+
+test('a release waits while its commit carries entries not stamped yet (its stamp failed): released then, its notes would leave them out', async () => {
+  // Reeve v0.19.2, 2026-10-28: its stamp couldn't be pushed, and the build released main as it was, the change its
+  // entry named in the code and not in the notes.
+  const p = onMain('release-waits-for-stamp', { [fragmentFor('claude/feature')]: ENTRY('A feature.') }, { vouched: true });
+  const e = { ...p.e, release: TAG_RELEASE };
+  assert.equal((await stampMain(p.ctx, e, { released: ['0.4.0'], taken: [] }))?.version, '0.4.1', p.ctx.lines.join('\n'));
+  sh(p.checkout, 'fetch', '--quiet', 'origin');
+  sh(p.checkout, 'reset', '--quiet', '--hard', 'origin/main');
+  writeFileSync(path.join(p.checkout, 'src/fix.ts'), 'export const fix = 1;\n');
+  writeFileSync(path.join(p.checkout, fragmentFor('claude/fix')), ENTRY('A fix.'));
+  sh(p.checkout, 'add', '-A');
+  sh(p.checkout, 'commit', '--quiet', '-m', 'A fix');
+  sh(p.checkout, 'push', '--quiet', 'origin', 'main');
+  const before = p.main();
+  p.statuses.set(before, [byTeam]);
+
+  const [held] = await releaseUnreleased(p.ctx, [e]);
+  assert.deepEqual([held.outcome, held.message, held.commit], ['skipped', 'v0.4.1 waits for changes/claude-fix.md on origin/main to be stamped into its changelog: released now, its notes would leave that change out', before.slice(0, 7)], p.ctx.lines.join('\n'));
+  assert.equal(p.releases.length, 0, 'nothing released');
+
+  // Stamped at the next round, it is released, its notes with both changes.
+  assert.equal((await stampAll(p.ctx, [e])).merged.length, 1, p.ctx.lines.join('\n'));
+  const [released] = await releaseUnreleased(p.ctx, [e]);
+  assert.equal(released.outcome, 'done', `${released.message}\n${p.ctx.lines.join('\n')}`);
+  assert.deepEqual(p.releases.map((r) => [r.tag, r.target]), [['v0.4.1', p.main()]]);
+  assert.match(p.releases[0].notes ?? '', /\*\*Brings 2 changes: A feature; A fix\.\*\*/);
 });
 
 test("over plain git, main's entries aren't stamped: no PR to stamp through, nothing pushed, and gh never run", async () => {
