@@ -101,6 +101,17 @@ button.ui-choice:hover:not(:disabled) { background: var(--hover); filter: none; 
 .ui-busy-area { border: 0; margin: 0; padding: 0; min-width: 0; }
 /* In the Settings form, over settings-panel.css's boxed .sf-panel fieldset: the panel's own background, and no second box in it. */
 .sf-panel .ui-busy-area { background: inherit; border: 0; margin: 0; padding: 0; }
+/* The page waiting on an action (PageArea, page-busy.ts): no box of its own, the busy cursor over it, and its controls
+   dimmed only once the wait is longer than a blink, so a quick action doesn't flash the page. */
+.ui-page-area { display: contents; }
+.ui-page-area[aria-busy="true"], .ui-page-area[aria-busy="true"] * { cursor: progress; }
+.ui-page-area[aria-busy="true"] :disabled { transition: opacity .15s ease .3s, color .15s ease .3s; }
+/* A button pressed for a post() that draws no spinner of its own (a page's own <button>): the spinner, before its words,
+   in its icon's place, as the kit's Button draws it. */
+button[data-ui-busy]:not(:has(> .ui-spinner))::before { content: ""; display: inline-block; flex: none; box-sizing: border-box; width: 14px; height: 14px; margin-right: 6px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ui-spin .8s linear infinite; vertical-align: -2px; }
+button[data-ui-busy]:is(:has(> .ui-icon), .icon-btn)::before { margin-right: 0; }
+button[data-ui-busy]:not(:has(> .ui-spinner)) > :is(svg, .ui-icon) { display: none; }
+@media (prefers-reduced-motion: reduce) { button[data-ui-busy]::before { animation-duration: 2.4s; } }
 /* The Settings form (settings-form.tsx): sections, jump links and Advanced, beside settings-panel.css's own. */
 .sf-jump { position: sticky; top: var(--titlebar-h, 0); z-index: 5; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 0; margin-bottom: 4px; background: var(--card); border-bottom: 1px solid var(--line); }
 .sf-panel .sf-jump button.link { text-decoration: none; font-weight: 600; }

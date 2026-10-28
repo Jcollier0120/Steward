@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { openDialog } from './page-busy.ts';
 import { SHOW_TAB } from './tabs.tsx';
 import { ago } from './time.ts';
 import { Badge, Button } from './ui.tsx';
@@ -384,6 +385,8 @@ export function Output({ text, label }: { text: string; label?: string }) {
  * or a click outside it closes it. `meta` are lines under its title (where the file is, when it ran).
  */
 export function SidePanel({ title, meta = [], onClose, children }: { title: ReactNode; meta?: ReactNode[]; onClose: () => void; children: ReactNode }) {
+  // A dialog: one opened while the page waits on an action is usable (page-busy.ts).
+  useEffect(() => openDialog(), []);
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', k);

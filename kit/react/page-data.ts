@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { holdForPress } from './page-busy.ts';
 
 /**
  * A React page's data: what the server put in the page (#page-data), then /api/page's answer each time the page looks
@@ -147,24 +148,33 @@ const refused = (r: Response, json: Answer) => r.status === 403 && json.error ==
  * Refused for its token (kit 2.143.3): the page's server started again since the page opened (an update, say), with a
  * new token. The page reads the new one (freshToken) and sends the same POST once more, never again; where it can't,
  * it says it is out of date, and offers a Reload (useOutOfDate). It never reloads by itself: a form may hold changes.
+ *
+ * Sent for a press (kit 2.144.0), the page waits while it runs, the new token's retry and all, and the button pressed
+ * spins (page-busy.ts' holdForPress): a page's own button that awaits post() needs nothing more. Sent for no press (as
+ * someone types, say), the page goes on.
  */
 export async function post(path: string, body?: unknown): Promise<{ ok: boolean; json: Answer }> {
-  const send = async (token: string) => {
-    const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': token }, body: JSON.stringify(body ?? {}) });
-    return { r, json: (await r.json().catch(() => ({}))) as Answer };
-  };
-  const sent = pageToken();
-  let { r, json } = await send(sent);
-  if (refused(r, json)) {
-    const token = await freshToken();
-    if (token && token !== sent) ({ r, json } = await send(token));
+  const done = holdForPress();
+  try {
+    const send = async (token: string) => {
+      const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': token }, body: JSON.stringify(body ?? {}) });
+      return { r, json: (await r.json().catch(() => ({}))) as Answer };
+    };
+    const sent = pageToken();
+    let { r, json } = await send(sent);
     if (refused(r, json)) {
-      json = { ...json, error: await outOfDateWords() };
-      outOfDate = json.error!;
-      for (const changed of outOfDateSeen) changed();
+      const token = await freshToken();
+      if (token && token !== sent) ({ r, json } = await send(token));
+      if (refused(r, json)) {
+        json = { ...json, error: await outOfDateWords() };
+        outOfDate = json.error!;
+        for (const changed of outOfDateSeen) changed();
+      }
     }
+    return { ok: r.ok, json: r.ok ? json : { ...json, error: json.error ?? r.statusText } };
+  } finally {
+    done();
   }
-  return { ok: r.ok, json: r.ok ? json : { ...json, error: json.error ?? r.statusText } };
 }
 
 /**
