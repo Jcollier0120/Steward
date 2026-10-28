@@ -73,6 +73,10 @@ export type AcceleratorRules = {
      */
     gamesFreshMs: number;
     /**
+     * npu-call.json not written again for this long is a call that ended without saying so.
+     */
+    callFreshMs: number;
+    /**
      * A background request doesn't join a line with this many already waiting.
      */
     maxAhead: number;
@@ -145,6 +149,10 @@ export type KeeperRules = {
      * A card nobody has used this long has its servers stopped as soon as a game is using it.
      */
     gameGraceMs: number;
+    /**
+     * The NPU nobody has used this long has its servers stopped while a call that doesn't need them is on.
+     */
+    callGraceMs: number;
     /**
      * A server that hasn't answered this long, while nobody uses its accelerator, is restarted.
      */

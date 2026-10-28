@@ -29,6 +29,7 @@
  * @property {number} reasonMaxChars A failure marker's reason is one line, at most this long.
  * @property {number} gamePercent A card is in use by a game while another program keeps a 3D engine over this.
  * @property {number} gamesFreshMs games.json is checked again when it's older than this.
+ * @property {number} callFreshMs npu-call.json not written again for this long is a call that ended without saying so.
  * @property {number} maxAhead A background request doesn't join a line with this many already waiting.
  * @property {number} maxSlots The most slots an accelerator other than the NPU may have.
  * @property {number} ownMemoryGb A graphics card with this much memory of its own comes first in auto order.
@@ -56,6 +57,7 @@
  * @property {number} npuIdleStopMinutes config.json's npuIdleStopMinutes when it gives none: the NPU unused this long, its servers stop.
  * @property {number} gpuIdleStopMinutes config.json's gpuIdleStopMinutes when it gives none: a graphics card (or the processor) unused this long, its servers stop.
  * @property {number} gameGraceMs A card nobody has used this long has its servers stopped as soon as a game is using it.
+ * @property {number} callGraceMs The NPU nobody has used this long has its servers stopped while a call that doesn't need them is on.
  * @property {number} unansweredMs A server that hasn't answered this long, while nobody uses its accelerator, is restarted.
  * @property {number} recycleBytes GenieX's working set at which it is restarted while nobody uses the NPU: memory kept from earlier loads.
  * @property {number} turnWaitMs How long the keeper's turn waits for its first slot.
@@ -110,9 +112,9 @@
 const SHAPE = {
   queue: ['heartbeatMs', 'lateMs', 'deadMs', 'ageMs', 'headPollMs', 'pollMs'],
   lock: ['waitMs', 'staleMs', 'ownerGraceMs', 'pollMs', 'takeTries', 'removeTries', 'removeRetryMs'],
-  accelerators: ['failedForMs', 'reasonMaxChars', 'gamePercent', 'gamesFreshMs', 'maxAhead', 'maxSlots', 'ownMemoryGb', 'defaultMaxContextTokens', 'defaultRequestTimeoutMs', 'startWaitMs', 'probeMs', 'readyWaitMs', 'requestBaseMs', 'requestPerTokenMs', 'coldLoadMs'],
+  accelerators: ['failedForMs', 'reasonMaxChars', 'gamePercent', 'gamesFreshMs', 'callFreshMs', 'maxAhead', 'maxSlots', 'ownMemoryGb', 'defaultMaxContextTokens', 'defaultRequestTimeoutMs', 'startWaitMs', 'probeMs', 'readyWaitMs', 'requestBaseMs', 'requestPerTokenMs', 'coldLoadMs'],
   manners: ['maxWaitMs', 'backOffMs'],
-  keeper: ['lookEveryMs', 'npuIdleStopMinutes', 'gpuIdleStopMinutes', 'gameGraceMs', 'unansweredMs', 'recycleBytes', 'turnWaitMs', 'turnMaxAhead', 'otherSlotsWaitMs', 'orphanGraceMs'],
+  keeper: ['lookEveryMs', 'npuIdleStopMinutes', 'gpuIdleStopMinutes', 'gameGraceMs', 'callGraceMs', 'unansweredMs', 'recycleBytes', 'turnWaitMs', 'turnMaxAhead', 'otherSlotsWaitMs', 'orphanGraceMs'],
   tokens: ['charsPerToken', 'messageChars', 'quirkRoomChars', 'imageTokens', 'minPieceChars'],
   speed: ['keptPerBoot', 'keptBoots', 'samplesNeeded', 'slowPercent', 'bootSlackMs'],
   npuPace: ['roomFreshMs', 'lookWaitMs', 'stretchMs', 'otherUsePercent'],

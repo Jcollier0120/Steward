@@ -99,6 +99,8 @@ export const say = Object.freeze({
   skippedFailed: (acc, reason, min) => `${theAccelerator(acc)} failed (${reason}); it is tried again in ${min} min`,
   /** @param {AcceleratorRef} acc @param {string[]} by */
   skippedGame: (acc, by) => `${theAccelerator(acc)} is in use by ${by.join(', ') || 'a game'}`,
+  /** @param {AcceleratorRef} acc @param {string} by The agent captioning the call ("envoy"). */
+  skippedCall: (acc, by) => `${by.charAt(0).toUpperCase()}${by.slice(1)} is captioning a call on ${theAccelerator(acc)}`,
   /** @param {AcceleratorRef} acc @param {number} min */
   skippedDeferred: (acc, min) => `work on ${theAccelerator(acc)} resumes in ${min} min`,
   /** @param {AcceleratorRef} acc @param {number} waiting */

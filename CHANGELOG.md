@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.251
+
+**It hands out the kit 2.143.1: while Envoy captions a call on the NPU, the staff's background model work waits for the call to end, and when the call isn't translated, the NPU's chat model is stopped after two minutes unused, so the call's captions have the NPU to themselves.**
+
+### What's new
+
+- **The NPU goes to calls first.** While Envoy captions a call on the NPU, the staff's background model work waits for the call to end. It isn't moved to the graphics card or the processor. A request you're waiting on still has the NPU, and so do Envoy's own translations.
+- **The NPU's chat model stops in a call that isn't translated**, once nobody has used it for two minutes. Its memory goes back to the call. If the call is being translated, the model stays loaded, so translations don't wait for it to load.
+
+### Before you update
+
+- Nothing: it updates itself as usual. It takes effect once Envoy's next update, which announces its calls, is installed.
+
 ## 0.36.250
 
 **It hands out the kit 2.143.0: each staff member's About page opens with What's new, the notes of the versions its latest updates brought, newest first.**

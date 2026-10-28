@@ -139,6 +139,29 @@ export type Games = {
     checkedAt: string;
     cards: Record<string, CardUse>;
 };
+export type NpuCall = {
+    /**
+     * The agent captioning it ("envoy").
+     */
+    by: string;
+    /**
+     * Its process.
+     */
+    pid: number;
+    /**
+     * When the call began.
+     */
+    since: string;
+    /**
+     * When the file was last written.
+     */
+    at: string;
+    /**
+     * Whether it asks the NPU's chat model during the call (Envoy's translations). While it
+     * doesn't, the keeper stops the NPU's servers once nobody has used them for callGraceMs.
+     */
+    translating: boolean;
+};
 export type GpuLoad = {
     adapters: DxgiAdapter[];
     counters: string;
@@ -152,7 +175,7 @@ export type Need = {
 };
 export type Skipped = {
     acc: Accelerator;
-    why: 'failed' | 'game' | 'deferred';
+    why: 'failed' | 'game' | 'call' | 'deferred';
     detail: string;
 };
 export type Look = {
@@ -250,6 +273,16 @@ export type Look = {
  * @property {Record<string, CardUse>} cards
  */
 /**
+ * @typedef {object} NpuCall npu-call.json: a call being captioned on the NPU (Envoy's), which the staff's background
+ *   work leaves the NPU to while it lasts (kit 2.143.1). Written again every 20 s while the call lasts, removed when it ends.
+ * @property {string} by The agent captioning it ("envoy").
+ * @property {number} pid Its process.
+ * @property {string} since When the call began.
+ * @property {string} at When the file was last written.
+ * @property {boolean} translating Whether it asks the NPU's chat model during the call (Envoy's translations). While it
+ *   doesn't, the keeper stops the NPU's servers once nobody has used them for callGraceMs.
+ */
+/**
  * @typedef {object} GpuLoad What gpu-load.ps1 prints: the adapters, the counters' lines, the processes by pid, and the compositor's pid.
  * @property {DxgiAdapter[]} adapters
  * @property {string} counters
@@ -265,7 +298,7 @@ export type Look = {
 /**
  * @typedef {object} Skipped
  * @property {Accelerator} acc
- * @property {'failed' | 'game' | 'deferred'} why
+ * @property {'failed' | 'game' | 'call' | 'deferred'} why
  * @property {string} detail
  */
 /**
@@ -624,6 +657,21 @@ export declare function gamesOf(text: string | null): Games | null;
  */
 export declare function gamesStale(rules: Rules, g: Games | null, nowMs: number): boolean;
 /**
+ * npu-call.json's contents, or null when it's absent or unreadable (which count the same: no call).
+ * @param {string | null} text
+ * @returns {NpuCall | null}
+ */
+export declare function callOf(text: string | null): NpuCall | null;
+/**
+ * The call on the NPU now, or null: npu-call.json written within callFreshMs. Older (its agent stopped without
+ * removing it), or from a clock that far ahead, it's over.
+ * @param {Rules} rules
+ * @param {NpuCall | null} call
+ * @param {number} nowMs
+ * @returns {NpuCall | null}
+ */
+export declare function callNow(rules: Rules, call: NpuCall | null, nowMs: number): NpuCall | null;
+/**
  * What doesn't count as a game: the desktop's compositor, and the manor's own model servers (their
  * startCommands', and the usual ones).
  * @param {Accelerator[]} accs
@@ -648,8 +696,10 @@ export declare function gameCards(rules: Rules, load: GpuLoad, accs: Accelerator
 /**
  * The candidates for a request, in order: they serve its kind, its size fits their cap, they haven't
  * failed in the last failedForMs (unless every one that would do has: then they all may, as a last
- * resort), a game isn't using them (background work only), and the agent isn't leaving them alone after
- * a line that was too long (`deferredMs`).
+ * resort), a game isn't using them (background work only), the NPU isn't captioning a call (`call`, callNow's:
+ * background work only, kit 2.143.1), and the agent isn't leaving them alone after a line that was too long
+ * (`deferredMs`). Skipped for a call, the NPU first leaves background work no candidate: it waits for the call's end
+ * (whyNone's busy), and goes to no graphics card or processor meanwhile (the owner's ruling, 2026-10-27).
  *
  * **The NPU first:** when the first that would do, in order, is the NPU and it hasn't failed, it is the only
  * candidate (`npuFirst`). The NPU does model work without the processor or a graphics card, so they take it
@@ -670,12 +720,13 @@ export declare function gameCards(rules: Rules, load: GpuLoad, accs: Accelerator
  * @param {Rules} rules
  * @param {Accelerator[]} accs
  * @param {Need} need
- * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, deferredMs?: Record<string, number>, nowMs?: number, workOrder?: WorkOrder | null, running?: Record<string, boolean>, waiting?: number }} [state]
+ * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, call?: NpuCall | null, deferredMs?: Record<string, number>, nowMs?: number, workOrder?: WorkOrder | null, running?: Record<string, boolean>, waiting?: number }} [state]
  * @returns {{ list: Accelerator[], skipped: Skipped[], npuFirst: boolean }}
  */
 export declare function candidates(rules: Rules, accs: Accelerator[], need: Need, state?: {
     failures?: Record<string, Failure | null>;
     games?: Games | null;
+    call?: NpuCall | null;
     deferredMs?: Record<string, number>;
     nowMs?: number;
     workOrder?: WorkOrder | null;

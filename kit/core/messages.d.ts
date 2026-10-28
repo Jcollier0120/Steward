@@ -78,6 +78,8 @@ export declare const say: Readonly<{
     skippedFailed: (acc: AcceleratorRef, reason: string, min: number) => string;
     /** @param {AcceleratorRef} acc @param {string[]} by */
     skippedGame: (acc: AcceleratorRef, by: string[]) => string;
+    /** @param {AcceleratorRef} acc @param {string} by The agent captioning the call ("envoy"). */
+    skippedCall: (acc: AcceleratorRef, by: string) => string;
     /** @param {AcceleratorRef} acc @param {number} min */
     skippedDeferred: (acc: AcceleratorRef, min: number) => string;
     /** @param {AcceleratorRef} acc @param {number} waiting */
