@@ -25,7 +25,7 @@ import { withRepo } from './slots.ts';
 import { linkSharedModules } from './modules.ts';
 import { kitOnlyRelease, noteKitOnlyRelease, type KitOnly } from './kitonly.ts';
 import { rolloutDone, rolloutGoingOn } from './rollout.ts';
-import { stampAll } from './stamp.ts';
+import { stampAll, unstampedAt } from './stamp.ts';
 import { clearPending, dueAgain, exchequerCommand, finishFailed, loadExchequerPending, missedExchequer, notePending } from './exchequer.ts';
 
 /**
@@ -174,6 +174,11 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   const version = (v as { version: string }).version;
   const not = o.unless?.(commit, version);
   if (not) return result(e, 'skipped', not, { version, commit: commit.slice(0, 7) });
+  // Entries in changes/ not stamped into a version yet (stamp.ts): its stamp failed, or waits. Released now, its notes
+  // would leave them out, as Reeve v0.19.2's did on 2026-10-28. It waits for the stamp, which the next round tries again.
+  // Not over plain git, where a person stamps them (the Steward pushes nothing there), nor a hire, which installs the clone.
+  const unstamped = o.hire || hostIs(ctx, e) === 'git' ? [] : await unstampedAt(ctx, repo, commit);
+  if (unstamped.length) return result(e, 'skipped', `v${version} waits for ${unstamped.join(', ')} on ${remote} to be stamped into its changelog: released now, its notes would leave ${unstamped.length === 1 ? 'that change' : 'those changes'} out`, { version, commit: commit.slice(0, 7) });
   // The release before: the versions merged since and never released on their own come in its notes.
   const since = released.filter((r) => compareVersions(r, version) < 0).sort(compareVersions).at(-1) ?? null;
   // A new kit alone (kitonly.ts): it waits, merged, for the agent's next release of its own, unless it changes what the

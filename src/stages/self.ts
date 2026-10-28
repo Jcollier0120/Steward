@@ -12,6 +12,8 @@ import { runLine, tail } from '../run.ts';
 import { exchequerNote, networkFailure, networkNote, passingFailure, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { guardPackages, installPackages } from './modules.ts';
 import { releaseNeedsPackages } from './release.ts';
+import { unstampedAt } from './stamp.ts';
+import { CHANGES_DIR, KIT_CHANGES_DIR } from '../entries.ts';
 import { linkSharedModules } from './modules.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor, must } from '../hosts/index.ts';
@@ -246,6 +248,14 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
         }
         const steward = stewardEmployee(ctx.settings, repo);
         const at = step.commit.slice(0, 7);
+        // Its entries not stamped yet (stamp.ts: the stamp failed, or waits): released now, its notes would leave them
+        // out. It waits for the stamp, as an employee's release does (release.ts); the Steward's version waits with a kit's.
+        if (!(await commitOf(ctx.run, repo, step.commit))) await fetchBranch(ctx.run, repo, STEWARD_BRANCH).catch(() => undefined);
+        const unstamped = await unstampedAt(ctx, repo, step.commit, step.what === 'kit' ? KIT_CHANGES_DIR : CHANGES_DIR);
+        if (unstamped.length) {
+          results.push(selfResult('skipped', `${step.tag} waits for ${unstamped.join(', ')} on ${STEWARD_BRANCH} to be stamped into its changelog: released now, its notes would leave ${unstamped.length === 1 ? 'that change' : 'those changes'} out`, { version: step.version, commit: at }));
+          continue;
+        }
         if (step.what === 'kit') {
           // Tried on every agent first (trial.ts): one still going holds the round's kit, and one failing holds the kit
           // alone (its alarm is the trial's own); the employees' releases go on either way.
