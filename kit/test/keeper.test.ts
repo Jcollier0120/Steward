@@ -290,7 +290,12 @@ test("the NPU refresh's quiet wait counts the NPU's own use and let-go, never an
     };
     const letGo = () => rmSync(lock, { recursive: true });
     const quiet = (now?: number) => Date.now() - lastUseMs(lock, now) >= QUIET;
-    return { lock, workTurn, take, letGo, quiet };
+    /** The line's and the shared folder's times set, in milliseconds. */
+    const times = (o: { queue?: number; locks?: number }) => {
+      if (o.queue !== undefined) utimesSync(queue, o.queue / 1000, o.queue / 1000);
+      if (o.locks !== undefined) utimesSync(locks, o.locks / 1000, o.locks / 1000);
+    };
+    return { lock, workTurn, take, letGo, quiet, times };
   };
 
   // Last used half an hour ago; then the Smith's work turns, a minute apart.
@@ -313,11 +318,25 @@ test("the NPU refresh's quiet wait counts the NPU's own use and let-go, never an
   assert.ok(b.quiet(Date.now() - 1000));
   b.take();
   b.letGo();
-  // Each look a millisecond on, so a time on disk within this millisecond counts as before it.
-  const used = lastUseMs(b.lock, Date.now() + 1);
+  const used = lastUseMs(b.lock);
   assert.ok(Date.now() - used < QUIET, 'used since the last look');
   b.workTurn();
-  assert.equal(lastUseMs(b.lock, Date.now() + 1), used, 'a later work turn adds nothing');
+  assert.equal(lastUseMs(b.lock), used, 'a later work turn adds nothing');
+
+  // The folders' times a little ahead of the clock, as Windows' often are (a millisecond or two ahead of Date.now() read
+  // just after the change): the take is the look's own, never set against the clock, so the work turn after still adds
+  // nothing. Set against the clock, it counted as a let-go (kit 2.143.1's whole suite, once).
+  const c = at('locks-ahead');
+  const t = Date.now() - MIN;
+  assert.ok(c.quiet(t - 1000));
+  c.take();
+  c.letGo();
+  c.times({ queue: t, locks: t + 1 });
+  const ahead = lastUseMs(c.lock, t - 2);
+  assert.ok(Math.abs(ahead - t) < 1, `its take, the look 2 ms behind it: ${ahead - t}`);
+  c.workTurn();
+  c.times({ locks: t + 10 });
+  assert.equal(lastUseMs(c.lock, t + 20), ahead, 'a later work turn adds nothing');
 });
 
 /**

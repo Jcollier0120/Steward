@@ -246,8 +246,8 @@ export interface ReaperOptions {
 
 export class Reaper {
   private lastInUse = new Map<string, number>();
-  /** Each accelerator's last look: when, and whether someone held or waited on it then. */
-  private looked = new Map<string, { atMs: number; held: boolean }>();
+  /** Each accelerator's last look: its own lock folders' time then (0 when held), and whether someone held or waited on it. */
+  private looked = new Map<string, { ownMs: number; held: boolean }>();
   private lastSkip = new Map<string, string>();
   private silentSince = new Map<string, number>();
   private orphanSince = new Map<number, number>();
@@ -288,7 +288,7 @@ export class Reaper {
     }
     if (d.inUse(s)) {
       this.lastInUse.set(s.acc.id, d.now());
-      this.looked.set(s.acc.id, { atMs: d.now(), held: true });
+      this.looked.set(s.acc.id, { ownMs: 0, held: true });
       this.silentSince.delete(s.base);
       return { base: s.base, did: 'in-use' };
     }
@@ -308,7 +308,7 @@ export class Reaper {
       const pids = await this.inTurn(s, false, true);
       if (pids === 'used') {
         this.lastInUse.set(s.acc.id, d.now());
-        this.looked.set(s.acc.id, { atMs: d.now(), held: true });
+        this.looked.set(s.acc.id, { ownMs: 0, held: true });
         return { base: s.base, did: 'in-use' };
       }
       if (!pids) return taken;
@@ -363,17 +363,18 @@ export class Reaper {
   /**
    * When someone last let go of this accelerator, as far as the folder every lock shares tells (`own`: when its lock was
    * last taken): that folder's time, but only when this accelerator was in use since the last look (held or waited on
-   * then, or taken since), so another accelerator's lock never counts. At the reaper's first look, no later than a holder
-   * may keep a slot after taking it (rules.json's lock.staleMs). 0 when it can't tell. Remembered as use.
+   * then, or taken since: `own` moved since, one file time against another, never against the clock, as lastUseMs), so
+   * another accelerator's lock never counts. At the reaper's first look, no later than a holder may keep a slot after
+   * taking it (rules.json's lock.staleMs). 0 when it can't tell. Remembered as use.
    */
   private letGoMs(s: ReapedServer, own: number): number {
     const d = this.deps;
     const now = d.now();
     const was = this.looked.get(s.acc.id);
-    this.looked.set(s.acc.id, { atMs: now, held: false });
+    this.looked.set(s.acc.id, { ownMs: own, held: false });
     if (!d.locksActivityMs) return 0;
     const shared = d.locksActivityMs(s);
-    const ms = was ? (was.held || own > was.atMs ? Math.min(shared, now) : 0) : own > 0 ? Math.min(shared, own + RULES.lock.staleMs) : 0;
+    const ms = was ? (was.held || own > was.ownMs ? Math.min(shared, now) : 0) : own > 0 ? Math.min(shared, own + RULES.lock.staleMs) : 0;
     if (ms > 0) this.lastInUse.set(s.acc.id, Math.max(this.lastInUse.get(s.acc.id) ?? 0, ms));
     return ms;
   }
@@ -709,7 +710,7 @@ export function lastActivityMs(lockDirs: string | string[]): number {
   return Math.max(locksActivityMs(lockDirs), ownActivityMs(lockDirs));
 }
 
-const useLooks = new Map<string, { atMs: number; held: boolean; usedMs: number }>();
+const useLooks = new Map<string, { ownMs: number; held: boolean; usedMs: number }>();
 
 /**
  * When an accelerator was last in use, for a look a process takes again and again (the NPU refresh's quiet wait, at each
@@ -718,6 +719,11 @@ const useLooks = new Map<string, { atMs: number; held: boolean; usedMs: number }
  * this process's last look, and at its first look no later than a holder may keep a slot. Until kit 2.82.3 the wait
  * counted every change to that folder, and the agents' work turns are there too: on a PC with the Smith's rounds a
  * few minutes apart, the NPU was never quiet for 2 minutes, and the patch look waited for hours.
+ *
+ * In use since the last look: held then, or its own folders' time has moved since (one file time against another). It
+ * was once set against the clock at the last look, and on Windows a folder's time is often a millisecond or two ahead of
+ * Date.now() read just after the change: a slot taken just before a look counted as taken after it, and the shared
+ * folder's next change, an agent's work turn say, as its let-go.
  */
 export function lastUseMs(lockDirs: string | string[], now = Date.now()): number {
   const dirs = [lockDirs].flat();
@@ -726,9 +732,9 @@ export function lastUseMs(lockDirs: string | string[], now = Date.now()): number
   const own = ownActivityMs(dirs);
   const was = useLooks.get(dirs[0]);
   const shared = locksActivityMs(dirs);
-  const letGo = was ? (was.held || own > was.atMs ? Math.min(shared, now) : 0) : own > 0 ? Math.min(shared, own + RULES.lock.staleMs) : 0;
+  const letGo = was ? (was.held || own > was.ownMs ? Math.min(shared, now) : 0) : own > 0 ? Math.min(shared, own + RULES.lock.staleMs) : 0;
   const usedMs = Math.max(was?.usedMs ?? 0, own, letGo, held ? now : 0);
-  useLooks.set(dirs[0], { atMs: now, held, usedMs });
+  useLooks.set(dirs[0], { ownMs: own, held, usedMs });
   return usedMs;
 }
 

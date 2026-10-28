@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.253
+
+**It hands out the kit 2.143.2: the staff's waits for a quiet NPU, or an idle model server, no longer take another agent's work for its use.**
+
+### What changed
+
+- **The kit 2.143.2:** before the staff refresh or patch the NPU's servers they wait for the NPU to be quiet, and a model server is stopped once its accelerator is idle. When the disk's and the clock's times disagreed by a millisecond or two, another agent's work right after a look could count as that accelerator's use, and the wait ran longer than it needed to. It no longer does.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.252
 
 **A stamp cut short no longer blocks a repository, and a release waits for its stamp, so its notes never leave a change out.**
