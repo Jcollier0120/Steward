@@ -12,7 +12,7 @@ process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { boardedUrgent, DEFAULT_PIPELINE, endRound, kitRides, kitStep, lastBuildTime, lateLine, loadPipeline, nextBuildTime, normalizePipeline, pipelineMode, pipelineView, savePipeline, urgentKey } = await import('../src/pipeline.ts');
+const { boardedUrgent, BUILD_BUSY_MS, buildUnderWay, DEFAULT_PIPELINE, endRound, kitRides, kitStep, lastBuildTime, lateLine, loadPipeline, nextBuildTime, normalizePipeline, pipelineMode, pipelineView, savePipeline, urgentKey } = await import('../src/pipeline.ts');
 const { addToEntry, composeEntry, CHANGES_README, changesReadme, fragmentBody, fragmentFiles, fragmentFor } = await import('../src/entries.ts');
 const { stampBranch, stampMain } = await import('../src/stages/stamp.ts');
 const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
@@ -243,6 +243,19 @@ test('what Manor reads: always on, the next build, and whether one is under way'
   const plain = pipelineView(DEFAULT_PIPELINE, none, at(8, 5));
   assert.deepEqual([plain.on, plain.next, plain.building], [true, at(12).toISOString(), false]);
   assert.equal(pipelineView({ ...DEFAULT_PIPELINE, days: [] }, none, at(8, 5)).next, null, 'no build time to come');
+});
+
+test('a build is under way from its start until it closes, between its rounds too, and never for good: what the ping says busy for', () => {
+  const open = { due: at(8).toISOString(), by: 'schedule' as const, started: at(8, 1).toISOString(), rounds: 1, merged: [], released: [], failed: [] };
+  assert.equal(buildUnderWay({ open, builds: [] }, at(8, 20).getTime()), open, 'between its rounds');
+  assert.equal(buildUnderWay(none, at(8, 20).getTime()), null);
+  assert.equal(buildUnderWay({ open: { ...open, finished: at(8, 30).toISOString() }, builds: [] }, at(8, 40).getTime()), null, 'closed');
+  // One left open (the Steward taken off duty halfway) holds Manor's updates no longer than BUILD_BUSY_MS.
+  const late = at(8, 1).getTime() + BUILD_BUSY_MS;
+  assert.equal(buildUnderWay({ open, builds: [] }, late - 1), open);
+  assert.equal(buildUnderWay({ open, builds: [] }, late), null);
+  assert.equal(pipelineView(THREE, { open, builds: [] }, new Date(late)).building, false, 'nor does Manor hold for it');
+  assert.equal(buildUnderWay({ open: { ...open, started: 'not a time' }, builds: [] }, at(8, 20).getTime()), null);
 });
 
 const ENTRY = (line: string, before = 'Nothing: it updates itself as usual.') => `**${line}**\n\n### What changed\n\n- ${line}\n\n### Before you update\n\n- ${before}\n`;

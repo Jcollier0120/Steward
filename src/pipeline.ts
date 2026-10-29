@@ -297,7 +297,7 @@ export interface PipelineView {
   kit: BuildPipeline['kit'];
   /** The next build time (ISO), or null when Settings name none to come. */
   next: string | null;
-  /** The build under way: Manor holds its installs until it ends. */
+  /** The build under way (buildUnderWay): Manor holds its installs until it ends. */
   building: boolean;
   open: BuildRun | null;
   last: BuildRun | null;
@@ -305,5 +305,21 @@ export interface PipelineView {
 
 export function pipelineView(p: BuildPipeline, state: PipelineState, now = new Date()): PipelineView {
   const open = state.open && !state.open.finished ? state.open : null;
-  return { on: true, times: p.times, days: p.days, kit: p.kit, next: nextBuildTime(p, now)?.toISOString() ?? null, building: !!open, open, last: state.builds.at(-1) ?? null };
+  return { on: true, times: p.times, days: p.days, kit: p.kit, next: nextBuildTime(p, now)?.toISOString() ?? null, building: !!buildUnderWay(state, now.getTime()), open, last: state.builds.at(-1) ?? null };
+}
+
+/** How long after it began a build counts as under way, at most (buildUnderWay): each has closed within an hour or so. */
+export const BUILD_BUSY_MS = 3 * 3600_000;
+
+/**
+ * The build under way, from its start until it closes, between its rounds too (while its rollout or whole suite runs
+ * beside them): the Steward's ping says busy meanwhile, so Manor installs no update of the Steward's in the middle of it,
+ * even when its look at /api/pipeline gets no answer in time (Steward 0.36.257). Null once it closed, and BUILD_BUSY_MS
+ * after it began: one left open (the Steward taken off duty halfway) never holds Manor's updates for good.
+ */
+export function buildUnderWay(state: PipelineState, now = Date.now()): BuildRun | null {
+  const open = state.open;
+  if (!open || open.finished) return null;
+  const started = Date.parse(open.started);
+  return Number.isFinite(started) && now - started < BUILD_BUSY_MS ? open : null;
 }

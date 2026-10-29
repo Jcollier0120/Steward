@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { appendRotating, pokePage, pruneKits, tellAfterRelease } from '../src/upkeep.ts';
+import { appendRotating, ownToken, pokePage, pruneKits, tellAfterRelease } from '../src/upkeep.ts';
 
 // The Steward's housekeeping: stages.log rotated, kit versions no one pins let go, and pages told of a release.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-upkeep-'));
@@ -71,6 +71,37 @@ test("a page is told as its own button would: the token read from the page, the 
   } finally {
     await older.close();
   }
+});
+
+test("a page whose / carries no token (Manor's since its page sign-in) is told with the token from its server.json here", async () => {
+  const page = await fakePage({ token: false });
+  try {
+    assert.deepEqual(await pokePage(`${page.base}/api/updates/check`, { own: () => 'f'.repeat(48) }), { ok: true, said: 'HTTP 200' });
+    assert.deepEqual(page.posts, [{ path: '/api/updates/check', token: 'f'.repeat(48), origin: undefined }]);
+    assert.deepEqual(await pokePage(`${page.base}/api/updates/check`, { own: () => null }), { ok: false, said: 'its page (HTTP 200) carries no token' }, 'none here: its page, as before');
+  } finally {
+    await page.close();
+  }
+});
+
+test("a page's own token is read from its server.json only for its own address: Manor's by its port, the staff's by name", () => {
+  const home = path.join(tmp, 'home');
+  const write = (dir: string, port: number, token: string) => (mkdirSync(dir, { recursive: true }), writeFileSync(path.join(dir, 'server.json'), JSON.stringify({ port, token })));
+  write(path.join(home, '.manor'), 18585, 'm'.repeat(48));
+  write(path.join(home, '.reeve'), 18590, 'r'.repeat(48));
+  const own = (url: string, env: NodeJS.ProcessEnv = {}) => ownToken(new URL(url), { env, home });
+  assert.equal(own('http://127.0.0.1:18585/api/updates/check'), 'm'.repeat(48));
+  assert.equal(own('http://localhost:18585/api/updates/check'), 'm'.repeat(48));
+  assert.equal(own('http://castellan.localhost:18585/api/updates/check'), 'm'.repeat(48));
+  assert.equal(own('http://reeve.localhost:18590/api/run'), 'r'.repeat(48));
+  assert.equal(own('http://127.0.0.1:18586/api/updates/check'), null, "not Manor's port");
+  assert.equal(own('http://127.0.0.1:18590/api/run'), null, "a staff member's by its name only");
+  assert.equal(own('http://reeve.localhost:18591/api/run'), null, 'not its port');
+  assert.equal(own('http://porter.localhost:18600/api/run'), null, 'no server.json here');
+  assert.equal(own('https://127.0.0.1:18585/api/updates/check'), null);
+  assert.equal(own('http://example.com:18585/api/updates/check'), null);
+  write(path.join(tmp, 'other-manor'), 18585, 'o'.repeat(48));
+  assert.equal(own('http://127.0.0.1:18585/api/updates/check', { MANOR_HOME: path.join(tmp, 'other-manor') }), 'o'.repeat(48), "Manor's own folder, where it is");
 });
 
 test("after a release each page is told, and one that doesn't answer is only logged; never the live pages under node --test", async () => {

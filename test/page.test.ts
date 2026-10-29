@@ -74,6 +74,21 @@ test('it pings as the Steward, on duty and idle', async () => {
   assert.equal((await fetch(`${base()}/favicon.svg`)).headers.get('content-type'), 'image/svg+xml');
 });
 
+test("it pings busy while its build is open, between the build's rounds too: Manor puts no update in mid-build", async () => {
+  const { pipelineFile } = await import('../src/pipeline.ts');
+  await served.idle();
+  const now = new Date().toISOString();
+  writeFileSync(pipelineFile(), JSON.stringify({ open: { due: now, by: 'schedule', started: now, rounds: 1, merged: [], released: [], failed: [] }, builds: [] }));
+  try {
+    const ping = await (await fetch(`${base()}/api/ping`)).json();
+    assert.deepEqual([ping.busy, ping.stage], [true, 'build']);
+  } finally {
+    rmSync(pipelineFile(), { force: true });
+  }
+  const idle = await (await fetch(`${base()}/api/ping`)).json();
+  assert.deepEqual([idle.busy, idle.stage], [false, null], 'idle again once it closed');
+});
+
 test('the page is drawn in the browser: its shell carries the token, its first data and the bundle', async () => {
   const html = await (await fetch(`${base()}/`)).text();
   assert.match(html, /<meta name="page-token" content="[0-9a-f]{48}">/);
