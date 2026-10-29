@@ -41,7 +41,7 @@ function signed(payload: Record<string, unknown>, key: KeyObject = exchequer.pri
 }
 
 /** A license as the Exchequer signs it: `iat` an hour ago unless said. */
-function license(o: { tier: 'trial' | 'household' | 'workshop'; runsUntil?: number; updatesUntil?: number | null; iat?: number }): Record<string, unknown> {
+function license(o: { tier: 'trial' | 'household' | 'workshop' | 'workshop-pro' | 'enterprise'; runsUntil?: number; updatesUntil?: number | null; iat?: number }): Record<string, unknown> {
   const iat = Math.floor((o.iat ?? Date.now() - 60 * 60_000) / 1000);
   return {
     lic: 'lic_test',
@@ -143,6 +143,31 @@ test('paid: it runs, and so does a license of another tier (Manor holds back the
   assert.deepEqual([at('reeve').state, at('reeve').ended], ['paid', false], 'a Workshop agent under a Household license runs');
   hold(license({ tier: 'workshop', updatesUntil: null }));
   assert.deepEqual([at().state, at().ended], ['pending', false]);
+});
+
+test('Workshop Pro (kit 2.144.1): its license verifies and runs every employee, the Wright, the Bailiff and the Crier too', () => {
+  hold(license({ tier: 'workshop-pro' }));
+  const v = lic.verifyLicense(lic.readHeld(manor)!.licence, lic.trustedKeys());
+  assert.ok('payload' in v && v.payload.tier === 'workshop-pro');
+  sells([...SOLD, { id: 'wright', tier: 'workshop-pro' }, { id: 'bailiff', tier: 'workshop-pro' }, { id: 'crier', tier: 'workshop-pro' }]);
+  for (const id of ['fixture', 'reeve', 'wright', 'bailiff', 'crier', 'seneschal']) {
+    const c = at(id);
+    assert.deepEqual([id, c.checked, c.held, c.ended, c.state, c.problem], [id, true, false, false, 'paid', null]);
+  }
+  assert.deepEqual([check.licenseNow().state, check.licenseHeld()], ['paid', null]);
+  hold(license({ tier: 'workshop-pro', updatesUntil: null }));
+  assert.deepEqual([at('wright').state, at('wright').held], ['pending', false]);
+  hold(license({ tier: 'workshop-pro', updatesUntil: Date.now() - 400 * DAY }));
+  assert.deepEqual([at('wright').state, at('wright').held], ['lapsed', false]);
+});
+
+test('a tier this kit does not know is refused: no license for this PC, so it holds', () => {
+  hold(license({ tier: 'enterprise' }));
+  assert.ok('error' in lic.verifyLicense(lic.readHeld(manor)!.licence, lic.trustedKeys()));
+  const c = at();
+  assert.deepEqual([c.checked, c.state, c.held, c.ended], [true, 'bad-signature', true, false]);
+  assert.match(c.problem ?? '', /payload isn't a license's/);
+  assert.deepEqual(lic.LICENSE_TIERS, ['household', 'workshop', 'workshop-pro', 'trial']);
 });
 
 test('paid and lapsed: the Freehold license runs, forever', () => {

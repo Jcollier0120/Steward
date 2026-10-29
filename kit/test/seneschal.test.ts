@@ -9,7 +9,7 @@ import { freePort } from './free-port.ts';
 
 // The Seneschal's work client (node/seneschal.ts) against a Seneschal the test plays: a page on a free port that
 // answers as each test says, and keeps what it was asked. What matters most: with no Seneschal, one off duty, one on a
-// PC without Developer Pro, or one that stops answering, the agent runs its work as before; a pass of exactly these
+// PC without Workshop Pro, or one that stops answering, the agent runs its work as before; a pass of exactly these
 // checks stands in; a failure is never taken for this run's; and a lease that runs out doesn't stop the run.
 const { sameCommands, seneschalAt, seneschalTurn } = await import('./fixture/src/kit/seneschal.ts');
 
@@ -91,11 +91,11 @@ test('inside another run\'s turn (KIT_CHECKS_TURN): run as before, or the PC wou
   assert.equal(asked.length, 0);
 });
 
-test('off duty, or a PC without Developer Pro: the Seneschal says run as before, and it does', async () => {
-  routes['/api/tasks/submit'] = () => ({ json: { task: null, why: "the Seneschal comes with Developer Pro, which this PC doesn't have: it hands out no work, so run it as before", asBefore: true } });
+test('off duty, or a PC without Workshop Pro: the Seneschal says run as before, and it does', async () => {
+  routes['/api/tasks/submit'] = () => ({ json: { task: null, why: "the Seneschal comes with Workshop Pro, which this PC doesn't have: it hands out no work, so run it as before", asBefore: true } });
   lines.length = 0;
   assert.equal(await seneschalTurn(task, { ...quick, say }), null);
-  assert.match(lines[0], /comes with Developer Pro/);
+  assert.match(lines[0], /comes with Workshop Pro/);
   routes['/api/tasks/submit'] = () => ({ json: waitingTask() });
   routes['/api/tasks/lease'] = () => ({ json: { task: null, why: 'the Seneschal is off duty: it hands out no work, so run it as before', asBefore: true } });
   assert.equal(await seneschalTurn(task, quick), null);

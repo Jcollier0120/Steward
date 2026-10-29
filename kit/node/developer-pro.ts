@@ -1,22 +1,27 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { statSync } from 'node:fs';
 import path from 'node:path';
+import { sharedLicenseFolder } from './everyone.ts';
+import { isThisPc, LICENSE_FILE, licenseCheckOn, readHeldFile, trustedKeys, verifyLicense } from './license.ts';
+import { manorHome } from './manor.ts';
 
 /**
- * Developer Pro (kit 2.49.0): the work the Wright and the Bailiff do with the rest of the staff, as other agents show
- * it. The Assayer testing the Wright's drafts the Bailiff approved, a failure filed for the Wright, the Aletaster's work
- * orders sent to the Wright's queue, the Surveyor's findings handed to the Wright, the Steward's look at the Wright's
- * drafts. None of it is sold yet, so none of it is shown or done on a customer's PC, whether or not a Wright happens to
- * be there: an agent asks developerPro() before showing a setting, a line or a button that names them, and before
- * doing the work.
+ * Workshop Pro (kit 2.49.0, named Developer Pro until kit 2.144.1): the work the Wright and the Bailiff do with the
+ * rest of the staff, as other agents show it. The Assayer testing the Wright's drafts the Bailiff approved, a failure
+ * filed for the Wright, the Aletaster's work orders sent to the Wright's queue, the Surveyor's findings handed to the
+ * Wright, the Steward's look at the Wright's drafts. None of it is shown or done on a PC without Workshop Pro, whether
+ * or not a Wright happens to be there: an agent asks developerPro() before showing a setting, a line or a button that
+ * names them, and before doing the work.
  *
  * The Seneschal comes with it too (kit 2.78.1): the agent that hands out the staff's work on a PC in order, as the PC
- * has room. Without Developer Pro it hands out no work, and each agent runs its own as before.
+ * has room. Without Workshop Pro it hands out no work, and each agent runs its own as before.
  *
- * Today that is the maker's laptop only: its firmware's (SMBIOS) UUID, hashed with a salt, the same check as the
- * Steward's maker.ts and Manor's customer view. No file, setting or environment variable makes another PC the maker's.
- * When the Exchequer sells a Developer Pro license, its tier turns it on here too (license.ts's LicenseTier gains it),
- * and every agent that asks follows without a change of its own.
+ * Which PCs have it: the maker's laptop (its firmware's (SMBIOS) UUID, hashed with a salt, the same check as the
+ * Steward's maker.ts and Manor's customer view; no file, setting or environment variable makes another PC the maker's),
+ * and, from kit 2.144.1, a PC holding a Workshop Pro license (tier `workshop-pro`: workshopProLicense). Every agent that
+ * asks follows without a change of its own. A trial doesn't turn it on yet: Workshop Pro isn't on sale, and a trial
+ * mustn't show its staff. Once it is on sale, a running trial joins (a trial holds every tier): in workshopProLicense.
  */
 
 /** The maker's laptop: SHA-256 of MAKERS_SALT and its firmware UUID (upper case, no braces). The Steward's and Manor's, the same. */
@@ -56,10 +61,61 @@ export function isMakersUuid(uuid: string | null, expected = MAKERS_PC): boolean
   return !!uuid && createHash('sha256').update(MAKERS_SALT + uuid).digest('hex') === expected;
 }
 
+/** How long a reading of the license is kept, unless licence.json changes first (license-check.ts' LICENSE_CHECK_MS). */
+const LOOK_AGAIN_MS = 60 * 60_000;
+
+let license: { home: string; stamp: string; at: number; on: boolean } | null = null;
+
+function stampOf(file: string): string {
+  try {
+    const s = statSync(file);
+    return `${s.size}:${s.mtimeMs}`;
+  } catch (e) {
+    return `none:${(e as NodeJS.ErrnoException).code ?? ''}`;
+  }
+}
+
+/** Whether Manor's licence.json in `home` is a Workshop Pro license made for this PC, verified as license-check.ts verifies it. */
+function holdsWorkshopPro(home: string, env: NodeJS.ProcessEnv): boolean {
+  const file = readHeldFile(home);
+  if (!('held' in file)) return false;
+  const v = verifyLicense(file.held.licence, trustedKeys(env));
+  // Not a trial yet: Workshop Pro's staff aren't on sale. Once they are, `|| v.payload.tier === 'trial'` (a trial
+  // still running: license-check.ts' judgeLicense says whether its runsUntil has passed) turns it on for a trial too.
+  if ('error' in v || v.payload.tier !== 'workshop-pro') return false;
+  const shared = sharedLicenseFolder(env);
+  return isThisPc(v.payload.sub, shared ? [home, shared] : [home]);
+}
+
+/**
+ * Whether this PC holds a Workshop Pro license (kit 2.144.1): Manor's licence.json, verified offline, of tier
+ * `workshop-pro`, made for this PC. Paid, waiting for its first payment, or lapsed, as such a license runs every agent
+ * (license-check.ts). Read again only when licence.json changes (its size or time), or an hour on: a stat per call.
+ * Under node --test it reads none unless MANOR_LICENSE_CHECK=on (licenseCheckOn), so no agent's tests read this PC's.
+ */
+export function workshopProLicense(env: NodeJS.ProcessEnv = process.env, now = Date.now()): boolean {
+  if (!licenseCheckOn(env)) return false;
+  try {
+    const home = manorHome();
+    const stamp = stampOf(path.join(home, LICENSE_FILE));
+    if (!license || license.home !== home || license.stamp !== stamp || Math.abs(now - license.at) >= LOOK_AGAIN_MS) {
+      license = { home, stamp, at: now, on: holdsWorkshopPro(home, env) };
+    }
+    return license.on;
+  } catch {
+    return false;
+  }
+}
+
+/** Forgets the license last read, so the next workshopProLicense() reads it again: for tests. */
+export function forgetWorkshopProLicense(): void {
+  license = null;
+}
+
 let given: (() => boolean) | null = null;
 
 /**
- * Stands in for the PC in a test: `() => true`, Developer Pro; `() => false`, a customer's PC; null, this PC again. Only
+ * Stands in for the PC in a test: `() => true`, Workshop Pro; `() => false`, a PC without it; null, this PC again. Only
  * code in the same process can call it.
  */
 export function developerProForTests(f: (() => boolean) | null): void {
@@ -67,12 +123,13 @@ export function developerProForTests(f: (() => boolean) | null): void {
 }
 
 /**
- * Whether the Wright's and the Bailiff's work with the rest of the staff is shown and done here: the maker's laptop,
- * for now. CASTELLAN_CUSTOMER=1 makes even the maker's laptop answer no (to see an agent as a customer has it, and for a
- * test's child process); nothing makes another PC answer yes. Cheap after the first call: ask it per request.
+ * Whether the Wright's and the Bailiff's work with the rest of the staff is shown and done here (Workshop Pro): the
+ * maker's laptop, or a PC holding a Workshop Pro license. CASTELLAN_CUSTOMER=1 makes even the maker's laptop answer no
+ * (to see an agent as a customer has it, and for a test's child process), its license included. Cheap after the first
+ * call: ask it per request.
  */
 export function developerPro(): boolean {
   if (process.env.CASTELLAN_CUSTOMER === '1') return false;
   if (given) return given();
-  return isMakersUuid(firmwareUuid());
+  return isMakersUuid(firmwareUuid()) || workshopProLicense();
 }

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { APP } from '../app.ts';
 import { isDemo } from './demo.ts';
 import { sharedLicenseFolder } from './everyone.ts';
-import { isThisPc, LICENSE_FILE, readHeldFile, trustedKeys, verifyLicense, type LicensePayload } from './license.ts';
+import { isThisPc, LICENSE_FILE, licenseCheckOn, readHeldFile, trustedKeys, verifyLicense, type LicensePayload } from './license.ts';
 import { MANOR_DEFAULT_NAME, manorHome, manorLink } from './manor.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 
@@ -133,7 +133,8 @@ export function judgeLicense(r: LicenseReading, now: number, latestSeen = 0): Li
     const ended = runs <= time;
     return { ...base, state: ended ? 'trial-ended' : 'trial', held: ended, ended, runsUntil: p.runsUntil ?? null };
   }
-  // Household or Workshop, of whatever tier this agent is: it runs (Manor holds back the updates a tier doesn't cover).
+  // Household, Workshop or Workshop Pro, of whatever tier this agent is: it runs (Manor holds back the updates a tier
+  // doesn't cover).
   if (p.updatesUntil === null) return { ...base, state: 'pending' };
   return { ...base, state: Date.parse(p.updatesUntil) >= now ? 'paid' : 'lapsed' };
 }
@@ -143,11 +144,8 @@ export function checkLicense(o: { id: string; home: string; now?: number; latest
   return judgeLicense(readLicenseFor(o), o.now ?? Date.now(), o.latestSeen ?? 0);
 }
 
-/**
- * Whether this process checks: always, but under node --test, where it checks only with MANOR_LICENSE_CHECK=on (so no
- * agent's tests read this PC's own license).
- */
-export const licenseCheckOn = (env: NodeJS.ProcessEnv = process.env) => !env.NODE_TEST_CONTEXT || env.MANOR_LICENSE_CHECK === 'on';
+/** Whether this process checks: license.ts' licenseCheckOn (off under node --test unless MANOR_LICENSE_CHECK=on). */
+export { licenseCheckOn };
 
 // ---------------------------------------------------------------- the agent's own check, kept
 
