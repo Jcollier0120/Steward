@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.144.2
+
+**An update's probation watcher outlives the install that started it again: it starts apart from the install's jobs, so the last agents of Manor's update round finish their probation and clear app.prev, rather than being ended with Manor's install.**
+
+### What changed
+
+- **node/safeinstall.ts, the probation watcher (`safeDeps().watch`):** started apart (apart.ts `startApart`, out of the jobs that let it leave), and detached only where it can't be (not Windows, no launcher). Manor's install runs at the owner's pace in a gentle job of its own (gentle.ts `containSelf`), and every program it starts is in that job too. Merely detached, a watcher was ended with Manor's install, with no line in probation.log, leaving its probation.json and app.prev behind, whenever the round ended within its 90 s probation: always for the last agent or two of a round, and for an agent updated alone. Its probation went unwatched for the rest, so an update that stopped answering then wasn't rolled back.
+- **node/apart.ts, `startApart`:** a `cap` option. `0` leaves the program out of the model servers' job (`apart:0`), for a program that only needs to outlive its starter. Left out, it is the servers' cap, as before.
+- **test/checks-pace.test.ts:** on Windows, a starter at the gentle pace starts one program detached and one apart, then ends: the detached one ends with it, and the one apart runs on.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent whose last update left probation.json and app.prev behind clears them at its next update.
+
 ## 2.144.1
 
 **Ready for the Workshop Pro plan: every agent accepts a Workshop Pro license (tier `workshop-pro`) and runs under it as it does under Workshop, and a PC holding one has what Developer Pro brought, now named Workshop Pro: the Wright's and the Bailiff's work with the rest of the staff, and the Seneschal. Until now a license of a tier the kit didn't know was refused as no license at all, so this kit reaches every agent before the Exchequer signs one.**

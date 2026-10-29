@@ -3,6 +3,7 @@ import { cpSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } f
 import os from 'node:os';
 import path from 'node:path';
 import { APP, port } from '../app.ts';
+import { startApart } from './apart.ts';
 import { flushTree } from './flush.ts';
 import { appFolder, defaultDeps, finishSwap, homeRefusal, install, OLD_TASK_NAME, readRelease, refusedHomeLine, replaceContents, runOwnTask, TASK_NAME, waitForPage, type InstallDeps } from './install.ts';
 import { endProcesses, pagesFrom } from './native.ts';
@@ -427,15 +428,22 @@ export function safeDeps(): SafeDeps {
     flagged: loadUnsafe,
     // From the new copy, working in the user's folder (never in app, which a rollback moves, nor the data folder), with
     // no window and nothing tying it to the install that started it: Manor's update pass goes on to the next agent.
+    // Started apart (the kit's startApart, kit 2.144.2), out of the jobs of the install that started it: Manor's install
+    // runs at the owner's pace in a gentle job (gentle.ts containSelf), which Windows ends with Manor's install, so a
+    // watcher merely detached went with it whenever the run ended within its probation, the last agents' every time,
+    // and their probation.json and app.prev stayed. Where it can't start apart (not Windows, no launcher), detached.
     watch: async (args) => {
-      let pid: number | undefined;
-      try {
-        const child = spawn(process.execPath, [path.join(appFolder(d.dataDir), 'src', 'cli.ts'), 'install', ...args], { cwd: os.homedir(), detached: true, stdio: 'ignore', windowsHide: true });
-        child.on('error', () => {});
-        child.unref();
-        pid = child.pid;
-      } catch {
-        return false;
+      const argv = [path.join(appFolder(d.dataDir), 'src', 'cli.ts'), 'install', ...args];
+      let pid = (await startApart(process.execPath, argv, { cwd: os.homedir(), cap: 0 })) ?? undefined;
+      if (pid === undefined) {
+        try {
+          const child = spawn(process.execPath, argv, { cwd: os.homedir(), detached: true, stdio: 'ignore', windowsHide: true });
+          child.on('error', () => {});
+          child.unref();
+          pid = child.pid;
+        } catch {
+          return false;
+        }
       }
       if (typeof pid !== 'number') return false;
       // Started is not watching: a copy that can't run its watcher would leave the rest unwatched, so it must say so.

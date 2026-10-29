@@ -20,8 +20,13 @@ import { CEILING_CAP, CEILING_ENV, ceilingCap } from './pace.ts';
  * `o.env`, and answers its process id; null where it can't (not Windows, no launcher, it didn't start), and the caller
  * starts it as before. Never throws. Under node --test, null unless KIT_APART=1: a test's servers are its own children,
  * and a test never builds the launcher in this PC's kit folder.
+ *
+ * `o.cap` 0 (kit 2.144.2) keeps a program that is no model server out of the servers' job: it only leaves the jobs that
+ * would end it with the program that started it, as an update's probation watcher must (safeinstall.ts). A program
+ * merely detached stays in its starter's jobs, and its starter's gentle job is ended with its starter: the PowerShell
+ * worker that joins it (gentle.ts) is in the job Node keeps for its own children, which Windows ends when Node exits.
  */
-export async function startApart(cmd: string, args: string[], o: { cwd?: string; env?: NodeJS.ProcessEnv; out?: number; log?: (line: string) => void } = {}): Promise<number | null> {
+export async function startApart(cmd: string, args: string[], o: { cwd?: string; env?: NodeJS.ProcessEnv; out?: number; log?: (line: string) => void; cap?: number } = {}): Promise<number | null> {
   if (process.platform !== 'win32' || (process.env.NODE_TEST_CONTEXT && process.env.KIT_APART !== '1')) return null;
   const exe = await checksPaceLauncher(o.log ?? (() => {}));
   if (!exe) return null;
@@ -29,7 +34,7 @@ export async function startApart(cmd: string, args: string[], o: { cwd?: string;
   return new Promise((resolve) => {
     try {
       const env = { ...(o.env ?? process.env), [CEILING_ENV]: String(ceilingCap()) };
-      const child = spawn(exe, [`apart:${apartCap()}`, cmd, ...args], { stdio: ['ignore', out, out], windowsHide: true, cwd: o.cwd, env });
+      const child = spawn(exe, [`apart:${o.cap ?? apartCap()}`, cmd, ...args], { stdio: ['ignore', out, out], windowsHide: true, cwd: o.cwd, env });
       child.on('error', () => resolve(null));
       child.on('exit', (code) => resolve(code && code > 0 ? code : null));
     } catch {

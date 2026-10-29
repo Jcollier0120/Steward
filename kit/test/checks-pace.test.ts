@@ -225,6 +225,41 @@ test('on Windows, a program started apart (a model server): detached, its output
   process.kill(pid);
 });
 
+test("on Windows, a program started apart outlives a starter in a gentle job, where one merely detached ends with it (an update's probation watcher, kit 2.144.2)", { skip: process.platform !== 'win32' }, async () => {
+  const { alive } = await import('./fixture/src/kit/apart.ts');
+  // As Manor's install: at the gentle pace (its own job, its PowerShell worker in it), it starts one program detached
+  // and one apart, as the probation watcher was and is, and ends.
+  const starter = path.join(home, 'starter.mjs');
+  writeFileSync(
+    starter,
+    `import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const [gentle, apart, out] = process.argv.slice(2);
+await (await import(gentle)).containSelf('gentle');
+const stay = ['-e', 'setTimeout(() => {}, 120000)'];
+const detached = spawn(process.execPath, stay, { detached: true, stdio: 'ignore', windowsHide: true });
+detached.unref();
+const apartPid = await (await import(apart)).startApart(process.execPath, stay, { cap: 0 });
+writeFileSync(out, JSON.stringify({ detached: detached.pid, apart: apartPid }));
+`,
+  );
+  const out = path.join(home, 'started.json');
+  const env: NodeJS.ProcessEnv = { ...process.env, KIT_APART: '1' };
+  delete env.KIT_GENTLE;
+  const code = await new Promise<number | null>((resolve) =>
+    execFile(process.execPath, [starter, new URL('./fixture/src/kit/gentle.ts', import.meta.url).href, new URL('./fixture/src/kit/apart.ts', import.meta.url).href, out], { env, windowsHide: true }, (e) => resolve(e ? ((e as { code?: number }).code ?? 1) : 0)),
+  );
+  assert.equal(code, 0, 'the starter ran');
+  const started = JSON.parse(readFileSync(out, 'utf8')) as { detached: number; apart: number | null };
+  try {
+    assert.ok(started.apart && started.apart > 0, 'started apart');
+    await until(() => !alive(started.detached), testsPaced(15_000), 'the one merely detached ends with its starter');
+    assert.ok(alive(started.apart), 'the one apart runs on');
+  } finally {
+    for (const pid of [started.detached, started.apart]) if (pid && alive(pid)) process.kill(pid);
+  }
+});
+
 test("the servers' cap (kit 2.78.3): the manor's ceiling, whatever the pace; none under node --test unless KIT_APART_CAP says", async () => {
   const { apartCap } = await import('./fixture/src/kit/apart.ts');
   assert.equal(apartCap({}), CEILING_CAP);
