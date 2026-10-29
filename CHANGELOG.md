@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.257
+
+**After a release, Manor hears of it at once again, and the Steward says it's busy for the whole of its build, so it is never updated in the middle of one.**
+
+### What changed
+
+- **Manor is told of a release again:** since Manor's page asks a program to sign in, the Steward's word after each release ("told after a release", Settings) went unheard ("its page carries no token"), and Manor found the release only at its next look, up to a quarter of an hour later. The Steward now signs in with the key Manor's page leaves for programs on this PC, so Manor looks for the release, and puts it in, right away. The same goes for the Steward reopening a page through Manor and pressing Update for a stuck agent.
+- **Busy for the whole build:** the Steward said it was busy only while a round ran, and idle between a build's rounds while its rollout or whole suite went on beside them. It now says busy from the start of a build until it closes (at most three hours, in case one is left open), so Manor's automatic updates wait for the build to close, even when Manor can't read the build's state in time.
+- **A build's rounds go on:** while a build is open, the round that follows a finished rollout or whole suite no longer stands aside for an update Manor won't put in until the build closes.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.256
 
 **It hands out the kit 2.144.1: ready for the Workshop Pro plan.**

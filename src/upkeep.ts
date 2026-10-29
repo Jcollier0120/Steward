@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, readdirSync, renameSync, rmSync, statSync }
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { pageToken as tokenByAddress, serverFile, staffHome } from './kit/page-access.ts';
 import { compareVersions, KIT_VERSION } from './kitfiles.ts';
 
 /**
@@ -83,12 +84,34 @@ export const request: HttpRequest = (url, o) => {
   });
 };
 
+/** What looks for a page's token on this PC (ownToken): a test gives its own. */
+export type OwnToken = (origin: URL) => string | null;
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
 /**
- * A page's token, read as its own script would: GET its origin's `/`, and the `<meta name="page-token">` in it (Manor's
- * page and every kit page carry one). `{ error }` when the page gives no answer at all; `{ status }` alone when it
- * answers without a token.
+ * A page's token from the server.json its page writes in its folder as it starts, only for that page's own address
+ * (the kit's page-access.ts): `<id>.localhost:<port>` by its name (castellan.localhost is Manor's), and 127.0.0.1 or
+ * localhost on Manor's port by Manor's own. Null for any other address, or a page with no server.json here.
  */
-export async function pageToken(origin: URL, o: { timeoutMs: number; http?: HttpRequest }): Promise<{ token: string } | { status: number } | { error: string }> {
+export function ownToken(origin: URL, o: { env?: NodeJS.ProcessEnv; home?: string } = {}): string | null {
+  const byName = tokenByAddress(origin, o);
+  if (byName) return byName;
+  if (origin.protocol !== 'http:' || !LOOPBACK.has(origin.hostname.toLowerCase())) return null;
+  const manor = serverFile(staffHome('manor', o.env, o.home));
+  return manor && manor.port === Number(origin.port || 80) ? manor.token : null;
+}
+
+/**
+ * A page's token: from its server.json on this PC (ownToken), else read as its own script would: GET its origin's `/`,
+ * and the `<meta name="page-token">` in it. Since Manor's page sign-in (2026-10-27), Manor's `/` and a
+ * strict kit page's carry no token for a program that isn't signed in, so the page's own server.json comes first; `/`
+ * still serves a page from before it. `{ error }` when the page gives no answer at all; `{ status }` alone when it
+ * answers without a token. Never this PC's server.json files under node --test, unless a test gives its own `own`.
+ */
+export async function pageToken(origin: URL, o: { timeoutMs: number; http?: HttpRequest; own?: OwnToken }): Promise<{ token: string } | { status: number } | { error: string }> {
+  const own = (o.own ?? (process.env.NODE_TEST_CONTEXT ? () => null : ownToken))(origin);
+  if (own) return { token: own };
   const page = await (o.http ?? request)(new URL('/', origin), { method: 'GET', timeoutMs: o.timeoutMs });
   if ('error' in page) return page;
   const token = /<meta name="page-token" content="([0-9A-Za-z_-]{16,200})">/.exec(page.body)?.[1];
@@ -99,15 +122,15 @@ export async function pageToken(origin: URL, o: { timeoutMs: number; http?: Http
 export const tokenHeaders = (token: string) => ({ 'content-type': 'application/json', 'x-token': token, 'x-manor-token': token });
 
 /**
- * POSTs a page's action as its own page would: the page at its origin read for its token (`<meta name="page-token">`,
- * which Manor's page and every kit page carry), then the POST with it, and no Origin, as a script that read the page
- * (Manor's and the kit's guard allow that). What it said, in a few words, or why it couldn't.
+ * POSTs a page's action as its own page would: its token (pageToken: its server.json here, else its page), then the
+ * POST with it, and no Origin, as a script that read the page (Manor's and the kit's guard allow that). What it said,
+ * in a few words, or why it couldn't.
  */
-export async function pokePage(target: string, o: { timeoutMs?: number } = {}): Promise<{ ok: boolean; said: string }> {
+export async function pokePage(target: string, o: { timeoutMs?: number; own?: OwnToken } = {}): Promise<{ ok: boolean; said: string }> {
   if (!LOCAL_URL.test(target)) return { ok: false, said: 'not a local address' };
   const timeoutMs = o.timeoutMs ?? 5000;
   const url = new URL(target);
-  const t = await pageToken(url, { timeoutMs });
+  const t = await pageToken(url, { timeoutMs, own: o.own });
   if ('error' in t) return { ok: false, said: t.error };
   if (!('token' in t)) return { ok: false, said: `its page (HTTP ${t.status}) carries no token` };
   const r = await request(url, { method: 'POST', headers: tokenHeaders(t.token), body: '{}', timeoutMs });

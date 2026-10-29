@@ -31,7 +31,7 @@ import { endWholeOrphans, endWholeSuite, loadWholeJob, wholeSuitesBeside } from 
 import { githubReady, hostOf, loadScm, type Host } from './scm.ts';
 import { DEVELOPER_ONLY, PLAIN_ROLE, stewardActs } from './maker.ts';
 import { noteFreshStart, watchWake } from './fresh-start.ts';
-import { lateLine, loadPipeline, pipelineView } from './pipeline.ts';
+import { buildUnderWay, lateLine, loadPipeline, pipelineView } from './pipeline.ts';
 import { holdForBuilds } from './build-hold.ts';
 import { wakesPc } from './kit/wake.ts';
 import { saverSleepLine, saverSleeps, type SaverSleeps } from './kit/sleep-cause.ts';
@@ -317,10 +317,11 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   /**
    * A round as the schedule runs one, now, beside the schedule (whose next tick passes while it runs). While Manor has
    * an automatic update due for the Steward (the kit's update-hold.ts), none starts: the schedule's rounds wait a few
-   * minutes for it, so Manor finds the Steward idle, and its next look runs the round this one would have been.
+   * minutes for it, so Manor finds the Steward idle, and its next look runs the round this one would have been. Not
+   * while its build is open (buildUnderWay): Manor puts no update in until it closes, so the build's rounds go on.
    */
   const startRound = () => {
-    if (updateHold()) return;
+    if (!buildUnderWay(loadPipeline()) && updateHold()) return;
     void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
   };
   // Beside the rounds (stages/others.ts): one of the Seneschal's workers, where it's on this PC (Seneschal 0.2.0). A PR
@@ -447,7 +448,12 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     icon: ICON,
     // The whole suite beside the rounds ends with the Steward, with everything it started (stages/wholesuite.ts).
     onStop: () => endWholeSuite(),
-    ping: () => ({ busy: runs.length > 0, stage: runs.length ? runs.map((r) => r.stage).join(', ') : null, tour: hasTour() }),
+    // Busy while a stage runs, and while its build is open, between the build's rounds too (buildUnderWay): Manor
+    // installs an update only while the ping says idle, never mid-build (Steward 0.36.257).
+    ping: () => {
+      const build = !!buildUnderWay(loadPipeline());
+      return { busy: runs.length > 0 || build, stage: runs.length ? runs.map((r) => r.stage).join(', ') : build ? 'build' : null, tour: hasTour() };
+    },
     // Its work status (GET /api/peer/work, the kit's work-status.ts), for Manor's Work page: its stages' slots beside the
     // kit's. Nothing holds a repository's work up here: no PR waits for the Steward (Steward 0.36.124).
     work: () => ({ slots: [{ kind: 'stage', name: 'Stages at once', of: loadSettings().stagesAtOnce, used: runs.length }], blocked: [] }),
