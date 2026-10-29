@@ -6,13 +6,13 @@ import path from 'node:path';
 /**
  * The Seneschal's work client (kit 2.78.1): an agent asks the Seneschal for its turn before it runs its own work (the
  * Steward's PR checks, its kit trials), so the developer agents' work on a PC runs in one order, never more at once
- * than the PC has room for. The Seneschal is the manor's work manager; it comes with Developer Pro.
+ * than the PC has room for. The Seneschal is the manor's work manager; it comes with Workshop Pro.
  *
  * `seneschalTurn` submits the task (a repository and a commit, never a command), then asks for that task by name every
  * few seconds until its turn comes, and hands back one of:
  *
  * - **null**: run it as before. The Seneschal isn't on this PC (no server.json in its data folder), doesn't answer, is
- *   off duty, or this PC hasn't Developer Pro; or it refused the task, or the turn didn't come in SENESCHAL_WAIT_MS (as
+ *   off duty, or this PC hasn't Workshop Pro; or it refused the task, or the turn didn't come in SENESCHAL_WAIT_MS (as
  *   long as a checks pace's turn may take); or this run is already inside another's turn (KIT_CHECKS_TURN, which the
  *   checks pace's launcher sets for what it starts), which asking again would hold twice.
  * - **{ reused }**: the same work on the same code passed already, running exactly these commands: nothing to run.

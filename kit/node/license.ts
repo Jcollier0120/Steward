@@ -76,6 +76,12 @@ export function trustedKeys(env: NodeJS.ProcessEnv = process.env, carried: reado
   return keys.filter((k) => k.kty === 'OKP' && k.crv === 'Ed25519' && typeof k.x === 'string');
 }
 
+/**
+ * Whether this process reads this PC's license: always, but under node --test, where it reads it only with
+ * MANOR_LICENSE_CHECK=on (so no agent's tests read this PC's own license). license-check.ts and developer-pro.ts ask.
+ */
+export const licenseCheckOn = (env: NodeJS.ProcessEnv = process.env) => !env.NODE_TEST_CONTEXT || env.MANOR_LICENSE_CHECK === 'on';
+
 const b64 = (s: string) => Buffer.from(s, 'base64url');
 
 /**

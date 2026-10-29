@@ -167,7 +167,7 @@ export const WORK: Record<string, AgentWork> = {
       { what: "Handing out the staff's work in order: each repository's checks, the kit's trials, full test suites and the Wright's jobs, in four lanes, never more at once than the PC has room for", where: 'the processor, a moment, and its ledger on the disk; the work itself runs in the agent that asked for it', when: 'when an agent asks for a turn, and in its sweep every 15 seconds, which takes back the turns of agents that stopped answering', dev: true },
       { what: "A look at the PC's room: its processors and the checks pace, its memory, the accelerators' lines, whether you're using it and whether it's on battery", where: 'the processor; whether you are using it, one PowerShell call', when: 'every 15 seconds, a moment; whether you are using it, every minute', dev: true },
     ],
-    notes: ["It uses no model and runs no work of its own: each task names a repository and a commit, and the agent that asked runs that repository's own checks.", 'It comes with Developer Pro: on a PC without it, it hands out no work, and each agent runs its own as before.'],
+    notes: ["It uses no model and runs no work of its own: each task names a repository and a commit, and the agent that asked runs that repository's own checks.", 'It comes with Workshop Pro: on a PC without it, it hands out no work, and each agent runs its own as before.'],
   },
   surveyor: {
     model: true,

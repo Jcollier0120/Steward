@@ -8,7 +8,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What changed
 
-- **The kit 2.144.1:** every agent accepts a Workshop Pro license and runs under it, as it does under Workshop. A license of a plan an agent doesn't know is still refused, so each agent learns Workshop Pro before anyone holds one.
+- **The kit 2.144.1:** every agent accepts a Workshop Pro license and runs under it, as it does under Workshop. A license of a plan an agent doesn't know is still refused, so each agent learns Workshop Pro before anyone holds one. On a PC with a Workshop Pro license, the agents show and do the work they share with the Wright, the Bailiff and the Seneschal; what was called Developer Pro is now Workshop Pro.
 
 ### Before you update
 

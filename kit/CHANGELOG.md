@@ -4,17 +4,20 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.144.1
 
-**Ready for the Workshop Pro plan: every agent accepts a Workshop Pro license (tier `workshop-pro`) and runs under it as it does under Workshop. Until now a license of a tier the kit didn't know was refused as no license at all, so this kit reaches every agent before the Exchequer signs one.**
+**Ready for the Workshop Pro plan: every agent accepts a Workshop Pro license (tier `workshop-pro`) and runs under it as it does under Workshop, and a PC holding one has what Developer Pro brought, now named Workshop Pro: the Wright's and the Bailiff's work with the rest of the staff, and the Seneschal. Until now a license of a tier the kit didn't know was refused as no license at all, so this kit reaches every agent before the Exchequer signs one.**
 
 ### What's new
 
 - **node/license.ts:** `LicenseTier` gains `'workshop-pro'`, and `LICENSE_TIERS` lists the tiers a license may have: `household`, `workshop`, `workshop-pro` and `trial`. An agent's own tier is `free`, `household`, `workshop` or `workshop-pro`, each holding the ones before it; a trial holds every one.
+- **node/developer-pro.ts, `workshopProLicense`:** whether this PC holds a Workshop Pro license: Manor's licence.json verified offline, of tier `workshop-pro`, made for this PC, paid, waiting for its first payment or lapsed. It is read again only when licence.json changes, or an hour on (a stat per call), and under `node --test` only with `MANOR_LICENSE_CHECK=on`, as the license check. `forgetWorkshopProLicense` drops the reading, for tests.
 
 ### What changed
 
 - **node/license.ts, `verifyLicense`:** a license whose tier is `workshop-pro` verifies. One of a tier not in `LICENSE_TIERS` is still refused ("its payload isn't a license's"), so the agent holds as it does with no license for this PC.
-- **node/license-check.ts, `judgeLicense`:** a Workshop Pro license runs every agent, whatever its tier, the Wright, the Bailiff and the Crier included: paid, waiting for its first payment, or lapsed (Freehold), as a Household or Workshop license does. A trial already ran everything, and still does.
-- **test/license-check.test.ts:** a Workshop Pro license verifies and runs every agent, paid, pending and lapsed; a license of an unknown tier holds.
+- **node/license-check.ts, `judgeLicense`:** a Workshop Pro license runs every agent, whatever its tier, the Wright, the Bailiff and the Crier included: paid, waiting for its first payment, or lapsed (Freehold), as a Household or Workshop license does. A trial already ran everything, and still does. `licenseCheckOn` moved to license.ts, and license-check.ts exports it as before.
+- **node/developer-pro.ts, `developerPro`:** yes on the maker's laptop, as before, and now also on a PC holding a Workshop Pro license, so every agent that asks shows and does the Wright's, the Bailiff's and the Seneschal's work there without a change of its own. A trial doesn't turn it on yet: Workshop Pro isn't on sale, so a trial mustn't show its staff; once it is, a running trial joins (the place is marked in `holdsWorkshopPro`). `CASTELLAN_CUSTOMER=1` still answers no, a license and all, and `developerProForTests` still stands in for the whole PC.
+- **Developer Pro is named Workshop Pro** in words: the Seneschal's line in the staff's work list (work.ts, "It comes with Workshop Pro"), node/seneschal.ts, node/developer-pro.ts and spec/WORK-STATUS.md. Code names (`developerPro`, developer-pro.ts) stay.
+- **test/license-check.test.ts:** a Workshop Pro license verifies and runs every agent, paid, pending and lapsed; a license of an unknown tier holds. **test/developer-pro.test.ts:** a Workshop Pro license for this PC turns it on, paid, pending and lapsed; a running trial, Household, Workshop, another PC's license, a bad signature, an unknown tier or none don't; `CASTELLAN_CUSTOMER=1` still answers no; under `node --test` no license is read without `MANOR_LICENSE_CHECK=on`; a changed licence.json is read at once, an unchanged one kept an hour. test/seneschal.test.ts matches the new words.
 
 ### Before you update
 
