@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.258
+
+**It hands out the kit 2.144.2: the last agents of an update round finish their probation again, and are put back if their update stops answering.**
+
+### What changed
+
+- **The kit 2.144.2:** after an update, each agent is watched for 90 seconds and put back to the version before if it stops answering. That watch was ended along with Manor's update round when the round finished first, as it always did for the last agent or two and for an agent updated on its own. So their watch was cut short, and the copy of the version before stayed on the disk. Now the watch runs to its end however soon the round finishes, and the copy kept to go back to is removed once the update has held up.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent whose last update left its copy of the version before behind clears it at its next update.
+
 ## 0.36.257
 
 **After a release, Manor hears of it at once again, and the Steward says it's busy for the whole of its build, so it is never updated in the middle of one.**
