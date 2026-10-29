@@ -29,8 +29,14 @@ export const LICENSE_KEYS: readonly JsonWebKey[] = [
   { kty: 'OKP', crv: 'Ed25519', x: 'W6O2WhitICK24HcImbinHcTV6OvADrhM2b0_YN2VQlE', kid: '-X2Q5MnESm2aqCbITQ05JKgEQmixpZ4n06EaZx99Sr8', alg: 'EdDSA', use: 'sig' },
 ];
 
-/** A license's tier: what it holds. An agent's own tier is `free`, `household` or `workshop`. */
-export type LicenseTier = 'household' | 'workshop' | 'trial';
+/**
+ * A license's tier: what it holds. An agent's own tier is `free`, `household`, `workshop` or `workshop-pro`, each
+ * holding the ones before it; a trial holds every one (Workshop Pro, kit 2.144.1).
+ */
+export type LicenseTier = 'household' | 'workshop' | 'workshop-pro' | 'trial';
+
+/** The tiers a license may have: a license of any other is refused, so a kit learns a tier before the Exchequer sells it. */
+export const LICENSE_TIERS: readonly LicenseTier[] = ['household', 'workshop', 'workshop-pro', 'trial'];
 
 /** The license's payload, exactly the Exchequer's (its src/domain/license.ts). */
 export interface LicensePayload {
@@ -110,7 +116,7 @@ export function verifyLicense(jws: string, keys: readonly JsonWebKey[]): { paylo
   }
   const iso = (v: unknown) => typeof v === 'string' && Number.isFinite(Date.parse(v));
   if (
-    typeof p.lic !== 'string' || (p.tier !== 'household' && p.tier !== 'workshop' && p.tier !== 'trial') || !(p.updatesUntil === null || iso(p.updatesUntil)) ||
+    typeof p.lic !== 'string' || !LICENSE_TIERS.includes(p.tier as LicenseTier) || !(p.updatesUntil === null || iso(p.updatesUntil)) ||
     (p.runsUntil !== undefined && !iso(p.runsUntil)) || typeof p.devices !== 'number' || typeof p.sub !== 'string' || typeof p.iat !== 'number' || typeof p.exp !== 'number'
   ) {
     return { error: "its payload isn't a license's" };

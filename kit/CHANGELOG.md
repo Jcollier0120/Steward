@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.144.1
+
+**Ready for the Workshop Pro plan: every agent accepts a Workshop Pro license (tier `workshop-pro`) and runs under it as it does under Workshop. Until now a license of a tier the kit didn't know was refused as no license at all, so this kit reaches every agent before the Exchequer signs one.**
+
+### What's new
+
+- **node/license.ts:** `LicenseTier` gains `'workshop-pro'`, and `LICENSE_TIERS` lists the tiers a license may have: `household`, `workshop`, `workshop-pro` and `trial`. An agent's own tier is `free`, `household`, `workshop` or `workshop-pro`, each holding the ones before it; a trial holds every one.
+
+### What changed
+
+- **node/license.ts, `verifyLicense`:** a license whose tier is `workshop-pro` verifies. One of a tier not in `LICENSE_TIERS` is still refused ("its payload isn't a license's"), so the agent holds as it does with no license for this PC.
+- **node/license-check.ts, `judgeLicense`:** a Workshop Pro license runs every agent, whatever its tier, the Wright, the Bailiff and the Crier included: paid, waiting for its first payment, or lapsed (Freehold), as a Household or Workshop license does. A trial already ran everything, and still does.
+- **test/license-check.test.ts:** a Workshop Pro license verifies and runs every agent, paid, pending and lapsed; a license of an unknown tier holds.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.144.0
 
 **While a button's action runs, the whole page waits: the button pressed spins, and every control on the page is disabled until the action is done, has failed or has timed out, then focus is back where it was. A page's own button whose handler awaits `post()` gets it too.**

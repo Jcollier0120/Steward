@@ -133,7 +133,8 @@ export function judgeLicense(r: LicenseReading, now: number, latestSeen = 0): Li
     const ended = runs <= time;
     return { ...base, state: ended ? 'trial-ended' : 'trial', held: ended, ended, runsUntil: p.runsUntil ?? null };
   }
-  // Household or Workshop, of whatever tier this agent is: it runs (Manor holds back the updates a tier doesn't cover).
+  // Household, Workshop or Workshop Pro, of whatever tier this agent is: it runs (Manor holds back the updates a tier
+  // doesn't cover).
   if (p.updatesUntil === null) return { ...base, state: 'pending' };
   return { ...base, state: Date.parse(p.updatesUntil) >= now ? 'paid' : 'lapsed' };
 }

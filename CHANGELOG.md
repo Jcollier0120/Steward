@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.256
+
+**It hands out the kit 2.144.1: ready for the Workshop Pro plan.**
+
+### What changed
+
+- **The kit 2.144.1:** every agent accepts a Workshop Pro license and runs under it, as it does under Workshop. A license of a plan an agent doesn't know is still refused, so each agent learns Workshop Pro before anyone holds one.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.255
 
 **It hands out the kit 2.144.0: while a button's action runs, its page shows a spinner on it and waits, so nothing is pressed twice.**
