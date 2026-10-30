@@ -162,11 +162,11 @@ export const isGithubRepo = (repo: string) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+
  * How the Steward works with a repository (see above). With no look at what is installed yet (null), as before:
  * GitHub for a GitHub repository. Pure.
  */
-export function hostOf(e: Pick<Employee, 'repo'> & { resolvedPipeline?: ResolvedPipeline }, s: Pick<Settings, 'sourceControl' | 'releasesCastellan'>, look: ScmLook | null): Host {
+export function hostOf(e: Pick<Employee, 'repo'> & { resolvedPipeline?: ResolvedPipeline; hostHint?: Employee['hostHint'] }, s: Pick<Settings, 'sourceControl' | 'releasesCastellan'>, look: ScmLook | null): Host {
   if (s.releasesCastellan) return 'github';
   // Its pipeline's host (repoconfig.ts): none, or plain git, is plain git whatever else; a kind it names is worked with
   // that kind's way where its CLI is signed in here (a self-hosted GitLab whose name doesn't say gitlab), else plain git.
-  const said = e.resolvedPipeline?.host?.kind;
+  const said = e.resolvedPipeline?.host?.kind ?? e.hostHint;
   if (said === 'none' || said === 'git') return 'git';
   if (s.sourceControl === 'git') return 'git';
   if (s.sourceControl === 'github') return 'github';
@@ -238,6 +238,11 @@ export function originUrl(checkout: string): string | null {
  */
 export function repoFromUrl(url: string): string | null {
   const u = url.trim().replace(/\.git\/*$/i, '').replace(/\/+$/, '');
+  // A file: URL is a folder on this PC, as a path is (below): never a host called "file".
+  if (/^file:/i.test(u)) {
+    const name = u.replace(/^file:\/*/i, '').split(/[\\/]/).filter(Boolean).pop();
+    return name ? `local/${name}` : null;
+  }
   const gh = /github\.com[:/]+([^/\s]+)\/([^/\s]+)$/i.exec(u);
   if (gh) return `${gh[1]}/${gh[2]}`;
   const web = /^[a-z+]+:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+)$/i.exec(u);

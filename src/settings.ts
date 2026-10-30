@@ -5,7 +5,7 @@ import { dataDir } from './app.ts';
 import { DEFAULT_PIPELINE, normalizePipeline, type BuildPipeline } from './pipeline.ts';
 import { developerPro } from './kit/developer-pro.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
-import { agentUrl, manorHome, manorLink, manorProjects, originRepo, type ManorProject } from './kit/manor.ts';
+import { agentUrl, manorHome, manorLink, manorProjects, originName, originOf, originRepo, type ManorProject } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { takeOntoKit } from './employ.ts';
@@ -89,6 +89,11 @@ export interface Employee {
    * over them, and what its fields above always said for the rest. Never in settings.json; absent, its fields say all.
    */
   resolvedPipeline?: ResolvedPipeline;
+  /**
+   * The kind of host Manor's Repositories say it is on (a project's "host": a GitLab at code.acme.com, say), for scm.ts's
+   * hostOf where its name doesn't say. Never in settings.json; absent, its name says.
+   */
+  hostHint?: 'github' | 'gitlab' | 'bitbucket' | 'azure' | 'gitea';
 }
 
 export interface Settings {
@@ -926,15 +931,19 @@ export function withPipelines(s: Settings, read: (checkout: string) => { raw: un
 /**
  * One of Manor's tracked repositories (the kit's spec/REPOSITORIES.md) as the Steward looks after it: merged where it
  * says `merges`, released where it says `release`, its version claimed in its `versionFiles`; never on the kit, never
- * installed. Null for one with no repository on GitHub: the Steward works through pull requests. `taken` are the ids
- * already given, so each gets its own.
+ * installed. One with no repository is looked after only when its clone is local (no origin, or a folder as its origin:
+ * the kit's originOf), as local/<folder>, worked with plain git on this PC alone (Steward 0.36.264); one whose clone is
+ * on a host, but that names no repository, is left out, as before. Its "host", where it gives one, goes with it
+ * (hostHint), for a host whose name doesn't say. `taken` are the ids already given, so each gets its own.
  */
 export function employeeOfProject(p: ManorProject, taken: string[] = []): Employee | null {
-  if (!p.repo) return null;
+  const local = p.repo ? null : originOf(p.checkout, p.host);
+  if (!p.repo && local?.kind !== 'local') return null;
+  const repo = p.repo ?? originName(local!);
   const base = p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'repository';
   let id = base;
   for (let n = 2; taken.includes(id); n++) id = `${base}-${n}`;
-  return { id, name: p.name, repo: p.repo, checkout: p.checkout, branch: p.branch, merges: p.merges === true, usesKit: false, fill: '', test: p.test ? [p.test] : [], versionFiles: p.versionFiles, release: p.release ?? '', install: '', approve: '', installed: '', note: "from Manor's Repositories" };
+  return { id, name: p.name, repo, checkout: p.checkout, branch: p.branch, merges: p.merges === true, usesKit: false, fill: '', test: p.test ? [p.test] : [], versionFiles: p.versionFiles, release: p.release ?? '', install: '', approve: '', installed: '', note: "from Manor's Repositories", ...(p.host && p.host !== 'other' ? { hostHint: p.host } : {}) };
 }
 
 /**

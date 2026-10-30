@@ -6,6 +6,8 @@ import type { GetJson } from './alarms.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { manorHome, manorOwn, manorProjects, originRepo, projectsFrom } from './kit/manor.ts';
 import { originUrl, repoFromUrl } from './scm.ts';
+import { remoteOf } from './git.ts';
+import { readVersion } from './versions.ts';
 import { employeeFor } from './employ.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { branchTree, dotnetTests, dotnetVersionFiles, folderTree, type Tree } from './migrate.ts';
@@ -141,7 +143,9 @@ export async function findRepos(o: { run: Runner; cwd: string; getJson: GetJson;
     // On GitHub, owner/name; anywhere else, its origin's host/path (scm.ts): GitHub isn't required.
     const onGithub = githubOf(r);
     const url = !onGithub && typeof r.path === 'string' ? originUrl(r.path) : null;
-    const repo = onGithub ?? (url ? repoFromUrl(url) : null);
+    // A clone with no origin at all is a local one (remoteOf), as local/<folder>: worked with plain git on this PC alone.
+    const local = !onGithub && !url && typeof r.path === 'string' && existsSync(path.join(r.path, '.git')) && remoteOf(r.path) === '.';
+    const repo = onGithub ?? (url ? repoFromUrl(url) : local ? `local/${path.basename(r.path as string)}` : null);
     if (!repo || r.ignored === true || typeof r.path !== 'string' || seen.has(repo.toLowerCase())) continue;
     seen.add(repo.toLowerCase());
     const branch = typeof r.defaultBranch === 'string' && r.defaultBranch ? r.defaultBranch : typeof r.branch === 'string' && r.branch ? r.branch : 'main';
@@ -205,7 +209,15 @@ export function readClone(checkout: string, branch: string): { test: string[]; v
       if (at) versionFiles.push(`src/${at}`);
     }
   } else {
-    if (t.has('Cargo.toml')) test.push('cargo test');
+    // A crate's and a Python project's version is in its manifest (versions.ts reads both), when it keeps one there.
+    if (t.has('Cargo.toml')) {
+      test.push('cargo test');
+      if (readVersion('Cargo.toml', t.read('Cargo.toml') ?? '')) versionFiles.push('Cargo.toml');
+    }
+    if (t.has('pyproject.toml')) {
+      test.push('python -m pytest');
+      if (readVersion('pyproject.toml', t.read('pyproject.toml') ?? '')) versionFiles.push('pyproject.toml');
+    }
     if (t.has('go.mod')) test.push('go test ./...');
     test.push(...dotnetTests(t));
     versionFiles.push(...dotnetVersionFiles(t));
@@ -323,15 +335,18 @@ export function addToManor(e: Employee, home = manorHome()): string | null {
   if (raw.projects !== undefined && !Array.isArray(raw.projects)) return `Manor's Repositories can't be read (settings.json's "projects" isn't a list): put it right in Manor's Settings first.`;
   const list = [...((raw.projects as unknown[] | undefined) ?? [])];
   const tests = e.test.join(' && ');
+  // A local one (local/<folder>) has no repository to name: Manor's Repositories leave "repo" out for it, and with it
+  // the merges and the release they keep for one on a host (its own are its .steward.json's: repoconfig.ts).
+  const local = /^local\//i.test(e.repo);
   const entry = {
     name: e.name,
     checkout: e.checkout,
-    repo: e.repo,
+    ...(local ? {} : { repo: e.repo }),
     ...(e.branch !== 'main' ? { branch: e.branch } : {}),
     ...(tests && tests.length <= 300 ? { test: tests } : {}),
     ...(e.versionFiles.length ? { versionFiles: e.versionFiles } : {}),
-    ...(e.merges ? { merges: true } : {}),
-    ...(e.release ? { release: e.release } : {}),
+    ...(e.merges && !local ? { merges: true } : {}),
+    ...(e.release && !local ? { release: e.release } : {}),
   };
   const own = manorOwn({ home });
   const problems: string[] = [];

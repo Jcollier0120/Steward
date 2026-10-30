@@ -104,11 +104,15 @@ test("a repository's name from its origin, whatever the host", () => {
     ['ssh://git@bitbucket.org:7999/team/app.git', 'bitbucket.org/team/app'],
     ['\\\\nas\\git\\app.git', 'local/app'],
     ['D:/repos/app.git', 'local/app'],
+    ['file:///C:/repos/app.git', 'local/app'],
+    ['file://D:\\repos\\app', 'local/app'],
   ];
   for (const [url, name] of cases) assert.equal(S.repoFromUrl(url), name, url);
   assert.equal(S.isGithubRepo('octocat/app'), true);
   assert.equal(S.isGithubRepo('gitlab.com/group/app'), false);
-  assert.equal(S.isGithubRepo('local/app'), true, 'a local one reads as owner/name: worked with GitHub only when it is on it (its origin decides employ)');
+  // Steward 0.36.264: a local one is never sent to GitHub (it was, as owner/name, when its origin didn't say).
+  assert.equal(S.isGithubRepo('local/app'), false, 'a local one is worked with plain git, never asked of GitHub');
+  assert.equal(S.isGithubRepo('Local/App'), false);
 });
 
 test("git ls-remote read: the branch's head, and v<x.y.z> tags newest first, an annotated one at the commit it tags", () => {

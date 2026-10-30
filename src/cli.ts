@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { APP, pageUrl } from './app.ts';
@@ -12,6 +13,8 @@ import { claimPort, clashes, portUses, releasePort } from './ports.ts';
 import { anyRepo } from './found.ts';
 import { addEmployee, employeeFor as employeeFromCheckout } from './employ.ts';
 import { loadSettings, settingsFile } from './settings.ts';
+import { dryRun } from './dryrun.ts';
+import { loadScm } from './scm.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { open, shutdown, start, status, stop } from './kit/service.ts';
 import type { StageResult } from './stages/common.ts';
@@ -55,6 +58,12 @@ const USAGE = `${APP.id}: ${APP.role}
                    urgent fix (a commit on main whose changelog entry starts "**Urgent fix:"), which builds at
                    once for its repository; an urgent kit goes out to every agent in that build, and each is
                    built at once after it
+  build --dry-run <repo>
+                   the steps a build of one repository takes by its pipeline (its .steward.json, Settings'
+                   Pipelines, or what its fields always said): its builds, tests, version, notes, release,
+                   merges, vouches and refs. Nothing is run, fetched or written. <repo> is an id, a
+                   repository's name, or any clone's folder (one not looked after yet is read as Look after
+                   would take it). docs/PIPELINE.md says each option
   build [--employees a,b] [--to-customers]
                    the owner's override of the build pipeline: a build now, outside the set times, for the
                    repositories named or all; --to-customers lets its releases out to customers at once, not
@@ -244,6 +253,18 @@ async function stage(name: 'bump' | 'push' | 'release' | 'round'): Promise<numbe
  * refused without a console to type at, so a script or a coding session can't run one: their work waits for the next build.
  */
 async function buildNow(): Promise<number> {
+  // A dry run (repoconfig.ts): the steps a build of one repository would take, none of them run. Asked anywhere.
+  if (rest.includes('--dry-run')) {
+    const words = rest.filter((w) => w !== '--dry-run');
+    if (words.length !== 1) {
+      console.error('build --dry-run takes one repository: its id, its name (owner/name, host/path) or its clone\'s folder');
+      return 2;
+    }
+    const branchOf = (dir: string) => spawnSync('git', ['branch', '--show-current'], { cwd: dir, encoding: 'utf8', windowsHide: true }).stdout?.trim() || null;
+    const r = dryRun(loadSettings(), words[0], { look: loadScm(), currentBranch: branchOf });
+    for (const line of r.lines) console[r.code ? 'error' : 'log'](line);
+    return r.code;
+  }
   const bad: string[] = [];
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === '--employees') i++;
