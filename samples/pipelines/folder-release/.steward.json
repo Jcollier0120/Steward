@@ -1,0 +1,9 @@
+{
+  "//": "Built into dist, then dist copied to a folder as <folder>\\v<version>: a share, a drop folder, a USB stick (docs/PIPELINE.md)",
+  "build": ["npm run build"],
+  "test": ["npm test"],
+  "versioning": "claim",
+  "versionFiles": ["package.json"],
+  "changelog": "none",
+  "releaseTo": { "folder": "@SAMPLES@\\releases\\folder-release", "from": "dist" }
+}

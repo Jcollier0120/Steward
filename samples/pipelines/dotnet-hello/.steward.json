@@ -1,0 +1,9 @@
+{
+  "//": ".NET: published before its release, the .csproj's <VersionPrefix> carries the version, what dotnet publish leaves in publish copied to a folder as <folder>\\v<version> (docs/PIPELINE.md)",
+  "build": ["dotnet publish -c Release -o publish"],
+  "test": ["dotnet build -c Release"],
+  "versioning": "files",
+  "versionFiles": ["Hello.csproj"],
+  "changelog": "none",
+  "releaseTo": { "folder": "@SAMPLES@\\releases\\dotnet-hello", "from": "publish" }
+}

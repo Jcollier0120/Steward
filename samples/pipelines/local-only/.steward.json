@@ -1,0 +1,10 @@
+{
+  "//": "A repository on this PC alone: no origin, no host, no vouches, no shared refs; versioned by its tags (made in the clone), each release copied to a folder (docs/PIPELINE.md)",
+  "host": "none",
+  "test": ["test.cmd"],
+  "versioning": "tags",
+  "changelog": "none",
+  "releaseTo": { "folder": "@SAMPLES@\\releases\\local-only" },
+  "vouch": false,
+  "sharedRefs": false
+}

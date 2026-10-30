@@ -1,0 +1,11 @@
+{
+  "name": "folder-release",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hello, world: a sample built into dist and released to a folder, for the Steward's pipelines (docs/PIPELINE.md)",
+  "type": "module",
+  "scripts": {
+    "build": "node build.js",
+    "test": "node --test"
+  }
+}

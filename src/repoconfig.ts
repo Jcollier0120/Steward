@@ -210,6 +210,17 @@ function releaseTo(v: unknown): Read<ReleaseTo> {
 /** Keys a file may carry that aren't options: its schema, and a word for whoever reads it. */
 const IGNORED = new Set(['$schema', '//', 'comment', 'comments']);
 
+/** How many letters one word is from another (added, dropped or changed): Levenshtein's. Pure. */
+function distance(a: string, b: string): number {
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length];
+}
+
 /**
  * What one source says (Settings' pipeline, or a .steward.json's contents): each option it gives, read and checked, and
  * a sentence for each that is wrong, `where` first ("Settings", ".steward.json"). An option that is wrong is left out,
@@ -228,7 +239,9 @@ export function readPipeline(raw: unknown, where: string): { given: Partial<Repo
   for (const [k, v] of Object.entries(r)) {
     if (IGNORED.has(k)) continue;
     if (!(PIPELINE_KEYS as string[]).includes(k)) {
-      const like = PIPELINE_KEYS.find((o) => o.toLowerCase() === k.toLowerCase().replace(/[-_ ]/g, ''));
+      // The option meant: the same but for case and dashes, else one a slip of a letter or two away (tagFormt).
+      const bare = k.toLowerCase().replace(/[-_ ]/g, '');
+      const like = PIPELINE_KEYS.find((o) => o.toLowerCase() === bare) ?? PIPELINE_KEYS.find((o) => bare.length > 3 && distance(o.toLowerCase(), bare) <= 2);
       errors.push(`${where}: "${k}" isn't a pipeline option${like ? ` (did you mean "${like}"?)` : ''}; the options are ${PIPELINE_KEYS.join(', ')}`);
       continue;
     }
@@ -416,7 +429,8 @@ export interface DryStep {
 export function dryRunSteps(e: { name: string; repo: string; branch: string; checkout: string; resolvedPipeline?: ResolvedPipeline; test: string[]; versionFiles: string[]; release: string }, hostKind: string): DryStep[] {
   const p = pipelineOf(e);
   const steps: DryStep[] = [];
-  const at = `a fresh worktree of origin/${e.branch}`;
+  // A local one's (no host) is its own branch: it has no origin to fetch from (git.ts's remoteOf).
+  const at = `a fresh worktree of ${p.host?.kind === 'none' ? e.branch : `origin/${e.branch}`}`;
   for (const c of p.build) steps.push({ stage: 'build', what: `in ${at}`, command: c });
   for (const c of p.test) steps.push({ stage: 'test', what: `in ${at}; must pass`, command: c });
   if (!p.build.length && !p.test.length) steps.push({ stage: 'test', what: 'no tests: released untested' });

@@ -1,0 +1,8 @@
+{
+  "//": "Go: no file carries its version, its tags do (the patch after the newest, once there is something new; v0.1.0 first), notes none (docs/PIPELINE.md)",
+  "build": ["go vet ./..."],
+  "test": ["go test ./..."],
+  "versioning": "tags",
+  "changelog": "none",
+  "releaseTo": "tag"
+}

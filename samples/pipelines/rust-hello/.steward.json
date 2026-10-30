@@ -1,0 +1,11 @@
+{
+  "//": "Rust: built in release before its tests, Cargo.toml carries the version, released by a command of its own (cargo publish would go here; this one only runs it) and tagged rust-hello-v<version> (docs/PIPELINE.md)",
+  "build": ["cargo build --release"],
+  "test": ["cargo test"],
+  "versioning": "files",
+  "versionFiles": ["Cargo.toml"],
+  "changelog": "none",
+  "release": "cargo run --release",
+  "releaseTo": "command",
+  "tagFormat": "rust-hello-v{version}"
+}

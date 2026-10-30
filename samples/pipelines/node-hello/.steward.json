@@ -1,0 +1,8 @@
+{
+  "//": "Node.js, as the Steward always took one: versions claimed up front, package.json carries the version, a v<version> tag released (docs/PIPELINE.md)",
+  "test": ["npm test"],
+  "versioning": "claim",
+  "versionFiles": ["package.json"],
+  "changelog": "changelog-md",
+  "releaseTo": "tag"
+}

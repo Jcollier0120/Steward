@@ -1,0 +1,7 @@
+{
+  "//": "Wrong on purpose: each mistake is said in words, and its builds and releases are held until it is put right (docs/PIPELINE.md)",
+  "versioning": "sometimes",
+  "tagFormt": "v{version}",
+  "releaseTo": "command",
+  "vouch": "yes"
+}

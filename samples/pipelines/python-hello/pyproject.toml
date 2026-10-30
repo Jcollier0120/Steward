@@ -1,0 +1,8 @@
+[project]
+name = "python-hello"
+version = "0.1.0"
+description = "Hello, world: a Python sample for the Steward's pipelines (docs/PIPELINE.md)"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["."]
