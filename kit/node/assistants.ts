@@ -270,10 +270,11 @@ function entryFor(a: Assistant, s: McpServer): Record<string, unknown> {
   return { command: s.command, args, ...(env ? { env } : {}) };
 }
 
-const psQuote = (s: string) => (/^[A-Za-z0-9_\-.:\\/=@]+$/.test(s) ? s : `'${s.replace(/'/g, "''")}'`);
+/** A word as PowerShell (and a POSIX shell) takes it: as it is when plain, else in single quotes. */
+const psQuote = (s: string) => (/^[A-Za-z0-9_\-.:/=@]+$/.test(s) ? s : `'${s.replace(/'/g, "''")}'`);
 
-/** The `claude mcp add` arguments for a server, for every project (user scope). */
-export const claudeAddArgs = (s: McpServer): string[] => ['mcp', 'add', '--scope', 'user', ...Object.entries(s.env ?? {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]), s.name, '--', s.command, ...(s.args ?? [])];
+/** The `claude mcp add` arguments for a server, for every project (user scope): its name before -e, which takes every word up to --. */
+export const claudeAddArgs = (s: McpServer): string[] => ['mcp', 'add', '--scope', 'user', s.name, ...Object.entries(s.env ?? {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]), '--', s.command, ...(s.args ?? [])];
 
 /** The text to paste to add a server to an assistant by hand: a command for Claude Code, else its settings' part. Pure. */
 export function pasteFor(id: string, s: McpServer): string {
@@ -645,6 +646,9 @@ function removeMember(text: string, obj: JNode, m: JNode['members'][number]): st
     const c = skipSpace(text, prev.end);
     if (text[c] === ',' && c < start) out = `${out.slice(0, c)}${out.slice(c + 1)}`;
   }
+  // The only one gone: {} rather than an empty object over two lines.
+  const close = obj.end - 1 - (text.length - out.length);
+  if (obj.members.length === 1 && /^\s*$/.test(out.slice(obj.start + 1, close))) out = `${out.slice(0, obj.start + 1)}${out.slice(close)}`;
   return out;
 }
 

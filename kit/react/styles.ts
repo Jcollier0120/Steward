@@ -168,6 +168,12 @@ details.ui-connect[open] > summary { margin-bottom: 8px; }
 details.ui-connect.ui-connect-todo { border-left: 4px solid var(--accent); }
 .ui-connect-action { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
 .ui-connect-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+.ui-assistants { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ui-assistant { padding: 6px 10px; background: var(--bg); border-radius: 6px; min-width: 0; }
+.ui-assistant-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.ui-assistant-act { margin-left: auto; display: flex; gap: 6px; }
+.ui-assistant .ui-paste { margin-bottom: 4px; }
+.ui-assistant .ui-warn { color: var(--warn); margin: 4px 0 0; }
 .ui-paste { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0 10px; }
 .ui-paste pre { flex: 1; min-width: 0; margin: 0; padding: 8px 10px; background: var(--bg); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .ui-kept-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
