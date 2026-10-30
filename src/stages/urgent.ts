@@ -71,7 +71,7 @@ export async function urgentReady(ctx: Ctx, employees: Employee[], boarded: Set<
   const found = await mapLimit(employees, 4, async (e): Promise<UrgentPr | null> => {
     // The Steward's own from `heads`; an employee's from the glance, with the commit its newest release tags.
     const glance = heads[e.id] ? null : glanceOf(ctx, e);
-    const g = heads[e.id] ?? (glance ? { head: glance.head, tags: appReleasesIn(JSON.stringify(glance.releases)).map((r) => r.tag) } : null);
+    const g = heads[e.id] ?? (glance ? { head: glance.head, tags: appReleasesIn(JSON.stringify(glance.releases), e.resolvedPipeline?.tagFormat).map((r) => r.tag) } : null);
     const tagged = glance?.releases.find((r) => r.tagName === g?.tags[0])?.commit ?? null;
     if (!g?.head) return null;
     const u: UrgentPr = { id: e.id, head: g.head };

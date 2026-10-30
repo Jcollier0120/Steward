@@ -317,7 +317,8 @@ export async function takeGlance(
   const byGit = settings.employees.filter((e) => host(e) === 'git');
   for (const e of byGit) {
     try {
-      glance.repos[e.id] = await gitGlance(run, { branch: e.branch, checkout: path.resolve(expandEnv(e.checkout)) });
+      // Its tags by its pipeline's tagFormat (repoconfig.ts): read as v<x.y.z>, a fake-0.4.0 was never released.
+      glance.repos[e.id] = await gitGlance(run, { branch: e.branch, checkout: path.resolve(expandEnv(e.checkout)) }, e.resolvedPipeline?.tagFormat);
     } catch (err) {
       glance.errors[e.id] = (err as Error).message;
     }

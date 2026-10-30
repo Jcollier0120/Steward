@@ -338,7 +338,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
   // Worked with plain git (scm.ts): its origin's branch and tags, and no PRs; GitHub isn't asked.
   const byGit = hostIs(ctx, e) === 'git';
   let gitErr: string | null = null;
-  const g = glanceOf(ctx, e) ?? (byGit ? await gitGlance(run, { branch: e.branch, checkout: dir }).catch((err) => ((gitErr = (err as Error).message), null)) : null);
+  const g = glanceOf(ctx, e) ?? (byGit ? await gitGlance(run, { branch: e.branch, checkout: dir }, e.resolvedPipeline?.tagFormat).catch((err) => ((gitErr = (err as Error).message), null)) : null);
 
   const local = (async () => {
     if (!row.checkout.exists) return void notes.push(`no checkout at ${dir}`);
@@ -386,7 +386,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     .catch((err) => void (notes.push(`couldn't list its PRs: ${(err as Error).message}`), shaky.add(row)));
 
   const releases = (g ? Promise.resolve(JSON.stringify(g.releases)) : byGit ? Promise.reject(new Error(gitErr ?? 'no answer from its origin')) : hostFor({ ...ctx, run }, e).listReleases(e.repo, 'tagName,isDraft,publishedAt').then(must))
-    .then((out) => appReleasesIn(out))
+    .then((out) => appReleasesIn(out, e.resolvedPipeline?.tagFormat))
     .catch((err) => {
       notes.push(`couldn't list its releases: ${(err as Error).message}`);
       shaky.add(row);

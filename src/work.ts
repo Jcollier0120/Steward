@@ -578,7 +578,7 @@ async function newestRelease(o: { run: Runner; cwd: string; glance?: Glance | nu
   const r = g ? { code: 0, out: JSON.stringify(g.releases), err: '' } : await hostFor({ run: o.run, neutralDir: o.cwd }).listReleases(e.repo, 'tagName,isDraft,publishedAt');
   let listed: ReleaseInfo[] = [];
   try {
-    if (r.code === 0) listed = appReleasesIn(r.out);
+    if (r.code === 0) listed = appReleasesIn(r.out, e.resolvedPipeline?.tagFormat);
   } catch {
     listed = [];
   }
