@@ -32,7 +32,7 @@ import { RETIRED, retiredOf } from '../retired.ts';
  * the kit rolled out.
  *
  * An agent Manor has retired (its staff.json: retired.ts) gets no kit: the rounds pass it over, and a bump of it that
- * failed before is let go. A person's Bump or Push naming it still does it.
+ * failed before is let go. (Since Steward 0.36.261 it is no employee at all: settings.ts's inEffect.)
  *
  * Every employee rides the build pipeline (Steward 0.36.248): its PRs write changes/<branch>.md, and the build stamps the
  * version (stamp.ts). One behind the kit gets changes/README.md with its kit bump, which writes its own entry there and

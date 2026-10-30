@@ -21,7 +21,7 @@ import { allowUpdate } from './safeinstall.ts';
 import { loadClaims } from './claims.ts';
 import { testedView } from './tested.ts';
 import { findRepos, foundStale, foundView, loadFound, lookAfterAll } from './found.ts';
-import { handOver, turnsView, type TurnsDeps } from './lease.ts';
+import { handOver, releasesHere, turnsView, type TurnsDeps } from './lease.ts';
 import { claimClashes } from './claims.ts';
 import { passedLines, passedWords } from './passover.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
@@ -492,8 +492,12 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         return { json: { on: loadSettings().alarms.on, at: a.at, open: a.open, cleared: a.cleared, page: '/#alarms' } };
       },
       // The build pipeline (pipeline.ts): its times, the next build, and whether one is under way. Manor holds its
-      // installs while `building`, and installs once, when the build has ended.
-      '/api/pipeline': () => ({ json: pipelineView(loadSettings().buildPipeline, loadPipeline()) }),
+      // installs while `building`, and installs once, when the build has ended; and offers Build now only where
+      // `releasesHere`: this PC releases one of the repositories looked after, the Steward's own among them (lease.ts).
+      '/api/pipeline': () => {
+        const s = loadSettings();
+        return { json: { ...pipelineView(s.buildPipeline, loadPipeline()), releasesHere: releasesHere([...s.employees.map((e) => e.repo), ...(s.stewardRepo ? [s.stewardRepo] : [])]) } };
+      },
     }),
     post: gatePosts({
       '/api/stage/bump': stagePost('bump'),

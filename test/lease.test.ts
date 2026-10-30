@@ -519,3 +519,14 @@ test("a round's two looks at the turns are one guard: each employee is asked of 
   assert.equal(await g.ok(emp('nobody', r1)), false, 'no look took a turn for it');
   assert.equal(L.joinGuards(null, first.guard), first.guard);
 });
+
+test("releasesHere: this PC releases a repository whose turn it holds or no other PC does; not one another PC holds, nor none", () => {
+  const rec = { pc: B.id, name: B.name, until: new Date(T0 + TTL).toISOString(), since: new Date(T0).toISOString(), pinned: false };
+  const at = new Date(T0).toISOString();
+  const s = (repos: Record<string, import('../src/lease.ts').RepoTurn>) => ({ at, device: A, repos });
+  const elsewhere = s({ 'me/app': { repo: 'me/app', status: 'elsewhere', record: rec, at }, 'me/web': { repo: 'me/web', status: 'elsewhere', record: rec, at } });
+  assert.equal(L.releasesHere(['me/app', 'Me/Web'], elsewhere), false, "every turn another PC's");
+  assert.equal(L.releasesHere([], elsewhere), false, 'nothing looked after');
+  assert.equal(L.releasesHere(['me/app', 'me/new'], elsewhere), true, 'no turn taken yet for one: no other PC holds it');
+  for (const status of ['here', 'alone', 'unreachable'] as const) assert.equal(L.releasesHere(['me/app', 'me/web'], s({ ...elsewhere.repos, 'me/web': { repo: 'me/web', status, at } })), true, status);
+});
