@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { deflateSync, inflateSync } from 'node:zlib';
+import { gitCommonDir, remoteUrl } from './kit/git-auth.ts';
 import type { Ran, Runner } from './run.ts';
 
 /** A git or gh command that failed: its words and what it said. */
@@ -40,11 +41,29 @@ export async function gh(run: Runner, cwd: string, ...args: string[]): Promise<s
  */
 export async function fetchFor(run: Runner, repo: string, sha: string | null | undefined, ref: string): Promise<void> {
   if (sha && hasObject(repo, sha)) return;
-  await git(run, repo, 'fetch', '--quiet', 'origin', ref);
+  await git(run, repo, 'fetch', '--quiet', remoteOf(repo), ref);
 }
 
-/** Fetches one branch from origin, so origin/<branch> is fresh. */
-export const fetchBranch = (run: Runner, repo: string, branch: string) => git(run, repo, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
+/**
+ * Where a clone's branch and tags are read from: `origin`, or the clone itself (`.`) when its config names no remote at
+ * all, a local-only repository (Steward 0.36.264). Fetched from `.`, its origin/<branch> is its own branch, so every
+ * stage that reads origin/<branch> reads it as it would anyone's; `git ls-remote .` lists its own tags. One whose config
+ * can't be read, or includes another file (where an origin may be), is asked of origin, as before. No git started.
+ */
+export function remoteOf(repo: string): 'origin' | '.' {
+  if (remoteUrl(repo, 'origin') !== null) return 'origin';
+  try {
+    const common = gitCommonDir(repo);
+    if (!common) return 'origin';
+    const config = readFileSync(path.join(common, 'config'), 'utf8');
+    return /^\s*\[\s*(include|includeIf|remote)\b/im.test(config) ? 'origin' : '.';
+  } catch {
+    return 'origin';
+  }
+}
+
+/** Fetches one branch from origin (or a local-only clone's own: remoteOf), so origin/<branch> is fresh. */
+export const fetchBranch = (run: Runner, repo: string, branch: string) => git(run, repo, 'fetch', '--quiet', remoteOf(repo), `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
 
 /** One read waiting for its repository's batch. */
 interface Ask {
