@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.264
+## 0.36.266
 
 **Each repository is built and released by its own instructions: a `.steward.json` in it (or Settings' Pipelines) says its build and test commands, how it is versioned, its tag format, its notes and where a release goes. A repository on GitLab, Azure DevOps, Gitea, Bitbucket, any git server or this PC alone is looked after as fully as one on GitHub, and `steward build --dry-run` shows a build's steps before anything runs.**
 
@@ -19,6 +19,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: a repository with no `.steward.json` and nothing in Settings' Pipelines is built, tested, versioned and released exactly as before, and settings.json, staff.json and Manor's Repositories read as they did.
+
+## 0.36.265
+
+**It hands out the kit 2.146.1. That version only explains, for the staff's makers, how a staff member's git sign-in must be given its environment. Nothing you see changes.**
+
+### What changed
+
+- **The kit 2.146.1:** its git sign-in says how the environment it hands a command is used: added to the command's own environment, never the whole of it. One staff member, the Assayer, used it the other way. That was fixed in the Assayer itself: its https fetches had run without your proxy and your git settings.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.36.263
 

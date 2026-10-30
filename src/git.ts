@@ -46,7 +46,7 @@ export async function fetchFor(run: Runner, repo: string, sha: string | null | u
 
 /**
  * Where a clone's branch and tags are read from: `origin`, or the clone itself (`.`) when its config names no remote at
- * all, a local-only repository (Steward 0.36.264). Fetched from `.`, its origin/<branch> is its own branch, so every
+ * all, a local-only repository (Steward 0.36.266). Fetched from `.`, its origin/<branch> is its own branch, so every
  * stage that reads origin/<branch> reads it as it would anyone's; `git ls-remote .` lists its own tags. One whose config
  * can't be read, or includes another file (where an origin may be), is asked of origin, as before. No git started.
  */

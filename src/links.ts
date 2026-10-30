@@ -2,7 +2,7 @@ import type { Host } from './scm.ts';
 
 /**
  * A repository's pages on its host (its own, a release's, a commit's, a compare's), for the Steward's page and its
- * results: Steward 0.36.264, when each was GitHub's whatever the host. Pure, with no node imports, so the page's bundle
+ * results: Steward 0.36.266, when each was GitHub's whatever the host. Pure, with no node imports, so the page's bundle
  * takes it too. A repository is named as scm.ts names it: owner/name on GitHub, host/path anywhere else, local/<folder>
  * for one on this PC alone. Null where there is no such page: a local one, or a host whose pages aren't known.
  */

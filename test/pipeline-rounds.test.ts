@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// Whole rounds by a repository's own pipeline (repoconfig.ts, Steward 0.36.264), on a PC with Git alone and no network:
+// Whole rounds by a repository's own pipeline (repoconfig.ts, Steward 0.36.266), on a PC with Git alone and no network:
 // one on this PC alone, released to a folder by its tags; one on a GitLab that isn't there (its origin a plain git folder
 // under that name), tagged by its own format; one whose pipeline can't be read, held while the others carry on; and an
 // install from before, whose settings read exactly as they did. Nothing reaches a host, the live ~/.steward or Manor.

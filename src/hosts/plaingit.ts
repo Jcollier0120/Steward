@@ -4,7 +4,7 @@ import type { Answer, PrState, SourceHost } from './host.ts';
  * A repository worked with plain git (scm.ts) that isn't on GitHub: on a host whose CLI isn't signed in here, a server of
  * your own, or no host at all. It has no pull requests, commit statuses, releases or issues the Steward can ask for, so
  * every question is answered as refused, in words that say why, rather than asked of GitHub about a repository that
- * isn't there (Steward 0.36.264: hostFor fell back to GitHub's for every one). The stages pass over such a repository
+ * isn't there (Steward 0.36.266: hostFor fell back to GitHub's for every one). The stages pass over such a repository
  * before they would ask; this is what answers one that didn't.
  */
 export class PlainGit implements SourceHost {

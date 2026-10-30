@@ -110,7 +110,7 @@ test("a repository's name from its origin, whatever the host", () => {
   for (const [url, name] of cases) assert.equal(S.repoFromUrl(url), name, url);
   assert.equal(S.isGithubRepo('octocat/app'), true);
   assert.equal(S.isGithubRepo('gitlab.com/group/app'), false);
-  // Steward 0.36.264: a local one is never sent to GitHub (it was, as owner/name, when its origin didn't say).
+  // Steward 0.36.266: a local one is never sent to GitHub (it was, as owner/name, when its origin didn't say).
   assert.equal(S.isGithubRepo('local/app'), false, 'a local one is worked with plain git, never asked of GitHub');
   assert.equal(S.isGithubRepo('Local/App'), false);
 });

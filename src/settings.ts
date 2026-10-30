@@ -932,7 +932,7 @@ export function withPipelines(s: Settings, read: (checkout: string) => { raw: un
  * One of Manor's tracked repositories (the kit's spec/REPOSITORIES.md) as the Steward looks after it: merged where it
  * says `merges`, released where it says `release`, its version claimed in its `versionFiles`; never on the kit, never
  * installed. One with no repository is looked after only when its clone is local (no origin, or a folder as its origin:
- * the kit's originOf), as local/<folder>, worked with plain git on this PC alone (Steward 0.36.264); one whose clone is
+ * the kit's originOf), as local/<folder>, worked with plain git on this PC alone (Steward 0.36.266); one whose clone is
  * on a host, but that names no repository, is left out, as before. Its "host", where it gives one, goes with it
  * (hostHint), for a host whose name doesn't say. `taken` are the ids already given, so each gets its own.
  */

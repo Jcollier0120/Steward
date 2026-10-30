@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 /**
- * A repository's own pipeline (Steward 0.36.264): how the Steward builds, tests, versions and releases it, by the
+ * A repository's own pipeline (Steward 0.36.266): how the Steward builds, tests, versions and releases it, by the
  * repository's instructions rather than the way it works with its own agents. Each option is Settings' for the
  * repository (its record's `pipeline`, or Settings' `pipelines` by its id or repository, for one Manor's Repositories
  * bring), and a `.steward.json` committed at the root of its clone overrides Settings, option by option. Left out, every

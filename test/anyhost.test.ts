@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// A repository on any host, or on none (Steward 0.36.264): its pages, the host worked with, what plain git refuses in
+// A repository on any host, or on none (Steward 0.36.266): its pages, the host worked with, what plain git refuses in
 // words, merging by each host's own command, its version in Cargo.toml or pyproject.toml, Look after and Manor's
 // Repositories for one with no origin, its refs kept here, and the team named from every host's account.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-anyhost-'));

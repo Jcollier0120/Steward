@@ -198,7 +198,7 @@ export function dotnetTests(checkout: string | Tree): string[] {
 export function dotnetVersionFiles(checkout: string | Tree): string[] {
   const t = typeof checkout === 'string' ? folderTree(checkout) : checkout;
   const sets = (f: string) => /<VersionPrefix>/.test(t.read(f) ?? '');
-  // A project at the clone's top (one project alone, Steward 0.36.264), or one folder down.
+  // A project at the clone's top (one project alone, Steward 0.36.266), or one folder down.
   const top = t.list('').filter((f) => f.endsWith('.csproj') && !t.isDir(f));
   const own = [
     ...top,
