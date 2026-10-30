@@ -185,6 +185,9 @@ export function withTeam(settings: Settings, log: (line: string) => void, owner?
 /** The account signed in on each GitLab, Azure DevOps organization, Gitea and Bitbucket, by its address, as last asked (an hour at most). */
 const hostAccounts = new Map<string, { login: string | null; at: number }>();
 
+/** The accounts known on other hosts (withHostTeams), each by where it is: for the page's team (team.ts). */
+export const hostLogins = (): { login: string; at: string }[] => [...hostAccounts].flatMap(([at, k]) => (k.login ? [{ login: k.login, at }] : []));
+
 /** Where an account is its own: a GitLab, a Gitea or Bitbucket by its host name, an Azure DevOps organization by its address. */
 const accountsAt = (host: Host, repo: string) => (host === 'gitlab' ? whereIs(repo).hostname : host === 'azure' ? (whereAzure(repo)?.base ?? null) : host === 'gitea' ? (whereGitea(repo)?.hostname ?? null) : host === 'bitbucket' ? 'bitbucket.org' : null);
 

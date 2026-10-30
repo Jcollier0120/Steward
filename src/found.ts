@@ -14,6 +14,7 @@ import { branchTree, dotnetTests, dotnetVersionFiles, folderTree, type Tree } fr
 import { retiredStaff } from './retired.ts';
 import type { Runner } from './run.ts';
 import { gitExe } from './kit/git-exe.ts';
+import { expandEnv } from './kit/settings-kit.ts';
 import { employeesOfProjects, inEffect, isSelf, loadSettings, manorTakesOver, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
 
 /**
@@ -263,7 +264,34 @@ export function employeeFromFound(r: FoundRepo, o: { taken: string[]; merges: bo
  * Look after: the found repository added to Settings (settings.json's employees, the rest of the file as it was). An
  * error in words when it isn't one the Steward can offer.
  */
-export function lookAfter(repo: string, o: { merges: boolean; release: boolean; found?: FoundState; file?: string; manorHome?: string }): { employee: Employee } | { error: string } {
+/**
+ * A clone named by its folder, as Reeve would list it (Add on the page, for one on any host, or none, that he didn't
+ * find): its origin's name, else local/<folder>; the branch checked out, else main. Never asked of GitHub (byGit): you
+ * name it yourself. Null when the folder is no clone.
+ */
+export function foundOfFolder(folder: string, branchOf: (dir: string) => string | null = checkedOut): FoundRepo | null {
+  const dir = path.resolve(expandEnv(folder.trim().replace(/^"|"$/g, '')));
+  if (!folder.trim() || !existsSync(path.join(dir, '.git'))) return null;
+  const url = originUrl(dir);
+  const repo = url ? repoFromUrl(url) : `local/${path.basename(dir)}`;
+  if (!repo) return null;
+  return { repo, name: path.basename(dir).toLowerCase(), path: dir, branch: branchOf(dir) || 'main', lockfiles: [], push: null, byGit: true };
+}
+
+/** The branch checked out in a clone, by git; null when it can't say (a detached head). */
+function checkedOut(dir: string): string | null {
+  try {
+    return execFileSync(gitExe(), ['branch', '--show-current'], { cwd: dir, encoding: 'utf8', windowsHide: true, timeout: 20_000 }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Look after one: a repository Reeve found (`repo`, as the page offers it), or with `folder` any clone on this PC
+ * (foundOfFolder), on GitHub, another host or none.
+ */
+export function lookAfter(repo: string, o: { merges: boolean; release: boolean; found?: FoundState; file?: string; manorHome?: string; folder?: string }): { employee: Employee } | { error: string } {
   // Settings read once first, so a new install is known as one before this writes its settings.json (migrate.ts).
   if (!o.file) loadSettings();
   const file = o.file ?? settingsFile();
@@ -279,8 +307,15 @@ export function lookAfter(repo: string, o: { merges: boolean; release: boolean; 
   const current = intoManor ? employeesOfProjects(manorProjects(home)) : own.employees;
   // The Steward's own, on the PC that releases it: looked after as itself already (settings.ts's inEffect).
   const self = inEffect(own, own.wrightHere, null, { makers });
+  const byFolder = o.folder !== undefined ? foundOfFolder(o.folder) : null;
+  if (o.folder !== undefined && !byFolder) return { error: `${o.folder.trim() || 'No folder'} is no clone (it has no .git): give the folder of a repository's clone on this PC.` };
+  if (byFolder) {
+    if (current.some((e) => same(e.repo, byFolder.repo) || (e.checkout && samePath(expandEnv(e.checkout), byFolder.path))) || isSelf(self, byFolder)) return { error: `${byFolder.repo} is looked after already: see Settings, under Repositories.` };
+    const theirsToo = makersOwn({ repo: byFolder.repo }, { makers, byId: false });
+    if (theirsToo) return { error: theirsToo };
+  }
   const found = o.found ?? loadFound();
-  const r = candidates(found, current, makers, self).find((x) => same(x.repo, repo));
+  const r = byFolder ?? candidates(found, current, makers, self).find((x) => same(x.repo, repo));
   if (!r) {
     if (current.some((e) => same(e.repo, repo)) || isSelf(self, { repo })) return { error: `${repo} is looked after already: see Settings, under Repositories.` };
     return { error: `${repo} isn't one Reeve found here that you can push to. Refresh the list, or add it in Settings.` };

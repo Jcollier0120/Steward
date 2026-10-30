@@ -14,7 +14,7 @@ export const ONBOARDING: Onboarding = {
   tour: [
     { tour: 'alarms', title: 'Needs you', text: 'What it could not settle by itself: a release it gave up on, say. Each clears by itself once it is fixed.' },
     { tour: 'last', title: 'Last stage', text: 'What it did last, a round or a stage you pressed: repository by repository, with the output of anything that failed.' },
-    { tour: 'found', title: 'Found on this PC', text: 'Your repositories on GitHub that Reeve found here and you can push to. Look after one, and tick whether it may release new versions.' },
+    { tour: 'found', title: 'Found on this PC', text: 'Your repositories that Reeve found here: on GitHub the ones you can push to, and each one on another host or on this PC alone. Look after one, and tick whether it may release new versions.' },
     { tour: 'staff', title: 'Your repositories', text: 'Each one it looks after: its version on its branch, its newest release, its open pull requests, and what you let it do.' },
     { tour: 'stages', title: 'Release', text: 'Release new versions when you want them by hand, rather than at the next build.' },
   ],
