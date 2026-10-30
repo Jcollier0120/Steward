@@ -99,6 +99,32 @@ export const loadLastStage = () => readJson<StageResult | null>(lastStageFile(),
 export const loadStaff = () => readJson<Staff | null>(staffFile(), null);
 
 /**
+ * What the alarms read from the files the stages keep (alarms.ts roundConditions): the releases, rollouts and refreshes
+ * that failed, the holds and waits, the PRs passed over in the staff's table. A round's alarms, and a recheck's between
+ * rounds (recheck.ts), read them alike.
+ */
+export function keptAlarmSources(settings: Settings) {
+  return {
+    settings,
+    employees: settings.employees,
+    failedReleases: readJson<Record<string, string>>(roundFailuresFile(), {}),
+    failedRollouts: loadRolloutFailures(),
+    failedSelf: loadSelfFailures(),
+    tastingHolds: loadTastingHolds(),
+    signingWaits: loadSigningWaits(),
+    signingAhead: loadSigningAhead(),
+    exchequerPending: loadExchequerPending(),
+    tending: settings.tend ? loadTending() : null,
+    unstick: settings.tend ? loadUnstick() : null,
+    unsafe: loadUnsafe(),
+    migrated: pendingMigration(settingsFile()),
+    failedRefreshes: loadRefreshFailures(),
+    installHolds: loadInstallHolds(),
+    passedOver: passedConditions(passedLines(loadStaff()?.rows ?? [])),
+  };
+}
+
+/**
  * One glance at GitHub for every employee (glance.ts), or null, said in the log, when GitHub can't be asked that way.
  * What GitHub says of the account's API budget is kept (budget.ts); when GitHub refuses the account, one line says
  * so and until when nothing is asked of it.
@@ -972,7 +998,6 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // After every round, done or not: what needs the person (alarms.ts).
       if (name === 'round') {
         try {
-          const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
           // Merged or released by something that isn't this Steward (strangers.ts): looked for only in a round that asked GitHub.
           const strangers = await lookForStrangers({ ctx, glance: quiet || out.error ? null : ctx.glance, alarms: loadAlarms(), now: o.now?.() });
           lap('strangers');
@@ -980,7 +1005,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
           const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
           lap('ports');
-          await watchAlarms({ settings: ctx.settings, round: out, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, heldKit: heldKit(readJson<Record<string, KitTrial>>(kitTrialsFile(), {}), ctx.kit.released), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), signingAhead: loadSigningAhead(), exchequerPending: loadExchequerPending(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), passedOver: passedConditions(passedLines(loadStaff()?.rows ?? [])), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir, glance: quiet || out.error ? null : ctx.glance }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ ...keptAlarmSources(ctx.settings), round: out, strangers, ports, rolloutWaits, heldKit: heldKit(readJson<Record<string, KitTrial>>(kitTrialsFile(), {}), ctx.kit.released), log, run: ctx.run, neutralDir: ctx.neutralDir, glance: quiet || out.error ? null : ctx.glance }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }

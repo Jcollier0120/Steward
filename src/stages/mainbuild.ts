@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fetchFor, gitMaybe, removeWorktree } from '../git.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
@@ -9,7 +9,7 @@ import { setVouch, stoodInDescription, vouchDescription, vouchOn } from './vouch
 import type { StoodIn } from './standin.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor } from '../hosts/index.ts';
-import { noteMerged } from '../strangers.ts';
+import { noteAsked, noteMerged } from '../strangers.ts';
 import { headsMoved } from '../heads.ts';
 import { treeOf, wholePassOf } from '../whole.ts';
 
@@ -164,37 +164,76 @@ export async function mainGate(ctx: Ctx, e: Employee, commit: string, since: str
 /** How long the Steward waits before asking GitHub again to merge a PR of its own it has just opened. */
 export const OWN_MERGE_WAITS_MS = [5_000, 15_000, 30_000];
 
+/** GitHub's answer while a merge asked for already is under way: the PR is being merged, not refused. */
+const BEING_MERGED = /merge already in progress/i;
+
+/**
+ * Whether a PR of the Steward's own has landed though its merge answered otherwise: the host says it is merged at `head`,
+ * or `head` is in the employee's branch already (fetched into the checkout here). Never throws: false when it can't tell.
+ *
+ * On 2026-10-30 every ask to merge Thatcher#99 answered "Merge already in progress", while GitHub had put its merge commit
+ * on main at 01:09:08, seconds after the first ask; it called the PR merged only at 14:01, and the round after took that
+ * merge for a stranger's (strangers.ts).
+ */
+async function landed(ctx: Ctx, e: Employee, pr: { number: number; head: string }): Promise<boolean> {
+  const v = await hostFor(ctx, e).viewPr(e.repo, pr.number, 'state,headRefOid').catch(() => null);
+  try {
+    const p = v?.code === 0 ? (JSON.parse(v.out) as { state?: string; headRefOid?: string }) : null;
+    if (p?.state === 'MERGED' && p.headRefOid === pr.head) return true;
+  } catch {
+    // Not told by the host: the branch says.
+  }
+  const repo = checkoutOf(e);
+  if (!existsSync(repo)) return false;
+  if ((await gitMaybe(ctx.run, repo, 'fetch', '--quiet', 'origin', `+refs/heads/${e.branch}:refs/remotes/origin/${e.branch}`)) === null) return false;
+  const r = await ctx.run('git', ['merge-base', '--is-ancestor', pr.head, `origin/${e.branch}`], { cwd: repo, timeoutMs: 60_000 }).catch(() => null);
+  return r?.code === 0;
+}
+
 /**
  * A PR the Steward opened itself (a kit's rollout, a stamp), merged by it at `head`, its branch deleted: GitHub may need
  * a moment to tell whether a PR just opened merges, so a refusal is asked again after each of OWN_MERGE_WAITS_MS. Null
  * once merged, else why not. Never throws.
+ *
+ * After each answer that isn't a merge, it looks whether the PR landed all the same (landed): then it is this Steward's
+ * merge, carried out by GitHub from its ask. "Merge already in progress" is such a merge under way: it is looked at after
+ * each wait, not asked for again, and noted as asked (strangers.ts noteAsked), so a round that finds it merged later
+ * counts it as this Steward's.
  *
  * Merged, its branch has moved past the stage's glance, so what comes after in the round (a build's release above all)
  * reads it from GitHub afresh (common.ts's freshBranch). On 2026-10-19 a build stamped Manor 0.17.2 again, its entry
  * taking in the Seneschal's, and then released v0.17.2 from the commit before that stamp: the glance and the clone both
  * still said that commit, so nothing was fetched (Steward 0.36.160).
  */
-export async function mergeOwn(ctx: Ctx, e: Pick<Employee, 'id' | 'repo'>, pr: { number: number; head: string }): Promise<string | null> {
+export async function mergeOwn(ctx: Ctx, e: Employee, pr: { number: number; head: string }): Promise<string | null> {
   const host = hostFor(ctx, e);
   const pause = ctx.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const sha = pr.head.slice(0, 7);
+  const merged = (how: string) => {
+    // This Steward's merge, not a stranger's (strangers.ts).
+    noteMerged(e, pr.number);
+    forgetGlance(ctx, e);
+    // And the repository's heads read again in a moment (heads.ts), so Reeve brings its clones up to the merge.
+    headsMoved(e.repo);
+    ctx.log(`[${e.id}] merged its own #${pr.number} (${sha})${how}`);
+    return null;
+  };
   let why = '';
+  let merging = false;
   for (const ms of [0, ...OWN_MERGE_WAITS_MS]) {
     if (ms) await pause(ms);
-    const r = await host.mergePr(e.repo, pr.number, { matchHead: pr.head, deleteBranch: true }).catch((err: Error) => ({ code: 1, out: '', err: err.message }));
-    if (r.code === 0) {
-      // This Steward's merge, not a stranger's (strangers.ts).
-      noteMerged(e, pr.number);
-      forgetGlance(ctx, e);
-      // And the repository's heads read again in a moment (heads.ts), so Reeve brings its clones up to the merge.
-      headsMoved(e.repo);
-      ctx.log(`[${e.id}] merged its own #${pr.number} (${pr.head.slice(0, 7)})`);
-      return null;
+    if (!merging) {
+      const r = await host.mergePr(e.repo, pr.number, { matchHead: pr.head, deleteBranch: true }).catch((err: Error) => ({ code: 1, out: '', err: err.message }));
+      if (r.code === 0) return merged('');
+      why = (r.err || r.out).trim().split('\n').pop() ?? '';
+      // Its head moved: someone pushed to it, and it is theirs to merge now.
+      if (/head.*(changed|modified|out of date)|expected head sha/i.test(why)) break;
+      merging = BEING_MERGED.test(why);
+      if (merging) noteAsked(e, pr.number, pr.head);
     }
-    why = (r.err || r.out).trim().split('\n').pop() ?? '';
-    // Its head moved: someone pushed to it, and it is theirs to merge now.
-    if (/head.*(changed|modified|out of date)|expected head sha/i.test(why)) break;
+    if (await landed(ctx, e, pr)) return merged(`: ${host.name} answered "${why}", and merged it`);
   }
-  return `${host.name} wouldn't merge #${pr.number}: ${why}`;
+  return merging ? `${host.name} is merging #${pr.number} still: ${why}` : `${host.name} wouldn't merge #${pr.number}: ${why}`;
 }
 
 /** The PR's number in its URL (…/pull/12, GitLab's …/merge_requests/12, Bitbucket's …/pull-requests/12), or null. Pure. */

@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.260
+
+**Items the Steward raises clear as soon as you've done what they ask, and a merge GitHub was still finishing no longer looks like another Steward's.**
+
+### What's new
+
+- Once Castellan is updated too, an item the Steward raised clears as soon as you've done what it asks: released by hand, the PR it passed over merged or labelled owner-done, the fix pushed. It clears when you come back to Manor's page or press one of its buttons, not at the next round, up to ten minutes later. The Steward reads what its own records and the other agents' pages say then, and looks at GitHub for each such item, no more than once a minute.
+
+### What changed
+
+- When GitHub answered the Steward's merge with "Merge already in progress" and went on merging the PR itself, the Steward raised "Another Steward or person seems to be merging …" once the PR closed. It now counts that merge as its own: it looks whether the PR has merged instead of asking again, and a PR merged at the commit it asked for is never taken for someone else's.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.258
 
 **It hands out the kit 2.144.2: the last agents of an update round finish their probation again, and are put back if their update stops answering.**
