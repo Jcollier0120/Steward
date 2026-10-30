@@ -427,6 +427,8 @@ function remoteParts(url: string): { scheme: string; host: string; port: string;
   }
   const web = /^([a-z][a-z0-9+.-]*):\/\/(?:[^@/]*@)?(\[[^\]]+\]|[^/:?#]+)(?::(\d*))?(\/[^?#]*)?/i.exec(u);
   if (web) return { scheme: web[1].toLowerCase(), host: web[2].toLowerCase(), port: web[3] ?? '', path: web[4] ?? '' };
+  // A scheme with no host after it (https://) is no remote, not an scp-style host called https.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return null;
   // A drive (C:\repos, C:/repos), a share (\\server\share), an absolute or relative path: a folder.
   if (/^[a-z]:([\\/]|$)/i.test(u) || /^(\\\\|\/\/|\/|\.{1,2}([\\/]|$)|~[\\/])/.test(u)) return { folder: u };
   // scp-style, as git reads it: [user@]host:path, with no slash before the colon, and a host longer than a drive letter.

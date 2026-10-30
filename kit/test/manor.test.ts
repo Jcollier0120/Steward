@@ -243,7 +243,8 @@ test('a wrong project is left out and said; the rest stand', () => {
     [{ name: 'A', checkout: 'C:\\bad|name' }, /"checkout"/],
     [{ name: 'A', checkout: 7 }, /"checkout"/],
     [{ name: 'A', checkout: 'C:\\x', repo: 'no-slash' }, /"repo" as owner\/name/],
-    [{ name: 'A', checkout: 'C:\\x', repo: 'https://github.com/a/b' }, /"repo"/],
+    // A clone URL is a repo since kit 2.146.0 (origin.test.ts); a folder never is.
+    [{ name: 'A', checkout: 'C:\\x', repo: 'C:\\repos\\b.git' }, /"repo"/],
     [{ name: 'A', checkout: 'C:\\x', branch: 'two words' }, /"branch"/],
     [{ name: 'A', checkout: 'C:\\x', branch: '-x' }, /"branch"/],
     [{ name: 'A', checkout: 'C:\\x', branch: 'a..b' }, /"branch"/],
