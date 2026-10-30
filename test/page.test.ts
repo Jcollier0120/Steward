@@ -302,6 +302,19 @@ test("an older vouch's ask for a round: the Steward merges no PRs; while it buil
   assert.equal((await (await fetch(`${base()}/api/ping`)).json()).busy, false);
 });
 
+test("Manor's ask to look at the alarms again: with the page's token, answered once done, and no round run", async () => {
+  const html = await (await fetch(`${base()}/`)).text();
+  const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];
+  await served.idle();
+  assert.equal((await post('/api/alarms/recheck', {}, {})).status, 403, 'the token, as ever');
+  const asked = r.gh.length;
+  const answer = await post('/api/alarms/recheck', { 'x-token': token }, {});
+  assert.equal(answer.status, 200);
+  assert.deepEqual(await answer.json(), { ok: true });
+  assert.deepEqual(r.gh.slice(asked), [], 'no open alarm for GitHub to settle: not asked');
+  assert.equal((await (await fetch(`${base()}/api/ping`)).json()).busy, false);
+});
+
 test('stages side by side: a release beside a round, a third refused while both slots are taken, one round at a time', async () => {
   const html = await (await fetch(`${base()}/`)).text();
   const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];

@@ -20,7 +20,7 @@ import type { Runner } from './run.ts';
 import { portClashConditions, type PortUse } from './ports.ts';
 import { manorKeeps, tendConditions, type TendState } from './tend.ts';
 import { unstickConditions, type UnstickState } from './unstick.ts';
-import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
+import { closeResolved, fileWork, filedStates, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
 import type { KitTrial } from './stages/trial.ts';
 import type { Glance } from './glance.ts';
 
@@ -721,8 +721,32 @@ export function toastWords(raised: Alarm[]): { title: string; body: string } {
 }
 
 /**
+ * The conditions a recheck between rounds (recheck.ts) gives, merged with the alarms as the round left them. Of the kinds
+ * it builds again (`rebuilt`), one gone clears, one new is added, and one still there stands as the round said it (its
+ * words are the round's, which knows more: a release's own failure line, say). Every other kind stands as it was: open,
+ * or watched without being raised (afterMs Infinity), from when it was first seen. Pure.
+ */
+export function asRechecked(state: AlarmState, fresh: Condition[], rebuilt: (id: string) => boolean): Condition[] {
+  const open = new Map(state.open.map((a) => [a.id, a]));
+  const asItWas = (id: string, since: string, afterMs: number): Condition => {
+    const a = open.get(id);
+    return { id, who: a?.who ?? 'steward', title: a?.title ?? id, detail: a?.detail ?? [], ...(a?.url ? { url: a.url } : {}), ...(a?.action ? { action: a.action } : {}), since, afterMs };
+  };
+  const out = fresh.filter((c) => rebuilt(c.id)).map((c) => (open.has(c.id) ? asItWas(c.id, state.watching[c.id] ?? open.get(c.id)!.since, 0) : c));
+  for (const [id, since] of Object.entries(state.watching)) if (!rebuilt(id)) out.push(asItWas(id, since, open.has(id) ? 0 : Infinity));
+  return out;
+}
+
+/** Whether a reconcile changed what alarms.json says, its time aside. Pure. */
+export const sameAlarms = (a: AlarmState, b: AlarmState) => JSON.stringify({ ...a, at: null }) === JSON.stringify({ ...b, at: null });
+
+/**
  * After a round: every condition seen, reconciled with what was open, kept in alarms.json, and one toast for the
  * new ones. Manor's and the Surveyor's pages are read here; `deps` stands in for them, the toast and the clock.
+ *
+ * A recheck between rounds (recheck.ts) names the kinds it builds again (`deps.rebuilt`): nothing is filed for the
+ * Wright (no `run`), the work filed before holds its alarms as the round left them (work.ts filedStates), the rest
+ * stand as they were (asRechecked), and alarms.json is written only when that changed something.
  */
 export async function watchAlarms(
   o: Parameters<typeof roundConditions>[0] & {
@@ -733,7 +757,7 @@ export async function watchAlarms(
     /** The round's glance at GitHub, for what closing the work filed would otherwise ask (work.ts closeResolved). */
     glance?: Glance | null;
   },
-  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; pages?: Partial<AgentPages>; reeveInstalled?: () => boolean; surveyorInstalled?: () => boolean; seneschalInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
+  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; pages?: Partial<AgentPages>; reeveInstalled?: () => boolean; surveyorInstalled?: () => boolean; seneschalInstalled?: () => boolean; online?: () => Promise<boolean>; rebuilt?: (id: string) => boolean } = {},
 ): Promise<AlarmState> {
   const a = o.settings.alarms;
   // The other agents' pages, as Manor says them.
@@ -798,9 +822,16 @@ export async function watchAlarms(
   }
   // The Seneschal's jams, where it's installed (it comes with Developer Pro): manor-wide, like Reeve's.
   if (manorWide && p.seneschal && (deps.seneschalInstalled ?? seneschalInstalled)()) conditions.push(...seneschalConditions(await get(new URL('/api/alerts', p.seneschal).href)));
+  // A recheck files nothing: what the Wright was handed before holds its alarms as the round left them.
+  if (deps.rebuilt && o.settings.fileWork) {
+    items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== undefined && reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings });
+    states = filedStates(items, wright);
+  }
   const offline = !(await (deps.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : kitOnline))().catch(() => true));
-  const kept = holdForWork(withoutReeveDuplicates(conditions, reeveJobs), items, states, a.waitingHours);
-  const { state, raised } = reconcile(loadAlarms(), withoutOffline(kept, offline), now);
+  const kept = withoutOffline(holdForWork(withoutReeveDuplicates(conditions, reeveJobs), items, states, a.waitingHours), offline);
+  const was = loadAlarms();
+  const { state, raised } = reconcile(was, deps.rebuilt ? asRechecked(was, kept, deps.rebuilt) : kept, now);
+  if (deps.rebuilt && sameAlarms(was, state)) return was;
   writeJson(alarmsFile(), state);
   for (const r of raised) o.log(`alarm: ${r.title}`);
   if (raised.length && a.toast) {

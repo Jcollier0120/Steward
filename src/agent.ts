@@ -39,6 +39,7 @@ import { keepHeads } from './heads.ts';
 import { withLane } from './stages/seneschal.ts';
 import { workForOthers } from './stages/others.ts';
 import { askAgain } from './stages/exchequer.ts';
+import { ANSWER_WITHIN_MS, recheckAlarms, rechecker } from './recheck.ts';
 
 /** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
 const githubReadyHere = (): boolean | undefined => {
@@ -237,6 +238,17 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       .finally(() => {
         finding = null;
       }));
+
+  /** The alarms looked at again (POST /api/alarms/recheck): one at a time, GitHub at most once a minute, and not while a stage runs. */
+  const recheck = rechecker({
+    busy: () => runs.length > 0,
+    log: (line) => console.log(line),
+    recheck: (look) => {
+      const settings = loadSettings();
+      const scm = loadScm();
+      return recheckAlarms({ settings, run: o.run ?? realRun, neutralDir: dataDir, log: (line) => console.log(line), look, host: (e) => hostOf(e, settings, scm), refreshStaff: () => void refresh() }, o.getJson ? { getJson: o.getJson } : {});
+    },
+  });
 
   const refresh = () => {
     if (refreshing) return refreshing;
@@ -557,6 +569,22 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
           return { json: { ok: true, message: `${what} by a round starting now.` } };
         }
         return { json: { error: a ? 'that alarm has nothing to do but be dismissed' : 'no such alarm open' }, status: 404 };
+      },
+      // The alarms looked at again now, not at the next round (recheck.ts): Manor asks when the person comes back to its
+      // page or presses one of its buttons, so an alarm whose ask they have done clears then. Never a round.
+      '/api/alarms/recheck': async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const later = new Promise<'later'>((r) => {
+          timer = setTimeout(() => r('later'), ANSWER_WITHIN_MS);
+          timer.unref?.();
+        });
+        try {
+          const why = await Promise.race([recheck(), later]);
+          if (why === 'later') return { json: { ok: true, later: true } };
+          return why === null ? { json: { ok: true } } : { json: { error: why }, status: 500 };
+        } finally {
+          clearTimeout(timer);
+        }
       },
       // Look after repositories Reeve found (found.ts): added to Settings, releasing only as ticked. One
       // ({ repo, merges, release }), or several at once ({ repos: [{ repo, merges, release }, …] }).
