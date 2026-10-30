@@ -25,6 +25,17 @@ const ui = await bundleForNode<{ html: Record<string, () => string> }>(
      ]} />),
      notYet: () => r(<ConnectAI agent="the Assayer" connected={false} status="Not connected." action={<button type="button">Connect Claude Code</button>} setups={setups} instruction="Run tests through the Assayer." />),
      connected: () => r(<ConnectAI agent="Reeve" connected clients={[{ name: 'Claude Code', lastUsed: recent }, { name: 'Claude Code', lastUsed: null }]} setups={setups}><p>reminders</p></ConnectAI>),
+     assistantRows: [
+       { id: 'zed', name: 'Zed', state: 'not-installed' },
+       { id: 'cursor', name: 'Cursor', state: 'connected', canWrite: true },
+       { id: 'codex', name: 'Codex CLI', state: 'installed', canWrite: true },
+       { id: 'claude-code', name: 'Claude Code', state: 'installed', canWrite: false, where: 'Run this once in a terminal.', paste: 'claude mcp add --scope user reeve -- node cli.ts mcp' },
+       { id: 'gemini', name: 'Gemini CLI', state: 'installed', canWrite: true, problem: "Gemini CLI's settings don't parse as JSON with comments (it ends too soon, line 3)." },
+       { id: 'continue', name: 'Continue', state: 'connected', canWrite: false, paste: 'mcpServers: []' },
+     ],
+     get assistants() { return () => r(<ConnectAI agent="Reeve" connected={false} setups={[]} assistants={this.assistantRows} onConnect={() => {}} onDisconnect={() => {}} />); },
+     get assistantsNoHandlers() { return () => r(<ConnectAI agent="Reeve" connected={false} setups={[]} assistants={this.assistantRows} />); },
+     assistantsNone: () => r(<ConnectAI agent="Reeve" connected={false} setups={[]} assistants={[]} />),
      kept: () => r(<Kept intro="Tokens Reeve read" stats={[{ label: 'This month (October)', value: 'about 4.8M tokens', note: 'about $14.46' }]} rows={[{ name: 'outline', value: 'about 2.9M', note: '(246 calls)' }]} counted empty="Nothing counted yet." footnote="Estimates." />),
      keptNone: () => r(<Kept title="Kept out of your AI's context" stats={[{ label: 'All time', value: 'None yet' }]} rows={[{ name: 'check', value: '0' }]} counted={false} empty="Nothing counted yet." />),
      panel: () => r(<SidePanel title="Heiward: unit tests" meta={['exit 1, 2 hours ago']} onClose={() => {}}><Output text={'line 1\\nline 2'} /></SidePanel>),
@@ -74,6 +85,40 @@ test('once connected it is one line naming the AI and when it last used the tool
   assert.match(c, /^<details class="card ui-connect" data-tour="connect">/, 'folded, and not marked to do');
   assert.match(c, /<span class="ui-ok">✓<\/span> Your AI is connected to Reeve<\/strong><span class="muted small"> Claude Code, last used 3 minutes ago<\/span><span class="muted small"> · open it to connect another AI tool<\/span>/);
   assert.match(c, /<p>reminders<\/p><\/details>$/);
+});
+
+test("Connect your AI lists each assistant: installed ones first, its state, and Connect, Disconnect or the text to paste", () => {
+  const c = h.assistants();
+  const rows = [...c.matchAll(/<li class="ui-assistant[^"]*" data-assistant="([^"]+)" data-state="([^"]+)">(.*?)<\/li>/g)].map((m) => ({ id: m[1], state: m[2], body: m[3] }));
+  assert.deepEqual(rows.map((r) => `${r.id} ${r.state}`), ['cursor connected', 'codex installed', 'claude-code installed', 'gemini installed', 'continue connected', 'zed not-installed'], 'not installed last, the rest as given');
+  assert.match(c, /<ul class="ui-assistants" aria-label="Your AI assistants">/);
+  const row = (id: string) => rows.find((r) => r.id === id)!.body;
+  // Each one's state, in words.
+  assert.match(row('cursor'), /<strong>Cursor<\/strong><span class="[^"]*">Connected<\/span>/);
+  assert.match(row('codex'), /Not connected/);
+  assert.match(row('zed'), /Not installed/);
+  assert.match(c, /<li class="ui-assistant muted" data-assistant="zed"/, 'one that is not installed is muted');
+  // Disconnect where it's connected and the agent wrote it; Connect where it's installed and the agent may write.
+  assert.match(row('cursor'), /aria-label="Disconnect Cursor from Reeve"[^>]*>.*Disconnect/);
+  assert.doesNotMatch(row('cursor'), /Connect Cursor/);
+  assert.match(row('codex'), /aria-label="Connect Codex CLI to Reeve"/);
+  // Where the agent can't write: where to put it, and the text to paste; no button.
+  assert.match(row('claude-code'), /<p class="small">Run this once in a terminal\.<\/p>/);
+  assert.match(row('claude-code'), /claude mcp add --scope user reeve -- node cli\.ts mcp/);
+  assert.doesNotMatch(row('claude-code'), /aria-label="(Connect|Disconnect) /);
+  assert.doesNotMatch(row('continue'), /aria-label="Disconnect /, "connected by hand: the agent doesn't take out what it can't write");
+  assert.match(row('continue'), /mcpServers: \[\]/);
+  // A file that doesn't parse: said, and no Connect.
+  assert.match(row('gemini'), /<p class="small ui-warn">Gemini CLI&#x27;s settings don&#x27;t parse as JSON with comments \(it ends too soon, line 3\)\.<\/p>/);
+  assert.doesNotMatch(row('gemini'), /aria-label="Connect /);
+  // Not installed: nothing to press, nothing to paste.
+  assert.doesNotMatch(row('zed'), /<button|<pre/);
+  // With no handlers there's nothing to press, and the list still says each one's state.
+  const quiet = h.assistantsNoHandlers();
+  assert.doesNotMatch(quiet, /aria-label="(Connect|Disconnect) [^"]+ (to|from) Reeve"/);
+  assert.match(quiet, /data-assistant="cursor" data-state="connected"/);
+  assert.doesNotMatch(h.assistantsNone(), /ui-assistants/, 'none found: no list');
+  assert.doesNotMatch(h.notYet(), /ui-assistants/, "a page that doesn't give them draws as before");
 });
 
 test('Kept: its totals, what each part read once something is counted, else its empty note', () => {
