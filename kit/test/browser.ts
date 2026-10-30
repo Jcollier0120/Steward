@@ -88,7 +88,15 @@ export async function openTab(browser: string, url: string): Promise<Tab> {
   };
   try {
     const file = path.join(profile, 'DevToolsActivePort');
-    port = await until(() => existsSync(file) && readFileSync(file, 'utf8').split('\n')[0].trim(), 20_000, 'the browser to start');
+    // Read while the browser still has it open to write (EBUSY on Windows, under a busy suite): not there yet.
+    const portIn = () => {
+      try {
+        return existsSync(file) && readFileSync(file, 'utf8').split('\n')[0].trim();
+      } catch {
+        return false;
+      }
+    };
+    port = await until(portIn, 20_000, 'the browser to start');
     const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as { type: string; webSocketDebuggerUrl: string }[];
     const page = targets.find((t) => t.type === 'page');
     if (!page) throw new Error('the browser has no tab');

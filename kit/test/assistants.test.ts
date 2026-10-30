@@ -333,7 +333,7 @@ test('no secret goes in an assistant\'s settings, and a server needs a name and 
   }
   assert.deepEqual(filesIn(home), [], 'nothing was written');
   // What only looks like one of those words is fine.
-  for (const env of [{ AUTHOR: 'me' }, { PASSAGE: 'x' }, { TOKENIZER: 'bpe' }, { CASTELLAN_HOME: 'C:\\x' }, { WHERE: 'ghp_short' }]) assert.equal(serverProblem({ ...SERVER, env }), null, JSON.stringify(env));
+  for (const env of [{ AUTHOR: 'me' }, { PASSAGE: 'x' }, { TOKENIZER: 'bpe' }, { CASTELLAN_HOME: 'C:\\x' }, { WHERE: 'ghp_short' }] as Record<string, string>[]) assert.equal(serverProblem({ ...SERVER, env }), null, JSON.stringify(env));
   assert.equal(serverProblem(SERVER), null);
   assert.match((await removeServer('cursor', 'two words', { home, platform: 'win32' })).words, /name should be/);
 });
