@@ -103,6 +103,33 @@ test('which test files a change reaches, and what runs everything', () => {
   assert.match(String(pick(Array.from({ length: 201 }, (_, i) => ['M', `src/f${i}.ts`] as [string, string]))), /^all: 201 files changed/);
 });
 
+test("any host's CI and any AI assistant's folder is no code: it reaches no test", () => {
+  const dir = repo('no-code');
+  const pick = (p: string) => {
+    const a = affectedTests({ dir, changed: [{ status: 'M', path: p }], testGlobs: ['test/**/*.test.ts'], patchOf: () => '@@\n-x\n+y' });
+    return a.all ? `all: ${a.why}` : a.files;
+  };
+  const none = [
+    // Each host's CI.
+    '.github/workflows/ci.yml', '.github/dependabot.yml', '.gitlab-ci.yml', '.gitlab-ci.yaml', '.gitlab/merge_request_templates/Default.md', '.gitlab/ci/build.yml',
+    'azure-pipelines.yml', 'azure-pipelines.yaml', '.azuredevops/pull_request_template.md', '.azure-pipelines/release.yml', 'bitbucket-pipelines.yml',
+    '.gitea/workflows/ci.yaml', '.forgejo/workflows/ci.yaml',
+    // Each AI assistant's own folder or rules.
+    '.claude/settings.json', '.cursor/rules/style.mdc', '.cursor/mcp.json', '.codex/config.toml', '.gemini/settings.json', '.windsurf/rules/x.md',
+    '.vscode/settings.json', '.vscode/mcp.json', '.zed/settings.json', '.continue/config.yaml', '.clinerules/style.md', 'web/.clinerules', '.cursorrules', '.windsurfrules',
+    // As before.
+    '.gitignore', '.gitattributes', '.editorconfig', 'LICENSE', 'NOTICE.txt', 'docs/guide.md',
+  ];
+  const others = ['.circleci/config.yml', 'ci/gitlab-ci.yml.bak', 'tools/.github-token-check', 'web/.cursor-theme.bin', 'deploy/azure-pipelines.json'];
+  for (const p of [...none, ...others]) {
+    mkdirSync(path.dirname(path.join(dir, p)), { recursive: true });
+    writeFileSync(path.join(dir, p), 'x\n');
+  }
+  for (const p of none) assert.deepEqual(pick(p), [], p);
+  // Not those: still everything, as a file no code names always was.
+  for (const p of others) assert.match(String(pick(p)), /^all: .* changed, and no code names it/, p);
+});
+
 test('Markdown reaches only the code that reads it where it lies', () => {
   const here = "const here = path.dirname(fileURLToPath(import.meta.url));\n";
   assert.equal(readsInPlace(`${here}const log = readFileSync(path.join(here, '..', 'CHANGELOG.md'), 'utf8');\n`, 'CHANGELOG.md'), true);

@@ -261,6 +261,11 @@ test("GET /api/peer/result answers this agent's own result for one tree, from al
   const q = (o: Record<string, string>) => new URLSearchParams(o);
   assert.equal(peerResult(q({ repo: 'me/reeve', tree: 'HEAD' })).status, 400);
   assert.equal(peerResult(q({ repo: 'reeve', tree: TREE })).status, 400);
+  // A repository on any host, by its host/path; never a path out.
+  assert.deepEqual(peerResult(q({ repo: 'gitlab.com/group/sub/app', tree: TREE })).json, { v: 1, result: null });
+  assert.deepEqual(peerResult(q({ repo: 'dev.azure.com/acme/Platform/_git/app', tree: TREE })).json, { v: 1, result: null });
+  for (const repo of ['gitlab.com/../app', 'a/b c', 'C:\\repos\\app', '-x/app']) assert.equal(peerResult(q({ repo, tree: TREE })).status, 400, repo);
+  assert.match((peerResult(q({ repo: 'reeve', tree: TREE })).json as any).error, /owner\/name, or host\/path off GitHub/);
   assert.deepEqual(peerResult(q({ repo: 'me/reeve', tree: TREE })).json, { v: 1, result: null });
   recordResult(passed() as any);
   for (let i = 0; i < 80; i++) recordResult({ kind: 'checks', repo: 'me/other', tree: i.toString(16).padStart(40, '0'), ok: true }, new Date(NOW));

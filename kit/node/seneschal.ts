@@ -102,7 +102,7 @@ export interface SeneschalNeeds {
 }
 
 interface SeneschalTaskBase {
-  /** owner/name. */
+  /** owner/name on GitHub; host/path on any other host (manor.ts' originName, kit 2.146.0). */
   repo: string;
   /** Its code tree's full id, when the checkout has nothing uncommitted: the same code is the same work. */
   tree?: string;
@@ -594,7 +594,7 @@ export interface SeneschalWorkOptions {
   worker: string;
   /** The kinds it runs. */
   kinds: SeneschalKind[];
-  /** The repositories it runs them for, owner/name. With `clones`, a `checks` task of any repository besides. */
+  /** The repositories it runs them for, owner/name or host/path. With `clones`, a `checks` task of any repository besides. */
   repos: string[];
   /**
    * It gets a repository's code itself (Seneschal 0.5.0): with no clone of it on this PC, it clones it from the task's
@@ -618,8 +618,11 @@ export interface SeneschalWorkOptions {
 /** What a worker that doesn't say runs: the checks. The turn kinds are only ever their asker's, never a worker's. */
 const CHECK_KINDS: readonly SeneschalKind[] = ['pr-check', 'kit-trial', 'full-suite'];
 const LANES: readonly SeneschalLane[] = ['person', 'blocking', 'normal', 'background'];
-/** owner/name, neither of them "." or "..". */
-const REPO = /^(?!\.\.?\/)[A-Za-z0-9_.-]{1,100}\/(?!\.\.?$)[A-Za-z0-9_.-]{1,100}$/;
+/**
+ * A repository as manor.ts' originName names it (kit 2.146.0): owner/name on GitHub, host/path on any other host
+ * (gitlab.com/group/sub/app, dev.azure.com/org/project/_git/app), none of its parts "." or "..".
+ */
+const REPO = /^(?=.{3,300}$)(?!(?:.*\/)?\.\.?(?:\/|$))(?!(?:.*\/)?-)[A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.~%+@-]{1,100}){1,8}$/;
 const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 /** A remote's path: plain characters, never a ".." segment. */

@@ -4,7 +4,7 @@ import { APP } from '../app.ts';
 import { checksAtOnce, checksPaceCap, checksRuns, type ChecksRun } from './checks-pace.ts';
 import { lineSnapshot, slotDirs, type Lane } from './npu-queue.ts';
 import { agentsAtOnce, firstRoundLockDir, pace, workLockDir, type Pace } from './pace.ts';
-import { passOnOtherPcs } from './manor.ts';
+import { passOnOtherPcs, repoNameOk } from './manor.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 import { busyToday } from './token-tally.ts';
 import { workTasks, type Task, type WorkFields } from './work-tasks.ts';
@@ -304,10 +304,9 @@ export async function passFor(q: PassQuery, o: { now?: number; elsewhere?: PassE
 }
 
 const KIND = /^[a-z][a-z -]{0,39}$/;
-const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 
 /**
- * GET /api/peer/result?kind=checks&repo=<owner/name>&tree=<git tree id> (server.ts): this agent's result for that tree,
+ * GET /api/peer/result?kind=checks&repo=<owner/name, or host/path>&tree=<git tree id> (server.ts): this agent's result for that tree,
  * from all it keeps (work-results.json, not only the recent ones a status lists), for Manor to pass to another PC on the
  * licence whose agent is about to run the same checks. Its own result only: one it took from another PC isn't passed
  * on. Read only; null when it has none.
@@ -316,7 +315,7 @@ export function peerResult(query: URLSearchParams): { json: unknown; status?: nu
   const kind = query.get('kind') || 'checks';
   const repo = query.get('repo') ?? '';
   const tree = (query.get('tree') ?? '').toLowerCase();
-  if (!KIND.test(kind) || !REPO.test(repo) || !SHA.test(tree)) return { status: 400, json: { error: 'Ask for kind=<the work>, repo=<owner/name> and tree=<its git tree id>.' } };
+  if (!KIND.test(kind) || !repoNameOk(repo) || !SHA.test(tree)) return { status: 400, json: { error: 'Ask for kind=<the work>, repo=<owner/name, or host/path off GitHub> and tree=<its git tree id>.' } };
   const r = resultFor({ kind, repo, tree });
   return { json: { v: 1, result: r && !r.from ? r : null } };
 }

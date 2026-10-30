@@ -292,6 +292,23 @@ export interface ConnectedClient {
   lastUsed?: string | null;
 }
 
+/**
+ * One AI assistant in Connect your AI's list (kit 2.146.0), as the agent's server found it (node/assistants.ts
+ * `serverStatus` and `assistantsFound`): not installed, installed but not connected, or connected.
+ */
+export interface AssistantRow {
+  id: string;
+  name: string;
+  state: 'not-installed' | 'installed' | 'connected';
+  /** Whether the agent can connect it itself: a settings file it may write, or Claude Code's claude command. */
+  canWrite?: boolean;
+  /** Where it can't: the text for the person to paste, and where it goes ("Run this once in PowerShell."). */
+  paste?: string;
+  where?: ReactNode;
+  /** Why its settings can't be changed, in a sentence (a file that doesn't parse). */
+  problem?: ReactNode;
+}
+
 interface ConnectProps {
   /** The agent's name: "Reeve", "the Assayer". */
   agent: string;
@@ -307,6 +324,15 @@ interface ConnectProps {
   action?: ReactNode;
   /** Each AI tool's setup, as tabs. */
   setups: ClientSetup[];
+  /**
+   * Each AI assistant's state, a row each with its Connect or Disconnect (kit 2.146.0), above the setups: what is
+   * installed first, then what isn't. A row the agent can't write gets its paste-in text instead of a button.
+   */
+  assistants?: AssistantRow[];
+  /** Connect pressed on an assistant's row: the button is busy until a promise it returns settles. */
+  onConnect?: (id: string) => unknown;
+  /** Disconnect pressed on an assistant's row. */
+  onDisconnect?: (id: string) => unknown;
   /** The line for the AI's own instructions, so it reaches for the tools unasked. */
   instruction?: string;
   tour?: string;
@@ -324,7 +350,45 @@ export function ConnectAI(p: ConnectProps) {
   return <ConnectCard key={p.connected ? 'connected' : 'not-yet'} {...p} />;
 }
 
-function ConnectCard({ agent, connected, clients = [], status, about, action, setups, instruction, tour = 'connect', children }: ConnectProps) {
+const ASSISTANT_STATE: Record<AssistantRow['state'], { label: string; tone: 'success' | 'info' | 'neutral' }> = {
+  connected: { label: 'Connected', tone: 'success' },
+  installed: { label: 'Not connected', tone: 'info' },
+  'not-installed': { label: 'Not installed', tone: 'neutral' },
+};
+
+/** The assistants' rows: each one's state, and Connect, Disconnect or the text to paste. */
+function AssistantList({ agent, rows, onConnect, onDisconnect }: { agent: string; rows: AssistantRow[]; onConnect?: (id: string) => unknown; onDisconnect?: (id: string) => unknown }) {
+  const order = (r: AssistantRow) => (r.state === 'not-installed' ? 1 : 0);
+  const sorted = [...rows].sort((a, b) => order(a) - order(b));
+  return (
+    <ul className="ui-assistants" aria-label="Your AI assistants">
+      {sorted.map((r) => {
+        const s = ASSISTANT_STATE[r.state];
+        return (
+          <li key={r.id} className={cx('ui-assistant', r.state === 'not-installed' && 'muted')} data-assistant={r.id} data-state={r.state}>
+            <div className="ui-assistant-head">
+              <strong>{r.name}</strong>
+              <Badge label={s.label} tone={s.tone} />
+              <span className="ui-assistant-act">
+                {r.state === 'connected' && r.canWrite !== false && onDisconnect && <Button title="Disconnect" variant="secondary" size="sm" accessibilityLabel={`Disconnect ${r.name} from ${agent}`} onPress={() => onDisconnect(r.id)} />}
+                {r.state === 'installed' && r.canWrite && !r.problem && onConnect && <Button title="Connect" size="sm" accessibilityLabel={`Connect ${r.name} to ${agent}`} onPress={() => onConnect(r.id)} />}
+              </span>
+            </div>
+            {r.problem && <p className="small ui-warn">{r.problem}</p>}
+            {r.state !== 'not-installed' && !r.canWrite && r.paste && (
+              <>
+                {r.where && <p className="small">{r.where}</p>}
+                <Paste text={r.paste} label={`${r.name} setup`} />
+              </>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ConnectCard({ agent, connected, clients = [], status, about, action, setups, assistants, onConnect, onDisconnect, instruction, tour = 'connect', children }: ConnectProps) {
   // Not connected yet: open until it's folded once. Connected: a line until it's opened. Each its own key, since the
   // open card's first render already saved "open" under the other.
   const [open, setOpen] = useFold(connected ? 'connect-open-connected' : 'connect-open', !connected);
@@ -351,6 +415,7 @@ function ConnectCard({ agent, connected, clients = [], status, about, action, se
       </summary>
       <p className="small">{about ?? `${Agent} is an MCP server: Claude Code, Codex, Cursor or any AI tool that speaks MCP can use its tools. Add it once; the tool starts it when it needs it.`}</p>
       {action && <div className="ui-connect-action">{action}</div>}
+      {assistants && assistants.length > 0 && <AssistantList agent={agent} rows={assistants} onConnect={onConnect} onDisconnect={onDisconnect} />}
       {setup && (
         <>
           <div className="ui-connect-tools" role="tablist" aria-label="Your AI tool">

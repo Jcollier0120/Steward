@@ -334,6 +334,16 @@ test("a task a worker is handed is read again: one that names anything but a rep
   assert.equal(asked.find((x) => x.route === '/api/tasks/report')!.body.returned, true);
 });
 
+test("a task's repository on any host: owner/name on GitHub as always, host/path anywhere else; never a path out", () => {
+  const good = { id: 'b4', kind: 'pr-check', repo: 'Jcollier0120/Reeve', commit: 'c'.repeat(40), lane: 'normal', what: 'x' };
+  for (const repo of ['Jcollier0120/Reeve', 'gitlab.com/group/sub/app', 'gitlab.acme.io/platform/tools/app', 'dev.azure.com/acme/Platform/_git/app', 'dev.azure.com/acme/My%20Project/_git/app', 'bitbucket.org/team/app', 'bitbucket.acme.com/~jo/app', 'codeberg.org/me/app', 'github.acme.com/team/app', 'local/app']) {
+    assert.equal(jobOf({ ...good, repo })?.repo, repo, repo);
+  }
+  for (const repo of ['Reeve', '../Reeve', 'gitlab.com/../app', 'gitlab.com/./app', 'gitlab.com/group/..', 'a/b c', 'a\\b', 'C:/repos/app', `${'a/'.repeat(9)}b`, `a/${'b'.repeat(101)}`, 'https://gitlab.com/group/app', 'gitlab.com//app', '-x/app', 'a/b?c']) {
+    assert.equal(jobOf({ ...good, repo }), null, repo);
+  }
+});
+
 const { seneschalSiblings, shardOf } = await import('./fixture/src/kit/seneschal.ts');
 
 test('a shard of a whole suite: handed to a worker with its part, and only for a full-suite task', () => {

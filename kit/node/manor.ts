@@ -303,7 +303,11 @@ export interface ManorProject {
   name: string;
   /** The clone on this PC: a full path (C:\..., or a share), one project to a clone. */
   checkout: string;
-  /** Its repository on GitHub, owner/name, or null when it has none (or none was given). */
+  /**
+   * Its repository: owner/name on GitHub (github.com), as always; host/path on any other host (kit 2.146.0):
+   * gitlab.com/group/sub/app, dev.azure.com/org/project/_git/app, bitbucket.org/team/app, codeberg.org/me/app,
+   * github.acme.com/owner/app (originName). Null when it has none: a local-only repository, or none was given.
+   */
   repo: string | null;
   /** The branch its work goes to: "main" unless it says. */
   branch: string;
@@ -328,6 +332,12 @@ export interface ManorProject {
    * both, and a reader takes one missing as off.
    */
   release?: string;
+  /**
+   * The kind of host its repository is on, where the person said (settings' "host", kit 2.146.0): for a host whose name
+   * doesn't say (a GitLab at code.acme.com). Only there when the entry gives one, so a project read before reads the
+   * same; projectOrigin() takes it into account.
+   */
+  host?: Exclude<OriginKind, 'local'>;
 }
 
 /** What a project may not be: the manor's own repositories (owner/name) and the checkouts the Steward works from. */
@@ -354,6 +364,220 @@ export function githubRepo(url: string): string | null {
 }
 
 /**
+ * Where a repository lives (kit 2.146.0): the kind of host its origin is on, as every agent names it. `github` (github.com, or
+ * a GitHub Enterprise Server or ghe.com), `gitlab` (gitlab.com or a self-hosted GitLab), `bitbucket` (Bitbucket Cloud, or a
+ * Bitbucket Data Center), `azure` (Azure DevOps, dev.azure.com or the older org.visualstudio.com), `gitea` (Gitea,
+ * Forgejo, Codeberg), `other` (any other git server: a host the person keeps, a plain ssh server), `local` (no host at
+ * all: a folder or share as its origin, or no origin).
+ */
+export type OriginKind = 'github' | 'gitlab' | 'bitbucket' | 'azure' | 'gitea' | 'other' | 'local';
+
+/** The kinds a person may say a host is, where its name doesn't (settings' "host"): every kind but local. */
+export const HOST_KINDS: readonly Exclude<OriginKind, 'local'>[] = ['github', 'gitlab', 'bitbucket', 'azure', 'gitea', 'other'];
+
+/** A repository's origin, read host-neutrally: `parseOrigin(url)`. */
+export interface Origin {
+  kind: OriginKind;
+  /** The host's name, lower case and without a port (github.com, gitlab.acme.com, dev.azure.com); '' for a local one. */
+  hostName: string;
+  /**
+   * The repository on its host, without .git: owner/name (GitHub, Gitea, Bitbucket Cloud), group/sub/name (GitLab),
+   * org/project/_git/name (Azure DevOps; project/_git/name on org.visualstudio.com), KEY/name (Bitbucket Data Center), as
+   * the server has it (other). For a local one, the folder its origin is, or the clone's own when it has no origin.
+   */
+  path: string;
+  /** Its page on the web (https://gitlab.com/group/sub/name), or null where there's none to know: a local one, another server. */
+  webUrl: string | null;
+}
+
+/**
+ * What a person said hosts are, where a host's name doesn't say (a self-hosted GitLab at code.acme.com): one kind for
+ * this repository (a project's "host"), or kinds by host name ({ "code.acme.com": "gitlab" }).
+ */
+export type OriginHint = Exclude<OriginKind, 'local'> | Record<string, Exclude<OriginKind, 'local'>> | null | undefined;
+
+/** The kind a host's name says (github.com, gitlab.acme.com, codeberg.org), `other` when it says none. Pure. */
+export function kindOfHost(hostName: string): Exclude<OriginKind, 'local'> {
+  const h = hostName.toLowerCase().replace(/\.$/, '');
+  const labels = h.split('.');
+  if (h === 'github.com' || h === 'www.github.com' || h === 'ssh.github.com') return 'github';
+  if (h === 'dev.azure.com' || h === 'ssh.dev.azure.com' || h.endsWith('.visualstudio.com') || h.endsWith('.azure.com')) return 'azure';
+  if (h === 'bitbucket.org' || h === 'www.bitbucket.org' || h === 'altssh.bitbucket.org') return 'bitbucket';
+  if (h === 'codeberg.org' || h === 'gitea.com' || h === 'next.forgejo.org') return 'gitea';
+  if (h.endsWith('.github.io') || h.endsWith('githubusercontent.com')) return 'other';
+  if (h.endsWith('.ghe.com') || labels.some((l) => l === 'github' || l.startsWith('github-'))) return 'github';
+  if (h.includes('gitlab')) return 'gitlab';
+  if (labels.some((l) => /gitea|forgejo/.test(l))) return 'gitea';
+  if (labels.some((l) => l.includes('bitbucket'))) return 'bitbucket';
+  return 'other';
+}
+
+/** A remote's URL in its parts: a host's (scheme, host, port, path), or a folder's. Pure. */
+function remoteParts(url: string): { scheme: string; host: string; port: string; path: string } | { folder: string } | null {
+  const u = url.trim();
+  if (!u || /[\u0000-\u001f]/.test(u)) return null;
+  // file:///C:/repos/app.git, file://server/share/app: a folder, as git takes it.
+  const file = /^file:\/\/(.*)$/i.exec(u);
+  if (file) {
+    let rest = file[1];
+    try {
+      rest = decodeURIComponent(rest);
+    } catch { /* as written */ }
+    return { folder: /^\/[a-z]:/i.test(rest) ? rest.slice(1) : rest.startsWith('/') ? rest : `//${rest}` };
+  }
+  const web = /^([a-z][a-z0-9+.-]*):\/\/(?:[^@/]*@)?(\[[^\]]+\]|[^/:?#]+)(?::(\d*))?(\/[^?#]*)?/i.exec(u);
+  if (web) return { scheme: web[1].toLowerCase(), host: web[2].toLowerCase(), port: web[3] ?? '', path: web[4] ?? '' };
+  // A scheme with no host after it (https://) is no remote, not an scp-style host called https.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return null;
+  // A drive (C:\repos, C:/repos), a share (\\server\share), an absolute or relative path: a folder.
+  if (/^[a-z]:([\\/]|$)/i.test(u) || /^(\\\\|\/\/|\/|\.{1,2}([\\/]|$)|~[\\/])/.test(u)) return { folder: u };
+  // scp-style, as git reads it: [user@]host:path, with no slash before the colon, and a host longer than a drive letter.
+  const scp = /^(?:[^@/\\]+@)?(\[[^\]]+\]|[^:/\\]+):(.*)$/.exec(u);
+  if (scp && scp[1].length > 1) return { scheme: 'ssh', host: scp[1].toLowerCase().replace(/^\[|\]$/g, ''), port: '', path: scp[2] };
+  return { folder: u };
+}
+
+/** A path on a host without its slashes at either end, its .git, or an empty part. */
+const trimPath = (p: string) => p.replace(/\\/g, '/').split('/').filter(Boolean).join('/').replace(/\.git$/i, '');
+
+/** Azure DevOps' org/project/_git/name (hostName dev.azure.com), or project/_git/name on org.visualstudio.com, from any of its forms. */
+function azurePath(host: string, segs: string[]): { hostName: string; path: string } | null {
+  const ok = (s: string | undefined) => !!s && s !== '_git';
+  if (host === 'ssh.dev.azure.com' && segs[0]?.toLowerCase() === 'v3' && segs.length === 4 && segs.slice(1).every(ok)) return { hostName: 'dev.azure.com', path: `${segs[1]}/${segs[2]}/_git/${segs[3]}` };
+  if (host === 'vs-ssh.visualstudio.com' && segs[0]?.toLowerCase() === 'v3' && segs.length === 4 && segs.slice(1).every(ok)) return { hostName: `${segs[1].toLowerCase()}.visualstudio.com`, path: `${segs[2]}/_git/${segs[3]}` };
+  const git = segs.findIndex((s) => s.toLowerCase() === '_git');
+  if (git < 0 || git !== segs.length - 2 || !ok(segs[git + 1])) return null;
+  const name = segs[git + 1];
+  const before = segs.slice(0, git).filter((s, i) => !(i === 0 && host.endsWith('.visualstudio.com') && s.toLowerCase() === 'defaultcollection'));
+  if (host === 'dev.azure.com' || (host.endsWith('.azure.com') && host !== 'ssh.dev.azure.com')) {
+    // org/project/_git/name, or org/_git/name: the project's own repository, named as the project.
+    if (before.length === 2 && before.every(ok)) return { hostName: host, path: `${before[0]}/${before[1]}/_git/${name}` };
+    if (before.length === 1 && ok(before[0])) return { hostName: host, path: `${before[0]}/${name}/_git/${name}` };
+    return null;
+  }
+  if (host.endsWith('.visualstudio.com')) {
+    if (before.length === 1 && ok(before[0])) return { hostName: host, path: `${before[0]}/_git/${name}` };
+    if (before.length === 0) return { hostName: host, path: `${name}/_git/${name}` };
+    return null;
+  }
+  // Azure DevOps Server, on a host of the person's own (a hint said so): its collection/project/_git/name as it is.
+  if (before.length >= 1 && before.every(ok)) return { hostName: host, path: [...before, '_git', name].join('/') };
+  return null;
+}
+
+/** The hosts whose name is certain: a hint never makes them another kind. */
+const PUBLIC_HOST = /^(?:www\.|ssh\.)?(?:github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|gitea\.com)$|^(?:ssh\.)?dev\.azure\.com$|\.visualstudio\.com$/;
+
+/**
+ * A remote's URL read host-neutrally (kit 2.146.0): its kind, host, path and web page. Takes every form git does: https
+ * (with or without .git, a user or a port), ssh:// and scp-style user@host:path, git://, file:// and a folder (a drive,
+ * a share, a path). GitLab keeps its subgroups (group/sub/name); Azure DevOps takes dev.azure.com/org/project/_git/name,
+ * its ssh form (ssh.dev.azure.com:v3/org/project/name) and the older org.visualstudio.com, each as one path; Bitbucket
+ * Data Center drops its scm/. A host is known by its name (kindOfHost), or by `hint` where the person said (a
+ * self-hosted GitLab at code.acme.com, an Azure DevOps Server); a hint never changes github.com, gitlab.com,
+ * bitbucket.org, Azure DevOps, codeberg.org or gitea.com. Null for what isn't a remote at all (an empty or broken
+ * string). Pure.
+ */
+export function parseOrigin(url: string, hint?: OriginHint): Origin | null {
+  const parts = remoteParts(url);
+  if (!parts) return null;
+  if ('folder' in parts) return { kind: 'local', hostName: '', path: parts.folder.replace(/[\\/]+$/, '') || parts.folder, webUrl: null };
+  const host = parts.host.replace(/\.$/, '');
+  if (!host) return null;
+  const said = PUBLIC_HOST.test(host) ? undefined : typeof hint === 'string' ? hint : hint && typeof hint === 'object' ? hint[host] : undefined;
+  const kind: Exclude<OriginKind, 'local'> = said && HOST_KINDS.includes(said) ? said : kindOfHost(host);
+  const segs = trimPath(parts.path).split('/').filter(Boolean);
+  // An http(s) remote's page is at its own scheme and port; an ssh one's at https on the host.
+  const site = (h: string) => (parts.scheme === 'http' || parts.scheme === 'https' ? `${parts.scheme}://${h}${parts.port ? `:${parts.port}` : ''}` : `https://${h}`);
+  const other = (): Origin => ({ kind: 'other', hostName: host, path: segs.join('/'), webUrl: null });
+  if (!segs.length) return other();
+  if (kind === 'github') {
+    if (segs.length < 2) return other();
+    const hostName = host === 'www.github.com' || host === 'ssh.github.com' ? 'github.com' : host;
+    const p = `${segs[0]}/${segs[1].replace(/\.git$/i, '')}`;
+    return { kind, hostName, path: p, webUrl: `${hostName === 'github.com' ? 'https://github.com' : site(hostName)}/${p}` };
+  }
+  if (kind === 'gitlab') {
+    // A page's address pasted in (group/name/-/tree/main) is its repository's.
+    const dash = segs.indexOf('-');
+    const p = (dash > 0 ? segs.slice(0, dash) : segs).join('/');
+    if (!p.includes('/')) return other();
+    return { kind, hostName: host, path: p, webUrl: `${site(host)}/${p}` };
+  }
+  if (kind === 'azure') {
+    const a = azurePath(host, segs);
+    if (!a) return other();
+    return { kind, hostName: a.hostName, path: a.path, webUrl: `https://${a.hostName}/${a.path}` };
+  }
+  if (kind === 'bitbucket') {
+    if (host === 'bitbucket.org' || host === 'www.bitbucket.org' || host === 'altssh.bitbucket.org') {
+      if (segs.length < 2) return other();
+      const p = `${segs[0]}/${segs[1]}`;
+      return { kind, hostName: 'bitbucket.org', path: p, webUrl: `https://bitbucket.org/${p}` };
+    }
+    // Bitbucket Data Center: https://host/scm/KEY/name.git, ssh://git@host:7999/KEY/name.git; ~user for a personal one.
+    const dc = segs[0].toLowerCase() === 'scm' ? segs.slice(1) : segs;
+    if (dc.length !== 2) return other();
+    const [key, slug] = dc;
+    const page = key.startsWith('~') ? `users/${key.slice(1)}/repos/${slug}` : `projects/${key.toUpperCase()}/repos/${slug}`;
+    return { kind, hostName: host, path: `${key}/${slug}`, webUrl: `${site(host)}/${page}` };
+  }
+  if (kind === 'gitea') {
+    if (segs.length < 2) return other();
+    const p = segs.join('/');
+    return { kind, hostName: host, path: p, webUrl: `${site(host)}/${p}` };
+  }
+  return other();
+}
+
+/**
+ * A repository's name as the manor's settings and the Steward give it: owner/name for one on github.com, as always;
+ * host/path for one anywhere else (gitlab.com/group/sub/name, dev.azure.com/org/project/_git/name,
+ * github.acme.com/owner/name); local/<folder> for a local one. Pure.
+ */
+export function originName(o: Origin): string {
+  if (o.kind === 'github' && o.hostName === 'github.com') return o.path;
+  if (o.kind === 'local') return `local/${o.path.split(/[\\/]/).filter(Boolean).pop()?.replace(/\.git$/i, '') || 'repository'}`;
+  return `${o.hostName}/${o.path}`;
+}
+
+/**
+ * A name originName gives, back as its origin: owner/name is GitHub's (as a project's "repo" always was), host/path is
+ * read as https://host/path, with `hint` for a host whose name doesn't say. Null for one that isn't a name. Pure.
+ */
+export function originOfName(name: string, hint?: OriginHint): Origin | null {
+  const n = name.trim();
+  if (REPO.test(n)) return { kind: 'github', hostName: 'github.com', path: n, webUrl: `https://github.com/${n}` };
+  if (!HOST_NAME.test(n)) return null;
+  return parseOrigin(`https://${n}`, hint);
+}
+
+/**
+ * A repository's name as originName gives it, for what an agent is asked about one (kit 2.146.0): owner/name on GitHub,
+ * host/path on any other host, up to nine parts of plain characters, none of them "." or "..". Pure.
+ */
+export const repoNameOk = (s: string) => s.length <= 300 && /^(?!(?:.*\/)?\.\.?(?:\/|$))(?!(?:.*\/)?-)[A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.~%+@-]{1,100}){1,8}$/.test(s);
+
+/** A name for a repository on a host: the host (with a dot in it, or localhost; a port allowed), then its path. */
+const HOST_NAME = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9-]+(?::\d{1,5})?\/[A-Za-z0-9._~%+@-]+(?:\/[A-Za-z0-9._~%+@-]+)*$|^localhost(?::\d{1,5})?\/[A-Za-z0-9._~%+@-]+(?:\/[A-Za-z0-9._~%+@-]+)*$/i;
+
+/** A clone's origin URL from its git config (a worktree's .git file followed to the config it shares); '' with no origin; null when it isn't a clone. */
+function originUrlAt(checkout: string): string | null {
+  let git = path.join(checkout, '.git');
+  const s = statOf(git);
+  if (s?.isFile()) {
+    const to = /^gitdir:\s*(.+)$/m.exec(readText(git, s) ?? '')?.[1]?.trim();
+    if (!to) return null;
+    git = path.resolve(checkout, to);
+    const common = readText(path.join(git, 'commondir'));
+    if (common !== null) git = path.resolve(git, common.trim());
+  }
+  const config = readText(path.join(git, 'config'));
+  if (config === null) return null;
+  return /\[remote "origin"\][^[]*?^\s*url\s*=\s*(.+)$/m.exec(config)?.[1]?.trim() ?? '';
+}
+
+/**
  * The GitHub repository a clone's origin is (owner/name), read from its git config: a worktree's .git file is followed
  * to the config it shares. Null when it isn't a clone, has no origin, or its origin isn't on GitHub. Each file costs a
  * stat while it is unchanged (file-cache.ts, kit 2.83.2): the Steward asks for each of Manor's Repositories on every
@@ -361,18 +585,23 @@ export function githubRepo(url: string): string | null {
  */
 export function originRepo(checkout: string): string | null {
   try {
-    let git = path.join(checkout, '.git');
-    const s = statOf(git);
-    if (s?.isFile()) {
-      const to = /^gitdir:\s*(.+)$/m.exec(readText(git, s) ?? '')?.[1]?.trim();
-      if (!to) return null;
-      git = path.resolve(checkout, to);
-      const common = readText(path.join(git, 'commondir'));
-      if (common !== null) git = path.resolve(git, common.trim());
-    }
-    const config = readText(path.join(git, 'config'));
-    const url = config === null ? undefined : /\[remote "origin"\][^[]*?^\s*url\s*=\s*(.+)$/m.exec(config)?.[1];
+    const url = originUrlAt(checkout);
     return url ? githubRepo(url) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A clone's origin, on any host (kit 2.146.0): parseOrigin of its git config's origin, with `hint` for a host whose name
+ * doesn't say. A clone with no origin is local, its path the clone's own. Null when it isn't a clone (no .git), or its
+ * origin can't be read as one. Costs what originRepo does.
+ */
+export function originOf(checkout: string, hint?: OriginHint): Origin | null {
+  try {
+    const url = originUrlAt(checkout);
+    if (url === null) return null;
+    return url === '' ? { kind: 'local', hostName: '', path: checkout, webUrl: null } : parseOrigin(url, hint);
   } catch {
     return null;
   }
@@ -433,7 +662,7 @@ export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: s
 /**
  * settings.json's "projects" as the manor uses them: each entry checked, a wrong one left out and said in `problems`
  * (Manor shows them with its other settings' problems). Manor's own settings and every agent read them with this, so
- * the rules are the same everywhere. An entry is { "name", "checkout", "repo"?, "branch"?, "test"?, "versionFiles"?,
+ * the rules are the same everywhere. An entry is { "name", "checkout", "repo"?, "host"?, "branch"?, "test"?, "versionFiles"?,
  * "cleanBranches"?, "merges"?, "release"? }; one whose checkout or repository is the manor's own (`own`, manorOwn()) is refused, as is a
  * checkout inside one of the Steward's or holding one: the manor looks after its own itself, never as a project.
  * Whether the checkout is there isn't checked here: a project whose clone has gone stays listed, and the page says so.
@@ -441,7 +670,7 @@ export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: s
 export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = []): ManorProject[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
-    problems.push('settings.json: "projects" should be a list of { "name", "checkout", "repo", "branch", "test", "versionFiles", "cleanBranches", "merges", "release" }.');
+    problems.push('settings.json: "projects" should be a list of { "name", "checkout", "repo", "host", "branch", "test", "versionFiles", "cleanBranches", "merges", "release" }.');
     return [];
   }
   const ownRepos = new Set(own.repos.map((r) => r.toLowerCase()));
@@ -459,10 +688,17 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
     if (!checkout || checkout.length > 260 || !FULL_PATH.test(checkout) || /[\u0000-\u001f<>"|?*]/.test(checkout.slice(2))) {
       return wrong('should have a "checkout": the full path of its clone, like D:\\Code\\Example');
     }
+    let host: Exclude<OriginKind, 'local'> | undefined;
+    if (given(e.host)) {
+      if (typeof e.host !== 'string' || !HOST_KINDS.includes(e.host.trim().toLowerCase() as never)) return wrong(`should give its "host" as one of ${HOST_KINDS.join(', ')}, or none for the one its repository's name says`);
+      host = e.host.trim().toLowerCase() as Exclude<OriginKind, 'local'>;
+    }
     let repo: string | null = null;
     if (given(e.repo)) {
-      if (typeof e.repo !== 'string' || !REPO.test(e.repo.trim())) return wrong('should give its "repo" as owner/name on GitHub, or none');
-      repo = e.repo.trim();
+      const named = typeof e.repo === 'string' ? repoNamed(e.repo, host) : null;
+      if (!named) return wrong('should give its "repo" as owner/name on GitHub, host/path anywhere else (gitlab.com/group/app), its clone URL, or none');
+      if ('why' in named) return wrong(named.why);
+      repo = named.repo;
     }
     let branch = 'main';
     if (given(e.branch)) {
@@ -490,7 +726,7 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
     let merges = false;
     if (e.merges !== undefined && e.merges !== null) {
       if (typeof e.merges !== 'boolean') return wrong('should give "merges" as true or false');
-      if (e.merges && !repo) return wrong('says "merges", but has no "repo" on GitHub to merge in');
+      if (e.merges && !repo) return wrong('says "merges", but has no "repo" to merge in');
       merges = e.merges;
     }
     let release = '';
@@ -509,9 +745,37 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
     }
     const theirs = [repo, originRepo(checkout)].find((r) => r && ownRepos.has(r.toLowerCase()));
     if (theirs) return wrong(`is ${theirs}, one of the manor's own: the manor looks after it itself, so it can't be a project`);
-    projects.push({ name, checkout, repo, branch, test, versionFiles, cleanBranches, merges, release });
+    projects.push({ name, checkout, repo, branch, test, versionFiles, cleanBranches, merges, release, ...(host ? { host } : {}) });
   });
   return projects;
+}
+
+/**
+ * A project's "repo" as given: owner/name (GitHub's, kept exactly as written), host/path, or a clone URL (https, ssh,
+ * scp-style), named as originName names it. Why not, where it can't be one: a folder (a local-only project has no
+ * repo), or owner/name with a host other than GitHub said. Null for what isn't a repository's name at all. Pure.
+ */
+function repoNamed(raw: string, host: Exclude<OriginKind, 'local'> | undefined): { repo: string } | { why: string } | null {
+  const r = raw.trim();
+  if (!r || r.length > 300) return null;
+  if (REPO.test(r)) {
+    if (host && host !== 'github') return { why: `says its "host" is ${host}, but gives its "repo" as owner/name, which is GitHub's: give it as host/path (gitlab.acme.com/group/app), or its clone URL` };
+    return { repo: r };
+  }
+  const origin = HOST_NAME.test(r) ? originOfName(r, host) : /^[a-z][a-z0-9+.-]*:\/\/|^[^/\\:]{2,}:/i.test(r) && !/^file:/i.test(r) ? parseOrigin(r, host) : null;
+  if (!origin) return /^file:|^[a-z]:[\\/]|^\\\\|^\//i.test(r) ? { why: 'gives a folder as its "repo": a repository kept only on this PC, or a share, has none, so leave "repo" out' } : null;
+  if (origin.kind === 'local') return { why: 'gives a folder as its "repo": a repository kept only on this PC, or a share, has none, so leave "repo" out' };
+  return { repo: originName(origin) };
+}
+
+/**
+ * Where a project's repository is (kit 2.146.0): from its "repo" (originOfName) when it has one, else from its clone's
+ * origin (originOf), with its "host" for a host whose name doesn't say. A project with no repo and a clone with no
+ * origin, or a folder for one, is local. Null when there's neither: no repo, and no clone at its checkout.
+ */
+export function projectOrigin(p: Pick<ManorProject, 'repo' | 'checkout'> & { host?: ManorProject['host'] }): Origin | null {
+  if (p.repo) return originOfName(p.repo, p.host) ?? originOf(p.checkout, p.host);
+  return originOf(p.checkout, p.host);
 }
 
 /**
