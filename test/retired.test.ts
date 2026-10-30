@@ -15,6 +15,8 @@ const { RETIRED, retiredOf, retiredStaff } = await import('../src/retired.ts');
 const { planRollout, rollout, rolloutFailedFile } = await import('../src/stages/rollout.ts');
 const { releaseUnreleased, roundFailuresFile } = await import('../src/stages/round.ts');
 const { ctxFor, employee, runner } = await import('./helpers.ts');
+const { DEFAULT_SETTINGS, inEffect } = await import('../src/settings.ts');
+const { foundView } = await import('../src/found.ts');
 
 /** A Manor home whose app\staff.json lists these agents. */
 function manorWith(agents: Record<string, unknown>[]): string {
@@ -92,4 +94,31 @@ test("a round releases no version of a retired agent, and lets go of a release o
   assert.deepEqual([out.id, out.outcome, out.message], ['aletaster', 'skipped', RETIRED]);
   assert.deepEqual(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')), { porter: 'def5678' }, "its failed release no longer stands; another's does");
   assert.deepEqual(r.gh, [], 'GitHub asked nothing');
+});
+
+test("a retired agent is no employee at all: the settings the Steward works by leave it out, as Manor's staff.json says", () => {
+  const s = { ...DEFAULT_SETTINGS, releasesCastellan: true, employees: [aletaster, seneschal, porter] };
+  const ids = (x: { employees: { id: string }[] }) => x.employees.map((e) => e.id);
+  assert.deepEqual(ids(inEffect(s, false, null, { makers: true, retired: new Set(['aletaster']) })), ['seneschal', 'porter'], 'no row, glance, check, trial or alarm of its: it is not there');
+  assert.deepEqual(ids(inEffect(s, false, null, { makers: true, retired: new Set() })), ['aletaster', 'seneschal', 'porter'], 'none retired: as before');
+  // Not given: Manor's staff.json (MANOR_HOME), read as it is now, whatever case its ids are in.
+  const before = process.env.MANOR_HOME;
+  process.env.MANOR_HOME = manorWith([{ id: 'Aletaster', heldBack: true, retired: true }, { id: 'seneschal', heldBack: true }, { id: 'porter' }]);
+  try {
+    assert.deepEqual(ids(inEffect(s, false, null, { makers: true })), ['seneschal', 'porter'], 'held back until its first release: still looked after');
+  } finally {
+    process.env.MANOR_HOME = before;
+  }
+});
+
+test("a retired agent's clone isn't offered to look after again, though Settings still name it", () => {
+  const retiredOne = { ...aletaster, repo: 'me/aletaster', checkout: path.join(home, 'Aletaster') };
+  const mine = { ...porter, id: 'app', repo: 'me/app', checkout: path.join(home, 'App') };
+  writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [retiredOne, mine] }));
+  const repo = (name: string) => ({ repo: `me/${name}`, name, path: path.join(home, name), branch: 'main', lockfiles: [], push: true });
+  const found = { at: '2026-10-30T12:00:00Z', from: 'file' as const, error: null, repos: [repo('aletaster'), repo('app'), repo('new')] };
+  const manor = manorWith([{ id: 'aletaster', heldBack: true, retired: true }]);
+  // The settings in effect, without it (inEffect), and the file, with it.
+  const view = foundView(found, { ...DEFAULT_SETTINGS, releasesCastellan: true, employees: [mine] }, manor);
+  assert.deepEqual(view.offered.map((r) => r.repo), ['me/new']);
 });

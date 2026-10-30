@@ -9,6 +9,7 @@ import { originUrl, repoFromUrl } from './scm.ts';
 import { employeeFor } from './employ.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { branchTree, dotnetTests, dotnetVersionFiles, folderTree, type Tree } from './migrate.ts';
+import { retiredStaff } from './retired.ts';
 import type { Runner } from './run.ts';
 import { gitExe } from './kit/git-exe.ts';
 import { employeesOfProjects, inEffect, isSelf, loadSettings, manorTakesOver, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
@@ -368,5 +369,8 @@ export function anyRepo(who: string, o: { found?: FoundState; cwd?: string } = {
 export function foundView(s: FoundState, settings: Pick<Settings, 'employees' | 'releasesCastellan' | 'stewardRepo' | 'stewardCheckout'>, home = manorHome()): { at: string | null; error: string | null; from: FoundState['from']; offered: FoundRepo[]; found: number; into: 'manor' | 'steward' } {
   const own = normalizeSettings(readJson<unknown>(settingsFile(), {})).settings.employees;
   const into = !settings.releasesCastellan && manorTakesOver(own, home) ? 'manor' : 'steward';
-  return { at: s.at, error: s.error, from: s.from, offered: candidates(s, settings.employees, undefined, settings), found: s.repos.length, into };
+  // One Manor has retired is in the file still, though no longer looked after (settings.ts's inEffect): not offered again.
+  const retired = retiredStaff(home);
+  const held = [...settings.employees, ...own.filter((e) => retired.has(e.id.toLowerCase()))];
+  return { at: s.at, error: s.error, from: s.from, offered: candidates(s, held, undefined, settings), found: s.repos.length, into };
 }

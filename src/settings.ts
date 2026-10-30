@@ -11,6 +11,7 @@ import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { takeOntoKit } from './employ.ts';
 import { DEFAULT_INSTALL_SCRIPTS, PACKAGE_NAME } from './installscripts.ts';
 import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
+import { retiredStaff } from './retired.ts';
 import { loadScm, sourceControlField, type SourceControl } from './scm.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
 
@@ -905,9 +906,11 @@ export function manorTakesOver(own: Employee[], home = manorHome()): boolean {
  * take the id of one of Castellan's agents gets its own (porter-2). Where the Wright isn't installed, nothing is handed
  * to it and its drafts aren't looked at. On the PC that releases Castellan, the Steward's own repository is never an
  * employee as well (one looked after by mistake): it is looked after as itself (stages/selfmerge.ts), and twice would
- * merge it twice. Pure, but for asking the PC (makersPc, Manor's staff) unless `o` says.
+ * merge it twice. An agent Manor has retired (retired.ts) is no employee at all, whatever the file or Manor's list says:
+ * no row in the staff's table, and no glance, check, trial, release or alarm of its. Pure, but for asking the PC
+ * (makersPc, Manor's staff) unless `o` says.
  */
-export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProject[] | null = null, o: { makers?: boolean; ids?: Set<string> } = {}): Settings {
+export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProject[] | null = null, o: { makers?: boolean; ids?: Set<string>; retired?: ReadonlySet<string> } = {}): Settings {
   let out = s;
   const makers = o.makers ?? makersPc();
   // The ids no repository here may take, worked out once rather than once an employee.
@@ -932,6 +935,9 @@ export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProje
     const theirs = out.employees.filter((e) => !makersOwn(e, { makers, ids: idsHere() }));
     if (theirs.length < out.employees.length) out = { ...out, employees: theirs };
   }
+  const retired = o.retired ?? retiredStaff();
+  const serving = out.employees.filter((e) => !retired.has(e.id.toLowerCase()));
+  if (serving.length < out.employees.length) out = { ...out, employees: serving };
   return out;
 }
 

@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.261
+
+**Agents Manor has retired no longer show on the Steward's page, and Build now shows only on the PC that releases your repositories.**
+
+### What changed
+
+- Retired staff no longer show on the Steward's page: an agent Manor has retired is gone from the Staff table and its count, and the Steward no longer checks, tries, releases or raises anything for it. This happens by itself for any agent Manor retires.
+- Build now shows only on the PC that releases your repositories. Where another PC releases every one of them, Manor leaves the button off the Steward's card on this one (once Manor is updated too).
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.260
 
 **Items the Steward raises clear as soon as you've done what they ask, and a merge GitHub was still finishing no longer looks like another Steward's.**
