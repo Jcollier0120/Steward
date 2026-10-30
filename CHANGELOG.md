@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.265
+
+**It hands out the kit 2.146.1. That version only explains, for the staff's makers, how a staff member's git sign-in must be given its environment. Nothing you see changes.**
+
+### What changed
+
+- **The kit 2.146.1:** its git sign-in says how the environment it hands a command is used: added to the command's own environment, never the whole of it. One staff member, the Assayer, used it the other way. That was fixed in the Assayer itself: its https fetches had run without your proxy and your git settings.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.263
 
 **It hands out the kit 2.146.0: the staff can read a repository on any host, GitLab, Bitbucket, Azure DevOps, Gitea and the rest, or one kept only on this PC, and an MCP agent can connect itself to ten AI assistants. A change to another host's CI or an AI assistant's own folder no longer runs every test.**

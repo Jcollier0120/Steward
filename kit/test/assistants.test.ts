@@ -464,10 +464,17 @@ test('on macOS and Linux: each assistant in its own place', () => {
   // XDG_CONFIG_HOME, where it's set.
   const xdg = homeWith('xdg/zed');
   assert.deepEqual(assistantsFound(xdg, { platform: 'linux', env: { XDG_CONFIG_HOME: path.join(xdg, 'xdg') } }).map((a) => [a.id, a.file]), [['zed', path.join(xdg, 'xdg', 'zed', 'settings.json')]]);
-  // Claude Code on PATH, by its own name there.
+  // Claude Code on PATH, by its own name there. Its folder is given relative to the current one: a Linux PATH can't hold
+  // a Windows folder, whose drive's colon it splits at, and this runs on Windows too.
   const bin = homeWith('bin');
   writeFileSync(path.join(bin, 'bin', 'claude'), '#!/bin/sh\n');
-  assert.deepEqual(assistantsFound(bin, { platform: 'linux', env: { PATH: `/nowhere:${path.join(bin, 'bin')}` } }).map((a) => [a.id, a.canWrite]), [['claude-code', true]]);
+  const cwd = process.cwd();
+  process.chdir(bin);
+  try {
+    assert.deepEqual(assistantsFound(bin, { platform: 'linux', env: { PATH: '/nowhere:bin' } }).map((a) => [a.id, a.canWrite]), [['claude-code', true]]);
+  } finally {
+    process.chdir(cwd);
+  }
 });
 
 test('every assistant found at once, in their order, and none that aren\'t there', () => {

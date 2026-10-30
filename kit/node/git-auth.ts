@@ -32,13 +32,20 @@ export interface GitRan {
 
 export interface GitRunOptions {
   cwd?: string;
+  /**
+   * Added to the command's own environment (this process's, or whatever the runner gives every command), never the
+   * whole of it: the kit hands only its own few (`git credential fill`'s QUIET, a sign-in's GIT_CONFIG_* entries). A
+   * runner that ran a command with `env` alone would run git with no PATH, home or git settings of the person's, and
+   * with the sign-in's GIT_CONFIG_KEY_n numbered after entries it never got: "missing config key GIT_CONFIG_KEY_0",
+   * "unable to parse command-line config".
+   */
   env?: Record<string, string | undefined>;
   timeoutMs?: number;
   /** Written to its standard input, which is then closed (git credential fill reads its question there). */
   input?: string;
 }
 
-/** Runs a program and waits for it: an agent's own runner, which must take `input` and `env`. */
+/** Runs a program and waits for it: an agent's own runner, which must take `input`, and `env` laid over its own. */
 export type GitRunner<O extends GitRunOptions = GitRunOptions, R extends GitRan = GitRan> = (cmd: string, args: string[], opts?: O) => Promise<R>;
 
 /** The git commands that talk to a remote. */
@@ -208,6 +215,10 @@ interface Kept {
 /**
  * A runner whose git fetches, pushes and ls-remotes over https carry the host's sign-in themselves (see the top of this
  * file). Every other command, and git's own way when the sign-in can't be had, goes to `inner` as given.
+ *
+ * `inner` lays `env` over the command's own environment (GitRunOptions.env). The settings the sign-in adds are numbered
+ * after the GIT_CONFIG_COUNT of `{...process.env, ...opts.env}`, so an agent whose commands' own environment isn't this
+ * process's (a session's, say) hands each git command that environment whole in `env`, GIT_CONFIG_COUNT and all.
  */
 export function signedIn<O extends GitRunOptions, R extends GitRan>(inner: GitRunner<O, R>, now: () => number = Date.now, o: { fetch?: typeof fetch } = {}): GitRunner<O, R> {
   const byOrigin = new Map<string, Kept>();
@@ -258,6 +269,10 @@ export function signedIn<O extends GitRunOptions, R extends GitRan>(inner: GitRu
  *
  * A sign-in that goes stale while the script runs isn't retried the helper's way, as `signedIn`'s commands are: the
  * script's command fails as it would have, and the next run asks again. Keep a script's run short of KEEP_MS.
+ *
+ * It is added to the script's environment, never all of it: its entries are numbered after the GIT_CONFIG_COUNT of
+ * `o.already` (this process's environment when not given), so the script runs with `{...already, ...scriptEnv(…)}`.
+ * `run` lays `env` over the command's own environment (GitRunOptions.env).
  */
 export async function scriptEnv(origins: Iterable<string>, run: GitRunner, o: { cwd?: string; already?: Record<string, string | undefined> } = {}): Promise<Record<string, string>> {
   const headers = new Map<string, string>();

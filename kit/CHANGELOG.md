@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.146.1
+
+**git-auth.ts says what a runner does with `env`: it lays it over the command's own environment, never runs a command with it alone. The sign-in's git settings are numbered after the ones that environment already has.**
+
+### What changed
+
+- **node/git-auth.ts, `GitRunOptions.env`, `GitRunner`, `signedIn`, `scriptEnv`:** documented. `signedIn` hands its inner runner only its own few variables: `git credential fill`'s QUIET ones, or a sign-in's GIT_CONFIG_* entries numbered after the GIT_CONFIG_COUNT of `{...process.env, ...opts.env}`. A runner that took `env` as the whole environment ran `git credential fill` with no PATH, home or git settings. It also ran a signed fetch with GIT_CONFIG_KEY_3 and up but none from 0, which git refuses: "missing config key GIT_CONFIG_KEY_0", "unable to parse command-line config". The Assayer's runner did this; the Assayer fixes it in its own runner. No code changed here.
+- **test/assistants.test.ts:** the test of Claude Code on a Linux PATH passes on Windows too. A Windows folder's drive colon split it, so its folder is now given relative to the current one.
+
+### Before you update
+
+- Nothing for a runner that spawns with `{ ...process.env, ...opts.env }`, as the Steward's and Reeve's do. A runner whose commands get an environment of their own (a session's) passes that environment whole in `env` to the runner `signedIn` wraps, its GIT_CONFIG_COUNT included, and lays the `env` `signedIn` hands back over that same environment.
+
 ## 2.146.0
 
 **A repository may be on any host, or on none: GitHub, GitHub Enterprise, GitLab (subgroups and self-hosted too), Bitbucket, Azure DevOps, Gitea, Forgejo and Codeberg, any other git server, or a folder on this PC. And an agent that is an MCP server can connect itself to ten AI assistants, adding only its own entry to each one's settings.**
