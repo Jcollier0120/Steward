@@ -123,6 +123,6 @@ test('long output goes in a panel beside the page, with its title, its lines and
   const p = h.panel();
   assert.match(p, /^<div class="ui-overlay"><aside class="ui-side-panel" role="dialog" aria-modal="true" aria-label="Heiward: unit tests">/);
   assert.match(p, /<div class="ui-side-head"><strong>Heiward: unit tests<\/strong><button type="button" class="quiet small">Close<\/button><\/div>/);
-  assert.match(p, /<p class="muted small">exit 1, 2 hours ago<\/p><pre class="ui-output">line 1\nline 2<\/pre>/);
+  assert.match(p, /<p class="muted small">exit 1, 2 hours ago<\/p><pre class="ui-output"><button type="button" class="ui-copy" title="Copy" aria-label="Copy all of it" aria-live="polite"><svg class="ui-icon"[^>]*><rect [^>]*><\/rect><path [^>]*><\/path><\/svg><span class="ui-copy-said">Copy<\/span><\/button>line 1\nline 2<\/pre>/, 'Copy first in the block, for all of it: the copy glyph, its word for a screen reader');
   assert.equal(h.paste(), '<div class="ui-paste"><pre aria-label="A command">echo hi</pre><button type="button" class="quiet small">Copy</button></div>');
 });

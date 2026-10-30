@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.145.0
+
+**Every block of output has a copy button at its top-right: `Output` carries one, and `CopyButton` puts one in a page's own `<pre>`. One click copies the whole block, the lines scrolled out of sight too.**
+
+### What's new
+
+- **react/staff.tsx, `CopyButton`:** a small button with the copy glyph, made the first child of a `<pre>` (`<pre><CopyButton text={all} label="The setup's log" />{shown}</pre>`). It copies `text`, all of it, which may be more than the block shows (a run's whole log under its last lines). Once copied its glyph is a check in `--ok` for two seconds, then the copy glyph again. It floats right, so the first line wraps short of it rather than running under it, and it is sticky, so it stays at the block's top as the block scrolls (or the side panel, in a `SidePanel`). Its name is "Copy: <label>", or "Copy all of it" with no label, and "Copied" once copied, said politely; its word is hidden but for a screen reader, and its tip on hover is the same word. It is a plain button: it never holds the page busy.
+- **react/staff.tsx, `copyText(text, near?)`:** the clipboard's `writeText`, and where the page may not use it, the browser's copy command from a hidden field placed in `near` (so a modal dialog's focus trap lets it be selected), with the focus put back. True once copied. Where neither copies, `CopyButton` selects its block's text and says "Press Ctrl+C". `Paste` copies with it too.
+- **react/icons.tsx:** the `copy` glyph (Ionicons' name): two sheets, one in front of the other.
+- **react/staff.tsx, `Output`:** has a `CopyButton` as its first child, for its `text` and `label`.
+- **react/styles.ts:** `button.ui-copy` (on the block's own background, `--muted`, the page's font, `--hover` under the pointer, `--ok` once copied, pointer or not, the focus ring in `--accent`), and in a side panel `.ui-output` no longer scrolls on its own (the panel scrolls, so Copy stays at its top).
+- **test/browser.ts, `Tab`:** `key` (Enter, Space, Tab), and `click` and `hover` with the mouse, as a person's would be.
+- **spec/STAFF-PAGE.md:** every block of output has Copy at its top-right: `Output`, or a `CopyButton` first in a page's own `<pre>`.
+
+### Before you update
+
+- A page with its own `<pre>` of output (a log, a command's lines, a report to be sent) puts `<CopyButton text={…} label="…" />` first in it, or uses `Output`. A page that copies the kit's CSS by hand (Manor's app.css) copies the `button.ui-copy` rules too.
+
 ## 2.144.2
 
 **An update's probation watcher outlives the install that started it again: it starts apart from the install's jobs, so the last agents of Manor's update round finish their probation and clear app.prev, rather than being ended with Manor's install.**

@@ -176,12 +176,23 @@ details.ui-connect.ui-connect-todo { border-left: 4px solid var(--accent); }
 .ui-kept-rows { list-style: none; padding: 0; margin: 0 0 6px; }
 .ui-kept-rows li { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .ui-kept-rows li:last-child { border-bottom: none; }
+/* Copy at a block's top-right (staff.tsx CopyButton, the first child of its <pre>): the copy glyph, a check once copied,
+   on the block's own background. Floated, so the first line wraps short of it, never under it; sticky, so it stays at
+   the top of the block, or of what scrolls it, as it scrolls (a sticky top counts from inside the scroller's padding:
+   -4px keeps it where its margin puts it before any scroll). Its word is for a screen reader, shown only when it
+   couldn't copy; never in a selection of the block's text. */
+button.ui-copy { float: right; position: sticky; top: -4px; z-index: 1; display: inline-flex; align-items: center; gap: 4px; margin: -4px -6px 2px 12px; padding: 4px; border: 0; border-radius: 5px; background: inherit; color: var(--muted); font: 600 11.5px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif; white-space: nowrap; user-select: none; -webkit-user-select: none; cursor: pointer; }
+button.ui-copy:hover:not(:disabled) { background: var(--hover); color: var(--fg); filter: none; }
+button.ui-copy.ui-copied, button.ui-copy.ui-copied:hover:not(:disabled) { color: var(--ok); }
+button.ui-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.ui-copy .ui-copy-said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+button.ui-copy.ui-copy-failed .ui-copy-said { position: static; width: auto; height: auto; clip-path: none; }
 .ui-output { margin: 6px 0; padding: 8px 10px; background: var(--bg); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; line-height: 1.45; max-height: 60vh; overflow-y: auto; }
 .ui-overlay { position: fixed; inset: 0; z-index: 65; display: flex; justify-content: flex-end; background: rgba(0, 0, 0, .35); }
 .ui-side-panel { width: min(860px, 100%); height: 100%; overflow-y: auto; box-sizing: border-box; padding: 16px 20px; background: var(--surface); box-shadow: -4px 0 20px rgba(0, 0, 0, .25); }
 .ui-side-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .ui-side-head > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.ui-side-panel .ui-output { max-height: none; }
+.ui-side-panel .ui-output { max-height: none; overflow: visible; }
 .ui-needs > .card { margin: 0; }
 .card.ui-need { border-left: 4px solid var(--line); }
 .card.ui-need-danger { border-left-color: var(--alert); }

@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.262
+
+**It hands out the kit 2.145.0: every block of output on the staff's pages can be copied in one click, and the Steward's own build logs can too.**
+
+### What's new
+
+- **The kit 2.145.0:** a log, a command's output or a report shown on an employee's page has a small copy icon at its top-right corner. One click copies all of it, the lines scrolled out of view too, and the icon turns to a green check for a moment. It stays at the top as the log scrolls and never covers the first line.
+- **The Steward's page:** the last stage's log has the copy icon too.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.261
 
 **Agents Manor has retired no longer show on the Steward's page, and Build now shows only on the PC that releases your repositories.**
