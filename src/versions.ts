@@ -1,8 +1,9 @@
 /**
  * An employee's version, kept in several files that must agree (the kit's release.ts checks package.json
  * against src/app.ts): package.json, both of package-lock.json's own entries, a TypeScript file's
- * `version: 'x.y.z'` (src/app.ts's APP, Reeve's src/mcp.ts), or a .csproj's <VersionPrefix>. Each file is
- * changed in place, only at those spots, so the rest of it stays byte for byte.
+ * `version: 'x.y.z'` (src/app.ts's APP, Reeve's src/mcp.ts), a .csproj's <VersionPrefix>, a Rust crate's
+ * Cargo.toml ([package] or [workspace.package]) or a Python project's pyproject.toml ([project] or
+ * [tool.poetry]). Each file is changed in place, only at those spots, so the rest of it stays byte for byte.
  */
 
 /** x.y.z with the patch one up. */
@@ -13,14 +14,38 @@ export function bumpPatch(v: string): string {
 }
 
 const base = (file: string) => file.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
-const kindOf = (file: string): 'package' | 'lock' | 'csproj' | 'plain' | 'code' => {
+const kindOf = (file: string): 'package' | 'lock' | 'csproj' | 'plain' | 'toml' | 'code' => {
   const b = base(file);
   if (b === 'version') return 'plain';
   if (b === 'package.json') return 'package';
   if (b === 'package-lock.json') return 'lock';
   if (/\.(csproj|props)$/.test(b)) return 'csproj';
+  if (b === 'cargo.toml' || b === 'pyproject.toml') return 'toml';
   return 'code';
 };
+
+/** The TOML tables a version is kept in: a crate's, a workspace's, a Python project's (PEP 621) or Poetry's. */
+const TOML_TABLES: Record<string, string[]> = { 'cargo.toml': ['package', 'workspace.package'], 'pyproject.toml': ['project', 'tool.poetry'] };
+
+/** Where a Cargo.toml's or pyproject.toml's version is: its `version = "x.y.z"` line in the first of its tables that has one. */
+function tomlVersionAt(file: string, text: string): { start: number; end: number; version: string } | null {
+  const lines = text.split('\n');
+  let table = '';
+  let offset = 0;
+  const found: Record<string, { start: number; end: number; version: string }> = {};
+  for (const line of lines) {
+    const h = /^\s*\[\s*([A-Za-z0-9_.-]+)\s*\]\s*(#.*)?\r?$/.exec(line);
+    if (h) table = h[1];
+    else if (!found[table]) {
+      // version = "x.y.z" (or 'x.y.z'), its comment after it kept.
+      const m = /^(\s*version\s*=\s*)(["'])(\d+\.\d+\.\d+)\2/.exec(line);
+      if (m) found[table] = { start: offset + m[1].length + 1, end: offset + m[1].length + 1 + m[3].length, version: m[3] };
+    }
+    offset += line.length + 1;
+  }
+  for (const t of TOML_TABLES[base(file)] ?? []) if (found[t]) return found[t];
+  return null;
+}
 
 /** `version: 'x.y.z'` (an object's), or `VERSION = 'x.y.z'` (a constant's, as a site's src/version.ts). */
 const CODE = /(\b(?:version\s*:|VERSION\s*=)\s*)(['"])(\d+\.\d+\.\d+)\2/;
@@ -39,6 +64,7 @@ export function readVersion(file: string, text: string): string | null {
   }
   // A VERSION file (the kit's) is the version and nothing else.
   if (kind === 'plain') return /^\s*(\d+\.\d+\.\d+)\s*$/.exec(text.replace(/^﻿/, ''))?.[1] ?? null;
+  if (kind === 'toml') return tomlVersionAt(file, text)?.version ?? null;
   return (kind === 'csproj' ? CSPROJ.exec(text)?.[3] : CODE.exec(text)?.[3]) ?? null;
 }
 
@@ -76,6 +102,12 @@ export function setVersion(file: string, text: string, from: string, to: string)
   if (kind === 'plain') {
     if (readVersion(file, text) !== from) throw new Error(`${file} says ${text.trim()}, not ${from}`);
     return text.replace(from, to);
+  }
+  if (kind === 'toml') {
+    const at = tomlVersionAt(file, text);
+    if (!at) throw new Error(`${file} has no version = "x.y.z" in [${TOML_TABLES[base(file)].join('] or [')}]`);
+    if (at.version !== from) throw new Error(`${file} says ${at.version}, not ${from}`);
+    return `${text.slice(0, at.start)}${to}${text.slice(at.end)}`;
   }
   const re = kind === 'csproj' ? CSPROJ : CODE;
   const m = re.exec(text);
