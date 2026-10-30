@@ -601,8 +601,14 @@ function jsonEdit(text: string, key: string, name: string, entry: Record<string,
     }
     const last = obj.members[obj.members.length - 1];
     const next = skipSpace(text, last.end);
-    if (text[next] === ',') return `${text.slice(0, next + 1)}${eol}${pad(depth)}${member},${text.slice(next + 1)}`;
-    return `${text.slice(0, last.end)},${eol}${pad(depth)}${member}${text.slice(last.end)}`;
+    const comma = text[next] === ',';
+    // After the line's own comment (`"other": {…}, // theirs`), so the comment stays with what it's about.
+    const from = comma ? next + 1 : last.end;
+    const lineEnd = text.indexOf('\n', from);
+    const rest = lineEnd < 0 ? '' : text.slice(from, lineEnd).replace(/\r$/, '');
+    const at = lineEnd >= 0 && /^[ \t]*(\/\/.*|\/\*.*\*\/[ \t]*)$/.test(rest) ? from + rest.length : from;
+    if (comma) return `${text.slice(0, at)}${eol}${pad(depth)}${member},${text.slice(at)}`;
+    return `${text.slice(0, last.end)},${text.slice(last.end, at)}${eol}${pad(depth)}${member}${text.slice(at)}`;
   };
   let out: string;
   if (!top) {
