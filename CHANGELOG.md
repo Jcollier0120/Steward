@@ -2,6 +2,14 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.267
+
+**The kit's AI assistants and the Steward's any-host pipeline, tried with the real tools: opt-in live tests, and what they found fixed.**
+
+### What changed
+
+- **Live tests** (skipped unless switched on): `STEWARD_LIVE_ASSISTANTS=1` and `STEWARD_LIVE_HOSTS=1`.
+
 ## 0.36.266
 
 **Each repository is built and released by its own instructions: a `.steward.json` in it (or Settings' Pipelines) says its build and test commands, how it is versioned, its tag format, its notes and where a release goes. A repository on GitLab, Azure DevOps, Gitea, Bitbucket, any git server or this PC alone is looked after as fully as one on GitHub, and `steward build --dry-run` shows a build's steps before anything runs.**
