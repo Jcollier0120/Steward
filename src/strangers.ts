@@ -14,7 +14,8 @@ import { checkoutOf, freshBranch, type Ctx } from './stages/common.ts';
  *
  * Seen from what a round already has, with nothing more asked of GitHub:
  * - this Steward notes what it does itself, as it does it (acted.json): each PR it opens (stages/push.ts), each it
- *   merges (stages/mainbuild.ts's mergeOwn), each release it makes (stages/release.ts), whichever stage or button ran it;
+ *   merges (stages/mainbuild.ts's mergeOwn), and each whose merge it asked for and GitHub carries out later, each release
+ *   it makes (stages/release.ts), whichever stage or button ran it;
  * - each round's glance lists the Steward's open PRs (steward/…), which are watched with their head commit. One that is
  *   no longer open, and whose head is now in its employee's branch (git, in the checkout here), was merged; if not by
  *   this Steward, by someone else. One closed without merging is let go;
@@ -48,6 +49,11 @@ export interface Acted {
   /** What this Steward merged ("<repo>#<n>") and released ("<id>:v<x.y.z>") itself, and when. */
   merged: Record<string, string>;
   released: Record<string, string>;
+  /**
+   * The PRs whose merge this Steward asked for and GitHub took up ("Merge already in progress"), by "<repo>#<n>": at which
+   * head, and when. One found merged at that head later is this Steward's merge, carried out by GitHub.
+   */
+  asked: Record<string, { head: string; at: string }>;
   /** What a person marked as theirs (steward mine), the same keys, and when. */
   mine: Record<string, string>;
   /** Each employee's releases (v<x.y.z>) as the last round saw them: a new one is judged against these. */
@@ -69,7 +75,7 @@ export const releaseKey = (id: string, tag: string) => `${id}:${tag}`;
 /** A stranger's key, as what this Steward did and what a person marked are kept. */
 const keyOf = (s: Stranger) => (s.kind === 'merge' ? prKey(s.repo, s.ref.slice(1)) : releaseKey(s.id, s.ref));
 
-export const emptyActed = (): Acted => ({ watching: {}, merged: {}, released: {}, mine: {}, known: {}, strangers: [], ackedAt: null });
+export const emptyActed = (): Acted => ({ watching: {}, merged: {}, released: {}, asked: {}, mine: {}, known: {}, strangers: [], ackedAt: null });
 export const loadActed = (): Acted => ({ ...emptyActed(), ...readJson<Partial<Acted>>(actedFile(), {}) });
 
 /** Notes something this Steward did. Never throws: a note that couldn't be kept never fails what it notes. */
@@ -92,6 +98,9 @@ export function noteOpened(e: Pick<Employee, 'id' | 'repo'>, url: string, head: 
 
 /** A PR this Steward merged. */
 export const noteMerged = (e: Pick<Employee, 'repo'>, n: number, now?: Date) => note((a, at) => void (a.merged[prKey(e.repo, n)] = at), now);
+
+/** A PR whose merge at `head` this Steward asked for, and GitHub is carrying out (mainbuild.ts's mergeOwn). */
+export const noteAsked = (e: Pick<Employee, 'repo'>, n: number, head: string, now?: Date) => note((a, at) => void (a.asked[prKey(e.repo, n)] = { head, at }), now);
 
 /** A release this Steward made. */
 export const noteReleased = (e: Pick<Employee, 'id'>, version: string, now?: Date) => note((a, at) => void (a.released[releaseKey(e.id, `v${version}`)] = at), now);
@@ -161,10 +170,11 @@ export async function judge(o: { acted: Acted; glance: Glance; employees: Employ
       open.add(k);
       a.watching[k] = { id: e.id, head: String(p.headRefOid ?? a.watching[k]?.head ?? ''), url: String(p.url ?? ''), seen: at };
     }
-    // Those watched before this glance and no longer open: merged, or closed.
+    // Those watched before this glance and no longer open: merged, or closed. One whose merge this Steward asked for at
+    // the head watched is its own, whenever GitHub finished it (Thatcher#99 on 2026-10-30: asked at 01:08, merged 14:01).
     for (const [k, w] of Object.entries(a.watching)) {
       if (w.id !== e.id || open.has(k) || Date.parse(w.seen) >= taken) continue;
-      if (ours(k)) {
+      if (ours(k) || (!!w.head && a.asked?.[k]?.head === w.head)) {
         delete a.watching[k];
         continue;
       }
@@ -201,6 +211,7 @@ export function prune(a: Acted, employees: Pick<Employee, 'id'>[], now: Date): A
     watching: Object.fromEntries(Object.entries(keep(a.watching, (w) => w.seen)).filter(([, w]) => ids.has(w.id))),
     merged: keep(a.merged, (t) => t),
     released: keep(a.released, (t) => t),
+    asked: keep(a.asked ?? {}, (x) => x.at),
     mine: keep(a.mine, (t) => t),
     known: Object.fromEntries(Object.entries(a.known).filter(([id]) => ids.has(id))),
     strangers: a.strangers.filter((s) => fresh(s.seen)),

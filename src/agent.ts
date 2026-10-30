@@ -21,7 +21,7 @@ import { allowUpdate } from './safeinstall.ts';
 import { loadClaims } from './claims.ts';
 import { testedView } from './tested.ts';
 import { findRepos, foundStale, foundView, loadFound, lookAfterAll } from './found.ts';
-import { handOver, turnsView, type TurnsDeps } from './lease.ts';
+import { handOver, releasesHere, turnsView, type TurnsDeps } from './lease.ts';
 import { claimClashes } from './claims.ts';
 import { passedLines, passedWords } from './passover.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
@@ -39,6 +39,7 @@ import { keepHeads } from './heads.ts';
 import { withLane } from './stages/seneschal.ts';
 import { workForOthers } from './stages/others.ts';
 import { askAgain } from './stages/exchequer.ts';
+import { ANSWER_WITHIN_MS, recheckAlarms, rechecker } from './recheck.ts';
 
 /** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
 const githubReadyHere = (): boolean | undefined => {
@@ -237,6 +238,17 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       .finally(() => {
         finding = null;
       }));
+
+  /** The alarms looked at again (POST /api/alarms/recheck): one at a time, GitHub at most once a minute, and not while a stage runs. */
+  const recheck = rechecker({
+    busy: () => runs.length > 0,
+    log: (line) => console.log(line),
+    recheck: (look) => {
+      const settings = loadSettings();
+      const scm = loadScm();
+      return recheckAlarms({ settings, run: o.run ?? realRun, neutralDir: dataDir, log: (line) => console.log(line), look, host: (e) => hostOf(e, settings, scm), refreshStaff: () => void refresh() }, o.getJson ? { getJson: o.getJson } : {});
+    },
+  });
 
   const refresh = () => {
     if (refreshing) return refreshing;
@@ -480,8 +492,12 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         return { json: { on: loadSettings().alarms.on, at: a.at, open: a.open, cleared: a.cleared, page: '/#alarms' } };
       },
       // The build pipeline (pipeline.ts): its times, the next build, and whether one is under way. Manor holds its
-      // installs while `building`, and installs once, when the build has ended.
-      '/api/pipeline': () => ({ json: pipelineView(loadSettings().buildPipeline, loadPipeline()) }),
+      // installs while `building`, and installs once, when the build has ended; and offers Build now only where
+      // `releasesHere`: this PC releases one of the repositories looked after, the Steward's own among them (lease.ts).
+      '/api/pipeline': () => {
+        const s = loadSettings();
+        return { json: { ...pipelineView(s.buildPipeline, loadPipeline()), releasesHere: releasesHere([...s.employees.map((e) => e.repo), ...(s.stewardRepo ? [s.stewardRepo] : [])]) } };
+      },
     }),
     post: gatePosts({
       '/api/stage/bump': stagePost('bump'),
@@ -557,6 +573,22 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
           return { json: { ok: true, message: `${what} by a round starting now.` } };
         }
         return { json: { error: a ? 'that alarm has nothing to do but be dismissed' : 'no such alarm open' }, status: 404 };
+      },
+      // The alarms looked at again now, not at the next round (recheck.ts): Manor asks when the person comes back to its
+      // page or presses one of its buttons, so an alarm whose ask they have done clears then. Never a round.
+      '/api/alarms/recheck': async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const later = new Promise<'later'>((r) => {
+          timer = setTimeout(() => r('later'), ANSWER_WITHIN_MS);
+          timer.unref?.();
+        });
+        try {
+          const why = await Promise.race([recheck(), later]);
+          if (why === 'later') return { json: { ok: true, later: true } };
+          return why === null ? { json: { ok: true } } : { json: { error: why }, status: 500 };
+        } finally {
+          clearTimeout(timer);
+        }
       },
       // Look after repositories Reeve found (found.ts): added to Settings, releasing only as ticked. One
       // ({ repo, merges, release }), or several at once ({ repos: [{ repo, merges, release }, …] }).

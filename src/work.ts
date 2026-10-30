@@ -364,6 +364,27 @@ async function supersede(o: { run: Runner; cwd: string; log: (line: string) => v
   return keep.url;
 }
 
+/** Work filed before, as the Wright's queue (`takes`, its repositories) and its work say it stands. Pure. */
+function filedState(f: FiledWork, work: unknown, takes: Set<string> | null): WorkState {
+  // A Wright that no longer works there, or is gone from this PC, leaves it to a person; one that doesn't answer is the Wright's own alarm.
+  if (work === null || work === undefined) return { state: 'not-filed', why: `${NO_WRIGHT}; ${f.url} was filed` };
+  if (takes && !takes.has(f.repo.toLowerCase())) return { state: 'not-filed', why: `the Wright no longer works in ${f.repo} (${f.url} was filed)` };
+  const says = wrightSays(work, f);
+  return says ? { ...says, url: f.url, at: f.at } : { state: 'filed', url: f.url, at: f.at };
+}
+
+/**
+ * The work filed before for `items`, as fileWork finds it, with nothing filed or asked of GitHub: for a recheck of the
+ * alarms between rounds (recheck.ts), so what the Wright has in hand stays held as the round left it. An item never
+ * filed has no state: the round that found it couldn't file it either, and its alarm stands as it is.
+ */
+export function filedStates(items: WorkItem[], work: unknown): Map<string, WorkState> {
+  const filed = readJson<Record<string, FiledWork>>(workFiledFile(), {});
+  const q = readQueue(work);
+  const takes = 'why' in q ? null : new Set(q.repos.map((r) => r.toLowerCase()));
+  return new Map(items.flatMap((i): [string, WorkState][] => (filed[i.id] ? [[i.id, filedState(filed[i.id], work, takes)]] : [])));
+}
+
 /**
  * One round's filing: each item already filed looked up in the Wright's work, each new one filed where the Wright works,
  * as the module's comment says, or an older kit's open bump issue taken over (supersede). What each item's state is
@@ -385,13 +406,7 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
   for (const item of o.items) {
     const f = filed[item.id];
     if (f) {
-      // A Wright that no longer works there, or is gone from this PC, leaves it to a person; one that doesn't answer is the Wright's own alarm.
-      if (o.work === null || o.work === undefined) states.set(item.id, { state: 'not-filed', why: `${NO_WRIGHT}; ${f.url} was filed` });
-      else if (takes && !takes.has(f.repo.toLowerCase())) states.set(item.id, { state: 'not-filed', why: `the Wright no longer works in ${f.repo} (${f.url} was filed)` });
-      else {
-        const says = wrightSays(o.work, f);
-        states.set(item.id, says ? { ...says, url: f.url, at: f.at } : { state: 'filed', url: f.url, at: f.at });
-      }
+      states.set(item.id, filedState(f, o.work, takes));
       continue;
     }
     if ('why' in q) {

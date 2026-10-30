@@ -471,3 +471,10 @@ export function turnsView(employees: Pick<Employee, 'id' | 'name' | 'repo'>[], n
   }
   return rows.length ? { at: s.at, rows } : null;
 }
+
+/**
+ * Whether this PC releases any of these repositories (GET /api/pipeline's releasesHere, for Manor's Build now), as the
+ * page's Release PC column has it: one whose turn it holds, or that no other PC holds (a host that refuses the ref, a
+ * remote out of reach, or no turn taken yet). False when another PC holds every one's, or there are none.
+ */
+export const releasesHere = (repos: string[], s: TurnsState = loadTurns()): boolean => repos.some((r) => s.repos[key(r)]?.status !== 'elsewhere');

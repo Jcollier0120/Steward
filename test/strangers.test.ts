@@ -84,6 +84,30 @@ test("this Steward's own merges and releases are never counted, nor asked about"
   assert.deepEqual(S.strangerConditions(a, t('19:14:30')), []);
 });
 
+test('2026-10-30 replayed: a merge GitHub finished hours after this Steward asked for it, at the head it asked, is its own (Thatcher#99)', async () => {
+  const thatcher = employee('C:\\nowhere\\Thatcher', { id: 'thatcher', name: 'Thatcher', repo: 'Jcollier0120/Thatcher' });
+  const H99 = '9'.repeat(40);
+  const H98 = '8'.repeat(40);
+  const at = (hms: string) => new Date(`2026-10-30T${hms}Z`);
+  let a = await S.judge({ acted: S.loadActed(), glance: glance('2026-10-30T01:00:00Z', { thatcher: { head: 'a', prs: [], releases: rel('v0.2.80') } }), employees: [thatcher], merged: probe([]).fn, now: at('01:00:05') });
+  writeFileSync(S.actedFile(), JSON.stringify(a));
+  // The 01:09 rollout opens #99 and asks GitHub to merge it, which answers "Merge already in progress" each time
+  // (mainbuild.ts's mergeOwn notes the ask). The same for #98, which someone then pushes to.
+  S.noteOpened(thatcher, 'https://github.com/Jcollier0120/Thatcher/pull/99', H99, at('01:08:56'));
+  S.noteAsked(thatcher, 99, H99, at('01:08:57'));
+  S.noteOpened(thatcher, 'https://github.com/Jcollier0120/Thatcher/pull/98', H98, at('01:08:56'));
+  S.noteAsked(thatcher, 98, H98, at('01:08:57'));
+  // GitHub keeps both open for hours; #98 is at a new head now.
+  a = await S.judge({ acted: S.loadActed(), glance: glance('2026-10-30T01:20:00Z', { thatcher: { head: 'b', prs: [kitPr(thatcher.repo, 99, H99), kitPr(thatcher.repo, 98, 'c'.repeat(40))], releases: rel('v0.2.80') } }), employees: [thatcher], merged: probe([]).fn, now: at('01:20:05') });
+  writeFileSync(S.actedFile(), JSON.stringify(a));
+  // At 14:01 GitHub calls both merged.
+  const p = probe([H99, 'c'.repeat(40)]);
+  a = await S.judge({ acted: S.loadActed(), glance: glance('2026-10-30T14:10:00Z', { thatcher: { head: 'd', prs: [], releases: rel('v0.2.80') } }), employees: [thatcher], merged: p.fn, now: at('14:10:05') });
+  assert.deepEqual(p.asked, ['c'.repeat(40)], '#99 needs no look: its merge was asked for here at that head');
+  assert.deepEqual(a.strangers.map((s) => `${s.name} ${s.ref}`), ['Thatcher #98'], 'merged at a head this Steward never asked for');
+  assert.deepEqual(a.watching, {});
+});
+
 test('an update raises nothing: the first look only learns the releases there, and watches the open PRs', async () => {
   const a = await S.judge({ acted: S.emptyActed(), glance: glance('2026-10-07T18:51:00Z', { porter: { head: 'a', prs: [kitPr(porter.repo, 65, H65)], releases: rel('v0.5.13', 'v0.5.12', 'v0.5.11') } }), employees: [porter], merged: probe([]).fn, now: t('18:51:05') });
   assert.deepEqual(a.strangers, []);

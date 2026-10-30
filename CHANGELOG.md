@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.259
+## 0.36.262
 
 **It hands out the kit 2.145.0: every block of output on the staff's pages can be copied in one click, and the Steward's own build logs can too.**
 
@@ -10,6 +10,35 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **The kit 2.145.0:** a log, a command's output or a report shown on an employee's page has a small copy icon at its top-right corner. One click copies all of it, the lines scrolled out of view too, and the icon turns to a green check for a moment. It stays at the top as the log scrolls and never covers the first line.
 - **The Steward's page:** the last stage's log has the copy icon too.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.261
+
+**Agents Manor has retired no longer show on the Steward's page, and Build now shows only on the PC that releases your repositories.**
+
+### What changed
+
+- Retired staff no longer show on the Steward's page: an agent Manor has retired is gone from the Staff table and its count, and the Steward no longer checks, tries, releases or raises anything for it. This happens by itself for any agent Manor retires.
+- Build now shows only on the PC that releases your repositories. Where another PC releases every one of them, Manor leaves the button off the Steward's card on this one (once Manor is updated too).
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.260
+
+**Items the Steward raises clear as soon as you've done what they ask, and a merge GitHub was still finishing no longer looks like another Steward's.**
+
+### What's new
+
+- Once Castellan is updated too, an item the Steward raised clears as soon as you've done what it asks: released by hand, the PR it passed over merged or labelled owner-done, the fix pushed. It clears when you come back to Manor's page or press one of its buttons, not at the next round, up to ten minutes later. The Steward reads what its own records and the other agents' pages say then, and looks at GitHub for each such item, no more than once a minute.
+
+### What changed
+
+- When GitHub answered the Steward's merge with "Merge already in progress" and went on merging the PR itself, the Steward raised "Another Steward or person seems to be merging …" once the PR closed. It now counts that merge as its own: it looks whether the PR has merged instead of asking again, and a PR merged at the commit it asked for is never taken for someone else's.
 
 ### Before you update
 

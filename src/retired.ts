@@ -8,7 +8,9 @@ import { manorHome } from './kit/manor.ts';
  * the Assayer and the Smith hold now. Held back from customers, they still took every kit the rounds rolled out, and a
  * release for each: since 1 October some 160 of each one's commits were kit bumps. Now the rounds pass them over: no kit
  * rolled out to one (stages/rollout.ts), nor tried on it before the kit is released (stages/trial.ts), and no release of
- * one (stages/round.ts). A person's Bump, Push or Release naming one still does it.
+ * one (stages/round.ts). And since Steward 0.36.261 none is an employee at all (settings.ts's inEffect): no row in the
+ * staff's table, no glance, check or alarm, and no Bump, Push or Release of one; the stages' own guards stay for a
+ * context whose staff names one.
  *
  * Only those marked retired. One Manor holds back until its first release (the Seneschal), or doesn't list at all (Workshop
  * Pro's Bailiff and Wright, still being made), takes every kit as before. No Manor here, or its staff.json unreadable:

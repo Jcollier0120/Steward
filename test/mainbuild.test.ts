@@ -269,3 +269,69 @@ test('a PR the Steward opened itself is merged by it at its head, its branch del
   });
   assert.equal(broken.why, "GitHub wouldn't merge #12: spawn gh ENOENT");
 });
+
+test("a merge GitHub carries out from the Steward's ask is its own, whatever it answered; one being merged is looked at, not asked for again (Thatcher#99, 2026-10-30)", async () => {
+  const { loadActed } = await import('../src/strangers.ts');
+  const inProgress: Ran = { code: 1, out: '', err: 'GraphQL: Merge already in progress (mergePullRequest)\n' };
+  const notYet: Ran = { code: 1, out: '', err: 'GraphQL: Pull Request is not mergeable (mergePullRequest)\n' };
+  /** A kit PR's head, committed on a branch of the fake's own and pushed there; and on origin's main too when `landed`. */
+  const prOf = (name: string, landed: boolean) => {
+    const f = fakeEmployee(path.join(tmp, name));
+    const e = employee(f.checkout, { repo: `Jcollier0120/${name}` });
+    sh(f.checkout, 'switch', '--quiet', '-c', 'steward/kit-2.144.2');
+    const head = commit(f.checkout, `${name}.txt`);
+    sh(f.checkout, 'push', '--quiet', 'origin', `${head}:refs/heads/steward/kit-2.144.2`, ...(landed ? [`${head}:refs/heads/main`] : []));
+    sh(f.checkout, 'switch', '--quiet', 'main');
+    return { e, head };
+  };
+  /** mergeOwn with gh answering each merge from `merges`, each view from `views` (none: gh can't say), in turn. */
+  const go = async (e: ReturnType<typeof employee>, head: string, merges: Ran[], views: unknown[] = []) => {
+    const r = runner((a) => {
+      if (a[0] === 'pr' && a[1] === 'merge') return merges.shift() ?? ok('');
+      if (a[0] === 'pr' && a[1] === 'view' && views.length) return ok(views.shift());
+    });
+    const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'own'), run: r.run, neutralDir: tmp });
+    const pauses: number[] = [];
+    ctx.pause = async (ms) => void pauses.push(ms);
+    const why = await mergeOwn(ctx, e, { number: 99, head });
+    return { why, merges: r.gh.filter((a) => a[1] === 'merge').length, pauses, lines: ctx.lines };
+  };
+  const key = (e: ReturnType<typeof employee>) => `${e.repo}#99`;
+
+  // Every ask answered "already in progress", while its head is on main already: merged, by this Steward, at the first look.
+  const onMain = prOf('Thatcher', true);
+  const thatcher = await go(onMain.e, onMain.head, [inProgress, inProgress, inProgress, inProgress]);
+  assert.equal(thatcher.why, null);
+  assert.equal(thatcher.merges, 1, 'asked once');
+  assert.deepEqual(thatcher.pauses, []);
+  assert.ok(thatcher.lines.includes(`[fake] merged its own #99 (${onMain.head.slice(0, 7)}): GitHub answered "GraphQL: Merge already in progress (mergePullRequest)", and merged it`), thatcher.lines.join('\n'));
+  assert.ok(key(onMain.e) in loadActed().merged, 'noted as merged here');
+  assert.deepEqual(loadActed().asked[key(onMain.e)]?.head, onMain.head, 'and as asked, at its head');
+
+  // Being merged, not on main yet: looked at after each wait, not asked again, until GitHub says merged at its head.
+  const later = prOf('Later', false);
+  const open = { state: 'OPEN', headRefOid: later.head };
+  const done = await go(later.e, later.head, [inProgress], [open, open, { state: 'MERGED', headRefOid: later.head }]);
+  assert.equal(done.why, null);
+  assert.equal(done.merges, 1);
+  assert.deepEqual(done.pauses, OWN_MERGE_WAITS_MS.slice(0, 2));
+  assert.ok(key(later.e) in loadActed().merged);
+
+  // Still being merged after the last wait: said so, never asked again; the ask kept, for the round that finds it merged.
+  const slow = prOf('Slow', false);
+  const still = await go(slow.e, slow.head, [inProgress, ok('')]);
+  assert.equal(still.why, 'GitHub is merging #99 still: GraphQL: Merge already in progress (mergePullRequest)');
+  assert.equal(still.merges, 1, 'never asked again');
+  assert.deepEqual(still.pauses, OWN_MERGE_WAITS_MS);
+  assert.equal(key(slow.e) in loadActed().merged, false);
+  assert.equal(loadActed().asked[key(slow.e)]?.head, slow.head);
+
+  // A refusal, but GitHub says it is merged at the head asked for: merged. Merged at another head: someone else's push.
+  const refused = prOf('Refused', false);
+  assert.equal((await go(refused.e, refused.head, [notYet], [{ state: 'MERGED', headRefOid: refused.head }])).why, null);
+  const pushed = prOf('Pushed', false);
+  const other = await go(pushed.e, pushed.head, [notYet, notYet, notYet, notYet], [{ state: 'MERGED', headRefOid: 'b'.repeat(40) }]);
+  assert.equal(other.why, "GitHub wouldn't merge #99: GraphQL: Pull Request is not mergeable (mergePullRequest)");
+  assert.equal(other.merges, 1 + OWN_MERGE_WAITS_MS.length);
+  assert.equal(key(pushed.e) in loadActed().asked, false, 'a refusal is no ask GitHub took up');
+});

@@ -302,6 +302,43 @@ test("an older vouch's ask for a round: the Steward merges no PRs; while it buil
   assert.equal((await (await fetch(`${base()}/api/ping`)).json()).busy, false);
 });
 
+test("Manor's ask to look at the alarms again: with the page's token, answered once done, and no round run", async () => {
+  const html = await (await fetch(`${base()}/`)).text();
+  const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];
+  await served.idle();
+  assert.equal((await post('/api/alarms/recheck', {}, {})).status, 403, 'the token, as ever');
+  const asked = r.gh.length;
+  const answer = await post('/api/alarms/recheck', { 'x-token': token }, {});
+  assert.equal(answer.status, 200);
+  assert.deepEqual(await answer.json(), { ok: true });
+  assert.deepEqual(r.gh.slice(asked), [], 'no open alarm for GitHub to settle: not asked');
+  assert.equal((await (await fetch(`${base()}/api/ping`)).json()).busy, false);
+});
+
+test("the pipeline says whether this PC releases any repository it looks after, so Manor offers Build now only there", async () => {
+  const settingsFile = path.join(home, 'settings.json');
+  const turnsFile = path.join(home, 'turns.json');
+  const was = readFileSync(settingsFile, 'utf8');
+  const pipeline = async () => (await (await fetch(`${base()}/api/pipeline`)).json()) as { releasesHere?: unknown; times?: unknown };
+  const turn = (repo: string, status: string) => ({ repo, status, at: '2026-10-30T12:00:00Z', ...(status === 'elsewhere' ? { record: { pc: 'other', name: 'DESKTOP-ABC', until: '2099-01-01T00:00:00Z', since: '2026-10-30T12:00:00Z', pinned: false } } : {}) });
+  try {
+    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), employees: [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', checkout: home }] }));
+    const v = await pipeline();
+    assert.ok(Array.isArray(v.times), 'the pipeline as before');
+    assert.equal(v.releasesHere, true, 'no turn taken yet: no other PC holds it, so this one releases it');
+    // The Steward's own repository too, where Settings name it: every turn another PC's.
+    writeFileSync(turnsFile, JSON.stringify({ at: null, device: null, repos: { 'octocat/fake': turn('octocat/fake', 'elsewhere'), 'octocat/steward': turn('octocat/steward', 'elsewhere') } }));
+    assert.equal((await pipeline()).releasesHere, false, "every repository's turn is another PC's");
+    writeFileSync(turnsFile, JSON.stringify({ at: null, device: null, repos: { 'octocat/fake': turn('octocat/fake', 'here'), 'octocat/steward': turn('octocat/steward', 'elsewhere') } }));
+    assert.equal((await pipeline()).releasesHere, true, "this PC holds one's turn");
+    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), employees: [], stewardRepo: '' }));
+    assert.equal((await pipeline()).releasesHere, false, 'nothing looked after: nothing released here');
+  } finally {
+    writeFileSync(settingsFile, was);
+    rmSync(turnsFile, { force: true });
+  }
+});
+
 test('stages side by side: a release beside a round, a third refused while both slots are taken, one round at a time', async () => {
   const html = await (await fetch(`${base()}/`)).text();
   const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];
