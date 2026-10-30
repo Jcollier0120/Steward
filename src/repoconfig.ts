@@ -83,10 +83,10 @@ export function defaultPipeline(e: { test: string[]; versionFiles: string[]; rel
   return {
     host: null,
     build: [],
-    test: [...e.test],
+    test: [...(e.test ?? [])],
     release: e.release && e.release !== TAG ? e.release : '',
     versioning: 'claim',
-    versionFiles: [...e.versionFiles],
+    versionFiles: [...(e.versionFiles ?? [])],
     tagFormat: 'v{version}',
     changelog: 'auto',
     releaseTo: { kind: !e.release ? 'none' : e.release === TAG ? 'auto' : 'command' },
@@ -387,9 +387,11 @@ export function readPipelineFile(checkout: string): { raw: unknown; error: strin
  * them works by the pipeline; the pipeline itself kept beside them. One that says nothing comes back with the very
  * fields it had. Pure.
  */
-export function withPipeline<E extends { repo: string; test: string[]; versionFiles: string[]; release: string }>(e: E, p: ResolvedPipeline): E & { resolvedPipeline: ResolvedPipeline } {
-  // One whose pipeline couldn't be read keeps its fields, and is held (heldBy) where it would be built or released.
-  if (p.errors.length || !PIPELINE_KEYS.some((k) => p.from[k] !== 'default')) return { ...e, resolvedPipeline: p };
+export function withPipeline<E extends { repo: string; test: string[]; versionFiles: string[]; release: string }>(e: E, p: ResolvedPipeline): E & { resolvedPipeline?: ResolvedPipeline } {
+  // One that says nothing comes back as it was, the very object; one whose pipeline couldn't be read keeps its fields,
+  // and is held (heldBy) where it would be built or released.
+  if (!p.errors.length && !PIPELINE_KEYS.some((k) => p.from[k] !== 'default')) return e;
+  if (p.errors.length) return { ...e, resolvedPipeline: p };
   const releases = p.versioning !== 'none' && p.releaseTo.kind !== 'none';
   return {
     ...e,
