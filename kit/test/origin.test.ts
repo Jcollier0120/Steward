@@ -186,7 +186,7 @@ test("a repository's name as the manor gives it: owner/name on github.com as alw
 
 test('a name an agent is asked about is owner/name or host/path, plain, with no "." or ".." part', () => {
   const ok = ['Owner/App', 'me/app.js', 'gitlab.com/group/sub/app', 'dev.azure.com/acme/Platform/_git/app', 'dev.azure.com/acme/My%20Project/_git/app', 'bitbucket.acme.com/~jo/app', 'local/app'];
-  const bad = ['', 'app', '../app', 'a/..', 'a/./b', 'a/b c', 'a\\b', `a/${'b'.repeat(101)}`, `${'a/'.repeat(10)}b`, 'a/b?x', 'a/b#x'];
+  const bad = ['', 'app', '../app', 'a/..', 'a/./b', '-x/app', 'gitlab.com/-x', 'a/b/--upload-pack=x', 'a/b c', 'a\\b', `a/${'b'.repeat(101)}`, `${'a/'.repeat(10)}b`, 'a/b?x', 'a/b#x'];
   for (const n of ok) assert.equal(repoNameOk(n), true, n);
   for (const n of bad) assert.equal(repoNameOk(n), false, n);
 });

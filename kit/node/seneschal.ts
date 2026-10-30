@@ -622,7 +622,7 @@ const LANES: readonly SeneschalLane[] = ['person', 'blocking', 'normal', 'backgr
  * A repository as manor.ts' originName names it (kit 2.146.0): owner/name on GitHub, host/path on any other host
  * (gitlab.com/group/sub/app, dev.azure.com/org/project/_git/app), none of its parts "." or "..".
  */
-const REPO = /^(?=.{3,300}$)(?!(?:.*\/)?\.\.?(?:\/|$))[A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.~%+@-]{1,100}){1,8}$/;
+const REPO = /^(?=.{3,300}$)(?!(?:.*\/)?\.\.?(?:\/|$))(?!(?:.*\/)?-)[A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.~%+@-]{1,100}){1,8}$/;
 const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 /** A remote's path: plain characters, never a ".." segment. */

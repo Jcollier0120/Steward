@@ -556,7 +556,7 @@ export function originOfName(name: string, hint?: OriginHint): Origin | null {
  * A repository's name as originName gives it, for what an agent is asked about one (kit 2.146.0): owner/name on GitHub,
  * host/path on any other host, up to nine parts of plain characters, none of them "." or "..". Pure.
  */
-export const repoNameOk = (s: string) => s.length <= 300 && /^(?!(?:.*\/)?\.\.?(?:\/|$))[A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.~%+@-]{1,100}){1,8}$/.test(s);
+export const repoNameOk = (s: string) => s.length <= 300 && /^(?!(?:.*\/)?\.\.?(?:\/|$))(?!(?:.*\/)?-)[A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.~%+@-]{1,100}){1,8}$/.test(s);
 
 /** A name for a repository on a host: the host (with a dot in it, or localhost; a port allowed), then its path. */
 const HOST_NAME = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9-]+(?::\d{1,5})?\/[A-Za-z0-9._~%+@-]+(?:\/[A-Za-z0-9._~%+@-]+)*$|^localhost(?::\d{1,5})?\/[A-Za-z0-9._~%+@-]+(?:\/[A-Za-z0-9._~%+@-]+)*$/i;
