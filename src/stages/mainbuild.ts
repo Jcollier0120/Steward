@@ -1,6 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fetchFor, gitMaybe, remoteOf, removeWorktree } from '../git.ts';
+import { pipelineOf } from '../repoconfig.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { checksLogOf, runChecks, type AffectedScope, type FailedChecks } from './bump.ts';
@@ -223,7 +224,7 @@ export async function mergeOwn(ctx: Ctx, e: Employee, pr: { number: number; head
   for (const ms of [0, ...OWN_MERGE_WAITS_MS]) {
     if (ms) await pause(ms);
     if (!merging) {
-      const r = await host.mergePr(e.repo, pr.number, { matchHead: pr.head, deleteBranch: true }).catch((err: Error) => ({ code: 1, out: '', err: err.message }));
+      const r = await host.mergePr(e.repo, pr.number, { matchHead: pr.head, deleteBranch: true, method: pipelineOf(e).mergeMethod }).catch((err: Error) => ({ code: 1, out: '', err: err.message }));
       if (r.code === 0) return merged('');
       why = (r.err || r.out).trim().split('\n').pop() ?? '';
       // Its head moved: someone pushed to it, and it is theirs to merge now.

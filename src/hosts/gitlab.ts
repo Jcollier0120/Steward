@@ -125,8 +125,9 @@ export class GitLab implements SourceHost {
   }
 
   /** Merged as the project merges (a merge commit, unless it says otherwise); only at `matchHead` (GitLab's sha), when given. */
-  mergePr(repo: string, n: number, p: { matchHead?: string; deleteBranch?: boolean } = {}): Promise<Answer> {
-    return this.project(repo, 'PUT', `/merge_requests/${n}/merge`, { ...(p.matchHead ? { sha: p.matchHead } : {}), ...(p.deleteBranch ? { should_remove_source_branch: true } : {}) }, 5 * MINUTE);
+  mergePr(repo: string, n: number, p: { matchHead?: string; deleteBranch?: boolean; method?: 'merge' | 'squash' | 'rebase' } = {}): Promise<Answer> {
+    // GitLab takes squash per merge; a rebase is the project's own merge method (repoconfig.ts refuses it here).
+    return this.project(repo, 'PUT', `/merge_requests/${n}/merge`, { ...(p.matchHead ? { sha: p.matchHead } : {}), ...(p.method === 'squash' ? { squash: true } : {}), ...(p.deleteBranch ? { should_remove_source_branch: true } : {}) }, 5 * MINUTE);
   }
 
   async statuses(repo: string, commit: string): Promise<Answer> {

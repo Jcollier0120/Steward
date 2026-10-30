@@ -7,7 +7,7 @@ import { expandEnv } from '../kit/settings-kit.ts';
 import { addWorktree, commitOf, fetchBranch, gitMaybe, realOf } from '../git.ts';
 import type { Glance, RepoGlance } from '../glance.ts';
 import { gitGlance, isGithubRepo, type Host } from '../scm.ts';
-import { pipelineOf, tagsRelease, versionOfTag } from '../repoconfig.ts';
+import { pipelineOf, stampsChanges, tagsRelease, versionOfTag } from '../repoconfig.ts';
 import type { TastingDeps } from '../tasting.ts';
 import { appReleasesIn, type ReleaseInfo } from './staff.ts';
 import type { KitInfo } from '../kitsource.ts';
@@ -383,7 +383,7 @@ export const pipelineBranch = (head: string) => `${PIPELINE_BRANCH}${head.slice(
  * Whether an employee can ride the build pipeline (entries.ts, stages/stamp.ts): its host has pull requests for the
  * build's stamp to go through. One worked with plain git keeps setting its version in each change.
  */
-export const takesPipeline = (ctx: Pick<Ctx, 'host'>, e: Employee) => hostIs(ctx, e) !== 'git';
+export const takesPipeline = (ctx: Pick<Ctx, 'host'>, e: Employee) => hostIs(ctx, e) !== 'git' && stampsChanges(pipelineOf(e));
 /**
  * The Steward's kit PR still open for an older kit, which a newer kit goes onto instead of a PR of its own (the rollout's
  * fold): its number, its branch (steward/kit-<the kit it was opened for>) and the kit its branch pins now.

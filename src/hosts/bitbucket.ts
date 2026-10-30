@@ -182,14 +182,14 @@ export class Bitbucket implements SourceHost {
    * moved from `matchHead` isn't merged. A merge Bitbucket finishes in the background (202) is asked after (a minute at
    * most) until it has.
    */
-  async mergePr(repo: string, n: number, p: { matchHead?: string; deleteBranch?: boolean } = {}, waitMs = 5_000): Promise<Answer> {
+  async mergePr(repo: string, n: number, p: { matchHead?: string; deleteBranch?: boolean; method?: 'merge' | 'squash' | 'rebase' } = {}, waitMs = 5_000): Promise<Answer> {
     if (p.matchHead) {
       const now = await this.viewPr(repo, n, 'headRefOid');
       if (now.code !== 0) return now;
       const head = String(parsed<any>(now.out)?.headRefOid ?? '');
       if (head !== p.matchHead) return { ...now, code: 1, out: '', err: `pull request ${n}'s head moved (${head.slice(0, 7)}, not ${p.matchHead.slice(0, 7)}): not merged` };
     }
-    let a = await this.repo(repo, 'POST', `/pullrequests/${n}/merge`, { type: 'pullrequest_merge_parameters', merge_strategy: 'merge_commit', close_source_branch: !!p.deleteBranch }, 5 * MINUTE);
+    let a = await this.repo(repo, 'POST', `/pullrequests/${n}/merge`, { type: 'pullrequest_merge_parameters', merge_strategy: p.method === 'squash' ? 'squash' : p.method === 'rebase' ? 'fast_forward' : 'merge_commit', close_source_branch: !!p.deleteBranch }, 5 * MINUTE);
     for (let i = 0; a.code === 0 && parsed<any>(a.out)?.state !== 'MERGED' && i < 12; i++) {
       await new Promise((r) => setTimeout(r, waitMs));
       a = await this.repo(repo, 'GET', `/pullrequests/${n}`);

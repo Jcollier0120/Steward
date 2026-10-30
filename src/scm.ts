@@ -6,7 +6,7 @@ import type { GlanceRelease, RepoGlance } from './glance.ts';
 import { bitbucketLogin, TOKEN_HOST, whereBitbucket } from './hosts/bitbucket.ts';
 import { teaLogins, whereGitea } from './hosts/gitea.ts';
 import { remoteOf } from './git.ts';
-import { tagGlob, versionOfTag } from './repoconfig.ts';
+import { tagGlob, versionOfTag, type ResolvedPipeline } from './repoconfig.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
 
@@ -152,17 +152,29 @@ export const isAzureRepo = (repo: string) => /^(ssh\.)?dev\.azure\.com\/|^[^./]+
 /** A repository on a GitLab, as repoFromUrl names one: gitlab.com/group/app, or a host whose name says gitlab. Pure. */
 export const isGitlabRepo = (repo: string) => /^[^/]*gitlab[^/]*\/[^/]+\/.+$/i.test(repo);
 
-/** A repository named as GitHub names one (owner/name), not a host's path (gitlab.com/group/name). */
-export const isGithubRepo = (repo: string) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && !/\./.test(repo.split('/')[0]);
+/**
+ * A repository named as GitHub names one (owner/name), not a host's path (gitlab.com/group/name), nor a local one's
+ * local/<folder> (a clone whose origin is a folder, or that has none: the kit's originName, repoFromUrl).
+ */
+export const isGithubRepo = (repo: string) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && !/\./.test(repo.split('/')[0]) && !/^local\//i.test(repo);
 
 /**
  * How the Steward works with a repository (see above). With no look at what is installed yet (null), as before:
  * GitHub for a GitHub repository. Pure.
  */
-export function hostOf(e: Pick<Employee, 'repo'>, s: Pick<Settings, 'sourceControl' | 'releasesCastellan'>, look: ScmLook | null): Host {
+export function hostOf(e: Pick<Employee, 'repo'> & { resolvedPipeline?: ResolvedPipeline }, s: Pick<Settings, 'sourceControl' | 'releasesCastellan'>, look: ScmLook | null): Host {
   if (s.releasesCastellan) return 'github';
+  // Its pipeline's host (repoconfig.ts): none, or plain git, is plain git whatever else; a kind it names is worked with
+  // that kind's way where its CLI is signed in here (a self-hosted GitLab whose name doesn't say gitlab), else plain git.
+  const said = e.resolvedPipeline?.host?.kind;
+  if (said === 'none' || said === 'git') return 'git';
   if (s.sourceControl === 'git') return 'git';
   if (s.sourceControl === 'github') return 'github';
+  if (said === 'github') return !look || githubReady(look) ? 'github' : 'git';
+  if (said === 'gitlab') return look && gitlabReady(look) ? 'gitlab' : 'git';
+  if (said === 'azure') return look && azureReady(look) ? 'azure' : 'git';
+  if (said === 'bitbucket') return look && bitbucketReady(look) ? 'bitbucket' : 'git';
+  if (said === 'gitea') return look && giteaHosts(look).includes(e.repo.split('/')[0].toLowerCase()) ? 'gitea' : 'git';
   if (isGitlabRepo(e.repo)) return look && gitlabReady(look) ? 'gitlab' : 'git';
   if (isAzureRepo(e.repo)) return look && azureReady(look) ? 'azure' : 'git';
   if (whereBitbucket(e.repo)) return look && bitbucketReady(look) ? 'bitbucket' : 'git';
