@@ -20,6 +20,6 @@ const folder = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--onl
 const spun = spinUp(folder, { only });
 for (const s of spun) console.log(s.left ? `- ${s.name}: ${s.left}` : `- ${s.name}: ${s.dir}${s.origin ? `, its origin ${s.origin}` : ', no origin (this PC alone)'}`);
 console.log(`
-Each one's steps, nothing run:   node src/cli.ts build --dry-run "${path.join(path.resolve(folder), spun[0]?.name ?? 'node-hello')}"
+Each one's steps, nothing run:   node src/cli.ts build --dry-run "${path.join(path.resolve(folder), (spun.find((s) => s.name === 'python-hello') ?? spun[0])?.name ?? 'python-hello')}"
 Look after one: on the Steward's page, Found on this PC (Look again), or "Add a clone by its folder".
 Its releases go to its origin in ${path.join(path.resolve(folder), '.origins')}, or (folder releases) ${path.join(path.resolve(folder), 'releases')}.`);

@@ -24,9 +24,11 @@ On any other PC there is no staff: everything the person develops is a tracked r
 | `versionFiles` | The files its version is set in | none: its version is never changed |
 | `cleanBranches` | Reeve deletes branches already merged | true |
 | `merges` | The Steward merges the team's ready pull requests into `branch` (needs `repo`) | false |
-| `release` | How the Steward releases the version on `branch`: `tag`, or a command run in a worktree of it (needs `repo` and `versionFiles`) | none: never released |
+| `release` | How the Steward releases the version on `branch`: `tag`, or a command run in a worktree of it (needs `repo` and `versionFiles`). A repository with no `repo` is released only as its own `.steward.json` says (since kit 2.146.2) | none: never released |
 
 `merges` and `release` are the person's yes, repository by repository. Nothing merges or releases a repository that doesn't say so.
+
+How the Steward builds, tests, versions and releases a repository is its own: a `.steward.json` committed at its top says so (its build and test commands, how it is versioned, its tag format, its notes, where it is released to), else the Steward's Settings, else what the keys above have always meant. The Steward's docs/PIPELINE.md has each option. The list above stays the one place a repository is named (since kit 2.146.2).
 
 ## Who uses what
 

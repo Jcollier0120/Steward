@@ -407,7 +407,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     unique: 'id',
     label: 'Repositories',
     tab: 'Repositories',
-    help: "The repositories the Steward looks after. They arrive by Hire, or by Look after on the Steward's page, with all of it found from their clones: here you choose how each is released. Whoever writes a PR merges it once vouched; each build releases what is on the branch.",
+    help: "The repositories the Steward looks after, on any host or on this PC alone. They arrive by Hire, or by Look after or Add a clone by its folder on the Steward's page, with all of it found from their clones: here you choose how each is released, and a .steward.json in each says the rest (Pipelines, below). Whoever writes a PR merges it once vouched; each build releases what is on the branch.",
     maxItems: 50,
     noAdd: true,
     line: ['repo', 'branch', 'note'],
