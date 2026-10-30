@@ -456,9 +456,15 @@ function azurePath(host: string, segs: string[]): { hostName: string; path: stri
   if (host.endsWith('.visualstudio.com')) {
     if (before.length === 1 && ok(before[0])) return { hostName: host, path: `${before[0]}/_git/${name}` };
     if (before.length === 0) return { hostName: host, path: `${name}/_git/${name}` };
+    return null;
   }
+  // Azure DevOps Server, on a host of the person's own (a hint said so): its collection/project/_git/name as it is.
+  if (before.length >= 1 && before.every(ok)) return { hostName: host, path: [...before, '_git', name].join('/') };
   return null;
 }
+
+/** The hosts whose name is certain: a hint never makes them another kind. */
+const PUBLIC_HOST = /^(?:www\.|ssh\.)?(?:github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|gitea\.com)$|^(?:ssh\.)?dev\.azure\.com$|\.visualstudio\.com$/;
 
 /**
  * A remote's URL read host-neutrally (kit 2.146.0): its kind, host, path and web page. Takes every form git does: https
@@ -466,7 +472,9 @@ function azurePath(host: string, segs: string[]): { hostName: string; path: stri
  * a share, a path). GitLab keeps its subgroups (group/sub/name); Azure DevOps takes dev.azure.com/org/project/_git/name,
  * its ssh form (ssh.dev.azure.com:v3/org/project/name) and the older org.visualstudio.com, each as one path; Bitbucket
  * Data Center drops its scm/. A host is known by its name (kindOfHost), or by `hint` where the person said (a
- * self-hosted GitLab at code.acme.com). Null for what isn't a remote at all (an empty or broken string). Pure.
+ * self-hosted GitLab at code.acme.com, an Azure DevOps Server); a hint never changes github.com, gitlab.com,
+ * bitbucket.org, Azure DevOps, codeberg.org or gitea.com. Null for what isn't a remote at all (an empty or broken
+ * string). Pure.
  */
 export function parseOrigin(url: string, hint?: OriginHint): Origin | null {
   const parts = remoteParts(url);
@@ -474,7 +482,7 @@ export function parseOrigin(url: string, hint?: OriginHint): Origin | null {
   if ('folder' in parts) return { kind: 'local', hostName: '', path: parts.folder.replace(/[\\/]+$/, '') || parts.folder, webUrl: null };
   const host = parts.host.replace(/\.$/, '');
   if (!host) return null;
-  const said = typeof hint === 'string' ? hint : hint && typeof hint === 'object' ? hint[host] : undefined;
+  const said = PUBLIC_HOST.test(host) ? undefined : typeof hint === 'string' ? hint : hint && typeof hint === 'object' ? hint[host] : undefined;
   const kind: Exclude<OriginKind, 'local'> = said && HOST_KINDS.includes(said) ? said : kindOfHost(host);
   const segs = trimPath(parts.path).split('/').filter(Boolean);
   // An http(s) remote's page is at its own scheme and port; an ssh one's at https on the host.
