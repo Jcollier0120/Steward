@@ -185,6 +185,16 @@ export const pinOnly = (patch: string) => {
 };
 
 /**
+ * Folders no code of a repository reads, unless some names a file in them: each host's CI (GitHub's, GitLab's, Gitea's,
+ * Forgejo's, Azure DevOps'), and its settings for editors and AI assistants (Claude, Cursor, Codex, Gemini, Windsurf, VS
+ * Code, Zed, Continue, Cline).
+ */
+export const NO_CODE_FOLDER = /^\.(github|gitlab|gitea|forgejo|azuredevops|azure-pipelines|claude|cursor|codex|gemini|windsurf|vscode|zed|continue|clinerules)\//i;
+
+/** Files of the same kind: git's own, GitLab's, Azure DevOps' and Bitbucket's pipelines, and the assistants' rules. */
+export const NO_CODE_FILE = /^(\.(gitignore|gitattributes|editorconfig|gitlab-ci\.ya?ml|cursorrules|windsurfrules|clinerules)|azure-pipelines\.ya?ml|bitbucket-pipelines\.ya?ml)$/i;
+
+/**
  * The test files (matching `testGlobs`) a change in `dir` reaches, as the module's comment says. `patchOf` gives a changed
  * file's diff, to tell a version step from any other change. `kitFrom`: the folder the repository fills its kit from
  * (the Steward's own "kit"), where a kit file reaches where the fill puts it.
@@ -276,7 +286,7 @@ export function affectedTests(o: { dir: string; changed: Changed[]; testGlobs: s
       reasons.push(`${f}: through ${naming.length} file${naming.length === 1 ? '' : 's'} ${markdown ? 'reading' : 'naming'} it`);
     } else if (readFolders().some((r) => r.x !== f && f.startsWith(`${r.folder}/`))) {
       reasons.push(`${f}: in a folder code reads`);
-    } else if (markdown || /^(LICENSE|NOTICE)/i.test(name) || /^\.(gitignore|gitattributes|editorconfig)$/i.test(name) || /^\.(github|claude|vscode)\//i.test(f)) {
+    } else if (markdown || /^(LICENSE|NOTICE)/i.test(name) || NO_CODE_FILE.test(name) || NO_CODE_FOLDER.test(f)) {
       reasons.push(`${f}: no code reads it`);
     } else return everything(`${f} changed, and no code names it`);
   }
