@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ago, Badge, Card, Notes, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
+import { ago, Badge, Card, Notes, Output, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
 import type { Alarm, AlarmState } from '../alarms.ts';
 import type { TendState } from '../tend.ts';
 import type { TurnRow, TurnsView } from '../lease.ts';
@@ -406,7 +406,7 @@ function LastStage({ l, now }: { l: StageResult | null; now: number }) {
       {l.results.length > 0 && <StageResults results={l.results} />}
       <details open={!!l.error || l.results.some((r) => r.outcome === 'failed')}>
         <summary>Log ({l.log.length} lines)</summary>
-        <pre className="log">{l.log.join('\n')}</pre>
+        <Output text={l.log.join('\n')} label={`The ${l.stage} log`} />
       </details>
     </Card>
   );
@@ -852,7 +852,6 @@ td.pick-cell { width: 1%; padding-right: 0; }
 .turn-cell { margin-top: 4px; }
 .turn-buttons { gap: 6px; flex-wrap: wrap; }
 .alarm .notes { margin: 4px 0; }
-pre.log { max-height: 420px; overflow: auto; font: 12px/1.45 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; }
 td a { color: var(--accent); }
 `;
 

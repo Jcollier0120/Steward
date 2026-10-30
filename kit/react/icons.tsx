@@ -19,7 +19,8 @@ export type IconName =
   | 'add'
   | 'trash'
   | 'open'
-  | 'settings';
+  | 'settings'
+  | 'copy';
 
 const PATHS: Record<IconName, ReactNode> = {
   refresh: <path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5V5h-2.5" />,
@@ -60,6 +61,13 @@ const PATHS: Record<IconName, ReactNode> = {
   add: <path d="M8 3.5v9M3.5 8h9" />,
   trash: <path d="M3 4.5h10M6.3 4.5V3h3.4v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" />,
   open: <path d="M9 3h4v4M13 3 7.5 8.5M11.5 9.5V13H3V4.5h3.5" />,
+  // Two sheets, the copy in front and the one it came from behind it, at its top-left.
+  copy: (
+    <>
+      <rect x="5.5" y="5.5" width="9" height="9" rx="1.5" />
+      <path d="M3 10.5c-.8 0-1.5-.7-1.5-1.5V3c0-.8.7-1.5 1.5-1.5h6c.8 0 1.5.7 1.5 1.5" />
+    </>
+  ),
   settings: (
     <>
       <circle cx="8" cy="8" r="2.2" />

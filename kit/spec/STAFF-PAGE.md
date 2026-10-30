@@ -20,6 +20,7 @@ An agent that doesn't follow it yet keeps working; its page just reads different
 
 - **A row is one line.** A list shows each item as one line (`Row`): a badge for its state, its name, the one fact that matters, when, and its buttons at the end. Its details open under it with Details; the list never opens them all at once.
 - **Long output goes beside the page, never in it.** A log, a failing test's output, a stack trace, a report: a button on its row opens it in the `SidePanel` (`Output` for text as it was printed). The page never prints more than a few lines of output.
+- **Every block of output has Copy at its top-right**, the copy glyph alone, for all of its text in one press: `Output` has it, and a page's own `<pre>` of a log, lines or a report takes a `CopyButton` as its first child, given the whole text (all the run's lines, where the block shows only its last few).
 - **What's fine is one line.** A section where everything passed or nothing waits says so in a line ("All 39 pass") rather than listing each.
 - **Counts in headings**, the state in a badge, the time as `ago()` says it, with the exact time in its title.
 - **Developer content follows spec/DEVELOPER-OPTIONS.md**: with the switch off, the page is one plain line.
@@ -36,7 +37,8 @@ An agent that doesn't follow it yet keeps working; its page just reads different
 | `Glance`, `GlanceTile` | The tiles: `label`, `value`, `note`, `tone`, `to` (a section's tour), or an `action` button instead. |
 | `ConnectAI`, `ClientSetup`, `ConnectedClient` | Connect your AI: `agent`, `connected`, `clients` or `status` for its line, `about`, `action`, `setups` (each AI tool's `where` and `text`), `instruction`, and any more as children. |
 | `Kept`, `KeptStat`, `KeptRow` | Kept: `title`, `intro`, `stats`, `rows`, `counted`, `empty`, `footnote`. |
-| `SidePanel`, `Output` | A panel beside the page, with a `title`, `meta` lines and Close (Escape, or a click outside, closes it too); text as it was printed. |
+| `SidePanel`, `Output` | A panel beside the page, with a `title`, `meta` lines and Close (Escape, or a click outside, closes it too); text as it was printed, with Copy (`label` names it). |
+| `CopyButton`, `copyText` | Copy at a block's top-right, the first child of its `<pre>`: copies all of `text`, its glyph a check in `--ok` for a moment; `label` names the block for a screen reader. The first line wraps short of it, and it stays at the block's top as the block scrolls. `copyText(text)` is the copying alone. |
 | `Paste` | Text to copy, with Copy. |
 | `useFold(name, byDefault)` | Whether a fold is open, as this browser left it. |
 | `showSection(tour)` | Scrolls to a section by its tour name. |

@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Icon } from './icons.tsx';
 import { openDialog } from './page-busy.ts';
 import { SHOW_TAB } from './tabs.tsx';
 import { ago } from './time.ts';
@@ -198,16 +199,75 @@ export function Row({ mark, title, meta, actions, more, open: byDefault = false,
   );
 }
 
+/**
+ * Puts `text` on the clipboard, and says whether it did: navigator.clipboard's writeText, else the browser's copy
+ * command from a field put for a moment in `near` (a page opened over plain http from another PC has no
+ * navigator.clipboard, and in a modal dialog a field outside it can't be selected).
+ */
+export async function copyText(text: string, near?: Element | null): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // No clipboard on this page, or the browser refused it: the copy command.
+  }
+  const field = document.createElement('textarea');
+  field.value = text;
+  field.readOnly = true;
+  field.style.cssText = 'position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;';
+  const back = document.activeElement;
+  (near ?? document.body).append(field);
+  field.focus({ preventScroll: true });
+  field.select();
+  let done = false;
+  try {
+    done = document.execCommand('copy');
+  } catch {
+    done = false;
+  }
+  field.remove();
+  if (back instanceof HTMLElement) back.focus({ preventScroll: true });
+  return done;
+}
+
+/**
+ * Copy, pinned to the top-right of a block of text (a log, a check's output, a report): the first child of the block's
+ * <pre>. It copies all of `text`, the lines scrolled out of sight too, and says Copied for a moment. It floats right, so
+ * the first line wraps short of it rather than under it, and stays at the block's top as the block scrolls (styles.ts,
+ * .ui-copy). `label` names the block for a screen reader ("Copy: repo-sync log"). Output has one; a page's own block
+ * takes one the same way:
+ *
+ *   <pre className="my-log"><CopyButton text={log} label="The update's log" />{log}</pre>
+ */
+export function CopyButton({ text, label }: { text: string; label?: string }) {
+  const [said, setSaid] = useState<'Copy' | 'Copied' | 'Press Ctrl+C'>('Copy');
+  const button = useRef<HTMLButtonElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const copy = async () => {
+    const block = button.current?.parentElement;
+    const done = await copyText(text, block);
+    // Neither way copied: the block's text selected (Copy itself is never selected), for the keyboard's copy.
+    if (!done && block) window.getSelection()?.selectAllChildren(block);
+    setSaid(done ? 'Copied' : 'Press Ctrl+C');
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setSaid('Copy'), 2000);
+  };
+  // The copy glyph, a check once copied; the word is for a screen reader (aria-live says Copied), shown only when it
+  // couldn't copy.
+  return (
+    <button ref={button} type="button" className={cx('ui-copy', said === 'Copied' && 'ui-copied', said === 'Press Ctrl+C' && 'ui-copy-failed')} title={said} aria-label={said === 'Copy' ? (label ? `Copy: ${label}` : 'Copy all of it') : said} aria-live="polite" onClick={() => void copy()}>
+      <Icon name={said === 'Copied' ? 'checkmark' : 'copy'} size={15} />
+      <span className="ui-copy-said">{said}</span>
+    </button>
+  );
+}
+
 /** A block of text to paste somewhere, and Copy. */
 export function Paste({ text, label }: { text: string; label?: string }) {
   const [said, setSaid] = useState('Copy');
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setSaid('Copied');
-    } catch {
-      setSaid('Select it to copy');
-    }
+    setSaid((await copyText(text)) ? 'Copied' : 'Select it to copy');
     setTimeout(() => setSaid('Copy'), 2000);
   };
   return (
@@ -371,10 +431,11 @@ export function Kept({ title = 'Kept off the cloud', intro, stats, rows = [], co
   );
 }
 
-/** Long output as it was printed: monospace, wrapped, scrolling inside itself. */
+/** Long output as it was printed: monospace, wrapped, scrolling inside itself, and Copy at its top-right for all of it. */
 export function Output({ text, label }: { text: string; label?: string }) {
   return (
     <pre className="ui-output" aria-label={label}>
+      <CopyButton text={text} label={label} />
       {text}
     </pre>
   );

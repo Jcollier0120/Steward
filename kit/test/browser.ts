@@ -36,6 +36,12 @@ export async function until<T>(look: () => T | undefined | null | false, ms: num
 export interface Tab {
   /** An expression evaluated in the page, awaited when it's a promise; its value as JSON. Throws what the page threw. */
   run<T = unknown>(expression: string): Promise<T>;
+  /** A key pressed and let go as a person's would be (Enter, Space, Tab), on whatever has the focus. */
+  key(name: 'Enter' | 'Space' | 'Tab'): Promise<void>;
+  /** The mouse moved to (x, y) in the page's viewport and clicked there, as a person's would: it stays there, hovering. */
+  click(x: number, y: number): Promise<void>;
+  /** The mouse moved to (x, y), no click. */
+  hover(x: number, y: number): Promise<void>;
   /** The browser closed, and its profile removed. */
   close(): Promise<void>;
 }
@@ -87,8 +93,22 @@ export async function openTab(browser: string, url: string): Promise<Tab> {
       if (Date.now() > end) throw new Error(`timed out loading ${url}`);
       await new Promise((r) => setTimeout(r, 25));
     }
+    /** What the DevTools protocol needs for each key: the text a press types, as a keyboard's own would. */
+    const KEYS: Record<'Enter' | 'Space' | 'Tab', object> = { Enter: { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' }, Space: { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, text: ' ' }, Tab: { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 } };
     return {
       run,
+      key: async (name) => {
+        await send('Input.dispatchKeyEvent', { type: 'keyDown', ...KEYS[name] });
+        await send('Input.dispatchKeyEvent', { type: 'keyUp', ...KEYS[name], text: undefined });
+      },
+      click: async (x, y) => {
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+        await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+        await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+      },
+      hover: async (x, y) => {
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+      },
       close: async () => {
         ws.close();
         gone();

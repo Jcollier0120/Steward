@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.259
+
+**It hands out the kit 2.145.0: every block of output on the staff's pages can be copied in one click, and the Steward's own build logs can too.**
+
+### What's new
+
+- **The kit 2.145.0:** a log, a command's output or a report shown on an employee's page has a small copy icon at its top-right corner. One click copies all of it, the lines scrolled out of view too, and the icon turns to a green check for a moment. It stays at the top as the log scrolls and never covers the first line.
+- **The Steward's page:** the last stage's log has the copy icon too.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.258
 
 **It hands out the kit 2.144.2: the last agents of an update round finish their probation again, and are put back if their update stops answering.**
