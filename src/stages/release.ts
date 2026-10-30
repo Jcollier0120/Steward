@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { commitOf, fetchBranch, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchBranch, gitMaybe, remoteOf, removeWorktree, showFile } from '../git.ts';
 import { readLsRemote } from '../scm.ts';
 import { stayAwake } from '../kit/awake.ts';
 import { combinedEntry } from '../kit/notes.ts';
@@ -10,7 +10,9 @@ import { compareVersions } from '../kitfiles.ts';
 import { runLine, splitCommand, tail } from '../run.ts';
 import { releasedHere, releasesRepoEnv, TAG_RELEASE, type Employee } from '../settings.ts';
 import { tasteFirst } from '../tasting.ts';
-import { agreedVersion } from '../versions.ts';
+import { agreedVersion, bumpPatch } from '../versions.ts';
+import { heldBy, pipelineOf, stampsChanges, tagOf, tagsRelease, type ResolvedPipeline } from '../repoconfig.ts';
+import { expandEnv } from '../kit/settings-kit.ts';
 import { keepFailure } from '../failure.ts';
 import { needsSigning, noteSigningDown, signingDown, signingProblem, signsWith } from '../signing.ts';
 import { checksLogOf, needsNpmCi } from './bump.ts';
@@ -140,9 +142,16 @@ type ReleaseOptions = { kit: string | null; unless?: (commit: string, version: s
 async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what: string) => void): Promise<EmployeeResult> {
   const { run } = ctx;
   if (!e.usesKit && o.kit !== null) return result(e, 'skipped', NOT_ON_KIT);
+  // Its own pipeline (repoconfig.ts): one that can't be read holds it, and one may say it is never released.
+  const p = pipelineOf(e);
+  const held = heldBy(p);
+  if (held) return result(e, 'refused', held);
+  if (p.versioning === 'none' && p.from.versioning !== 'default') return result(e, 'skipped', `not released: its pipeline says versioning none (${p.from.versioning})`);
+  if (p.releaseTo.kind === 'none' && p.from.releaseTo !== 'default') return result(e, 'skipped', `not released: its pipeline says releaseTo none (${p.from.releaseTo})`);
   // Released only once the person said how (Settings' Release it), and only a repository with a version.
   if (!e.release) return result(e, 'skipped', NO_RELEASE);
-  if (!e.versionFiles.length) return result(e, 'skipped', 'no version files in Settings, so no version to release');
+  const byTags = p.versioning === 'tags';
+  if (!byTags && !e.versionFiles.length) return result(e, 'skipped', 'no version files in Settings, so no version to release');
   // Hired: its first install on this PC (Manor's Hire for one of this PC's own agents, staff.local.json). Only one built
   // here (its release installs it), only while it isn't installed, and at the version on its branch, released or not.
   if (o.hire) {
@@ -162,8 +171,11 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   if (!commit) return result(e, 'refused', `no ${remote}`);
   // Asked together, so git reads them in one command (showFile).
   const [texts, pinText] = await Promise.all([Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, remote, f)] as [string, string | null])), showFile(run, repo, remote, 'kit.json')]);
-  const v = agreedVersion(texts);
   const released = (await releasedOf(ctx, e)).map((r) => r.version);
+  // By tags (versioning: tags): the patch after its newest release, once its branch has a commit since.
+  const fromTags = byTags ? await nextByTags(ctx, e, { repo, commit, released }) : null;
+  if (fromTags?.nothing && 'version' in fromTags) return result(e, 'skipped', fromTags.nothing, { released: true, version: fromTags.version });
+  const v = fromTags ?? agreedVersion(texts);
   const pinned = readPin(pinText)?.kit ?? null;
   // A hire installs the version on its branch, whatever has been released before: there is no install of it here.
   const decision = o.hire ? releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released: [] }, null) : releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released }, o.kit);
@@ -177,7 +189,8 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   // Entries in changes/ not stamped into a version yet (stamp.ts): its stamp failed, or waits. Released now, its notes
   // would leave them out, as Reeve v0.19.2's did on 2026-10-28. It waits for the stamp, which the next round tries again.
   // Not over plain git, where a person stamps them (the Steward pushes nothing there), nor a hire, which installs the clone.
-  const unstamped = o.hire || hostIs(ctx, e) === 'git' ? [] : await unstampedAt(ctx, repo, commit);
+  // Nor one whose pipeline keeps no changes/ (changelog: changelog-md, host or none).
+  const unstamped = o.hire || hostIs(ctx, e) === 'git' || !stampsChanges(p) ? [] : await unstampedAt(ctx, repo, commit);
   if (unstamped.length) return result(e, 'skipped', `v${version} waits for ${unstamped.join(', ')} on ${remote} to be stamped into its changelog: released now, its notes would leave ${unstamped.length === 1 ? 'that change' : 'those changes'} out`, { version, commit: commit.slice(0, 7) });
   // The release before: the versions merged since and never released on their own come in its notes.
   const since = released.filter((r) => compareVersions(r, version) < 0).sort(compareVersions).at(-1) ?? null;
@@ -218,8 +231,8 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   if (!o.hire && ctx.lease && !(await ctx.lease.ok(e))) return result(e, 'skipped', `v${version} is left to another PC, whose turn it is now`, { version, commit: commit.slice(0, 7) });
   awake(`${e.name} v${version}'s release`);
 
-  // A GitHub release the Steward makes itself: no worktree, no command of the repository's.
-  if (e.release === TAG_RELEASE) {
+  // A GitHub release the Steward makes itself: no worktree, no command of the repository's. Or, by its pipeline, a folder.
+  if (e.release === TAG_RELEASE && p.releaseTo.kind !== 'folder') {
     const tagged = await tagRelease(ctx, e, { repo, commit, version, remote, noted: `${noted}${kitWords}`, since });
     if (tagged.outcome === 'done') daily();
     return tagged;
@@ -231,8 +244,16 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   await freshWorktree(run, ctx.settings, repo, dir, commit, '--detach');
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);
   try {
+    if (p.releaseTo.kind === 'folder') {
+      const r = await folderRelease(ctx, e, { repo, dir, commit, version, since, to: p.releaseTo });
+      if (r.outcome === 'done') daily();
+      return r.outcome === 'done' ? { ...r, message: `${r.message}${noted}${kitWords}` } : r;
+    }
     const held = await packagesFor(ctx, e, dir, e.release, `the release of v${version}`);
     if (held) return result(e, 'failed', `${held.why}, so its release wasn't built${held.network}`, { version, commit: commit.slice(0, 7) });
+    // Its pipeline's builds first (repoconfig.ts), in the same worktree: none unless it names some.
+    const built = await buildSteps(ctx, e, dir, p);
+    if (built) return result(e, 'failed', `v${version} wasn't released: ${built}`, { version, commit: commit.slice(0, 7) });
     // The kit's release publishes to the releases repository only on the PC that releases Castellan (MANOR_RELEASES_REPO).
     const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: true });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
@@ -254,7 +275,7 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
         const at = new Date().toISOString();
         notePending(e.id, { version, commit, why: missed.why, passing: missed.passing, since: at, last: at, tries: 0 });
         const released = `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${noted}${kitWords}`;
-        const url = hostFor(ctx, e).releaseUrl(e.repo, `v${version}`);
+        const url = hostFor(ctx, e).releaseUrl(e.repo, tagOf(p, version));
         if (missed.passing) return result(e, 'done', `${released}; on GitHub only for now: the Exchequer couldn't be reached (${missed.why}), so the rounds publish it there`, { version, commit: commit.slice(0, 7), url });
         // No commit: a round holds nothing against it (round.ts), and the alarm is what reaches the person (alarms.ts).
         return result(e, 'failed', `${released}; on GitHub only: the Exchequer refused it (${missed.why}), so no one is offered it: fix that, then press Publish it now on its alarm (or Release ${e.name}), which publishes it there from GitHub's files`, { version, url, released: true });
@@ -264,22 +285,25 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
     // Its releases have changed: the glance no longer says how they are.
     forgetGlance(ctx, e);
     const byGit = hostIs(ctx, e) === 'git';
+    // Its tag the release (plain git, or a pipeline whose own command releases it: repoconfig.ts's tagsRelease).
+    const byTag = tagsRelease(p, hostIs(ctx, e));
+    const tag = tagOf(p, version);
     // Worked with plain git (scm.ts): the release is the v<version> tag on origin, which the Steward pushes once the
     // command has run (or finds the command pushed). One built and installed here alone has nothing to publish.
-    if (byGit && !releasedHere(e)) {
+    if (byTag && !releasedHere(e)) {
       const tagged = await pushReleaseTag(ctx, e, { repo, commit, version, since });
-      if (tagged) return result(e, 'failed', `${e.release} finished, but the tag v${version} couldn't be pushed to its origin: ${tagged}${networkNote(tagged)}`, { version, commit: commit.slice(0, 7) });
+      if (tagged) return result(e, 'failed', `${e.release} finished, but the tag ${tag} couldn't be pushed to its origin: ${tagged}${networkNote(tagged)}`, { version, commit: commit.slice(0, 7) });
     }
     // A repository's own release command must make the GitHub release, or the next round would run it again: one that
     // didn't is a failed release, which the rounds then leave to the person at that commit. On the PC that releases
     // Castellan too: from 2026-10-13 to 10-14 kit 2.69.1's release.ts did nothing under a work folder reached through a
     // junction and still exited 0, and every round reported its agents released. (One released only on this PC has no
     // GitHub release.)
-    else if (!byGit && !releasedHere(e)) {
+    else if (!byTag && !releasedHere(e)) {
       const now = await releasedOf(ctx, e).catch(() => null);
       if (now && !now.some((x) => x.version === version)) {
         keepFailure(dir, e.release, r.code, `${r.out}\n${r.err}`);
-        return result(e, 'failed', `${e.release} finished, but ${hostFor(ctx, e).name} has no release v${version} in ${e.repo}: a release command must make it (or set Release it to tag, and the Steward makes it)`, { version, commit: commit.slice(0, 7) });
+        return result(e, 'failed', `${e.release} finished, but ${hostFor(ctx, e).name} has no release ${tag} in ${e.repo}: a release command must make it (or set Release it to tag, and the Steward makes it)`, { version, commit: commit.slice(0, 7) });
       }
     }
     // Released from this commit of its branch: the Surveyor's GET /api/tested (tested.ts).
@@ -293,7 +317,7 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
     const urgent = exchequer ? '' : await urgentNote(ctx, e, { repo, commit, version, since });
     const after = byGit ? await afterReleaseNote(ctx, e, { repo, commit, version, since }) : '';
     daily();
-    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${byGit && !releasedHere(e) ? `, tagged v${version} on its origin` : ''}${noted}${kitWords}${exchequer}${urgent}${after}`, { version, commit: commit.slice(0, 7), ...(byGit ? {} : { url: hostFor(ctx, e).releaseUrl(e.repo, `v${version}`) }) });
+    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${byTag && !releasedHere(e) ? `, tagged ${tag}${remoteOf(repo) === '.' ? ' in your clone' : ' on its origin'}` : ''}${noted}${kitWords}${exchequer}${urgent}${after}`, { version, commit: commit.slice(0, 7), ...(byTag ? {} : { url: hostFor(ctx, e).releaseUrl(e.repo, tag) }) });
   } finally {
     try {
       await removeWorktree(run, repo, dir);
@@ -434,27 +458,34 @@ async function afterReleaseNote(ctx: Ctx, e: Employee, o: { repo: string; commit
 }
 
 async function tagRelease(ctx: Ctx, e: Employee, o: { repo: string; commit: string; version: string; remote: string; noted: string; since: string | null }): Promise<EmployeeResult> {
-  const tag = `v${o.version}`;
-  // Worked with plain git (scm.ts): the release is the tag itself, pushed to origin.
-  if (hostIs(ctx, e) === 'git') {
-    ctx.log(`[${e.id}] releasing ${tag} from ${o.remote} (${o.commit.slice(0, 7)}): a tag pushed to its origin`);
+  const p = pipelineOf(e);
+  const tag = tagOf(p, o.version);
+  const host = hostIs(ctx, e);
+  // Its pipeline asks for a release on its host, and there is none to make here (repoconfig.ts).
+  if (p.releaseTo.kind === 'host' && host === 'git') return result(e, 'failed', `its pipeline releases it on its host, but ${e.repo} is worked with plain git on this PC, which has no releases: sign in to its host's CLI (docs/PIPELINE.md), or set "releaseTo" to tag`, { version: o.version, commit: o.commit.slice(0, 7) });
+  // Worked with plain git (scm.ts), or its pipeline asks for a tag alone: the release is the tag itself, pushed to origin
+  // (kept in the clone, for one with no origin).
+  if (host === 'git' || p.releaseTo.kind === 'tag') {
+    const where = remoteOf(o.repo) === '.' ? 'in your clone (it has no origin)' : 'on its origin';
+    ctx.log(`[${e.id}] releasing ${tag} from ${o.remote} (${o.commit.slice(0, 7)}): a tag ${where}`);
     const failed = await pushReleaseTag(ctx, e, o);
     if (failed) return result(e, 'failed', `the tag ${tag} couldn't be pushed to its origin: ${failed}${networkNote(failed)}`, { version: o.version, commit: o.commit.slice(0, 7) });
     forgetGlance(ctx, e);
     recordTested(e.id, { commit: o.commit, stage: 'release', branch: e.branch, version: o.version });
     noteReleased(e, o.version);
-    const after = await afterReleaseNote(ctx, e, o);
-    return result(e, 'done', `released v${o.version} from ${o.remote} (${o.commit.slice(0, 7)}), tagged ${tag} on its origin${o.noted}${after}`, { version: o.version, commit: o.commit.slice(0, 7) });
+    const after = host === 'git' ? await afterReleaseNote(ctx, e, o) : '';
+    return result(e, 'done', `released v${o.version} from ${o.remote} (${o.commit.slice(0, 7)}), tagged ${tag} ${where}${o.noted}${after}`, { version: o.version, commit: o.commit.slice(0, 7) });
   }
-  const entry = combinedEntry((await showFile(ctx.run, o.repo, o.commit, 'CHANGELOG.md')) ?? '', o.version, o.since ?? null);
+  // Its notes as its pipeline says: the CHANGELOG.md entry (as before), the host's own, or none.
+  const entry = p.changelog === 'host' ? null : p.changelog === 'none' ? '' : combinedEntry((await showFile(ctx.run, o.repo, o.commit, 'CHANGELOG.md')) ?? '', o.version, o.since ?? null);
   const notesDir = mkdtempSync(path.join(os.tmpdir(), 'steward-notes-'));
   try {
     let notesFile: string | null = null;
-    if (entry) {
+    if (entry || (entry === '' && p.changelog === 'none')) {
       notesFile = path.join(notesDir, 'notes.md');
       writeFileSync(notesFile, entry);
     }
-    ctx.log(`[${e.id}] releasing ${tag} from ${o.remote} (${o.commit.slice(0, 7)}): a ${hostFor(ctx, e).name} release, its notes ${entry ? 'the CHANGELOG.md entry' : "the host's"}`);
+    ctx.log(`[${e.id}] releasing ${tag} from ${o.remote} (${o.commit.slice(0, 7)}): a ${hostFor(ctx, e).name} release, its notes ${entry ? 'the CHANGELOG.md entry' : p.changelog === 'none' ? 'none' : "the host's"}`);
     const r = await hostFor(ctx, e).createRelease(e.repo, { tag, target: o.commit, title: `${e.name} ${o.version}`, notesFile });
     if (r.code !== 0) return result(e, 'failed', `gh release create ${tag} failed (exit ${r.code}): ${(r.err || r.out).trim().split('\n').pop()}${networkNote(`${r.out}\n${r.err}`)}`, { version: o.version, commit: o.commit.slice(0, 7) });
   } finally {
@@ -471,13 +502,16 @@ async function tagRelease(ctx: Ctx, e: Employee, o: { repo: string; commit: stri
  * and the version's CHANGELOG.md entry, pushed to origin, never forced. One already on origin at that commit (the
  * release command pushed it) is left as it is. Null when it is there; else why not.
  */
-export async function pushReleaseTag(ctx: Ctx, e: Employee, o: { repo: string; commit: string; version: string; since?: string | null }): Promise<string | null> {
-  const tag = `v${o.version}`;
+export async function pushReleaseTag(ctx: Ctx, e: Employee, o: { repo: string; commit: string; version: string; since?: string | null; local?: boolean }): Promise<string | null> {
+  const p = pipelineOf(e);
+  const tag = tagOf(p, o.version);
+  // A clone with no origin keeps its tags itself (remoteOf); `local` keeps it there too (a release to a folder).
+  const remote = o.local ? '.' : remoteOf(o.repo);
   const said = (r: { out: string; err: string }) => (r.err || r.out).trim().split('\n').pop() || 'no output';
-  const there = await ctx.run('git', ['ls-remote', 'origin', `refs/tags/${tag}`, `refs/tags/${tag}^{}`], { cwd: o.repo, timeoutMs: 2 * 60_000 });
+  const there = await ctx.run('git', ['ls-remote', remote, `refs/tags/${tag}`, `refs/tags/${tag}^{}`], { cwd: o.repo, timeoutMs: 2 * 60_000 });
   if (there.code !== 0) return `git ls-remote failed: ${said(there)}`;
-  const at = readLsRemote(there.out, '').releases.find((r) => r.tagName === tag)?.commit;
-  if (at) return at === o.commit ? null : `origin has ${tag} already, at ${at.slice(0, 7)}, not ${o.commit.slice(0, 7)}`;
+  const at = readLsRemote(there.out, '', p.tagFormat).releases.find((r) => r.tagName === tag)?.commit;
+  if (at) return at === o.commit ? null : `${remote === '.' ? 'this clone' : 'origin'} has ${tag} already, at ${at.slice(0, 7)}, not ${o.commit.slice(0, 7)}${remote === '.' ? ': delete it, or raise the version' : ''}`;
   const local = await commitOf(ctx.run, o.repo, `refs/tags/${tag}`);
   if (local && local !== o.commit) return `this clone has a tag ${tag} at ${local.slice(0, 7)}, not ${o.commit.slice(0, 7)}: delete it, or raise the version`;
   if (!local) {
@@ -485,7 +519,7 @@ export async function pushReleaseTag(ctx: Ctx, e: Employee, o: { repo: string; c
     const notesDir = mkdtempSync(path.join(os.tmpdir(), 'steward-notes-'));
     try {
       const file = path.join(notesDir, 'notes.md');
-      writeFileSync(file, `${e.name} ${o.version}\n\n${entry ?? ''}`.trimEnd() + '\n');
+      writeFileSync(file, `${e.name} ${o.version}\n\n${p.changelog === 'none' ? '' : (entry ?? '')}`.trimEnd() + '\n');
       let r = await ctx.run('git', ['tag', '-a', tag, o.commit, '-F', file], { cwd: o.repo, timeoutMs: 60_000 });
       // No name or email set for git on this PC: a plain tag needs none.
       if (r.code !== 0 && /user\.(name|email)|identity|tell me who you are/i.test(`${r.out}\n${r.err}`)) r = await ctx.run('git', ['tag', tag, o.commit], { cwd: o.repo, timeoutMs: 60_000 });
@@ -494,8 +528,66 @@ export async function pushReleaseTag(ctx: Ctx, e: Employee, o: { repo: string; c
       rmSync(notesDir, { recursive: true, force: true });
     }
   }
+  if (remote === '.') return null;
   const pushed = await ctx.run('git', ['push', '--quiet', 'origin', `refs/tags/${tag}:refs/tags/${tag}`], { cwd: o.repo, timeoutMs: 5 * 60_000 });
   return pushed.code === 0 ? null : `git push failed: ${said(pushed)}`;
+}
+
+/**
+ * The next version of one versioned by its tags (repoconfig.ts's versioning: tags): the patch after its newest release,
+ * once its branch has a commit since that release's tag; 0.1.0 for its first. {nothing} when the branch has nothing new.
+ */
+async function nextByTags(ctx: Ctx, e: Employee, o: { repo: string; commit: string; released: string[] }): Promise<{ version: string; nothing?: string } | { error: string; nothing?: undefined }> {
+  const p = pipelineOf(e);
+  const newest = [...o.released].sort(compareVersions).at(-1);
+  if (!newest) return { version: '0.1.0' };
+  const tag = tagOf(p, newest);
+  const ref = `refs/tags/${tag}`;
+  if (!(await commitOf(ctx.run, o.repo, ref))) await gitMaybe(ctx.run, o.repo, 'fetch', '--quiet', remoteOf(o.repo), `+${ref}:${ref}`);
+  const count = await gitMaybe(ctx.run, o.repo, 'rev-list', '--count', `${ref}..${o.commit}`);
+  if (count === null) return { error: `its newest release's tag ${tag} isn't in your clone, so the Steward can't tell what is new since it: fetch its tags (git fetch --tags)` };
+  if (Number(count.trim()) === 0) return { nothing: `nothing on ${e.branch} since ${tag}, its newest release`, version: newest };
+  return { version: bumpPatch(newest) };
+}
+
+/** Its pipeline's build commands (repoconfig.ts), in order, in `dir`: null once every one passed, else why not. None unless it names some. */
+async function buildSteps(ctx: Ctx, e: Employee, dir: string, p: Pick<ResolvedPipeline, 'build'>): Promise<string | null> {
+  for (const c of p.build) {
+    ctx.log(`[${e.id}] build: ${c}`);
+    const r = await runLine(ctx.run, c, { cwd: dir, timeoutMs: 30 * 60_000, paced: true });
+    for (const line of tail(`${r.out}\n${r.err}`, 5).split('\n')) ctx.log(`[${e.id}]   ${line}`);
+    if (r.code !== 0) {
+      keepFailure(dir, c, r.code, `${r.out}\n${r.err}`);
+      return `its build ${c} failed (exit ${r.code})${networkNote(`${r.out}\n${r.err}`)}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * A release to a folder (repoconfig.ts's releaseTo: { folder, from }): its pipeline's builds run in the release's
+ * worktree, then what they left in `from` is copied to <folder>\<tag>, and the tag made in the clone (never pushed), so
+ * the next release knows what is new since. A release folder already there is never written over.
+ */
+async function folderRelease(ctx: Ctx, e: Employee, o: { repo: string; dir: string; commit: string; version: string; since: string | null; to: { folder: string; from: string } }): Promise<EmployeeResult> {
+  const p = pipelineOf(e);
+  const tag = tagOf(p, o.version);
+  const at = { version: o.version, commit: o.commit.slice(0, 7) };
+  const built = await buildSteps(ctx, e, o.dir, p);
+  if (built) return result(e, 'failed', `${tag} wasn't released: ${built}`, at);
+  const from = path.resolve(o.dir, o.to.from);
+  if (!existsSync(from)) return result(e, 'failed', `${tag} wasn't released: its build left no ${o.to.from} to copy`, at);
+  const root = path.resolve(expandEnv(o.to.folder));
+  const dest = path.join(root, tag);
+  if (existsSync(dest)) return result(e, 'failed', `${tag} wasn't released: ${dest} is there already, and the Steward never writes over a release (remove it, or raise the version)`, at);
+  mkdirSync(root, { recursive: true });
+  cpSync(from, dest, { recursive: true, filter: (s) => path.basename(s) !== '.git' });
+  const tagged = await pushReleaseTag(ctx, e, { repo: o.repo, commit: o.commit, version: o.version, since: o.since, local: true });
+  forgetGlance(ctx, e);
+  recordTested(e.id, { commit: o.commit, stage: 'release', branch: e.branch, version: o.version });
+  noteReleased(e, o.version);
+  ctx.log(`[${e.id}] released ${tag} to ${dest}`);
+  return result(e, 'done', `released v${o.version} from origin/${e.branch} (${at.commit}) to ${dest}${tagged ? `; the tag ${tag} wasn't made in your clone (${tagged})` : `, tagged ${tag} in your clone`}`, at);
 }
 
 /**

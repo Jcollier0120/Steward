@@ -1,0 +1,10 @@
+{
+  "//": "A GitLab of your own: its address, squash merges, a release on GitLab with GitLab's own notes. With glab signed in to it, worked GitLab's way; without, plain git, released as a tag (docs/PIPELINE.md)",
+  "host": { "kind": "gitlab", "baseUrl": "https://gitlab.example.test" },
+  "test": ["npm test"],
+  "versioning": "claim",
+  "versionFiles": ["package.json"],
+  "changelog": "host",
+  "releaseTo": "auto",
+  "mergeMethod": "squash"
+}

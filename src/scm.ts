@@ -5,6 +5,8 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { GlanceRelease, RepoGlance } from './glance.ts';
 import { bitbucketLogin, TOKEN_HOST, whereBitbucket } from './hosts/bitbucket.ts';
 import { teaLogins, whereGitea } from './hosts/gitea.ts';
+import { remoteOf } from './git.ts';
+import { tagGlob, versionOfTag, type ResolvedPipeline } from './repoconfig.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
 
@@ -150,17 +152,29 @@ export const isAzureRepo = (repo: string) => /^(ssh\.)?dev\.azure\.com\/|^[^./]+
 /** A repository on a GitLab, as repoFromUrl names one: gitlab.com/group/app, or a host whose name says gitlab. Pure. */
 export const isGitlabRepo = (repo: string) => /^[^/]*gitlab[^/]*\/[^/]+\/.+$/i.test(repo);
 
-/** A repository named as GitHub names one (owner/name), not a host's path (gitlab.com/group/name). */
-export const isGithubRepo = (repo: string) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && !/\./.test(repo.split('/')[0]);
+/**
+ * A repository named as GitHub names one (owner/name), not a host's path (gitlab.com/group/name), nor a local one's
+ * local/<folder> (a clone whose origin is a folder, or that has none: the kit's originName, repoFromUrl).
+ */
+export const isGithubRepo = (repo: string) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && !/\./.test(repo.split('/')[0]) && !/^local\//i.test(repo);
 
 /**
  * How the Steward works with a repository (see above). With no look at what is installed yet (null), as before:
  * GitHub for a GitHub repository. Pure.
  */
-export function hostOf(e: Pick<Employee, 'repo'>, s: Pick<Settings, 'sourceControl' | 'releasesCastellan'>, look: ScmLook | null): Host {
+export function hostOf(e: Pick<Employee, 'repo'> & { resolvedPipeline?: ResolvedPipeline; hostHint?: Employee['hostHint'] }, s: Pick<Settings, 'sourceControl' | 'releasesCastellan'>, look: ScmLook | null): Host {
   if (s.releasesCastellan) return 'github';
+  // Its pipeline's host (repoconfig.ts): none, or plain git, is plain git whatever else; a kind it names is worked with
+  // that kind's way where its CLI is signed in here (a self-hosted GitLab whose name doesn't say gitlab), else plain git.
+  const said = e.resolvedPipeline?.host?.kind ?? e.hostHint;
+  if (said === 'none' || said === 'git') return 'git';
   if (s.sourceControl === 'git') return 'git';
   if (s.sourceControl === 'github') return 'github';
+  if (said === 'github') return !look || githubReady(look) ? 'github' : 'git';
+  if (said === 'gitlab') return look && gitlabReady(look) ? 'gitlab' : 'git';
+  if (said === 'azure') return look && azureReady(look) ? 'azure' : 'git';
+  if (said === 'bitbucket') return look && bitbucketReady(look) ? 'bitbucket' : 'git';
+  if (said === 'gitea') return look && giteaHosts(look).includes(e.repo.split('/')[0].toLowerCase()) ? 'gitea' : 'git';
   if (isGitlabRepo(e.repo)) return look && gitlabReady(look) ? 'gitlab' : 'git';
   if (isAzureRepo(e.repo)) return look && azureReady(look) ? 'azure' : 'git';
   if (whereBitbucket(e.repo)) return look && bitbucketReady(look) ? 'bitbucket' : 'git';
@@ -224,6 +238,11 @@ export function originUrl(checkout: string): string | null {
  */
 export function repoFromUrl(url: string): string | null {
   const u = url.trim().replace(/\.git\/*$/i, '').replace(/\/+$/, '');
+  // A file: URL is a folder on this PC, as a path is (below): never a host called "file".
+  if (/^file:/i.test(u)) {
+    const name = u.replace(/^file:\/*/i, '').split(/[\\/]/).filter(Boolean).pop();
+    return name ? `local/${name}` : null;
+  }
   const gh = /github\.com[:/]+([^/\s]+)\/([^/\s]+)$/i.exec(u);
   if (gh) return `${gh[1]}/${gh[2]}`;
   const web = /^[a-z+]+:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+)$/i.exec(u);
@@ -234,10 +253,8 @@ export function repoFromUrl(url: string): string | null {
   return name ? `local/${name}` : null;
 }
 
-const VERSION_TAG = /^v\d+\.\d+\.\d+$/;
-
-/** A repository's branch head and v<x.y.z> tags, from `git ls-remote` in its clone: the Git way's glance. Pure. */
-export function readLsRemote(out: string, branch: string): RepoGlance {
+/** A repository's branch head and release tags (v<x.y.z>, or its pipeline's tagFormat), from `git ls-remote` in its clone: the Git way's glance. Pure. */
+export function readLsRemote(out: string, branch: string, tagFormat = 'v{version}'): RepoGlance {
   let head: string | null = null;
   const tags = new Map<string, { oid: string; peeled: string | null }>();
   for (const line of out.split(/\r?\n/)) {
@@ -245,13 +262,13 @@ export function readLsRemote(out: string, branch: string): RepoGlance {
     if (!oid || !ref) continue;
     if (ref === `refs/heads/${branch}`) head = oid;
     const m = /^refs\/tags\/(.+?)(\^\{\})?$/.exec(ref);
-    if (!m || !VERSION_TAG.test(m[1])) continue;
+    if (!m || versionOfTag(tagFormat, m[1]) === null) continue;
     const t = tags.get(m[1]) ?? { oid, peeled: null };
     if (m[2]) t.peeled = oid;
     else t.oid = oid;
     tags.set(m[1], t);
   }
-  const num = (tag: string) => tag.slice(1).split('.').map(Number);
+  const num = (tag: string) => versionOfTag(tagFormat, tag)!.split('.').map(Number);
   const releases: GlanceRelease[] = [...tags]
     .sort(([a], [b]) => {
       const [x, y] = [num(a), num(b)];
@@ -261,10 +278,11 @@ export function readLsRemote(out: string, branch: string): RepoGlance {
   return { head, prs: [], releases };
 }
 
-/** The Git way's glance at one repository: one `git ls-remote` of origin in its clone. */
-export async function gitGlance(run: Runner, e: Pick<Employee, 'branch'> & { checkout: string }): Promise<RepoGlance> {
+/** The Git way's glance at one repository: one `git ls-remote` of origin in its clone (of the clone itself, when it has no origin). */
+export async function gitGlance(run: Runner, e: Pick<Employee, 'branch'> & { checkout: string }, tagFormat = 'v{version}'): Promise<RepoGlance> {
   if (!existsSync(e.checkout)) throw new Error(`no clone at ${e.checkout}`);
-  const r = await run('git', ['ls-remote', 'origin', `refs/heads/${e.branch}`, 'refs/tags/v*'], { cwd: e.checkout, timeoutMs: 2 * 60_000 });
-  if (r.code !== 0) throw new Error(`git ls-remote origin failed (${r.code}): ${(r.err || r.out).trim().split('\n').pop() || 'no output'}`);
-  return readLsRemote(r.out, e.branch);
+  const remote = remoteOf(e.checkout);
+  const r = await run('git', ['ls-remote', remote, `refs/heads/${e.branch}`, tagGlob(tagFormat)], { cwd: e.checkout, timeoutMs: 2 * 60_000 });
+  if (r.code !== 0) throw new Error(`git ls-remote ${remote === '.' ? 'of the clone' : 'origin'} failed (${r.code}): ${(r.err || r.out).trim().split('\n').pop() || 'no output'}`);
+  return readLsRemote(r.out, e.branch, tagFormat);
 }

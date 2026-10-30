@@ -1,5 +1,5 @@
 import { CHANGES_DIR, KIT_CHANGES_DIR } from '../entries.ts';
-import { commitOf, fetchBranch, git, gitMaybe } from '../git.ts';
+import { commitOf, fetchBranch, git, gitMaybe, remoteOf } from '../git.ts';
 import { isUrgent } from '../kit/exchequer.ts';
 import { CHANGELOG } from '../kit/notes.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
@@ -56,7 +56,7 @@ async function readUrgent(ctx: Ctx, e: Employee, head: string, tag: string, tagg
   const ref = `refs/tags/${tag}`;
   let from = tagged && (await commitOf(ctx.run, repo, tagged)) ? tagged : (await commitOf(ctx.run, repo, ref)) ? ref : null;
   if (!from) {
-    if ((await gitMaybe(ctx.run, repo, 'fetch', '--quiet', 'origin', `+${ref}:${ref}`)) === null) return false;
+    if ((await gitMaybe(ctx.run, repo, 'fetch', '--quiet', remoteOf(repo), `+${ref}:${ref}`)) === null) return false;
     from = ref;
   }
   const diff = await git(ctx.run, repo, 'diff', '--no-color', '--no-ext-diff', '--unified=0', `${from}..${head}`, '--', CHANGELOG, `${CHANGES_DIR}/`, `kit/${CHANGELOG}`, `${KIT_CHANGES_DIR}/`);
@@ -71,7 +71,7 @@ export async function urgentReady(ctx: Ctx, employees: Employee[], boarded: Set<
   const found = await mapLimit(employees, 4, async (e): Promise<UrgentPr | null> => {
     // The Steward's own from `heads`; an employee's from the glance, with the commit its newest release tags.
     const glance = heads[e.id] ? null : glanceOf(ctx, e);
-    const g = heads[e.id] ?? (glance ? { head: glance.head, tags: appReleasesIn(JSON.stringify(glance.releases)).map((r) => r.tag) } : null);
+    const g = heads[e.id] ?? (glance ? { head: glance.head, tags: appReleasesIn(JSON.stringify(glance.releases), e.resolvedPipeline?.tagFormat).map((r) => r.tag) } : null);
     const tagged = glance?.releases.find((r) => r.tagName === g?.tags[0])?.commit ?? null;
     if (!g?.head) return null;
     const u: UrgentPr = { id: e.id, head: g.head };

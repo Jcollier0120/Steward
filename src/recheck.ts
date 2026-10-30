@@ -1,4 +1,4 @@
-import { showFile } from './git.ts';
+import { remoteOf, showFile } from './git.ts';
 import { loadAlarms, sameAlarms, watchAlarms, type Alarm, type AlarmState } from './alarms.ts';
 import { gate, LIMITED, loadBudget, noteLimited, saveBudget } from './budget.ts';
 import { hostFor, type Answer } from './hosts/index.ts';
@@ -77,7 +77,7 @@ function letGo<T>(file: string, key: string, still: (v: T) => boolean): void {
 
 /** The commit `origin` has for the employee's branch, asked of the remote itself (git, no API); null when it can't say. */
 async function remoteHead(o: LookOptions, e: Employee): Promise<string | null> {
-  const r = await o.run('git', ['ls-remote', 'origin', `refs/heads/${e.branch}`], { cwd: checkoutOf(e), timeoutMs: 30_000 }).catch(() => null);
+  const r = await o.run('git', ['ls-remote', remoteOf(checkoutOf(e)), `refs/heads/${e.branch}`], { cwd: checkoutOf(e), timeoutMs: 30_000 }).catch(() => null);
   return r?.code === 0 ? r.out.trim().split(/\s+/)[0] || null : null;
 }
 

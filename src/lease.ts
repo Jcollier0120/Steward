@@ -10,6 +10,8 @@ import type { GitHubApi } from './kit/github.ts';
 import { fileAt, lsRemote, readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
+import type { ResolvedPipeline } from './repoconfig.ts';
+import { isGithubRepo } from './scm.ts';
 import { checkoutOf, mapLimit, result, workRootOf, type EmployeeResult } from './stages/common.ts';
 
 /**
@@ -183,9 +185,15 @@ export function deviceHere(): Device {
   return { id, name };
 }
 
-/** A repository's remote: its checkout's origin, else its GitHub address; the scratch repository in the work folder. */
-export async function remoteFor(run: Runner, settings: Settings, e: Pick<Employee, 'repo' | 'checkout'>): Promise<RemoteRepo | null> {
+/**
+ * A repository's remote: its checkout's origin, else its GitHub address; the scratch repository in the work folder.
+ * None (its turns and claims kept on this PC) when its pipeline keeps them here (repoconfig.ts's sharedRefs: false, or
+ * host: none), or it has no origin and isn't on GitHub: a local-only repository's, or one whose clone isn't here.
+ */
+export async function remoteFor(run: Runner, settings: Settings, e: Pick<Employee, 'repo' | 'checkout'> & { resolvedPipeline?: ResolvedPipeline }): Promise<RemoteRepo | null> {
   if (!e.repo) return null;
+  const p = e.resolvedPipeline;
+  if (p && (!p.sharedRefs || p.host?.kind === 'none')) return null;
   const scratch = path.join(workRootOf(settings), '_turns.git');
   const checkout = e.checkout ? checkoutOf(e as Employee) : '';
   if (checkout && existsSync(checkout)) {
@@ -197,7 +205,7 @@ export async function remoteFor(run: Runner, settings: Settings, e: Pick<Employe
     }
     if (url) return { key: key(e.repo), url, scratch };
   }
-  return { key: key(e.repo), url: `https://github.com/${e.repo}.git`, scratch };
+  return isGithubRepo(e.repo) ? { key: key(e.repo), url: `https://github.com/${e.repo}.git`, scratch } : null;
 }
 
 export function readRecord(text: string | null | undefined): TurnRecord | null {

@@ -1,0 +1,7 @@
+[package]
+name = "rust-hello"
+version = "0.1.0"
+edition = "2021"
+description = "Hello, world: a Rust sample for the Steward's pipelines (docs/PIPELINE.md)"
+
+[dependencies]

@@ -2,12 +2,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
-import { commitOf, fetchBranch, git, gitMaybe, pruneWorktrees, realOf, unlinkModules, worktreeRecords } from '../git.ts';
+import { commitOf, fetchBranch, git, gitMaybe, pruneWorktrees, realOf, remoteOf, unlinkModules, worktreeRecords } from '../git.ts';
+import { commitUrl } from '../links.ts';
 import { runLine, tail, type Ran } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { keepFailure } from '../failure.ts';
 import { checksLogOf, runChecks } from './bump.ts';
-import { checkoutOf, mapLimit, networkNote, result, clearWorkDir, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, hostIs, mapLimit, networkNote, result, clearWorkDir, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { guardPackages, installPackages, linkSharedModules } from './modules.ts';
 import { withRepo } from './slots.ts';
 
@@ -170,10 +171,11 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
     // Another PC's turn here now (lease.ts): it refreshes after its own releases. The commit stays in this worktree only.
     if (ctx.lease && !(await ctx.lease.ok(e))) return done('skipped', `${command} changed ${files.join(', ')}, but another PC publishes ${e.name} now, so nothing was pushed`, { commit: at });
     // A plain push: if the branch moved on meanwhile, git refuses, and so does the Steward. The next release tries again.
-    const p = await run('git', ['push', '--quiet', 'origin', `HEAD:refs/heads/${e.branch}`], { cwd: dir, timeoutMs: 5 * 60_000 });
+    // To its origin; a local one's (remoteOf) to its clone's own branch.
+    const p = await run('git', ['push', '--quiet', remoteOf(dir), `HEAD:refs/heads/${e.branch}`], { cwd: dir, timeoutMs: 5 * 60_000 });
     if (p.code !== 0) return done('failed', `git push to ${e.branch} refused (never forced): ${(p.err || p.out).trim().split('\n').slice(-2).join(' ')}${networkNote(`${p.out}\n${p.err}`)}`, { commit: at });
     say(`pushed ${made.slice(0, 7)} to ${e.branch}: ${title}`);
-    return done('done', `pushed ${made.slice(0, 7)} to ${e.branch}: ${title} (${files.join(', ')})`, { commit: made.slice(0, 7), url: `https://github.com/${e.repo}/commit/${made}` });
+    return done('done', `pushed ${made.slice(0, 7)} to ${e.branch}: ${title} (${files.join(', ')})`, { commit: made.slice(0, 7), url: commitUrl(e.repo, hostIs(ctx, e), made) ?? undefined });
   }
   // The worktree is kept for the next refresh (keptWorktree), and anything left in it is reset then.
 }

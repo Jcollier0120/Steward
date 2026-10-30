@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.266
+
+**Each repository is built and released by its own instructions: a `.steward.json` in it (or Settings' Pipelines) says its build and test commands, how it is versioned, its tag format, its notes and where a release goes. A repository on GitLab, Azure DevOps, Gitea, Bitbucket, any git server or this PC alone is looked after as fully as one on GitHub, and `steward build --dry-run` shows a build's steps before anything runs.**
+
+### What's new
+
+- **A repository's own pipeline** (docs/PIPELINE.md): `host` (its kind, a GitLab of your own by its address, plain git, or none), `build`, `test`, `release`, `versioning` (claimed up front, set by hand, by its tags, or never), `versionFiles` (Cargo.toml and pyproject.toml now too), `tagFormat` (`v{version}` unless said), `changelog` (`changes/` entries, CHANGELOG.md by hand, the host's own notes, or none), `releaseTo` (its host, a tag, a folder, its own command, or never), `mergeMethod`, `vouch` and `sharedRefs`. Every option is checked, and each mistake is said in a sentence ("did you mean" for a misspelt one). A pipeline that can't be read holds that repository alone.
+- **`steward build --dry-run <repo>`:** each step a build of one repository would take, and where each option came from, with nothing run, fetched or written. It takes a repository looked after, or any clone's folder, read as Look after would take it.
+- **Any host, or none:** a clone with no origin is looked after as `local/<folder>`, its tags made in the clone and its releases copied to a folder. Look after takes a repository on another host by its host/path name, reads a Python project's tests and `pyproject.toml`'s version, a crate's `Cargo.toml` version and a .csproj at a clone's top. **Add a clone by its folder**, under Found on this PC, takes any clone Reeve didn't list. The page's links (releases, commits, compares, repositories) go to each one's own host, and a local one has none.
+- **Plain git says what it can't do:** a repository worked with plain git is never asked of GitHub; `steward vouch` says plain git has no pull requests to vouch for; and "merge it yourself" gives each host's own command (gh, glab, az, tea, or Bitbucket's button) and the pipeline's merge method.
+- **The team:** with Settings' Team empty, the accounts glab, az, tea and the Bitbucket token are signed in as are named on the page with gh's.
+- **Samples:** `samples/pipelines` has hello, world on Node.js, Python, Rust, .NET and Go, one on this PC alone, one on a fake GitLab, one released to a folder and one with a broken pipeline; `node tools/samples.ts` makes them clones the Steward can look after, with no host asked.
+- **The kit 2.146.2:** the Repositories spec says a repository's `.steward.json` holds its build and release steps.
+
+### Before you update
+
+- Nothing: a repository with no `.steward.json` and nothing in Settings' Pipelines is built, tested, versioned and released exactly as before, and settings.json, staff.json and Manor's Repositories read as they did.
+
 ## 0.36.265
 
 **It hands out the kit 2.146.1. That version only explains, for the staff's makers, how a staff member's git sign-in must be given its environment. Nothing you see changes.**

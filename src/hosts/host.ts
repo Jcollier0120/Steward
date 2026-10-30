@@ -33,7 +33,7 @@ export function must(a: Answer): string {
 
 export interface SourceHost {
   /** Which host this is, as scm.ts names it. */
-  readonly kind: 'github' | 'gitlab' | 'azure' | 'gitea' | 'bitbucket';
+  readonly kind: 'github' | 'gitlab' | 'azure' | 'gitea' | 'bitbucket' | 'git';
   /** Its name in words, for logs and the page ("GitHub"). */
   readonly name: string;
 
@@ -48,8 +48,8 @@ export interface SourceHost {
   editPr(repo: string, n: number, p: { title?: string; body?: string; base?: string }): Promise<Answer>;
   commentPr(repo: string, n: number, body: string): Promise<Answer>;
   closePr(repo: string, n: number, p?: { comment?: string; deleteBranch?: boolean }): Promise<Answer>;
-  /** Merges a pull request with a merge commit; only while its head is `matchHead`, when given. */
-  mergePr(repo: string, n: number, p?: { matchHead?: string; deleteBranch?: boolean }): Promise<Answer>;
+  /** Merges a pull request: with a merge commit unless `method` says squash or rebase; only while its head is `matchHead`, when given. */
+  mergePr(repo: string, n: number, p?: { matchHead?: string; deleteBranch?: boolean; method?: 'merge' | 'squash' | 'rebase' }): Promise<Answer>;
 
   // Commit statuses: the vouch (stages/vouch.ts).
   /** A commit's statuses, newest first, as GitHub's REST API lists them (state, context, description, creator.login). */

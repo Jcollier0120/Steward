@@ -149,8 +149,8 @@ export class Gitea implements SourceHost {
   }
 
   /** Merged with a merge commit, only at `matchHead` (Gitea's head_commit_id), when given. */
-  mergePr(repo: string, n: number, p: { matchHead?: string; deleteBranch?: boolean } = {}): Promise<Answer> {
-    return this.repo(repo, 'POST', `/pulls/${n}/merge`, { Do: 'merge', ...(p.matchHead ? { head_commit_id: p.matchHead } : {}), ...(p.deleteBranch ? { delete_branch_after_merge: true } : {}) }, 5 * MINUTE);
+  mergePr(repo: string, n: number, p: { matchHead?: string; deleteBranch?: boolean; method?: 'merge' | 'squash' | 'rebase' } = {}): Promise<Answer> {
+    return this.repo(repo, 'POST', `/pulls/${n}/merge`, { Do: p.method ?? 'merge', ...(p.matchHead ? { head_commit_id: p.matchHead } : {}), ...(p.deleteBranch ? { delete_branch_after_merge: true } : {}) }, 5 * MINUTE);
   }
 
   async statuses(repo: string, commit: string): Promise<Answer> {

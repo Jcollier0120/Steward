@@ -5,13 +5,14 @@ import { dataDir } from './app.ts';
 import { DEFAULT_PIPELINE, normalizePipeline, type BuildPipeline } from './pipeline.ts';
 import { developerPro } from './kit/developer-pro.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
-import { agentUrl, manorHome, manorLink, manorProjects, originRepo, type ManorProject } from './kit/manor.ts';
+import { agentUrl, manorHome, manorLink, manorProjects, originName, originOf, originRepo, type ManorProject } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { takeOntoKit } from './employ.ts';
 import { DEFAULT_INSTALL_SCRIPTS, PACKAGE_NAME } from './installscripts.ts';
 import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
 import { retiredStaff } from './retired.ts';
+import { PIPELINE_FILE, PIPELINE_KEYS, readPipeline, readPipelineFile, resolvePipeline, withPipeline, type ResolvedPipeline } from './repoconfig.ts';
 import { loadScm, sourceControlField, type SourceControl } from './scm.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
 
@@ -83,6 +84,16 @@ export interface Employee {
   whenReleased?: string;
   /** A word on its row of the page: why its PRs are left to you, say. Empty or none: none. */
   note?: string;
+  /**
+   * Its own pipeline (repoconfig.ts), as loadSettings resolved it: Settings' pipelines for it, its clone's .steward.json
+   * over them, and what its fields above always said for the rest. Never in settings.json; absent, its fields say all.
+   */
+  resolvedPipeline?: ResolvedPipeline;
+  /**
+   * The kind of host Manor's Repositories say it is on (a project's "host": a GitLab at code.acme.com, say), for scm.ts's
+   * hostOf where its name doesn't say. Never in settings.json; absent, its name says.
+   */
+  hostHint?: 'github' | 'gitlab' | 'bitbucket' | 'azure' | 'gitea';
 }
 
 export interface Settings {
@@ -163,6 +174,11 @@ export interface Settings {
    * repository is; git, plain git on any host for every one; github, GitHub's for every one.
    */
   sourceControl: SourceControl;
+  /**
+   * Each repository's own pipeline options (repoconfig.ts), by its repository (owner/name, host/path) or its id: the JSON
+   * of a .steward.json, which its clone's .steward.json overrides option by option. Absent or empty: none, as before.
+   */
+  pipelines?: Record<string, string>;
   /** Whether the Wright is installed on this PC (wrightInstalled): read from the PC, never set. Its settings show only then. */
   wrightHere: boolean;
   /**
@@ -345,6 +361,7 @@ export const DEFAULT_SETTINGS: Settings = {
   releasesRepo: '',
   dotnetRoot: '',
   sourceControl: 'auto',
+  pipelines: {},
   wrightHere: wrightInstalled(),
   // Read from the PC when asked (as normalizeSettings does), so the defaults read as themselves.
   get makersPc() {
@@ -390,7 +407,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     unique: 'id',
     label: 'Repositories',
     tab: 'Repositories',
-    help: "The repositories the Steward looks after. They arrive by Hire, or by Look after on the Steward's page, with all of it found from their clones: here you choose how each is released. Whoever writes a PR merges it once vouched; each build releases what is on the branch.",
+    help: "The repositories the Steward looks after, on any host or on this PC alone. They arrive by Hire, or by Look after or Add a clone by its folder on the Steward's page, with all of it found from their clones: here you choose how each is released, and a .steward.json in each says the rest (Pipelines, below). Whoever writes a PR merges it once vouched; each build releases what is on the branch.",
     maxItems: 50,
     noAdd: true,
     line: ['repo', 'branch', 'note'],
@@ -471,6 +488,19 @@ export const SETTINGS_SCHEMA: Field[] = [
         ...command,
       },
     ],
+  },
+  {
+    key: 'pipelines',
+    kind: 'map',
+    label: 'Pipelines',
+    tab: 'Repositories',
+    help: `How each repository is built, tested, versioned and released, by its own instructions: its repository (owner/name, or host/path) or id, and the options as JSON, like {"build": ["cargo build --release"], "test": ["cargo test"], "versionFiles": ["Cargo.toml"], "releaseTo": "tag"}. A ${PIPELINE_FILE} committed in its clone says the same, and wins option by option. Options: ${PIPELINE_KEYS.join(', ')}; docs/PIPELINE.md says each. None: each is built and released as its fields above say. steward build --dry-run <id> prints the steps without running them.`,
+    keyLabel: 'Repository or id',
+    valueLabel: 'Pipeline (JSON)',
+    keyRules: { maxLength: 200, pattern: '[A-Za-z0-9_.-]+(/[A-Za-z0-9_.~@-]+)*', patternHint: 'owner/name, host/path, or an id like my-app' },
+    valueRules: { maxLength: 4000, placeholder: '{"test": ["npm test"], "releaseTo": "tag"}' },
+    maxItems: 50,
+    optional: true,
   },
   {
     key: 'team',
@@ -843,6 +873,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       releasesRepo: typeof r.releasesRepo === 'string' && (r.releasesRepo.trim() === '' || REPO_NAME.test(r.releasesRepo.trim())) ? r.releasesRepo.trim() : d.releasesRepo,
       dotnetRoot: str(r.dotnetRoot, d.dotnetRoot),
       sourceControl: r.sourceControl === 'git' || r.sourceControl === 'github' ? r.sourceControl : d.sourceControl,
+      pipelines: pipelinesOf(r.pipelines),
       // Never read from the file: whether the Wright is on this PC now.
       wrightHere: wrightInstalled(),
       makersPc: makers,
@@ -854,17 +885,65 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
 const REPO_NAME = new RegExp(`^${REPO.pattern}$`);
 
 /**
+ * Settings' pipelines (repoconfig.ts) as kept: each repository's options as JSON text. Options written into settings.json
+ * by hand as an object are kept as their JSON; anything else is left out. Pure.
+ */
+function pipelinesOf(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const key = k.trim();
+    if (!key) continue;
+    if (typeof v === 'string' && v.trim()) out[key] = v.trim();
+    else if (v && typeof v === 'object' && !Array.isArray(v)) out[key] = JSON.stringify(v);
+  }
+  return out;
+}
+
+/** The pipeline options Settings give a repository (by its repository, ignoring case, or its id), read: {raw} or {error}. Pure. */
+export function settingsPipelineFor(s: Pick<Settings, 'pipelines'>, e: Pick<Employee, 'id' | 'repo'>): { raw: unknown; error: string | null } {
+  const all = s.pipelines ?? {};
+  const key = Object.keys(all).find((k) => (!!e.repo && k.toLowerCase() === e.repo.toLowerCase())) ?? Object.keys(all).find((k) => k.toLowerCase() === e.id.toLowerCase());
+  if (key === undefined) return { raw: undefined, error: null };
+  try {
+    return { raw: JSON.parse(all[key]), error: null };
+  } catch (err) {
+    return { raw: undefined, error: `Settings' pipeline for ${key} isn't JSON: ${(err as Error).message}` };
+  }
+}
+
+/**
+ * Each employee by its own pipeline (repoconfig.ts): Settings' options for it, and its clone's .steward.json over them.
+ * One with neither keeps every field as it was. `read` reads a clone's .steward.json (the file's, unless a test says).
+ */
+export function withPipelines(s: Settings, read: (checkout: string) => { raw: unknown; error: string | null } = readPipelineFile): Settings {
+  return {
+    ...s,
+    employees: s.employees.map((e) => {
+      const given = settingsPipelineFor(s, e);
+      const file = e.checkout ? read(path.resolve(e.checkout.replace(/%([^%]+)%/g, (m, n: string) => process.env[n] ?? m))) : { raw: null, error: null };
+      const p = resolvePipeline(e, { settings: given.raw, file: file.raw, fileError: file.error, settingsError: given.error });
+      return withPipeline(e, p);
+    }),
+  };
+}
+
+/**
  * One of Manor's tracked repositories (the kit's spec/REPOSITORIES.md) as the Steward looks after it: merged where it
  * says `merges`, released where it says `release`, its version claimed in its `versionFiles`; never on the kit, never
- * installed. Null for one with no repository on GitHub: the Steward works through pull requests. `taken` are the ids
- * already given, so each gets its own.
+ * installed. One with no repository is looked after only when its clone is local (no origin, or a folder as its origin:
+ * the kit's originOf), as local/<folder>, worked with plain git on this PC alone (Steward 0.36.266); one whose clone is
+ * on a host, but that names no repository, is left out, as before. Its "host", where it gives one, goes with it
+ * (hostHint), for a host whose name doesn't say. `taken` are the ids already given, so each gets its own.
  */
 export function employeeOfProject(p: ManorProject, taken: string[] = []): Employee | null {
-  if (!p.repo) return null;
+  const local = p.repo ? null : originOf(p.checkout, p.host);
+  if (!p.repo && local?.kind !== 'local') return null;
+  const repo = p.repo ?? originName(local!);
   const base = p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'repository';
   let id = base;
   for (let n = 2; taken.includes(id); n++) id = `${base}-${n}`;
-  return { id, name: p.name, repo: p.repo, checkout: p.checkout, branch: p.branch, merges: p.merges === true, usesKit: false, fill: '', test: p.test ? [p.test] : [], versionFiles: p.versionFiles, release: p.release ?? '', install: '', approve: '', installed: '', note: "from Manor's Repositories" };
+  return { id, name: p.name, repo, checkout: p.checkout, branch: p.branch, merges: p.merges === true, usesKit: false, fill: '', test: p.test ? [p.test] : [], versionFiles: p.versionFiles, release: p.release ?? '', install: '', approve: '', installed: '', note: "from Manor's Repositories", ...(p.host && p.host !== 'other' ? { hostHint: p.host } : {}) };
 }
 
 /**
@@ -1002,6 +1081,18 @@ export const SETTINGS_SPEC: SettingsSpec<Settings> = {
       const why = makersOwn(e, { makers: next.makersPc });
       if (why) errors[`employees.${i}.${makersOwn(e, { makers: next.makersPc, byId: false }) ? 'repo' : 'id'}`] = why;
     });
+    // Each pipeline's options read as a build would: a sentence for each that is wrong, beside it.
+    Object.entries(next.pipelines ?? {}).forEach(([k, v], i) => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(v);
+      } catch (err) {
+        errors[`pipelines.${i}.value`] = `Not JSON: ${(err as Error).message}`;
+        return;
+      }
+      const read = readPipeline(raw, k);
+      if (read.errors.length) errors[`pipelines.${i}.value`] = read.errors.join(' ');
+    });
     return { errors, warnings: {} };
   },
   usedFrom: 'from the next stage on',
@@ -1021,6 +1112,7 @@ export function loadSettings(): Settings {
   // Off the maker's laptop releasesCastellan reads as off whatever the file says (normalizeSettings); the file itself is
   // never rewritten for it, so a firmware that couldn't be read for a moment changes nothing that lasts.
   const s = normalizeSettings(readJson<unknown>(settingsFile(), {})).settings;
-  // Off the makers' PC, with Manor here: its Repositories, read afresh (the kit's manorProjects).
-  return inEffect(s, s.wrightHere, !s.releasesCastellan && manorTakesOver(s.employees) ? manorProjects() : null);
+  // Off the makers' PC, with Manor here: its Repositories, read afresh (the kit's manorProjects). Then each by its own
+  // pipeline (repoconfig.ts): one that has none is as it was.
+  return withPipelines(inEffect(s, s.wrightHere, !s.releasesCastellan && manorTakesOver(s.employees) ? manorProjects() : null));
 }

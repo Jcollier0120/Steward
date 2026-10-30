@@ -64,8 +64,8 @@ export class GitHub implements SourceHost {
     return this.gh(['pr', 'close', String(n), '--repo', repo, ...(p.deleteBranch ? ['--delete-branch'] : []), ...(p.comment !== undefined ? ['--comment', p.comment] : [])], 2 * MINUTE);
   }
 
-  mergePr(repo: string, n: number, p: { matchHead?: string; deleteBranch?: boolean } = {}) {
-    return this.gh(['pr', 'merge', String(n), '--repo', repo, '--merge', ...(p.matchHead ? ['--match-head-commit', p.matchHead] : []), ...(p.deleteBranch ? ['--delete-branch'] : [])]);
+  mergePr(repo: string, n: number, p: { matchHead?: string; deleteBranch?: boolean; method?: 'merge' | 'squash' | 'rebase' } = {}) {
+    return this.gh(['pr', 'merge', String(n), '--repo', repo, `--${p.method ?? 'merge'}`, ...(p.matchHead ? ['--match-head-commit', p.matchHead] : []), ...(p.deleteBranch ? ['--delete-branch'] : [])]);
   }
 
   statuses(repo: string, commit: string) {

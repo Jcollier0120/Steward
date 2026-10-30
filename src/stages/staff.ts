@@ -11,6 +11,7 @@ import { agreedVersion } from '../versions.ts';
 import { releasedHere, type Employee } from '../settings.ts';
 import { bumpBranch, checkoutOf, glanceOf, hostIs, mapLimit, NOT_ON_KIT, type Ctx } from './common.ts';
 import { gitGlance } from '../scm.ts';
+import { versionOfTag } from '../repoconfig.ts';
 import { hostFor, must, type SourceHost } from '../hosts/index.ts';
 import { repoBusy } from './slots.ts';
 import { RETIRED, retiredOf } from '../retired.ts';
@@ -278,11 +279,11 @@ export function parsePrs(json: string, team: string[]): PrInfo[] {
 }
 
 /** The app releases (v<x.y.z>, not drafts) in a `gh release list --json tagName,isDraft,publishedAt` answer, newest version first. */
-export function appReleasesIn(json: string): ReleaseInfo[] {
+export function appReleasesIn(json: string, tagFormat = 'v{version}'): ReleaseInfo[] {
   const list = JSON.parse(json || '[]') as any[];
   return list
-    .filter((r) => !r?.isDraft && /^v\d+\.\d+\.\d+$/.test(String(r?.tagName ?? '')))
-    .map((r) => ({ tag: r.tagName as string, version: (r.tagName as string).slice(1), published: typeof r.publishedAt === 'string' ? r.publishedAt : null }))
+    .filter((r) => !r?.isDraft && versionOfTag(tagFormat, String(r?.tagName ?? '')) !== null)
+    .map((r) => ({ tag: r.tagName as string, version: versionOfTag(tagFormat, r.tagName as string)!, published: typeof r.publishedAt === 'string' ? r.publishedAt : null }))
     .sort((a, b) => compareVersions(b.version, a.version));
 }
 
@@ -337,7 +338,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
   // Worked with plain git (scm.ts): its origin's branch and tags, and no PRs; GitHub isn't asked.
   const byGit = hostIs(ctx, e) === 'git';
   let gitErr: string | null = null;
-  const g = glanceOf(ctx, e) ?? (byGit ? await gitGlance(run, { branch: e.branch, checkout: dir }).catch((err) => ((gitErr = (err as Error).message), null)) : null);
+  const g = glanceOf(ctx, e) ?? (byGit ? await gitGlance(run, { branch: e.branch, checkout: dir }, e.resolvedPipeline?.tagFormat).catch((err) => ((gitErr = (err as Error).message), null)) : null);
 
   const local = (async () => {
     if (!row.checkout.exists) return void notes.push(`no checkout at ${dir}`);
@@ -385,7 +386,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     .catch((err) => void (notes.push(`couldn't list its PRs: ${(err as Error).message}`), shaky.add(row)));
 
   const releases = (g ? Promise.resolve(JSON.stringify(g.releases)) : byGit ? Promise.reject(new Error(gitErr ?? 'no answer from its origin')) : hostFor({ ...ctx, run }, e).listReleases(e.repo, 'tagName,isDraft,publishedAt').then(must))
-    .then((out) => appReleasesIn(out))
+    .then((out) => appReleasesIn(out, e.resolvedPipeline?.tagFormat))
     .catch((err) => {
       notes.push(`couldn't list its releases: ${(err as Error).message}`);
       shaky.add(row);

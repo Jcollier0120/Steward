@@ -1,0 +1,10 @@
+{
+  "name": "node-hello",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hello, world: a Node.js sample for the Steward's pipelines (docs/PIPELINE.md)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

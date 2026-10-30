@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <Description>Hello, world: a .NET sample for the Steward's pipelines (docs/PIPELINE.md)</Description>
+  </PropertyGroup>
+
+</Project>

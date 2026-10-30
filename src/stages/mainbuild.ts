@@ -1,6 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { fetchFor, gitMaybe, removeWorktree } from '../git.ts';
+import { fetchFor, gitMaybe, remoteOf, removeWorktree } from '../git.ts';
+import { pipelineOf } from '../repoconfig.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { checksLogOf, runChecks, type AffectedScope, type FailedChecks } from './bump.ts';
@@ -74,7 +75,7 @@ async function releasedCommit(ctx: Ctx, e: Employee, since: string | null): Prom
   if (!since) return null;
   const repo = checkoutOf(e);
   const tag = `refs/tags/v${since}`;
-  if ((await gitMaybe(ctx.run, repo, 'fetch', '--quiet', 'origin', `+${tag}:${tag}`)) === null) return null;
+  if ((await gitMaybe(ctx.run, repo, 'fetch', '--quiet', remoteOf(repo), `+${tag}:${tag}`)) === null) return null;
   return (await gitMaybe(ctx.run, repo, 'rev-parse', '--verify', '--quiet', `${tag}^{commit}`))?.trim() || null;
 }
 
@@ -185,7 +186,7 @@ async function landed(ctx: Ctx, e: Employee, pr: { number: number; head: string 
   }
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return false;
-  if ((await gitMaybe(ctx.run, repo, 'fetch', '--quiet', 'origin', `+refs/heads/${e.branch}:refs/remotes/origin/${e.branch}`)) === null) return false;
+  if ((await gitMaybe(ctx.run, repo, 'fetch', '--quiet', remoteOf(repo), `+refs/heads/${e.branch}:refs/remotes/origin/${e.branch}`)) === null) return false;
   const r = await ctx.run('git', ['merge-base', '--is-ancestor', pr.head, `origin/${e.branch}`], { cwd: repo, timeoutMs: 60_000 }).catch(() => null);
   return r?.code === 0;
 }
@@ -223,7 +224,7 @@ export async function mergeOwn(ctx: Ctx, e: Employee, pr: { number: number; head
   for (const ms of [0, ...OWN_MERGE_WAITS_MS]) {
     if (ms) await pause(ms);
     if (!merging) {
-      const r = await host.mergePr(e.repo, pr.number, { matchHead: pr.head, deleteBranch: true }).catch((err: Error) => ({ code: 1, out: '', err: err.message }));
+      const r = await host.mergePr(e.repo, pr.number, { matchHead: pr.head, deleteBranch: true, method: pipelineOf(e).mergeMethod }).catch((err: Error) => ({ code: 1, out: '', err: err.message }));
       if (r.code === 0) return merged('');
       why = (r.err || r.out).trim().split('\n').pop() ?? '';
       // Its head moved: someone pushed to it, and it is theirs to merge now.

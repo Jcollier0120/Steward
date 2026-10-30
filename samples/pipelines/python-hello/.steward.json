@@ -1,0 +1,9 @@
+{
+  "//": "Python: pyproject.toml carries the version, its tests are pytest's, its notes CHANGELOG.md's own entry, a python-hello-<version> tag released (docs/PIPELINE.md)",
+  "test": ["python -m pytest"],
+  "versioning": "files",
+  "versionFiles": ["pyproject.toml"],
+  "tagFormat": "python-hello-{version}",
+  "changelog": "changelog-md",
+  "releaseTo": "tag"
+}

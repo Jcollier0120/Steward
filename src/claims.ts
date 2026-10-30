@@ -13,6 +13,7 @@ import { agreedVersion, bumpPatch } from './versions.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './stages/kitpart.ts';
 import { kitInfo } from './kitsource.ts';
 import { CLAIMS_FILE, CLAIMS_REF, remoteFor } from './lease.ts';
+import { pipelineOf } from './repoconfig.ts';
 export { CLAIMS_FILE, CLAIMS_REF };
 import { readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
 import type { Runner } from './run.ts';
@@ -158,6 +159,17 @@ const isKitKey = (key: string) => key.endsWith(kitClaimKey(''));
 export const claimsOn = (repo: string, all = loadClaims()): Claim[] => all.filter((c) => same(c.repo, repo));
 
 /**
+ * Why a repository's versions aren't claimed, or null when they are: its pipeline (repoconfig.ts) keeps them by hand
+ * (versioning: files), by its tags, or not at all. Pure.
+ */
+export function notClaimed(e: Employee): string | null {
+  const p = pipelineOf(e);
+  if (p.versioning === 'claim') return null;
+  const how = { files: `its version is set by hand in ${p.versionFiles.join(', ') || 'its version files'}`, tags: 'each release takes the patch after its newest release tag', none: 'it has no versions' }[p.versioning];
+  return `${e.name}'s versions aren't claimed: its pipeline says versioning ${p.versioning} (${p.from.versioning}), so ${how}`;
+}
+
+/**
  * A version for new work on an employee, claimed: as the module's comment says. Where the repository's remote can be
  * reached, through its claims ref (refs/manor/claims), for every PC that looks after it; else in this PC's store alone,
  * as always, and shared on the next round that reaches the remote (shareClaims). `now`, the facts it reads and `remote`
@@ -173,6 +185,9 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
   // account can push there: one of the maker's other development PCs (maker.ts).
   const theirs = await claimRefused(e, { kit, canPush: o.canPush ?? pushesHere(ctx) });
   if (theirs) throw new Error(theirs);
+  // Its own pipeline (repoconfig.ts) may keep its version some other way: then there is nothing to claim.
+  const unclaimed = kit ? null : notClaimed(e);
+  if (unclaimed) throw new Error(unclaimed);
   const key = kit ? kitClaimKey(e.repo) : e.repo;
   const files = kit ? [KIT_VERSION_FILE] : e.versionFiles;
   // What GitHub and the branch say, read before the lock is taken: the lock is held only to choose and write.

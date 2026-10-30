@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ago, Badge, Card, Notes, Output, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
+import { ago, Badge, Card, Input, Notes, Output, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
 import type { Alarm, AlarmState } from '../alarms.ts';
 import type { TendState } from '../tend.ts';
 import type { TurnRow, TurnsView } from '../lease.ts';
@@ -8,14 +8,19 @@ import type { EmployeeResult, StageResult } from '../stages/common.ts';
 import type { WholeJob } from '../stages/wholesuite.ts';
 import type { FoundView, PrView, RoundView, StaffRowView, StaffView, StewardView } from './types.ts';
 import { askedWords } from './asked.ts';
+import { commitUrl, compareUrl, kindOf, releaseUrl, repoUrl } from '../links.ts';
 
 /** The Steward's page: the kit, the staff's table, the stages, the last stage. (Settings is the kit's: shell.tsx.) */
 
-const Link = ({ url, children }: { url: string; children: ReactNode }) => (
-  <a href={url} rel="noreferrer">
-    {children}
-  </a>
-);
+/** A link to a page on a repository's host (links.ts); its words alone where it has none (a local one, plain git). */
+const Link = ({ url, children }: { url: string | null; children: ReactNode }) =>
+  url ? (
+    <a href={url} rel="noreferrer">
+      {children}
+    </a>
+  ) : (
+    <>{children}</>
+  );
 
 function KitCell({ r, kit }: { r: StaffRowView; kit: string | null }) {
   if (!r.usesKit) return <Badge label="not using the kit yet" />;
@@ -34,7 +39,7 @@ function ReleaseCell({ r }: { r: StaffRowView }) {
     <>
       {rel ? (
         <>
-          <Link url={`https://github.com/${r.repo}/releases/tag/${rel.tag}`}>{rel.tag}</Link>
+          <Link url={releaseUrl(r.repo, r.host, rel.tag)}>{rel.tag}</Link>
           <Text variant="muted">{kit}</Text>
         </>
       ) : (
@@ -132,22 +137,26 @@ function PrTable({ r }: { r: StaffRowView }) {
 
 /**
  * What a repository's next build releases (StaffRow.nextBuild): the commits on its branch since its last release, newest
- * first, a merged PR as its number and title. Linked on GitHub, where a compare shows them all. Nothing when there are none.
+ * first, a merged PR as its number and title. Linked on its host (links.ts), where a compare shows them all; a PR by its
+ * number on GitHub only, whose merge commits name it. Nothing when there are none.
  */
 function NextBuild({ r }: { r: StaffRowView }) {
   const n = r.nextBuild;
   if (!n?.count) return null;
-  const gh = (r.host ?? 'github') === 'github' ? `https://github.com/${r.repo}` : null;
+  // Over plain git an owner/name's commits aren't linked, as before: its origin may be any server's (a NAS's), so named.
+  const linked = !(r.host === 'git' && kindOf(r.repo, null) === 'github');
+  const gh = linked && kindOf(r.repo, r.host) === 'github' ? repoUrl(r.repo) : null;
+  const compare = linked ? compareUrl(r.repo, r.host, n.commit, r.branch) : null;
   const commits = `${n.count} ${n.count === 1 ? 'commit' : 'commits'} since ${n.tag}`;
   const more = n.count - n.commits.length;
   return (
     <>
       <div className="pr-head">
         {r.releases === false ? `Not released by the Steward: ${commits}` : `Next build brings ${commits}`}
-        {gh && (
+        {compare && (
           <>
             {' '}
-            (<Link url={`${gh}/compare/${n.commit}...${r.branch}`}>compare</Link>)
+            (<Link url={compare}>compare</Link>)
           </>
         )}
       </div>
@@ -158,7 +167,9 @@ function NextBuild({ r }: { r: StaffRowView }) {
             const label = c.pr !== null ? <>#{c.pr}</> : <code>{c.sha}</code>;
             return (
               <tr key={c.sha}>
-                <td className="pr-num">{gh ? <Link url={c.pr !== null ? `${gh}/pull/${c.pr}` : `${gh}/commit/${c.sha}`}>{label}</Link> : label}</td>
+                <td className="pr-num">
+                  <Link url={c.pr !== null ? (gh ? `${gh}/pull/${c.pr}` : null) : linked ? commitUrl(r.repo, r.host, c.sha) : null}>{label}</Link>
+                </td>
                 <td>{c.title}</td>
               </tr>
             );
@@ -203,7 +214,7 @@ function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRow
       <tr className={below ? 'has-prs' : undefined}>
         <td>
           <strong>
-            <Link url={`https://github.com/${r.repo}`}>{r.name}</Link>
+            <Link url={repoUrl(r.repo)}>{r.name}</Link>
           </strong>
           <br />
           {castellan ? <Text variant="muted">{r.main?.parts?.join(', ') || 'no parts'}</Text> : <Allowed r={r} />}
@@ -296,7 +307,8 @@ function StaffTable({ s, castellan, turns, clashes, passed }: { s: StaffView | n
     return (
       <Card className="empty" tour="staff">
         No repositories yet. Pick the ones to look after from those Reeve found, above, or add one in Settings, under
-        Repositories: its GitHub repository (owner/name), your clone of it, and how to test and release it.
+        Repositories: its repository (owner/name on GitHub, host/path on another host, or leave it out for one on this
+        PC alone), your clone of it, and how to test and release it; its .steward.json says the rest (docs/PIPELINE.md).
         {under}
       </Card>
     );
@@ -749,6 +761,9 @@ function Stages({ v }: { v: StewardView }) {
 function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; finding: boolean; now: number; tour?: string }) {
   const [asked, setAsked] = useState<Record<string, { merges: boolean; release: boolean }>>({});
   const [picked, setPicked] = useState<Record<string, boolean>>({});
+  // Add: any clone by its folder, on any host or none (found.ts's foundOfFolder), one Reeve didn't list.
+  const [folder, setFolder] = useState('');
+  const [folderRelease, setFolderRelease] = useState(false);
   if (!f) return null;
   const of = (repo: string) => asked[repo] ?? { merges: false, release: false };
   const set = (repo: string, k: 'merges' | 'release', on: boolean) => setAsked({ ...asked, [repo]: { ...of(repo), [k]: on } });
@@ -769,12 +784,13 @@ function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; findin
           </Text>
         ) : !f.offered.length ? (
           <Text variant="muted" as="p">
-            {f.found ? 'Every repository Reeve found that you can push to is looked after already.' : 'Reeve found no repository on GitHub here.'}
+            {f.found ? 'Every repository Reeve found that you can push to is looked after already.' : 'Reeve found no repository here.'}
           </Text>
         ) : (
           <>
             <Text variant="muted" as="p">
-              Your repositories on GitHub that Reeve found here and you can push to. Look after one to have its versions claimed, and its PRs and releases watched, or tick several and look after them in one go. It releases its new versions only if you tick that; you merge your own PRs.{f.into === 'manor' ? " It goes into Manor's Repositories, the one list every agent reads: change or remove it there." : ''}
+              Your repositories that Reeve found here: on GitHub the ones you can push to, and each one on another host or on
+              this PC alone. Look after one to have its versions claimed, and its PRs and releases watched, or tick several and look after them in one go. It releases its new versions only if you tick that; you merge your own PRs.{f.into === 'manor' ? " It goes into Manor's Repositories, the one list every agent reads: change or remove it there." : ''}
             </Text>
             <div className="row pick-bar">
               <label className="pick">
@@ -796,7 +812,7 @@ function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; findin
                     </td>
                     <td>
                       <strong>
-                        <Link url={`https://github.com/${r.repo}`}>{r.repo}</Link>
+                        <Link url={repoUrl(r.repo)}>{r.repo}</Link>
                       </strong>
                       <br />
                       <Text variant="muted">
@@ -817,6 +833,17 @@ function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; findin
             </table>
           </>
         )}
+        <div className="row pick-bar add-clone">
+          <Input label="Add a clone by its folder" value={folder} onChangeText={setFolder} placeholder="C:\\Projects\\my-app" />
+          <label className="pick">
+            <input type="checkbox" checked={folderRelease} onChange={(e) => setFolderRelease(e.target.checked)} /> Release each new version
+          </label>
+          <PostButton title="Add" variant="secondary" path="/api/repos/look-after" disabled={!folder.trim()} body={() => ({ folder, release: folderRelease })} />
+        </div>
+        <Text variant="muted" as="p">
+          On GitHub, another host or none: its <code>.steward.json</code> says how it is built and released (docs/PIPELINE.md),
+          and <code>steward build --dry-run</code> shows it first.
+        </Text>
         <div className="row round">
           <Text variant="muted">{f.at ? `Looked ${ago(f.at, now)}${f.from === 'file' ? ", from Reeve's last scan" : ''}.` : ''}</Text>
           <PostButton title={finding ? 'Looking…' : 'Look again'} variant="secondary" icon="refresh" path="/api/repos/refresh" disabled={finding} />
@@ -831,6 +858,8 @@ const STYLE = `
 .notes { margin: 0; padding-left: 16px; color: var(--muted); font-size: 13px; }
 .picks { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .pick { display: inline-flex; gap: 6px; align-items: center; }
+.add-clone { align-items: flex-end; margin-top: 12px; }
+.add-clone .ui-input { flex: 1 1 260px; min-width: 0; }
 .pick-all { font-weight: 600; padding-right: 12px; border-right: 1px solid var(--line); }
 .pick-bar { gap: 12px; align-items: center; margin: 8px 0; }
 td.pick-cell { width: 1%; padding-right: 0; }
@@ -893,7 +922,7 @@ function KitCard({ s, now, handsOut }: { s: StaffView | null; now: number; hands
           {s.kitNote && <Text variant="muted" as="p">{s.kitNote}</Text>}
           <Text variant="muted" as="p">
             The table is from {ago(s.at, now)}
-            {s.checked && s.checked !== s.at ? `; GitHub had nothing new for it ${ago(s.checked, now)}` : ''}.
+            {s.checked && s.checked !== s.at ? `; their hosts had nothing new for it ${ago(s.checked, now)}` : ''}.
           </Text>
         </>
       ) : (

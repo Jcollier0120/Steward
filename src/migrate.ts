@@ -190,7 +190,7 @@ export function dotnetTests(checkout: string | Tree): string[] {
 }
 
 /**
- * A .NET clone's version files: each project a folder down that sets its own <VersionPrefix>, which wins over
+ * A .NET clone's version files: each project at its top or a folder down that sets its own <VersionPrefix>, which wins over
  * Directory.Build.props's for that project (Heiward's HEI.Agent/HEI.Agent.csproj is the agent's 1.9.x; its
  * Directory.Build.props is the core library's 4.1.x, which its tags override). With none of its own,
  * Directory.Build.props, where one version is set for every project. Neither: [].
@@ -198,11 +198,15 @@ export function dotnetTests(checkout: string | Tree): string[] {
 export function dotnetVersionFiles(checkout: string | Tree): string[] {
   const t = typeof checkout === 'string' ? folderTree(checkout) : checkout;
   const sets = (f: string) => /<VersionPrefix>/.test(t.read(f) ?? '');
-  const own = t
-    .list('')
-    .filter((d) => t.isDir(d))
-    .flatMap((d) => t.list(d).filter((f) => f.endsWith('.csproj')).map((f) => `${d}/${f}`))
-    .filter(sets);
+  // A project at the clone's top (one project alone, Steward 0.36.266), or one folder down.
+  const top = t.list('').filter((f) => f.endsWith('.csproj') && !t.isDir(f));
+  const own = [
+    ...top,
+    ...t
+      .list('')
+      .filter((d) => t.isDir(d))
+      .flatMap((d) => t.list(d).filter((f) => f.endsWith('.csproj')).map((f) => `${d}/${f}`)),
+  ].filter(sets);
   if (own.length) return own;
   return sets('Directory.Build.props') ? ['Directory.Build.props'] : [];
 }

@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.146.2
+
+**The Repositories spec says where a repository's own build and release steps are: its `.steward.json`.**
+
+### What's new
+
+- **spec/REPOSITORIES.md:** a repository's `.steward.json`, committed at its top, says how the Steward builds, tests, versions and releases it, over the Steward's Settings and the keys' old meanings. A repository with no `repo` (one on this PC alone) is released only as its `.steward.json` says.
+
+### Before you update
+
+- Nothing: no code changed.
+
 ## 2.146.1
 
 **git-auth.ts says what a runner does with `env`: it lays it over the command's own environment, never runs a command with it alone. The sign-in's git settings are numbered after the ones that environment already has.**

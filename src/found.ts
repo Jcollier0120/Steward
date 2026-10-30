@@ -6,12 +6,15 @@ import type { GetJson } from './alarms.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { manorHome, manorOwn, manorProjects, originRepo, projectsFrom } from './kit/manor.ts';
 import { originUrl, repoFromUrl } from './scm.ts';
+import { remoteOf } from './git.ts';
+import { readVersion } from './versions.ts';
 import { employeeFor } from './employ.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { branchTree, dotnetTests, dotnetVersionFiles, folderTree, type Tree } from './migrate.ts';
 import { retiredStaff } from './retired.ts';
 import type { Runner } from './run.ts';
 import { gitExe } from './kit/git-exe.ts';
+import { expandEnv } from './kit/settings-kit.ts';
 import { employeesOfProjects, inEffect, isSelf, loadSettings, manorTakesOver, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
 
 /**
@@ -141,7 +144,9 @@ export async function findRepos(o: { run: Runner; cwd: string; getJson: GetJson;
     // On GitHub, owner/name; anywhere else, its origin's host/path (scm.ts): GitHub isn't required.
     const onGithub = githubOf(r);
     const url = !onGithub && typeof r.path === 'string' ? originUrl(r.path) : null;
-    const repo = onGithub ?? (url ? repoFromUrl(url) : null);
+    // A clone with no origin at all is a local one (remoteOf), as local/<folder>: worked with plain git on this PC alone.
+    const local = !onGithub && !url && typeof r.path === 'string' && existsSync(path.join(r.path, '.git')) && remoteOf(r.path) === '.';
+    const repo = onGithub ?? (url ? repoFromUrl(url) : local ? `local/${path.basename(r.path as string)}` : null);
     if (!repo || r.ignored === true || typeof r.path !== 'string' || seen.has(repo.toLowerCase())) continue;
     seen.add(repo.toLowerCase());
     const branch = typeof r.defaultBranch === 'string' && r.defaultBranch ? r.defaultBranch : typeof r.branch === 'string' && r.branch ? r.branch : 'main';
@@ -205,7 +210,15 @@ export function readClone(checkout: string, branch: string): { test: string[]; v
       if (at) versionFiles.push(`src/${at}`);
     }
   } else {
-    if (t.has('Cargo.toml')) test.push('cargo test');
+    // A crate's and a Python project's version is in its manifest (versions.ts reads both), when it keeps one there.
+    if (t.has('Cargo.toml')) {
+      test.push('cargo test');
+      if (readVersion('Cargo.toml', t.read('Cargo.toml') ?? '')) versionFiles.push('Cargo.toml');
+    }
+    if (t.has('pyproject.toml')) {
+      test.push('python -m pytest');
+      if (readVersion('pyproject.toml', t.read('pyproject.toml') ?? '')) versionFiles.push('pyproject.toml');
+    }
     if (t.has('go.mod')) test.push('go test ./...');
     test.push(...dotnetTests(t));
     versionFiles.push(...dotnetVersionFiles(t));
@@ -251,7 +264,34 @@ export function employeeFromFound(r: FoundRepo, o: { taken: string[]; merges: bo
  * Look after: the found repository added to Settings (settings.json's employees, the rest of the file as it was). An
  * error in words when it isn't one the Steward can offer.
  */
-export function lookAfter(repo: string, o: { merges: boolean; release: boolean; found?: FoundState; file?: string; manorHome?: string }): { employee: Employee } | { error: string } {
+/**
+ * A clone named by its folder, as Reeve would list it (Add on the page, for one on any host, or none, that he didn't
+ * find): its origin's name, else local/<folder>; the branch checked out, else main. Never asked of GitHub (byGit): you
+ * name it yourself. Null when the folder is no clone.
+ */
+export function foundOfFolder(folder: string, branchOf: (dir: string) => string | null = checkedOut): FoundRepo | null {
+  const dir = path.resolve(expandEnv(folder.trim().replace(/^"|"$/g, '')));
+  if (!folder.trim() || !existsSync(path.join(dir, '.git'))) return null;
+  const url = originUrl(dir);
+  const repo = url ? repoFromUrl(url) : `local/${path.basename(dir)}`;
+  if (!repo) return null;
+  return { repo, name: path.basename(dir).toLowerCase(), path: dir, branch: branchOf(dir) || 'main', lockfiles: [], push: null, byGit: true };
+}
+
+/** The branch checked out in a clone, by git; null when it can't say (a detached head). */
+function checkedOut(dir: string): string | null {
+  try {
+    return execFileSync(gitExe(), ['branch', '--show-current'], { cwd: dir, encoding: 'utf8', windowsHide: true, timeout: 20_000 }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Look after one: a repository Reeve found (`repo`, as the page offers it), or with `folder` any clone on this PC
+ * (foundOfFolder), on GitHub, another host or none.
+ */
+export function lookAfter(repo: string, o: { merges: boolean; release: boolean; found?: FoundState; file?: string; manorHome?: string; folder?: string }): { employee: Employee } | { error: string } {
   // Settings read once first, so a new install is known as one before this writes its settings.json (migrate.ts).
   if (!o.file) loadSettings();
   const file = o.file ?? settingsFile();
@@ -267,8 +307,15 @@ export function lookAfter(repo: string, o: { merges: boolean; release: boolean; 
   const current = intoManor ? employeesOfProjects(manorProjects(home)) : own.employees;
   // The Steward's own, on the PC that releases it: looked after as itself already (settings.ts's inEffect).
   const self = inEffect(own, own.wrightHere, null, { makers });
+  const byFolder = o.folder !== undefined ? foundOfFolder(o.folder) : null;
+  if (o.folder !== undefined && !byFolder) return { error: `${o.folder.trim() || 'No folder'} is no clone (it has no .git): give the folder of a repository's clone on this PC.` };
+  if (byFolder) {
+    if (current.some((e) => same(e.repo, byFolder.repo) || (e.checkout && samePath(expandEnv(e.checkout), byFolder.path))) || isSelf(self, byFolder)) return { error: `${byFolder.repo} is looked after already: see Settings, under Repositories.` };
+    const theirsToo = makersOwn({ repo: byFolder.repo }, { makers, byId: false });
+    if (theirsToo) return { error: theirsToo };
+  }
   const found = o.found ?? loadFound();
-  const r = candidates(found, current, makers, self).find((x) => same(x.repo, repo));
+  const r = byFolder ?? candidates(found, current, makers, self).find((x) => same(x.repo, repo));
   if (!r) {
     if (current.some((e) => same(e.repo, repo)) || isSelf(self, { repo })) return { error: `${repo} is looked after already: see Settings, under Repositories.` };
     return { error: `${repo} isn't one Reeve found here that you can push to. Refresh the list, or add it in Settings.` };
@@ -323,15 +370,18 @@ export function addToManor(e: Employee, home = manorHome()): string | null {
   if (raw.projects !== undefined && !Array.isArray(raw.projects)) return `Manor's Repositories can't be read (settings.json's "projects" isn't a list): put it right in Manor's Settings first.`;
   const list = [...((raw.projects as unknown[] | undefined) ?? [])];
   const tests = e.test.join(' && ');
+  // A local one (local/<folder>) has no repository to name: Manor's Repositories leave "repo" out for it, and with it
+  // the merges and the release they keep for one on a host (its own are its .steward.json's: repoconfig.ts).
+  const local = /^local\//i.test(e.repo);
   const entry = {
     name: e.name,
     checkout: e.checkout,
-    repo: e.repo,
+    ...(local ? {} : { repo: e.repo }),
     ...(e.branch !== 'main' ? { branch: e.branch } : {}),
     ...(tests && tests.length <= 300 ? { test: tests } : {}),
     ...(e.versionFiles.length ? { versionFiles: e.versionFiles } : {}),
-    ...(e.merges ? { merges: true } : {}),
-    ...(e.release ? { release: e.release } : {}),
+    ...(e.merges && !local ? { merges: true } : {}),
+    ...(e.release && !local ? { release: e.release } : {}),
   };
   const own = manorOwn({ home });
   const problems: string[] = [];

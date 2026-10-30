@@ -9,12 +9,13 @@ import { originRepo } from '../kit/manor.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { makersPc, makersRepo } from '../maker.ts';
 import { employeeFromClone } from '../migrate.ts';
-import { originUrl, repoFromUrl } from '../scm.ts';
+import { originUrl, repoFromUrl, type Host } from '../scm.ts';
+import { heldBy, pipelineOf, type MergeMethod } from '../repoconfig.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, readVersion } from '../versions.ts';
 import { checkKind, runChecks, type AffectedScope } from './bump.ts';
 import type { StoodIn } from './standin.ts';
-import type { Ctx } from './common.ts';
+import { hostIs, type Ctx } from './common.ts';
 import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
 import { kitContentOf, kitTrialOfClone } from './trial.ts';
 import { noteVouchTime, vouchLimit } from './vouchtime.ts';
@@ -82,9 +83,27 @@ export async function vouchOn(ctx: Ctx, repo: string, commit: string, team: stri
   return by && team.some((t) => t.toLowerCase() === by.toLowerCase()) ? by : null;
 }
 
-/** What to do once vouched: merge it yourself, and the next build releases it. Pure. */
-export const MERGE_IT_YOURSELF = (pr: number | null, repo: string) =>
-  `merge it yourself now, once GitHub says it merges cleanly (gh pr merge ${pr ?? '<number>'} --repo ${repo} --merge): the Steward merges no one's PRs, and the next build releases main`;
+/**
+ * What to do once vouched: merge it yourself, and the next build releases it. Said as its host takes it (GitHub's gh, as
+ * before, unless `o` says), with its pipeline's merge method (repoconfig.ts). Pure.
+ */
+export function MERGE_IT_YOURSELF(pr: number | null, repo: string, o: { host?: Host; method?: MergeMethod } = {}): string {
+  const n = pr ?? '<number>';
+  const method = o.method ?? 'merge';
+  const how: Record<Exclude<Host, 'git'>, [string, string]> = {
+    github: ['GitHub', `gh pr merge ${n} --repo ${repo} --${method}`],
+    gitlab: ['GitLab', `glab mr merge ${n} --repo ${repo}${method === 'merge' ? '' : ` --${method}`}`],
+    azure: ['Azure DevOps', `az repos pr update --id ${n} --status completed${method === 'squash' ? ' --squash true' : ''}`],
+    gitea: ['Gitea', `tea pr merge ${n} --repo ${repo} --style ${method}`],
+    bitbucket: ['Bitbucket', `its Merge button on bitbucket.org, ${method === 'merge' ? 'merge commit' : method === 'squash' ? 'squash' : 'fast-forward'}`],
+  };
+  const [name, command] = how[o.host && o.host !== 'git' ? o.host : 'github'];
+  return `merge it yourself now, once ${name} says it merges cleanly (${command}): the Steward merges no one's PRs, and the next build releases main`;
+}
+
+/** Why `steward vouch` can't vouch over plain git (scm.ts), and what happens instead. Pure. */
+export const PLAIN_GIT_VOUCH = (e: Pick<Employee, 'name' | 'repo' | 'branch'>) =>
+  `${e.name} (${e.repo}) is worked with plain git on this PC, which has no pull requests and no commit statuses, so there is nothing to vouch on: land your branch in ${e.branch}, and the next build runs its checks there and releases it only once they pass (steward build --dry-run ${e.repo} shows the steps)`;
 
 /** What `steward vouch` did: whether it set the status, and in a sentence what happened. */
 export interface Vouched {
@@ -111,6 +130,12 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
       ok: false,
       message: makersRepo(repo) && !makersPc() ? `${repo} is one of Castellan's own, and GitHub doesn't say this PC's account can push to it: only those who can vouch for it` : `${repo} isn't a repository the Steward looks after (Settings), nor its own: it has no checks to run`,
     };
+  // By its own pipeline (repoconfig.ts): one that can't be read, or says not to vouch, isn't; plain git has nothing to vouch on.
+  const p = pipelineOf(e);
+  const held = heldBy(p);
+  if (held) return { ok: false, message: `${e.name}: ${held}` };
+  if (!p.vouch) return { ok: false, message: `${e.name}'s pipeline says its PRs aren't vouched for (vouch: false, in ${p.from.vouch}): nothing was run` };
+  if (hostIs(ctx, e) === 'git') return { ok: false, message: PLAIN_GIT_VOUCH(e) };
   const dirty = (await gitMaybe(run, o.dir, 'status', '--porcelain'))?.trim();
   if (dirty === undefined) return { ok: false, message: `git couldn't read ${o.dir}` };
   if (dirty) return { ok: false, message: 'it has uncommitted changes: commit and push them first, as it vouches only for a commit as pushed' };
@@ -131,7 +156,7 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   o.say(`${e.name} #${pr.number} at ${head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, { ...o, repo, head });
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `#${pr.number}'s checks failed at ${head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): ${MERGE_IT_YOURSELF(pr.number, repo)}. Push to it again, and vouch again.` };
+  return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): ${MERGE_IT_YOURSELF(pr.number, repo, { host: hostIs(ctx, e), method: p.mergeMethod })}. Push to it again, and vouch again.` };
 }
 
 /**
@@ -334,5 +359,5 @@ async function vouchBranch(ctx: Ctx, e: Employee, o: { dir: string; repo: string
   o.say(`${e.name} ${o.branch} (${claim ? `v${claim.version}, ` : ''}no PR yet) at ${o.head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, o);
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `${o.branch}'s checks failed at ${o.head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  return { ok: true, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): open its PR${claim ? ` (v${claim.version})` : ''} from that commit, and ${MERGE_IT_YOURSELF(null, o.repo)}` };
+  return { ok: true, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): open its PR${claim ? ` (v${claim.version})` : ''} from that commit, and ${MERGE_IT_YOURSELF(null, o.repo, { host: hostIs(ctx, e), method: pipelineOf(e).mergeMethod })}` };
 }

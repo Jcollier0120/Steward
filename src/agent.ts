@@ -14,13 +14,13 @@ import { run as realRun, type Runner } from './run.ts';
 import { teamOf, type Owner } from './team.ts';
 import { agentPages, loadSettings, SETTINGS_SPEC } from './settings.ts';
 import type { Staff, StaffRow } from './stages/staff.ts';
-import { approveJobsNow, context, loadLastStage, loadStaff, refreshStaff, reposHere, runStage, type StageAsk } from './steward.ts';
+import { approveJobsNow, context, hostLogins, loadLastStage, loadStaff, refreshStaff, reposHere, runStage, type StageAsk } from './steward.ts';
 import { loadTending } from './tend.ts';
 import type { StaffView, StewardView } from './web/types.ts';
 import { allowUpdate } from './safeinstall.ts';
 import { loadClaims } from './claims.ts';
 import { testedView } from './tested.ts';
-import { findRepos, foundStale, foundView, loadFound, lookAfterAll } from './found.ts';
+import { findRepos, foundStale, foundView, loadFound, lookAfter, lookAfterAll } from './found.ts';
 import { handOver, releasesHere, turnsView, type TurnsDeps } from './lease.ts';
 import { claimClashes } from './claims.ts';
 import { passedLines, passedWords } from './passover.ts';
@@ -447,8 +447,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const busy = runs.length > 0 || refreshing !== null;
     const pv = pipelineView(s.buildPipeline, loadPipeline());
     const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: { times: pv.times, next: pv.next, building: pv.building, took: pv.last ? buildTimeLine(pv.last) : null, late: lateLine(pv.open ?? pv.last, new Date()), wakes: wakesPc() }, asleep: saverSlept ? saverSleepLine(saverSlept.saver, saverSlept.sleeps, Date.now()) : null };
-    // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
-    const team = teamOf(s.team, o.owner);
+    // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known), and
+    // the accounts on other hosts as the stages last asked them.
+    const team = teamOf(s.team, o.owner, hostLogins());
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
     const scm = loadScm();
     const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), passedOver: passedLines(loadStaff()?.rows ?? []).map((l) => passedWords(l)), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined, wholeSuite: loadWholeJob() };
@@ -591,16 +592,24 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         }
       },
       // Look after repositories Reeve found (found.ts): added to Settings, releasing only as ticked. One
-      // ({ repo, merges, release }), or several at once ({ repos: [{ repo, merges, release }, …] }).
+      // ({ repo, merges, release }), or several at once ({ repos: [{ repo, merges, release }, …] }); or Add, any clone by
+      // its folder ({ folder, release }), on any host or none. A repository's name is owner/name on GitHub, host/path on
+      // another host (gitlab.com/group/app), local/<folder> for one on this PC alone.
       '/api/repos/look-after': ({ body }) => {
+        if (typeof body?.folder === 'string') {
+          const r = lookAfter('', { folder: body.folder.slice(0, 260), merges: false, release: body?.release === true });
+          if ('error' in r) return { json: { error: r.error }, status: 409 };
+          if (!runs.length) void refresh();
+          return { json: { ok: true, id: r.employee.id, message: `Looked after ${r.employee.repo}, from ${r.employee.checkout}.` } };
+        }
         const many = Array.isArray(body?.repos);
         const picks = (many ? (body.repos as any[]).slice(0, 200) : [body]).map((p) => ({
           repo: typeof p?.repo === 'string' ? p.repo.trim().slice(0, 140) : '',
           merges: p?.merges === true,
           release: p?.release === true,
         }));
-        if (!picks.length || picks.some((p) => !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(p.repo)))
-          return { json: { error: 'Send { "repo": "owner/name" }, or { "repos": [{ "repo": "owner/name" }, …] }, of the repositories the page offers.' }, status: 400 };
+        if (!picks.length || picks.some((p) => !/^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.~-]+)+$/.test(p.repo)))
+          return { json: { error: 'Send { "repo": "owner/name" } (host/path off GitHub), or { "repos": [{ "repo": "owner/name" }, …] }, of the repositories the page offers; or { "folder": "C:\\path\\to\\clone" } to add any clone.' }, status: 400 };
         const r = lookAfterAll(picks);
         if (r.employees.length && !runs.length) void refresh();
         if (!r.employees.length) return { json: { error: r.errors.join('\n') }, status: 409 };

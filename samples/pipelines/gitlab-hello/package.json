@@ -1,0 +1,10 @@
+{
+  "name": "gitlab-hello",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hello, world: a sample on a fake GitLab (its origin's address is GitLab's, its pushes go to a folder) for the Steward's pipelines (docs/PIPELINE.md)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

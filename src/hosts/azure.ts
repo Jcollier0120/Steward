@@ -150,14 +150,14 @@ export class AzureDevOps implements SourceHost {
    * completes it in the background: it is asked again (a minute at most) until it is, so what follows finds the merge
    * on the branch; one a policy holds, or still not completed, is answered as a failure.
    */
-  async mergePr(repo: string, n: number, p: { matchHead?: string; deleteBranch?: boolean } = {}, waitMs = 5_000): Promise<Answer> {
+  async mergePr(repo: string, n: number, p: { matchHead?: string; deleteBranch?: boolean; method?: 'merge' | 'squash' | 'rebase' } = {}, waitMs = 5_000): Promise<Answer> {
     let head = p.matchHead;
     if (!head) {
       const a = await this.git(repo, 'get', `/pullrequests/${n}`);
       if (a.code !== 0) return a;
       head = parsed<any>(a.out)?.lastMergeSourceCommit?.commitId;
     }
-    let a = await this.git(repo, 'patch', `/pullrequests/${n}`, { status: 'completed', lastMergeSourceCommit: { commitId: head }, completionOptions: { mergeStrategy: 'noFastForward', deleteSourceBranch: !!p.deleteBranch } }, 5 * MINUTE);
+    let a = await this.git(repo, 'patch', `/pullrequests/${n}`, { status: 'completed', lastMergeSourceCommit: { commitId: head }, completionOptions: { mergeStrategy: p.method === 'squash' ? 'squash' : p.method === 'rebase' ? 'rebase' : 'noFastForward', deleteSourceBranch: !!p.deleteBranch } }, 5 * MINUTE);
     for (let i = 0; a.code === 0 && i < 12; i++) {
       const pr = parsed<any>(a.out);
       if (pr?.status === 'completed') return a;
