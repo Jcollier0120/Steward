@@ -303,7 +303,11 @@ export interface ManorProject {
   name: string;
   /** The clone on this PC: a full path (C:\..., or a share), one project to a clone. */
   checkout: string;
-  /** Its repository on GitHub, owner/name, or null when it has none (or none was given). */
+  /**
+   * Its repository: owner/name on GitHub (github.com), as always; host/path on any other host (kit 2.146.0):
+   * gitlab.com/group/sub/app, dev.azure.com/org/project/_git/app, bitbucket.org/team/app, codeberg.org/me/app,
+   * github.acme.com/owner/app (originName). Null when it has none: a local-only repository, or none was given.
+   */
   repo: string | null;
   /** The branch its work goes to: "main" unless it says. */
   branch: string;
@@ -328,6 +332,12 @@ export interface ManorProject {
    * both, and a reader takes one missing as off.
    */
   release?: string;
+  /**
+   * The kind of host its repository is on, where the person said (settings' "host", kit 2.146.0): for a host whose name
+   * doesn't say (a GitLab at code.acme.com). Only there when the entry gives one, so a project read before reads the
+   * same; projectOrigin() takes it into account.
+   */
+  host?: Exclude<OriginKind, 'local'>;
 }
 
 /** What a project may not be: the manor's own repositories (owner/name) and the checkouts the Steward works from. */
@@ -636,7 +646,7 @@ export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: s
 /**
  * settings.json's "projects" as the manor uses them: each entry checked, a wrong one left out and said in `problems`
  * (Manor shows them with its other settings' problems). Manor's own settings and every agent read them with this, so
- * the rules are the same everywhere. An entry is { "name", "checkout", "repo"?, "branch"?, "test"?, "versionFiles"?,
+ * the rules are the same everywhere. An entry is { "name", "checkout", "repo"?, "host"?, "branch"?, "test"?, "versionFiles"?,
  * "cleanBranches"?, "merges"?, "release"? }; one whose checkout or repository is the manor's own (`own`, manorOwn()) is refused, as is a
  * checkout inside one of the Steward's or holding one: the manor looks after its own itself, never as a project.
  * Whether the checkout is there isn't checked here: a project whose clone has gone stays listed, and the page says so.
@@ -644,7 +654,7 @@ export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: s
 export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = []): ManorProject[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
-    problems.push('settings.json: "projects" should be a list of { "name", "checkout", "repo", "branch", "test", "versionFiles", "cleanBranches", "merges", "release" }.');
+    problems.push('settings.json: "projects" should be a list of { "name", "checkout", "repo", "host", "branch", "test", "versionFiles", "cleanBranches", "merges", "release" }.');
     return [];
   }
   const ownRepos = new Set(own.repos.map((r) => r.toLowerCase()));
@@ -662,10 +672,17 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
     if (!checkout || checkout.length > 260 || !FULL_PATH.test(checkout) || /[\u0000-\u001f<>"|?*]/.test(checkout.slice(2))) {
       return wrong('should have a "checkout": the full path of its clone, like D:\\Code\\Example');
     }
+    let host: Exclude<OriginKind, 'local'> | undefined;
+    if (given(e.host)) {
+      if (typeof e.host !== 'string' || !HOST_KINDS.includes(e.host.trim().toLowerCase() as never)) return wrong(`should give its "host" as one of ${HOST_KINDS.join(', ')}, or none for the one its repository's name says`);
+      host = e.host.trim().toLowerCase() as Exclude<OriginKind, 'local'>;
+    }
     let repo: string | null = null;
     if (given(e.repo)) {
-      if (typeof e.repo !== 'string' || !REPO.test(e.repo.trim())) return wrong('should give its "repo" as owner/name on GitHub, or none');
-      repo = e.repo.trim();
+      const named = typeof e.repo === 'string' ? repoNamed(e.repo, host) : null;
+      if (!named) return wrong('should give its "repo" as owner/name on GitHub, host/path anywhere else (gitlab.com/group/app), its clone URL, or none');
+      if ('why' in named) return wrong(named.why);
+      repo = named.repo;
     }
     let branch = 'main';
     if (given(e.branch)) {
@@ -693,7 +710,7 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
     let merges = false;
     if (e.merges !== undefined && e.merges !== null) {
       if (typeof e.merges !== 'boolean') return wrong('should give "merges" as true or false');
-      if (e.merges && !repo) return wrong('says "merges", but has no "repo" on GitHub to merge in');
+      if (e.merges && !repo) return wrong('says "merges", but has no "repo" to merge in');
       merges = e.merges;
     }
     let release = '';
@@ -712,9 +729,37 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
     }
     const theirs = [repo, originRepo(checkout)].find((r) => r && ownRepos.has(r.toLowerCase()));
     if (theirs) return wrong(`is ${theirs}, one of the manor's own: the manor looks after it itself, so it can't be a project`);
-    projects.push({ name, checkout, repo, branch, test, versionFiles, cleanBranches, merges, release });
+    projects.push({ name, checkout, repo, branch, test, versionFiles, cleanBranches, merges, release, ...(host ? { host } : {}) });
   });
   return projects;
+}
+
+/**
+ * A project's "repo" as given: owner/name (GitHub's, kept exactly as written), host/path, or a clone URL (https, ssh,
+ * scp-style), named as originName names it. Why not, where it can't be one: a folder (a local-only project has no
+ * repo), or owner/name with a host other than GitHub said. Null for what isn't a repository's name at all. Pure.
+ */
+function repoNamed(raw: string, host: Exclude<OriginKind, 'local'> | undefined): { repo: string } | { why: string } | null {
+  const r = raw.trim();
+  if (!r || r.length > 300) return null;
+  if (REPO.test(r)) {
+    if (host && host !== 'github') return { why: `says its "host" is ${host}, but gives its "repo" as owner/name, which is GitHub's: give it as host/path (gitlab.acme.com/group/app), or its clone URL` };
+    return { repo: r };
+  }
+  const origin = HOST_NAME.test(r) ? originOfName(r, host) : /^[a-z][a-z0-9+.-]*:\/\/|^[^/\\:]{2,}:/i.test(r) && !/^file:/i.test(r) ? parseOrigin(r, host) : null;
+  if (!origin) return /^file:|^[a-z]:[\\/]|^\\\\|^\//i.test(r) ? { why: 'gives a folder as its "repo": a repository kept only on this PC, or a share, has none, so leave "repo" out' } : null;
+  if (origin.kind === 'local') return { why: 'gives a folder as its "repo": a repository kept only on this PC, or a share, has none, so leave "repo" out' };
+  return { repo: originName(origin) };
+}
+
+/**
+ * Where a project's repository is (kit 2.146.0): from its "repo" (originOfName) when it has one, else from its clone's
+ * origin (originOf), with its "host" for a host whose name doesn't say. A project with no repo and a clone with no
+ * origin, or a folder for one, is local. Null when there's neither: no repo, and no clone at its checkout.
+ */
+export function projectOrigin(p: Pick<ManorProject, 'repo' | 'checkout'> & { host?: ManorProject['host'] }): Origin | null {
+  if (p.repo) return originOfName(p.repo, p.host) ?? originOf(p.checkout, p.host);
+  return originOf(p.checkout, p.host);
 }
 
 /**
