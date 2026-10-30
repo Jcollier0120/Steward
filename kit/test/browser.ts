@@ -40,17 +40,49 @@ export interface Tab {
   close(): Promise<void>;
 }
 
+/** The browser on DevTools `port` asked to close, as a person closing it would; settles once it has, or after 10 s. */
+async function closeBrowser(port: string): Promise<void> {
+  try {
+    const { webSocketDebuggerUrl } = (await (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(5_000) })).json()) as { webSocketDebuggerUrl: string };
+    const ws = new WebSocket(webSocketDebuggerUrl);
+    await new Promise<void>((done) => {
+      const t = setTimeout(done, 10_000);
+      ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
+      ws.onclose = ws.onerror = () => {
+        clearTimeout(t);
+        done();
+      };
+    });
+  } catch {
+    // Gone already, or not answering: killed and its profile removed all the same.
+  }
+}
+
 /** A headless browser with one tab at `url`, once the page has loaded. */
 export async function openTab(browser: string, url: string): Promise<Tab> {
   const profile = mkdtempSync(path.join(os.tmpdir(), 'kit-browser-'));
   const child = spawn(browser, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-sync', '--disable-background-networking', '--disable-component-update', '--mute-audio', 'about:blank'], { stdio: 'ignore' });
-  const gone = () => {
+  let port: string | null = null;
+  // Edge may run its browser apart from the process started here, which hands over and ends (2026-10-30): killing that
+  // left the browser running, its profile held (EBUSY) and its connections to the test's page server open, so the test
+  // file never ended. It is asked to close over DevTools first, and its profile removed once it lets go.
+  const gone = async () => {
+    if (port) await closeBrowser(port);
     child.kill();
-    rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    const removed = () => {
+      try {
+        rmSync(profile, { recursive: true, force: true });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    // A profile still held after that is left in the temp folder: no failure of the test.
+    await until(removed, 15_000, 'the browser to let go of its profile').catch(() => {});
   };
   try {
     const file = path.join(profile, 'DevToolsActivePort');
-    const port = await until(() => existsSync(file) && readFileSync(file, 'utf8').split('\n')[0].trim(), 20_000, 'the browser to start');
+    port = await until(() => existsSync(file) && readFileSync(file, 'utf8').split('\n')[0].trim(), 20_000, 'the browser to start');
     const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as { type: string; webSocketDebuggerUrl: string }[];
     const page = targets.find((t) => t.type === 'page');
     if (!page) throw new Error('the browser has no tab');
@@ -91,11 +123,11 @@ export async function openTab(browser: string, url: string): Promise<Tab> {
       run,
       close: async () => {
         ws.close();
-        gone();
+        await gone();
       },
     };
   } catch (e) {
-    gone();
+    await gone();
     throw e;
   }
 }
