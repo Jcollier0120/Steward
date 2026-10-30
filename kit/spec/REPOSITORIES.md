@@ -11,13 +11,14 @@ On any other PC there is no staff: everything the person develops is a tracked r
 
 ## An entry
 
-`{ "name", "checkout", "repo"?, "branch"?, "test"?, "versionFiles"?, "cleanBranches"?, "merges"?, "release"? }`, checked by `projectsFrom()`. A wrong entry is left out, and the reason is given among Manor's settings problems.
+`{ "name", "checkout", "repo"?, "host"?, "branch"?, "test"?, "versionFiles"?, "cleanBranches"?, "merges"?, "release"? }`, checked by `projectsFrom()`. A wrong entry is left out, and the reason is given among Manor's settings problems.
 
 | Key | What it is | Default |
 |---|---|---|
 | `name` | What the pages call it | (required) |
 | `checkout` | Its clone on this PC, a full path | (required) |
-| `repo` | owner/name on GitHub | none |
+| `repo` | Where it is hosted: owner/name on GitHub, as always; host/path on any other host (`gitlab.com/group/sub/app`, `dev.azure.com/acme/Platform/_git/app`, `github.acme.com/team/app`); or its clone URL, read as one of those. A repository kept only on this PC, or on a share, has none (since kit 2.146.0; GitHub only before) | none |
+| `host` | What kind of host it is, where its name doesn't say (a self-hosted GitLab at `code.acme.com`): `github`, `gitlab`, `bitbucket`, `azure`, `gitea` (Forgejo and Codeberg too) or `other`. It never changes github.com, gitlab.com, bitbucket.org, Azure DevOps, codeberg.org or gitea.com (since kit 2.146.0) | from the host's name |
 | `branch` | Where its work goes and its releases come from | `main` |
 | `test` | The command that runs its tests | none |
 | `versionFiles` | The files its version is set in | none: its version is never changed |
@@ -37,6 +38,17 @@ On any other PC there is no staff: everything the person develops is a tracked r
 | The Bailiff, the Surveyor, the Assayer | They review the Wright's drafts, run `test`, and so on, as each one's spec says. |
 
 An agent installed without Manor keeps its own list, as before, and reads it only then.
+
+## Any host, or none
+
+Since kit 2.146.0 a repository's place is an `Origin` (node/manor.ts): `{ kind, hostName, path, webUrl }`, its `kind` one of `github`, `gitlab`, `bitbucket`, `azure`, `gitea`, `other` or `local`.
+
+- `parseOrigin(url, hint?)` reads a remote however it is written: https with or without .git, ssh://, scp-style (`git@host:path`), git://, file://, a drive, a share or a relative path. GitLab keeps its subgroups. Azure DevOps reads as `org/project/_git/name` on dev.azure.com, from its ssh form too, and as `project/_git/name` on org.visualstudio.com. Bitbucket Data Center drops its `scm/`. A host is known by its name (`kindOfHost`: github.com and GitHub Enterprise, gitlab.*, bitbucket.*, dev.azure.com and *.visualstudio.com, gitea, forgejo and codeberg.org), or by the project's `host`.
+- `originOf(checkout, hint?)` is a clone's origin from its git config (a worktree's through its main clone). A clone with no origin is `local`; a folder that isn't a clone is null.
+- `originName(origin)` is the name the manor gives it: owner/name on github.com, exactly as before; `host/path` anywhere else; `local/<folder>` for one kept on this PC. `originOfName(name, hint?)` reads one back, and `repoNameOk(name)` says whether an agent may be asked about it (a Seneschal task, a peer's result).
+- `projectOrigin(project)` is a tracked repository's place: from its `repo`, else from its clone.
+
+A project on GitHub reads exactly as before: its `repo` is owner/name, and it has no `host` key unless its entry gives one. `originRepo(checkout)` is still GitHub's alone.
 
 ## Moving to one list
 

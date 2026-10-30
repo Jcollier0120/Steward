@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.263
+
+**It hands out the kit 2.146.0: the staff can read a repository on any host, GitLab, Bitbucket, Azure DevOps, Gitea and the rest, or one kept only on this PC, and an MCP agent can connect itself to ten AI assistants. A change to another host's CI or an AI assistant's own folder no longer runs every test.**
+
+### What's new
+
+- **The kit 2.146.0:** a tracked repository's `repo` in Manor's Settings may be host/path on any host (`gitlab.com/group/app`), or its clone URL. An agent's Connect your AI card can list Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Gemini CLI, Codex CLI, Cline, Continue and Zed, each with Connect or Disconnect, and the text to paste where it can't write.
+- **Tested here:** GitLab's .gitlab-ci.yml and .gitlab folder, Azure Pipelines' and Bitbucket Pipelines' files, Gitea's and Forgejo's workflows, and the folders of Cursor, Codex, Gemini, Windsurf, VS Code, Zed, Continue and Cline (with their rules files) are no code: a change to one reaches no test, as .github's always did.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.262
 
 **It hands out the kit 2.145.0: every block of output on the staff's pages can be copied in one click, and the Steward's own build logs can too.**

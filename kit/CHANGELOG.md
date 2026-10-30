@@ -2,6 +2,31 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.146.0
+
+**A repository may be on any host, or on none: GitHub, GitHub Enterprise, GitLab (subgroups and self-hosted too), Bitbucket, Azure DevOps, Gitea, Forgejo and Codeberg, any other git server, or a folder on this PC. And an agent that is an MCP server can connect itself to ten AI assistants, adding only its own entry to each one's settings.**
+
+### What's new
+
+- **node/manor.ts, `parseOrigin(url, hint?)`:** a remote's place, `{ kind, hostName, path, webUrl }`, however its URL is written: https with or without .git, ssh://, scp-style, git://, file://, a drive, a share or a relative path. `kind` is `github`, `gitlab`, `bitbucket`, `azure`, `gitea`, `other` or `local`. GitLab keeps its subgroups; Azure DevOps reads as `org/project/_git/name` from each of its forms; Bitbucket Data Center drops its `scm/`. A host is known by its name (`kindOfHost`), or by a hint from settings, which never changes a public host. Null for what isn't a remote.
+- **node/manor.ts, `originOf(checkout, hint?)`:** a clone's origin on any host, from its git config (a worktree's through its main clone); `local` for a clone with no origin, null for a folder that isn't a clone. `originRepo` is unchanged: GitHub's owner/name or null.
+- **node/manor.ts, `originName`, `originOfName`, `repoNameOk`, `projectOrigin`, `HOST_KINDS`:** the manor's name for a repository (owner/name on github.com, as always; host/path elsewhere; local/<folder>), read back, checked, and a tracked repository's place.
+- **node/manor.ts, `projectsFrom`:** a project's `repo` may be host/path on any host, or its clone URL (read as owner/name on GitHub, host/path elsewhere). A new `host` key says the kind where a host's name doesn't (a self-hosted GitLab). A folder given as a `repo` is refused, in a sentence.
+- **node/assistants.ts:** `ASSISTANTS` (Claude Code, Claude Desktop, Cursor, VS Code with Copilot, Windsurf, Gemini CLI, Codex CLI, Cline, Continue and Zed, with each one's settings files on Windows, macOS and Linux), `assistantsFound(home?, options?)` (the installed ones), `serverStatus(id, name, options?)` (`not-installed`, `installed` or `connected`; it only reads), and `addServer(id, server, options?)` and `removeServer(id, name, options?)`. Only the agent's own entry is added, changed or removed. Each file is edited in place, keeping comments in JSON with comments, TOML and YAML, and it is backed up once, to `<file>.castellan.bak`, before the first write. Nothing is written for an assistant that isn't installed, a file that doesn't parse is refused in a sentence and left as it is, and a secret in a server's env or arguments is refused. Claude Code's ~/.claude.json is never written: its server is added with `claude mcp add --scope user`, or, without the claude command, `paste` gives the line to run. Claude Desktop from the Microsoft Store uses its package's own copy of its settings.
+- **react/staff.tsx, `ConnectAI`'s `assistants`, `onConnect` and `onDisconnect`:** the assistants on the PC as rows (`AssistantRow`), each with its state, Connect or Disconnect, the text to paste where the agent can't write, and why where its settings don't parse. The installed ones come first.
+- **react/styles.ts:** the `.ui-assistants` and `.ui-assistant` rules.
+- **node/seneschal.ts, node/work-status.ts:** a task's repository, and a peer's result's, may be host/path on any host. `work.ts`'s line says git clone for one off GitHub.
+- **spec/REPOSITORIES.md, spec/STAFF-PAGE.md:** the `repo` and `host` keys, any host's place, and the assistants' rows.
+
+### What changed
+
+- A project whose `repo` was a clone URL was left out; it is read now.
+- A Seneschal task or a peer result whose repository has a part starting with "-" is refused (one never names a real repository; it would read as an option to git).
+
+### Before you update
+
+- Nothing for an agent on GitHub: its projects, staff.json and results read exactly as before, and a project has no `host` key unless its entry gives one. An agent that builds GitHub URLs from a project's `repo` should use `projectOrigin(p).webUrl` instead, or check that the repo is owner/name first, because it may now be host/path. A page that copies the kit's CSS by hand copies the `.ui-assistant` rules too.
+
 ## 2.145.0
 
 **Every block of output has a copy button at its top-right: `Output` carries one, and `CopyButton` puts one in a page's own `<pre>`. One click copies the whole block, the lines scrolled out of sight too.**
