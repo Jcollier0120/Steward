@@ -167,7 +167,7 @@ test('an install from before: its settings, with no pipeline anywhere, read exac
   // read as a pipeline is refused beside it, before it is saved.
   assert.deepEqual(normalizeSettings({ ...raw, pipelines: {} }).problems, []);
   assert.deepEqual(normalizeSettings({ ...raw, pipelines: { 'octo/game': '{"tagFormat":"game-{version}"}' } }).settings.pipelines, { 'octo/game': '{"tagFormat":"game-{version}"}' });
-  const check = (pipelines: Record<string, string>) => SETTINGS_SPEC.check!({ ...structuredClone(DEFAULT_SETTINGS), employees: [], pipelines } as any).errors;
+  const check = (pipelines: Record<string, string>) => (SETTINGS_SPEC.check!({ ...structuredClone(DEFAULT_SETTINGS), employees: [], pipelines } as any, ['pipelines'], { pipelines }) as { errors: Record<string, string> }).errors;
   assert.deepEqual(check({}), {});
   assert.deepEqual(check({ 'octo/game': '{"tagFormat":"game-{version}"}' }), {});
   assert.deepEqual(Object.keys(check({ 'octo/game': '{"versioning":"sometimes"}', 'octo/site': 'not json' })), ['pipelines.0.value', 'pipelines.1.value']);

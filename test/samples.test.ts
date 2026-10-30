@@ -55,7 +55,7 @@ test('a .steward.json that names a folder names the samples\' own (@SAMPLES@ fil
   for (const name of ['dotnet-hello', 'folder-release', 'local-only']) {
     const text = readFileSync(path.join(at(name), '.steward.json'), 'utf8');
     assert.doesNotMatch(text, /@SAMPLES@/, name);
-    const to = readPipelineFile(at(name)).raw?.releaseTo as { folder: string };
+    const to = (readPipelineFile(at(name)).raw as { releaseTo: { folder: string } }).releaseTo;
     assert.equal(to.folder, path.join(target, 'releases', name), name);
   }
 });

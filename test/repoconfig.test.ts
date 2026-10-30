@@ -225,7 +225,7 @@ test(".steward.json read from the clone: none, JSON, not JSON, too big; read aga
 });
 
 test('a dry run says each step, and where each option came from; one held says so and runs nothing', () => {
-  const e = { id: 'app', name: 'App', repo: 'octo/app', branch: 'main', checkout: 'C:\\app', ...record() };
+  const e = { id: 'app', name: 'App', branch: 'main', checkout: 'C:\\app', ...record() };
   const def = R.dryRunLines(e, 'github');
   assert.deepEqual(def.slice(0, 2), ['App (octo/app), branch main, worked with github', 'pipeline: the defaults (no .steward.json, nothing in Settings)']);
   assert.ok(def.some((l) => /test +npm test +\(in a fresh worktree of origin\/main; must pass\)/.test(l)), def.join('\n'));

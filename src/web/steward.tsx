@@ -143,8 +143,10 @@ function PrTable({ r }: { r: StaffRowView }) {
 function NextBuild({ r }: { r: StaffRowView }) {
   const n = r.nextBuild;
   if (!n?.count) return null;
-  const gh = kindOf(r.repo, r.host) === 'github' ? repoUrl(r.repo) : null;
-  const compare = compareUrl(r.repo, r.host, n.commit, r.branch);
+  // Over plain git an owner/name's commits aren't linked, as before: its origin may be any server's (a NAS's), so named.
+  const linked = !(r.host === 'git' && kindOf(r.repo, null) === 'github');
+  const gh = linked && kindOf(r.repo, r.host) === 'github' ? repoUrl(r.repo) : null;
+  const compare = linked ? compareUrl(r.repo, r.host, n.commit, r.branch) : null;
   const commits = `${n.count} ${n.count === 1 ? 'commit' : 'commits'} since ${n.tag}`;
   const more = n.count - n.commits.length;
   return (
@@ -166,7 +168,7 @@ function NextBuild({ r }: { r: StaffRowView }) {
             return (
               <tr key={c.sha}>
                 <td className="pr-num">
-                  <Link url={c.pr !== null ? (gh ? `${gh}/pull/${c.pr}` : null) : commitUrl(r.repo, r.host, c.sha)}>{label}</Link>
+                  <Link url={c.pr !== null ? (gh ? `${gh}/pull/${c.pr}` : null) : linked ? commitUrl(r.repo, r.host, c.sha) : null}>{label}</Link>
                 </td>
                 <td>{c.title}</td>
               </tr>
