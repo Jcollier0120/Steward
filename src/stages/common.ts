@@ -1,11 +1,13 @@
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { compareVersions } from '../kitfiles.ts';
 import path from 'node:path';
 import { NOT_PUBLISHED, type ExchequerOptions } from '../kit/exchequer.ts';
 import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { addWorktree, commitOf, fetchBranch, gitMaybe, realOf } from '../git.ts';
 import type { Glance, RepoGlance } from '../glance.ts';
-import { gitGlance, type Host } from '../scm.ts';
+import { gitGlance, isGithubRepo, type Host } from '../scm.ts';
+import { pipelineOf, tagsRelease, versionOfTag } from '../repoconfig.ts';
 import type { TastingDeps } from '../tasting.ts';
 import { appReleasesIn, type ReleaseInfo } from './staff.ts';
 import type { KitInfo } from '../kitsource.ts';
@@ -126,8 +128,12 @@ export interface Ctx {
   retired?: ReadonlySet<string>;
 }
 
-/** How a repository is worked with in this stage (scm.ts). */
-export const hostIs = (ctx: Pick<Ctx, 'host'>, e: Employee): Host => ctx.host?.(e) ?? 'github';
+/**
+ * How a repository is worked with in this stage (scm.ts). With nothing to say (a test's context, a console stage before
+ * its look), GitHub for one named as GitHub names repositories, as before, and plain git for any other: never gh asked
+ * about a repository on another host, or one with no host at all.
+ */
+export const hostIs = (ctx: Pick<Ctx, 'host'>, e: Employee): Host => ctx.host?.(e) ?? (isGithubRepo(e.repo) ? 'github' : 'git');
 
 /**
  * Whether a failure is only the network's: its words say so, or this PC is offline now (the kit's net.ts). Such a
@@ -260,10 +266,28 @@ export const forgetGlance = (ctx: Ctx, e: Pick<Employee, 'id'>) => {
  * or every round would build and install it again.
  */
 export async function releasedOf(ctx: Ctx, e: Employee): Promise<ReleaseInfo[]> {
-  const g = glanceOf(ctx, e) ?? (hostIs(ctx, e) === 'git' ? await gitGlance(ctx.run, { branch: e.branch, checkout: checkoutOf(e) }) : null);
-  const out = appReleasesIn(g ? JSON.stringify(g.releases) : must(await hostFor(ctx, e).listReleases(e.repo, 'tagName,isDraft,publishedAt')));
+  // By its own pipeline (repoconfig.ts): released to a folder, its releases are the folder's; released as tags (plain
+  // git, a tag alone, or its own command), its tags, read with git: the glance's are its host's releases.
+  const p = pipelineOf(e);
+  if (p.releaseTo.kind === 'folder') return folderReleases(p.releaseTo.folder, p.tagFormat);
+  const byTag = tagsRelease(p, hostIs(ctx, e));
+  const g = (byTag && hostIs(ctx, e) !== 'git' ? null : glanceOf(ctx, e)) ?? (byTag ? await gitGlance(ctx.run, { branch: e.branch, checkout: checkoutOf(e) }, p.tagFormat) : null);
+  const out = appReleasesIn(g ? JSON.stringify(g.releases) : must(await hostFor(ctx, e).listReleases(e.repo, 'tagName,isDraft,publishedAt')), p.tagFormat);
   const here = installedRelease(e);
   return here && !out.some((r) => r.version === here.version) ? [{ tag: `v${here.version}`, version: here.version, published: here.built }, ...out] : out;
+}
+
+/** The releases in a folder its pipeline releases to (repoconfig.ts): each <tag> folder in it, newest first; none while it isn't there. */
+export function folderReleases(folder: string, tagFormat: string): ReleaseInfo[] {
+  try {
+    const root = path.resolve(expandEnv(folder));
+    return readdirSync(root, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && versionOfTag(tagFormat, d.name) !== null)
+      .map((d) => ({ tag: d.name, version: versionOfTag(tagFormat, d.name)!, published: statSync(path.join(root, d.name)).mtime.toISOString() }))
+      .sort((a, b) => compareVersions(b.version, a.version));
+  } catch {
+    return [];
+  }
 }
 
 /** The release installed here of an employee released only on this PC: its install folder's release.json, unless a development build. */

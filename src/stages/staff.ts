@@ -11,6 +11,7 @@ import { agreedVersion } from '../versions.ts';
 import { releasedHere, type Employee } from '../settings.ts';
 import { bumpBranch, checkoutOf, glanceOf, hostIs, mapLimit, NOT_ON_KIT, type Ctx } from './common.ts';
 import { gitGlance } from '../scm.ts';
+import { versionOfTag } from '../repoconfig.ts';
 import { hostFor, must, type SourceHost } from '../hosts/index.ts';
 import { repoBusy } from './slots.ts';
 import { RETIRED, retiredOf } from '../retired.ts';
@@ -278,11 +279,11 @@ export function parsePrs(json: string, team: string[]): PrInfo[] {
 }
 
 /** The app releases (v<x.y.z>, not drafts) in a `gh release list --json tagName,isDraft,publishedAt` answer, newest version first. */
-export function appReleasesIn(json: string): ReleaseInfo[] {
+export function appReleasesIn(json: string, tagFormat = 'v{version}'): ReleaseInfo[] {
   const list = JSON.parse(json || '[]') as any[];
   return list
-    .filter((r) => !r?.isDraft && /^v\d+\.\d+\.\d+$/.test(String(r?.tagName ?? '')))
-    .map((r) => ({ tag: r.tagName as string, version: (r.tagName as string).slice(1), published: typeof r.publishedAt === 'string' ? r.publishedAt : null }))
+    .filter((r) => !r?.isDraft && versionOfTag(tagFormat, String(r?.tagName ?? '')) !== null)
+    .map((r) => ({ tag: r.tagName as string, version: versionOfTag(tagFormat, r.tagName as string)!, published: typeof r.publishedAt === 'string' ? r.publishedAt : null }))
     .sort((a, b) => compareVersions(b.version, a.version));
 }
 

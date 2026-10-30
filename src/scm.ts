@@ -5,6 +5,8 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { GlanceRelease, RepoGlance } from './glance.ts';
 import { bitbucketLogin, TOKEN_HOST, whereBitbucket } from './hosts/bitbucket.ts';
 import { teaLogins, whereGitea } from './hosts/gitea.ts';
+import { remoteOf } from './git.ts';
+import { tagGlob, versionOfTag } from './repoconfig.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
 
@@ -234,10 +236,8 @@ export function repoFromUrl(url: string): string | null {
   return name ? `local/${name}` : null;
 }
 
-const VERSION_TAG = /^v\d+\.\d+\.\d+$/;
-
-/** A repository's branch head and v<x.y.z> tags, from `git ls-remote` in its clone: the Git way's glance. Pure. */
-export function readLsRemote(out: string, branch: string): RepoGlance {
+/** A repository's branch head and release tags (v<x.y.z>, or its pipeline's tagFormat), from `git ls-remote` in its clone: the Git way's glance. Pure. */
+export function readLsRemote(out: string, branch: string, tagFormat = 'v{version}'): RepoGlance {
   let head: string | null = null;
   const tags = new Map<string, { oid: string; peeled: string | null }>();
   for (const line of out.split(/\r?\n/)) {
@@ -245,13 +245,13 @@ export function readLsRemote(out: string, branch: string): RepoGlance {
     if (!oid || !ref) continue;
     if (ref === `refs/heads/${branch}`) head = oid;
     const m = /^refs\/tags\/(.+?)(\^\{\})?$/.exec(ref);
-    if (!m || !VERSION_TAG.test(m[1])) continue;
+    if (!m || versionOfTag(tagFormat, m[1]) === null) continue;
     const t = tags.get(m[1]) ?? { oid, peeled: null };
     if (m[2]) t.peeled = oid;
     else t.oid = oid;
     tags.set(m[1], t);
   }
-  const num = (tag: string) => tag.slice(1).split('.').map(Number);
+  const num = (tag: string) => versionOfTag(tagFormat, tag)!.split('.').map(Number);
   const releases: GlanceRelease[] = [...tags]
     .sort(([a], [b]) => {
       const [x, y] = [num(a), num(b)];
@@ -261,10 +261,11 @@ export function readLsRemote(out: string, branch: string): RepoGlance {
   return { head, prs: [], releases };
 }
 
-/** The Git way's glance at one repository: one `git ls-remote` of origin in its clone. */
-export async function gitGlance(run: Runner, e: Pick<Employee, 'branch'> & { checkout: string }): Promise<RepoGlance> {
+/** The Git way's glance at one repository: one `git ls-remote` of origin in its clone (of the clone itself, when it has no origin). */
+export async function gitGlance(run: Runner, e: Pick<Employee, 'branch'> & { checkout: string }, tagFormat = 'v{version}'): Promise<RepoGlance> {
   if (!existsSync(e.checkout)) throw new Error(`no clone at ${e.checkout}`);
-  const r = await run('git', ['ls-remote', 'origin', `refs/heads/${e.branch}`, 'refs/tags/v*'], { cwd: e.checkout, timeoutMs: 2 * 60_000 });
-  if (r.code !== 0) throw new Error(`git ls-remote origin failed (${r.code}): ${(r.err || r.out).trim().split('\n').pop() || 'no output'}`);
-  return readLsRemote(r.out, e.branch);
+  const remote = remoteOf(e.checkout);
+  const r = await run('git', ['ls-remote', remote, `refs/heads/${e.branch}`, tagGlob(tagFormat)], { cwd: e.checkout, timeoutMs: 2 * 60_000 });
+  if (r.code !== 0) throw new Error(`git ls-remote ${remote === '.' ? 'of the clone' : 'origin'} failed (${r.code}): ${(r.err || r.out).trim().split('\n').pop() || 'no output'}`);
+  return readLsRemote(r.out, e.branch, tagFormat);
 }

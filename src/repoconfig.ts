@@ -331,6 +331,16 @@ export function versionOfTag(format: string, tag: string): string | null {
   return /^\d+\.\d+\.\d+$/.test(v) ? v : null;
 }
 
+/** Whether its pipeline keeps changes/ entries that are stamped into CHANGELOG.md before a release (changelog: auto or changes-dir). Pure. */
+export const stampsChanges = (p: Pick<RepoPipeline, 'changelog'>) => p.changelog === 'auto' || p.changelog === 'changes-dir';
+
+/**
+ * Whether a repository's releases are its tags, read with git rather than asked of its host: worked with plain git (as
+ * before), released to a tag alone, or released by a command its pipeline names (which makes no host release: the
+ * Steward tags what it released). Pure.
+ */
+export const tagsRelease = (p: Pick<ResolvedPipeline, 'releaseTo' | 'from'>, hostKind: string) => hostKind === 'git' || p.releaseTo.kind === 'tag' || (p.releaseTo.kind === 'command' && (p.from.release !== 'default' || p.from.releaseTo !== 'default'));
+
 /** The glob `git ls-remote` is asked for a format's tags (refs/tags/v*). Pure. */
 export const tagGlob = (format: string) => `refs/tags/${format.split('{version}')[0]}*`;
 
@@ -341,7 +351,7 @@ export const tagGlob = (format: string) => `refs/tags/${format.split('{version}'
 export const heldBy = (p: Pick<ResolvedPipeline, 'errors'>): string | null => (p.errors.length ? `its pipeline can't be read, so nothing is built or released until it's fixed: ${p.errors.join('; ')}` : null);
 
 /** The file's text, read once while it is unchanged (its size and time). */
-const files = new Map<string, { key: string; text: string | null }>();
+const files = new Map<string, { key: string; text: string }>();
 
 /**
  * A clone's .steward.json: its contents, null when it has none, or a sentence when it can't be read as JSON. Read from
@@ -349,7 +359,7 @@ const files = new Map<string, { key: string; text: string | null }>();
  */
 export function readPipelineFile(checkout: string): { raw: unknown; error: string | null } {
   const file = path.join(checkout, PIPELINE_FILE);
-  let text: string | null = null;
+  let text = '';
   try {
     const st = statSync(file);
     const key = `${st.size}:${st.mtimeMs}`;
