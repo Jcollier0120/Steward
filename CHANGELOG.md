@@ -2,6 +2,17 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.279
+
+**The Steward's log no longer reads as a failure where it only says an agent is tried again, no longer holds a kit back, or the PC woke. The Surveyor took each such line for one and raised a warning on Manor.**
+
+### What changed
+
+- **Main's kit trial** says "Assayer has changed since kit 2.146.6 didn't pass its checks there: trying it again", where it said "Assayer moved on since kit 2.146.6 failed their checks". The Surveyor reads "failed" anywhere in a line of the Steward's log as something going wrong, so Manor showed a warning for a retry that then passed. Three more of the trial's lines are worded the same way: a verdict another Steward kept ("didn't pass kit 2.146.6's checks as Steward 0.36.270 tried them: trying it again"), an agent Manor has retired since ("didn't pass kit 2.146.6's checks, and Manor has retired it since: no longer held against the kit"), and a failure that may be this PC's load ("it didn't pass, which may be this PC's load, not the kit's: tried once more, alone").
+- **The PC waking** is "the PC woke after 855 min: what didn't go through before is tried again" in serve.log, not "what failed before".
+- **A line that says something failed** is worded as it was, and is still a warning. So is a line that runs something again but quotes the failure's own words, such as an agent's checks run once more: those words match, so its wording was left as it was.
+- The tests read each line as the Surveyor does: `test/surveyor.ts` copies its test of a line (Surveyor `src/logs.ts`, ERROR_RE and NOT_AN_ERROR).
+
 ## 0.36.278
 
 **What's new, at the top of every agent's About page, now shows just the newest 5 versions an update brought, so it stays short.**
@@ -21,6 +32,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
 ## 0.36.275
 
 **Repositories on Azure DevOps are worked with again where the organization is one of Microsoft accounts: the Steward asks Azure DevOps through the Azure CLI's azure-devops extension, not `az rest`, which got the organization's sign-in page, never its API.**
