@@ -24,8 +24,7 @@ export function hostFor(o: { run: Runner; neutralDir: string; host?: (e: Pick<Em
   const host = e ? o.host?.(e) : undefined;
   const site = e?.resolvedPipeline?.host?.baseUrl ?? null;
   if (e && host === 'gitlab') return new GitLab(o.run, o.neutralDir, whereIs(e.repo).hostname, site);
-  const azure = e && host === 'azure' ? whereAzure(e.repo) : null;
-  if (azure) return new AzureDevOps(o.run, o.neutralDir, azure.base);
+  if (e && host === 'azure' && whereAzure(e.repo)) return new AzureDevOps(o.run, o.neutralDir);
   const gitea = e && host === 'gitea' ? whereGitea(e.repo) : null;
   if (gitea) return new Gitea(o.run, o.neutralDir, gitea.hostname, site);
   if (e && host === 'bitbucket') return new Bitbucket(o.run, o.neutralDir);
