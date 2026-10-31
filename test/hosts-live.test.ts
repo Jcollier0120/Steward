@@ -332,11 +332,16 @@ test("gitlab.com through glab anonymously: a project's and a subgroup's releases
 test('Azure DevOps through az signed out, and Bitbucket with no API token: the sentence each says', { skip, timeout: 5 * 60_000 }, async () => {
   const azRepo = repoFromUrl('https://dev.azure.com/microsoft/vscode-python/_git/vscode-python')!;
   assert.equal(azRepo, 'dev.azure.com/microsoft/vscode-python/_git/vscode-python');
-  const az = new AzureDevOps(realRun, home, whereAzure(azRepo)!.base);
+  assert.ok(whereAzure(azRepo));
+  const az = new AzureDevOps(realRun, home);
+  // An empty AZURE_CONFIG_DIR has no extensions either: az repos and az devops say the extension, which isn't installed.
   for (const a of [await az.listPrs(azRepo, { state: 'open', limit: 2, fields: 'number,title' }), await az.listReleases(azRepo, 'tagName', 2)]) {
     assert.equal(a.code, 1);
-    assert.match(a.err, /Please run 'az login' to setup account\.|az isn't installed|not recognized/);
+    assert.match(a.err, /^the Azure CLI's azure-devops extension isn't installed: az extension add --name azure-devops$|^az's sign-in isn't let into https:\/\/dev\.azure\.com\/microsoft |az isn't installed|not recognized/);
   }
+  const who = await az.whoAmI();
+  assert.equal(who.code, 1);
+  assert.match(who.err, /^az isn't signed in \(az login\): .*az login|az isn't installed|not recognized/);
   const bbRepo = repoFromUrl('https://bitbucket.org/atlassian/python-bitbucket.git')!;
   const bb = new Bitbucket(realRun, home);
   for (const a of [await bb.listPrs(bbRepo, { state: 'open', limit: 2, fields: 'number,title' }), await bb.listReleases(bbRepo, 'tagName', 2), await bb.whoAmI()]) {
