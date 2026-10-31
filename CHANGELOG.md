@@ -2,6 +2,17 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.276
+
+**The Steward's log no longer reads as a failure where it only says an agent is tried again, no longer holds a kit back, or the PC woke. The Surveyor took each such line for one and raised a warning on Manor.**
+
+### What changed
+
+- **Main's kit trial** says "Assayer has changed since kit 2.146.6 didn't pass its checks there: trying it again", where it said "Assayer moved on since kit 2.146.6 failed their checks". The Surveyor reads "failed" anywhere in a line of the Steward's log as something going wrong, so Manor showed a warning for a retry that then passed. Three more of the trial's lines are worded the same way: a verdict another Steward kept ("didn't pass kit 2.146.6's checks as Steward 0.36.270 tried them: trying it again"), an agent Manor has retired since ("didn't pass kit 2.146.6's checks, and Manor has retired it since: no longer held against the kit"), and a failure that may be this PC's load ("it didn't pass, which may be this PC's load, not the kit's: tried once more, alone").
+- **The PC waking** is "the PC woke after 855 min: what didn't go through before is tried again" in serve.log, not "what failed before".
+- **A line that says something failed** is worded as it was, and is still a warning. So is a line that runs something again but quotes the failure's own words, such as an agent's checks run once more: those words match, so its wording was left as it was.
+- The tests read each line as the Surveyor does: `test/surveyor.ts` copies its test of a line (Surveyor `src/logs.ts`, ERROR_RE and NOT_AN_ERROR).
+
 ## 0.36.274
 
 **`claim-version` no longer hands out a version an open PR already sets: it reads the version a kit PR's title gives after the kit's, and the version each open PR's head sets in its version files.**
