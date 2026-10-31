@@ -137,7 +137,7 @@ import { slotNames } from './queue.js';
 /**
  * @typedef {object} Skipped
  * @property {Accelerator} acc
- * @property {'failed' | 'game' | 'call' | 'deferred'} why
+ * @property {'failed' | 'game' | 'call' | 'driver' | 'deferred'} why
  * @property {string} detail
  */
 
@@ -908,6 +908,78 @@ export function callNow(rules, call, nowMs) {
   return Number.isFinite(at) && nowMs - at <= fresh && at - nowMs <= fresh ? call : null;
 }
 
+// ---------------------------------------------------------------- driver work (kit 2.148.0)
+
+/**
+ * @typedef {object} DriverCard A graphics card the Watchman's driver guard names in driver-work.json: its driver is
+ * changing now, so no model work goes there until it's done (ACCELERATORS.md, "Driver work").
+ * @property {string} name The card as Windows names it ("NVIDIA GeForce RTX 4080 SUPER"): the name its id comes from.
+ * @property {string} [instanceId] Its device as Windows knows it.
+ * @property {'rollback' | 'install'} why A rollback of its driver, or a driver being installed on it.
+ * @property {'rolling' | 'restart' | 'finishing'} [stage] A rollback's: under way, waiting for Windows to restart, or
+ * being finished at a start-up after the PC went down in the middle of it.
+ * @property {string} [by] An install's: who installs it ("Windows Update", "NVIDIA's installer", "Windows").
+ * @property {string} since When the work began.
+ * @property {string} until It holds until then, unless the guard writes it again.
+ */
+
+/**
+ * @typedef {object} DriverWork driver-work.json: the guard's, in its own folder, which every user may read.
+ * @property {string} by
+ * @property {string} at When the guard last wrote it.
+ * @property {DriverCard[]} cards
+ */
+
+/**
+ * driver-work.json's contents, or null when it's absent or unreadable (which count the same: no driver changing).
+ * Only entries that name a card, why, and until when are kept. A single entry where a list belongs (as Windows
+ * PowerShell can write one) is read as a list of one.
+ * @param {string | null} text
+ * @returns {DriverWork | null}
+ */
+export function driverWorkOf(text) {
+  if (typeof text !== 'string') return null;
+  try {
+    const w = JSON.parse(text.replace(/^﻿/, ''));
+    if (!w || typeof w !== 'object' || !w.cards || typeof w.cards !== 'object') return null;
+    /** @type {any[]} */
+    const list = Array.isArray(w.cards) ? w.cards : [w.cards];
+    const cards = list.filter((c) => c && typeof c.name === 'string' && c.name && (c.why === 'rollback' || c.why === 'install') && typeof c.until === 'string');
+    return { by: typeof w.by === 'string' ? w.by : '', at: typeof w.at === 'string' ? w.at : '', cards };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The configured graphics cards whose driver is changing now, by id: each one a live entry names, by the id its name
+ * gives (acceleratorId), or a second card's of that name (`…-2`); "Graphics card" (several cards, which one not known)
+ * whenever any is named. An entry is live until its `until`, and not when that is more than driverWorkMaxMs ahead (a
+ * clock moved back): so one the guard no longer renews lets go by itself. The NPU and the processor are never held.
+ * @param {Rules} rules
+ * @param {DriverWork | null} work
+ * @param {Pick<Accelerator, 'id' | 'kind'>[]} accs
+ * @param {number} nowMs
+ * @returns {Record<string, DriverCard>}
+ */
+export function driverHolds(rules, work, accs, nowMs) {
+  /** @type {Record<string, DriverCard>} */
+  const out = {};
+  if (!work) return out;
+  const live = work.cards.filter((c) => {
+    const until = parseIsoMs(c.until);
+    return Number.isFinite(until) && until > nowMs && until - nowMs <= rules.accelerators.driverWorkMaxMs;
+  });
+  for (const c of live) {
+    const id = acceleratorId('gpu', c.name);
+    for (const a of accs) {
+      if (a.kind !== 'gpu' || out[a.id]) continue;
+      if (a.id === id || (a.id.startsWith(`${id}-`) && /^\d+$/.test(a.id.slice(id.length + 1))) || a.id === acceleratorId('gpu', LEGACY_NAMES.gpu)) out[a.id] = c;
+    }
+  }
+  return out;
+}
+
 /**
  * A program's name from a command's first word: its file name, without `.exe`, in lowercase.
  * @param {string} exe
@@ -990,7 +1062,8 @@ export function gameCards(rules, load, accs, opts) {
  * The candidates for a request, in order: they serve its kind, its size fits their cap, they haven't
  * failed in the last failedForMs (unless every one that would do has: then they all may, as a last
  * resort), a game isn't using them (background work only), the NPU isn't captioning a call (`call`, callNow's:
- * background work only, kit 2.143.1), and the agent isn't leaving them alone after a line that was too long
+ * background work only, kit 2.143.1), the Watchman isn't changing their driver (`driver`, driverHolds': every lane,
+ * a request someone waits on too, kit 2.148.0), and the agent isn't leaving them alone after a line that was too long
  * (`deferredMs`). Skipped for a call, the NPU first leaves background work no candidate: it waits for the call's end
  * (whyNone's busy), and goes to no graphics card or processor meanwhile (the owner's ruling, 2026-10-27).
  *
@@ -1013,7 +1086,7 @@ export function gameCards(rules, load, accs, opts) {
  * @param {Rules} rules
  * @param {Accelerator[]} accs
  * @param {Need} need
- * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, call?: NpuCall | null, deferredMs?: Record<string, number>, nowMs?: number, workOrder?: WorkOrder | null, running?: Record<string, boolean>, waiting?: number }} [state]
+ * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, call?: NpuCall | null, driver?: Record<string, DriverCard>, deferredMs?: Record<string, number>, nowMs?: number, workOrder?: WorkOrder | null, running?: Record<string, boolean>, waiting?: number }} [state]
  * @returns {{ list: Accelerator[], skipped: Skipped[], npuFirst: boolean }}
  */
 export function candidates(rules, accs, need, state = {}) {
@@ -1036,6 +1109,12 @@ export function candidates(rules, accs, need, state = {}) {
   const head = fitting[0];
   const npuFirst = !!head && head.kind === 'npu' && (lastResort || !failureOfAcc(head));
   for (const acc of npuFirst ? [head] : fitting) {
+    // Its driver changing (the Watchman's driver-work.json): no request of any lane, failed or not, until it's done.
+    const changing = acc.kind === 'gpu' ? state.driver?.[acc.id] : undefined;
+    if (changing) {
+      skipped.push({ acc, why: 'driver', detail: say.skippedDriver(acc, changing) });
+      continue;
+    }
     const failed = lastResort ? null : failureOfAcc(acc);
     if (failed) {
       const min = Math.max(1, Math.ceil((failureUntil(rules, failed) - (state.nowMs ?? 0)) / 60_000));

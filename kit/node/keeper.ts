@@ -1,8 +1,8 @@
-import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, type FSWatcher, mkdirSync, readFileSync, statSync, watch } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, kindOfId, readableConfigFile, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverLogsDir, serves, toolsHome } from './accelerator-config.ts';
-import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, npuCallNow, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
+import { currentGames, type DriverCard, driverHoldsNow, driverWorkFile, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, npuCallNow, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
 import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
 import { withLock } from './lock.ts';
@@ -50,6 +50,12 @@ import { kitVersion, refreshCardVision, refreshSmallModel, setupCommand, testNpu
  *   gives way when the keeper's turn wasn't had at once (TURN_AT_ONCE_MS): someone took the accelerator after the look.
  * - **A game**: when a game is using its graphics card (games.json) and nobody has used the card for 2 minutes, it
  *   is stopped, so the game gets the card's memory.
+ * - **Its card's driver changing** (kit 2.148.0): when the Watchman's driver-work.json names its graphics card (a
+ *   rollback, from before it changes anything until it's done; or a driver being installed), it is stopped at once:
+ *   in its turn when that is had, else once the requests under way there end, within `driverGraceMs` (10 s), and then
+ *   whatever holds it, as the guard waits only 20 s before pnputil changes the driver. It isn't started again here; no
+ *   request goes there meanwhile, nor does any server start there (accelerators.ts' ensureServer). The file is watched
+ *   (watchDriverWork), so this comes within seconds of the guard writing it, not at the next look.
  * - **A call** (kit 2.143.1): when a call is being captioned on the NPU without translating (npu-call.json's
  *   `translating` false: Envoy then asks the NPU's chat model nothing) and nobody has used the NPU for 2 minutes, the
  *   NPU's servers are stopped, so the call's speech models have the NPU and its memory to themselves. A call that
@@ -142,6 +148,10 @@ export const RECYCLE_BYTES = RULES.keeper.recycleBytes;
 export const GAME_GRACE_MS = RULES.keeper.gameGraceMs;
 /** How long nobody must have used the NPU before its servers are stopped for a call that doesn't translate. */
 export const CALL_GRACE_MS = RULES.keeper.callGraceMs;
+/** How long the requests under way on a card whose driver is changing may go on before its servers are stopped anyway. */
+export const DRIVER_GRACE_MS = RULES.keeper.driverGraceMs;
+/** How often the keeper reads driver-work.json beside watching its folder (watchDriverWork). */
+export const DRIVER_LOOK_MS = 2_000;
 /** How often the keeper looks. */
 export const REAP_EVERY_MS = RULES.keeper.lookEveryMs;
 /** How long an orphan is seen before it is stopped; 0 never stops one. */
@@ -189,6 +199,7 @@ export type ReapOutcome =
   | { base: string; did: 'stopped'; pids: number[]; idleMs: number }
   | { base: string; did: 'stopped-for-game'; pids: number[]; by: string[] }
   | { base: string; did: 'stopped-for-call'; pids: number[]; by: string }
+  | { base: string; did: 'stopped-for-driver'; pids: number[]; why: string }
   | { base: string; did: 'stopped-kept-out'; pids: number[] }
   | { base: string; did: 'restarted'; pids: number[]; silentMs: number }
   | { base: string; did: 'recycled'; pids: number[]; workingSetBytes: number }
@@ -220,6 +231,8 @@ export interface ReaperDeps {
   gameOn?: (s: ReapedServer) => Promise<string[] | null>;
   /** The call being captioned on the NPU now (npu-call.json, npuCallNow's), or null. */
   callOn?: () => core.NpuCall | null;
+  /** What the Watchman is doing to its graphics card's driver now (driver-work.json, driverHoldsNow's), or null. */
+  driverOn?: (s: ReapedServer) => DriverCard | null;
   start: (spec: ServerSpec) => Promise<unknown>;
   log: (line: string) => void;
   /** Every model server's process on this PC (llama-server, GenieX, and the configured programs), for the orphan check. */
@@ -240,6 +253,7 @@ export interface ReaperOptions {
   recycleBytes?: number;
   gameGraceMs?: number;
   callGraceMs?: number;
+  driverGraceMs?: number;
   orphanGraceMs?: number;
   turnAtOnceMs?: number;
 }
@@ -285,6 +299,20 @@ export class Reaper {
     if (!procs.length) {
       this.silentSince.delete(s.base);
       return { base: s.base, did: 'not-running' };
+    }
+    // Its card's driver changing: stopped now, in use or not (kit 2.148.0, above).
+    const changing = s.acc.kind === 'gpu' && d.driverOn ? d.driverOn(s) : null;
+    if (changing) {
+      const why = core.say.skippedDriver(s.acc, changing);
+      let pids = await this.inTurn(s, false);
+      if (!pids) {
+        const grace = this.o.driverGraceMs ?? DRIVER_GRACE_MS;
+        for (const t0 = Date.now(); d.inUse(s) && Date.now() - t0 < grace; ) await sleep(250);
+        pids = (await this.inTurn(s, false)) ?? (await this.stopNow(s));
+      }
+      this.silentSince.delete(s.base);
+      d.log(`stopped ${path.win32.basename(s.program)} (${pids.join(', ')}) at ${s.base}: ${why}`);
+      return { base: s.base, did: 'stopped-for-driver', pids, why };
     }
     if (d.inUse(s)) {
       this.lastInUse.set(s.acc.id, d.now());
@@ -402,6 +430,18 @@ export class Reaper {
         if (e instanceof QueueFull || e instanceof LockTimeout) return null;
         throw e;
       });
+  }
+
+  /**
+   * Stops the server's processes outside its turn, which someone holds: only for a card whose driver is changing, once
+   * the requests under way there had their grace. The pids it stopped.
+   */
+  private async stopNow(s: ReapedServer): Promise<number[]> {
+    const d = this.deps;
+    const procs = await d.processes(s.program, s.base);
+    for (const p of procs) d.stop(p.pid);
+    for (let i = 0; i < 40 && (await d.processes(s.program, s.base)).length; i++) await sleep(250);
+    return procs.map((p) => p.pid);
   }
 
   /**
@@ -799,6 +839,7 @@ export function pcReaper(o: { who?: string; logFile?: string; log?: (line: strin
         return card?.busy ? card.by : null;
       },
       callOn: () => npuCallNow(),
+      driverOn: (s) => driverHoldsNow([s.acc])[s.acc.id] ?? null,
       start: (spec) => ensureServer({ baseUrl: spec.base, model: '', startCommand: spec.startCommand, ...(spec.serverEnv ? { env: spec.serverEnv } : {}) }, { logFile: spec.logFile, env: spec.env }),
       log: o.log ?? ((line) => logLine(logFile, line)),
       allProcesses: () => modelServerProcesses(configuredAccelerators(config()).flatMap((a) => ENDPOINT_KINDS.map((k) => a[k]?.startCommand?.[0] ?? '')).filter(Boolean).map((p) => expandEnv(p))),
@@ -1113,7 +1154,8 @@ export function startRepairs(o: { logFile?: string; config?: () => Record<string
       return setUpAgain({
         kit: kitVersion(),
         detect: detectOnce,
-        idle: (a) => Date.now() - lastUseMs(lockDirsOf(a)) >= AGAIN_QUIET_MS,
+        // A card whose driver the Watchman is changing isn't set up again meanwhile: its test servers would start there.
+        idle: (a) => Date.now() - lastUseMs(lockDirsOf(a)) >= AGAIN_QUIET_MS && !driverHoldsNow([a])[a.id],
         setup: async (x) => {
           againOn = x.ids[0] ?? null;
           try {
@@ -1141,6 +1183,7 @@ export function startRepairs(o: { logFile?: string; config?: () => Record<string
  */
 export async function keeperLook(reaper: Reaper, o: { config?: () => Record<string, any>; withNpu?: () => boolean } = {}): Promise<{ servers: ReapOutcome[]; orphans: OrphanOutcome[] }> {
   if (asksPc(reaper)) {
+    driverWatch ??= watchDriverWork(reaper);
     await refreshHardware().catch(() => false);
     refreshCards();
     startRepairs({ config: o.config });
@@ -1151,6 +1194,58 @@ export async function keeperLook(reaper: Reaper, o: { config?: () => Record<stri
   const looked = await reaper.look(servers);
   const orphans = await reaper.orphans(servers);
   return { servers: looked, orphans };
+}
+
+/** The watch the PC's keeper keeps on driver-work.json (watchDriverWork), once a process: its stop. */
+let driverWatch: (() => void) | null = null;
+
+/**
+ * The keeper's watch on the Watchman's driver-work.json (kit 2.148.0): its folder watched, and the file read every
+ * DRIVER_LOOK_MS besides (a watch can miss a change). Each time it changes, the servers this keeper keeps on the cards
+ * it names are looked at then (the reaper's look: stopped, as driverOn says), so they stop within seconds of the guard
+ * naming their card rather than at the next minute's look. The servers are config.json's as it is then. `file`,
+ * `servers` and `everyMs` are for tests. Returns its stop.
+ */
+export function watchDriverWork(reaper: Reaper, o: { file?: string | null; servers?: () => ReapedServer[]; everyMs?: number } = {}): () => void {
+  const file = o.file === undefined ? driverWorkFile() : o.file;
+  if (!file) return () => {};
+  let last: string | null = null;
+  let running = false;
+  const check = async () => {
+    if (running) return;
+    let text = '';
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {}
+    if (text === last) return;
+    last = text;
+    if (!text) return;
+    running = true;
+    try {
+      const servers = (o.servers ?? (() => serversToReap(readConfigFile().raw, { withNpu: gpuWithNpu().on })))();
+      const held = driverHoldsNow(servers.map((s) => s.acc));
+      const mine = servers.filter((s) => held[s.acc.id]);
+      if (mine.length) await reaper.look(mine);
+    } catch {
+      // The next change, or the next minute's look, tries again.
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => void check(), o.everyMs ?? DRIVER_LOOK_MS);
+  timer.unref();
+  let w: FSWatcher | null = null;
+  try {
+    w = watch(path.dirname(file), { persistent: false }, (_e, name) => {
+      if (!name || String(name).toLowerCase() === path.basename(file).toLowerCase()) void check();
+    });
+    w.on('error', () => {});
+  } catch {}
+  void check();
+  return () => {
+    clearInterval(timer);
+    w?.close();
+  };
 }
 
 /**
@@ -1195,6 +1290,8 @@ export interface AcceleratorStatus {
   servers: { kind: EndpointKind; baseUrl: string; model: string; state: ServerState }[];
   failed: { since: string; reason: string; by: string } | null;
   game: { busy: boolean; percent: number; by: string[] } | null;
+  /** What the Watchman is doing to its driver now (driver-work.json, kit 2.148.0): no model work goes there meanwhile. */
+  driver: DriverCard | null;
   holders: ({ pid: number; since: number } | null)[];
   waiting: { pid: number; lane: string; since: number; who?: string }[];
 }
@@ -1202,6 +1299,7 @@ export interface AcceleratorStatus {
 /** Every configured accelerator, as its servers, failure marker, game and line say now. */
 export async function acceleratorStatus(accs: Accelerator[], o: { probe?: (base: string) => Promise<ServerState> } = {}): Promise<AcceleratorStatus[]> {
   const games = readGames();
+  const driver = driverHoldsNow(accs);
   const ask = o.probe ?? (async (base: string) => {
     const s = await kitProbe(base, 1500);
     return s === 'busy' ? 'loading' : s;
@@ -1235,6 +1333,7 @@ export async function acceleratorStatus(accs: Accelerator[], o: { probe?: (base:
         servers: servers.filter((s): s is NonNullable<typeof s> => !!s),
         failed: readFailure(a.id),
         game: g ? { busy: !!g.busy, percent: g.percent ?? 0, by: g.by ?? [] } : null,
+        driver: driver[a.id] ?? null,
         holders: line.holders,
         waiting: line.waiting,
       };
@@ -1252,6 +1351,7 @@ export function describeStatus(list: AcceleratorStatus[], setupHint = 'Settings 
       s.enabled ? up : 'disabled',
       s.failed ? `FAILED ${ago(s.failed.since)}: ${s.failed.reason}` : '',
       s.game?.busy ? `held back for ${s.game.by.join(', ') || 'a game'} (${s.game.percent}%)` : '',
+      s.driver ? core.say.driverWaiting(s.driver) : '',
       `${held}/${s.slots} slot${s.slots === 1 ? '' : 's'} held, ${s.waiting.length} waiting${s.waiting.length ? `: ${s.waiting.map((w) => `${w.who ?? w.pid} (${w.lane})`).join(', ')}` : ''}`,
       `cap ${s.maxContextTokens} tokens a request`,
     ].filter(Boolean);

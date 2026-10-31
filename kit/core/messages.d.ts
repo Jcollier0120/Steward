@@ -80,6 +80,25 @@ export declare const say: Readonly<{
     skippedGame: (acc: AcceleratorRef, by: string[]) => string;
     /** @param {AcceleratorRef} acc @param {string} by The agent captioning the call ("envoy"). */
     skippedCall: (acc: AcceleratorRef, by: string) => string;
+    /**
+     * A card whose driver the Watchman is changing (driver-work.json, kit 2.148.0): what it's doing there.
+     * @param {AcceleratorRef} acc
+     * @param {{ why: string, stage?: string, by?: string }} work
+     */
+    skippedDriver: (acc: AcceleratorRef, work: {
+        why: string;
+        stage?: string;
+        by?: string;
+    }) => string;
+    /**
+     * The same on the card itself, its status (Manor's accelerator card): "Waiting: the Watchman is rolling back its driver".
+     * @param {{ why: string, stage?: string, by?: string }} work
+     */
+    driverWaiting: (work: {
+        why: string;
+        stage?: string;
+        by?: string;
+    }) => string;
     /** @param {AcceleratorRef} acc @param {number} min */
     skippedDeferred: (acc: AcceleratorRef, min: number) => string;
     /** @param {AcceleratorRef} acc @param {number} waiting */
