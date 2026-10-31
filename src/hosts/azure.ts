@@ -16,7 +16,7 @@ const NO_COMMIT = '0000000000000000000000000000000000000000';
  * ssh.dev.azure.com/v3/<org>/<project>/<repo>, or the older <org>.visualstudio.com/<project>/_git/<repo>.
  *
  * Pull requests go through `az repos pr` (list, show, create, update); everything else a repository has (a pull
- * request's iterations, statuses and comments, a commit's statuses, refs, annotated tags) through `az devops invoke`,
+ * request's iterations, statuses, comments and labels, a commit's statuses, refs, annotated tags) through `az devops invoke`,
  * the REST API (7.1) by area and resource. invoke takes a resource's first route, which for a pull request is the
  * organization's, read-only: so pull requests are az repos pr's. `az rest` isn't used: an organization of Microsoft
  * accounts answers it with its sign-in page, never its API (found live, 2026-10-31). A text (a title, a description, a
@@ -116,16 +116,25 @@ export class AzureDevOps implements SourceHost {
     }
     const a = await this.shown(repo, Number(which));
     if (a.code !== 0) return a;
-    const more = await this.details(repo, a.pr, fields);
+    const more = await this.details(repo, a.pr, fields, true);
     if ('code' in more) return more;
     return { ...a, out: JSON.stringify(prOf(repo, a.pr, more)) };
   }
 
-  /** What a pull request's list entry hasn't, asked only when `fields` wants it: its files, its checks. */
-  private async details(repo: string, pr: any, fields: string): Promise<Answer | { files?: string[]; statuses?: any[] }> {
+  /**
+   * What a pull request's list entry hasn't, asked only when `fields` wants it: its files, its checks. For one az repos
+   * pr show gave (`shown`), its labels too: show leaves them out, null even on a labelled one, where list gives them
+   * (found live, 2026-10-31).
+   */
+  private async details(repo: string, pr: any, fields: string, shown = false): Promise<Answer | { files?: string[]; statuses?: any[]; labels?: any[] }> {
     const want = new Set(fields.split(','));
-    const out: { files?: string[]; statuses?: any[] } = {};
+    const out: { files?: string[]; statuses?: any[]; labels?: any[] } = {};
     const pullRequestId = Number(pr?.pullRequestId);
+    if (shown && want.has('labels')) {
+      const l = await this.invoke(repo, 'GET', 'pullRequestLabels', { pullRequestId });
+      if (l.code !== 0) return l;
+      out.labels = valueOf(l.out);
+    }
     if (want.has('files')) {
       const its = await this.invoke(repo, 'GET', 'pullRequestIterations', { pullRequestId });
       if (its.code !== 0) return its;
@@ -370,7 +379,7 @@ export function mergeStatesOf(pr: any): { mergeable: string; mergeStateStatus: s
 }
 
 /** A pull request in `gh pr list --json`'s words, with what details() found. Pure. */
-export function prOf(repo: string, pr: any, more: { files?: string[]; statuses?: any[] } = {}): Record<string, unknown> {
+export function prOf(repo: string, pr: any, more: { files?: string[]; statuses?: any[]; labels?: any[] } = {}): Record<string, unknown> {
   const id = Number(pr?.pullRequestId);
   return {
     number: id,
@@ -387,7 +396,7 @@ export function prOf(repo: string, pr: any, more: { files?: string[]; statuses?:
     ...mergeStatesOf(pr),
     isDraft: pr?.isDraft === true,
     statusCheckRollup: (more.statuses ?? []).map((s) => ({ __typename: 'StatusContext', context: contextOf(s), state: checkState(String(s?.state ?? '')) })),
-    labels: (Array.isArray(pr?.labels) ? pr.labels : []).map((l: any) => ({ name: String(l?.name ?? '') })),
+    labels: (more.labels ?? (Array.isArray(pr?.labels) ? pr.labels : [])).filter((l: any) => l?.active !== false).map((l: any) => ({ name: String(l?.name ?? '') })),
     additions: 0,
     deletions: 0,
     files: (more.files ?? []).map((p) => ({ path: p })),
