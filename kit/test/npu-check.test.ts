@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import net, { type AddressInfo } from 'node:net';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { freePort as anyFreePort } from './free-port.ts';
 import { paced, until } from './until.ts';
 
 // The NPU check (npu-check.ts): setup's steps timed, then the server measured, against a fake OpenVINO Model Server in
@@ -26,13 +27,17 @@ const { checkNpuReport } = await import('./fixture/src/kit/npu-report.ts');
 const LUNAR = 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
 const X64 = 'cpu|9|8|Intel(R) Core(TM) Ultra 7 258V\nram|34359738368\n';
 
-/** A port nobody listens on. */
+/**
+ * A port nobody listens on, and none this file had before: free-port.ts', below Windows' dynamic ports. One listen(0)
+ * gave (64331) was answered by the time the check asked, so the check refused it as the manor's local AI: listen(0)
+ * hands out the ports every outgoing connection on the PC takes too.
+ */
+const given = new Set<number>();
 async function freePort(): Promise<number> {
-  const s = createServer();
-  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
-  const port = (s.address() as AddressInfo).port;
-  await new Promise((r) => s.close(r));
-  return port;
+  for (;;) {
+    const port = await anyFreePort();
+    if (!given.has(port)) return (given.add(port), port);
+  }
 }
 
 /** A fake OpenVINO Model Server: /v1/models, and chat that refuses a prompt past `cap` tokens (about 4 characters each). */

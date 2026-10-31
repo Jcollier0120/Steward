@@ -207,7 +207,8 @@ async function bundled(entry: string, esbuild: Esbuild, o: { minify?: boolean; n
 /**
  * A release's page (release.ts): src/web/main.tsx bundled, minified unless `readable`, into src/web/page.js in the
  * stage; and the page's sources left out (src/web's other files and the kit's react part), since the bundle carries
- * them all and the server imports none of them (src/web/types.ts's types only). React comes from the agent's own
+ * them all and the server imports none of them (src/web/types.ts's types only, with `import type`; a release whose
+ * code imports one is refused when it's built: minify.ts' importsLeftOut, kit 2.146.5). React comes from the agent's own
  * node_modules, a devDependency. Null for an agent with no React page. `packages`: the npm packages the bundle
  * carries, whose notices the release keeps (notices.ts).
  */

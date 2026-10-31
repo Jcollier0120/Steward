@@ -2,6 +2,17 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.270
+
+**Kit 2.146.5 won't build a release whose code imports a file the release leaves out, as Reeve 0.19.10 and 0.19.11 did. A kit PR's vouch on a PC with no agents to try it on now says it wasn't tried, not "passed 0 of 0".**
+
+### What changed
+
+- **Kit 2.146.5** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a release whose code imports a file the release doesn't carry isn't built, and the error names each file and what it imports. This covers the Steward's own release, every agent's, and Manor's and Reeve's own release scripts. Reeve 0.19.10 and 0.19.11 failed to start on every PC ("reeve (CONNECTION_CLOSED)"): its server imported `src/web/ps-arg.ts`, which a release leaves out, so the installed server stopped at `ERR_MODULE_NOT_FOUND`. Static imports, `export ... from` and an `import()` of a literal count. `import type` doesn't.
+- **A kit PR's vouch on a PC whose Steward looks after none of the agents** said "kit 2.146.4 passed 0 of 0 agents' checks", which read like a result. Now it says the kit isn't tried here, as this PC has no agents to try it on, and that main's trial on the PC that releases Castellan tries them once it's merged. The vouch's description on GitHub says "kit … not tried: no agents on this PC; main's trial tries them". It isn't counted as passed, and the vouch still passes on its own checks.
+- **set-up-again.json's rename is tried again** for up to half a second while Windows refuses it for a moment (kit 2.146.5). The product's write never retried, so this wasn't only the test: an antivirus or the indexer holding the file open on a customer's PC could fail a look the same way.
+- **The kit's NPU check test takes its ports from free-port.ts**, below Windows' dynamic ports. A port `listen(0)` gave (64331) was taken by another connection before the check asked, and the check refused it as the manor's local AI. Only the test changed here.
+
 ## 0.36.269
 
 **A GitLab or Gitea of your own on another port now works when its name comes from the clone: kit 2.146.4 keeps the port in a repository's name.**

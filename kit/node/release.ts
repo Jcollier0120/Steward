@@ -18,7 +18,9 @@
  *                                    (spec/RELEASE-NOTES.md, exchequer.ts isUrgent)
  *
  * What a release carries is built, never the readable source (minify.ts, spec/RELEASES.md): each .ts file under
- * src\ minified to a .js beside it, src\cli.ts a stub that runs its .js, and the .js and .css minified. The
+ * src\ minified to a .js beside it, src\cli.ts a stub that runs its .js, and the .js and .css minified. One whose code
+ * imports a file the release doesn't carry (src\web's sources but the page's bundle, a test) isn't built (kit 2.146.5,
+ * minify.ts' importsLeftOut), readable or not: the installed agent would stop there. The
  * README stays out: it's for the repository. The public repository holds the releases alone, so any PC downloads
  * them with no sign-in; the agent's own repository keeps them too, while Manors that look there are about.
  *
@@ -70,7 +72,7 @@ import { fileURLToPath } from 'node:url';
 import { APP } from '../app.ts';
 import type { Release } from './install.ts';
 import { isUrgent, letOut, NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, saleOf, type ExchequerOutcome } from './exchequer.ts';
-import { loadEsbuild, minifyRelease } from './minify.ts';
+import { importsLeftOut, leftOutText, loadEsbuild, minifyRelease } from './minify.ts';
 import { buildNative, CERTUM_TIMESTAMP, nativeOf, nativeSources, runBuild, stageNative, type Arch, type Native, type NativeBuilt } from './native.ts';
 import { CHANGELOG, readChangelog, releaseChangelog, releaseNotes, type Notes } from './notes.ts';
 import { SIGNED_BY } from './prebuilt.ts';
@@ -420,7 +422,15 @@ async function build(readable = false, publishing = false): Promise<Built> {
     const pageEsbuild = existsSync(path.join(stage, PAGE_ENTRY)) ? (esbuild ?? (await loadEsbuild(root))) : null;
     if (pageEsbuild && 'error' in pageEsbuild) throw new Error(pageEsbuild.error);
     const page = pageEsbuild ? await releasePage(stage, root, pageEsbuild, readable) : null;
+    // minifyRelease refuses a release whose code imports a file it doesn't carry (importsLeftOut, kit 2.146.5); a
+    // readable one, which it doesn't build, is refused the same way.
     const minified = esbuild ? await minifyRelease(stage, esbuild) : null;
+    if (!esbuild) {
+      const reader = pageEsbuild ?? (await loadEsbuild(root));
+      if ('error' in reader) throw new Error(reader.error);
+      const left = await importsLeftOut(stage, reader);
+      if (left.length) throw new Error(leftOutText(left));
+    }
     const nativeCount = native && nativeBuilt ? stageNative(root, stage, native, nativeBuilt) : 0;
     // The notices of what it carries of others' (notices.ts): it isn't built while something has none.
     const noticed = writeNotices(stage, {

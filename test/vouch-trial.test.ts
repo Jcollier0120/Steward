@@ -106,3 +106,25 @@ test("a kit PR's vouch tries its kit on each agent, one at a time, and fails nam
   assert.deepEqual(status?.slice(0, 8), ['api', '-X', 'POST', `repos/Jcollier0120/Steward/statuses/${head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`]);
   assert.equal(status?.[9], `description=node -e process.exit(0) passed at ${head.slice(0, 7)}; kit 1.0.1 passed 2 of 2 agents' checks`);
 });
+
+test("on a PC with no agents to try a kit on, its vouch says it wasn't tried, and that main's trial tries it: never that it passed", async () => {
+  const head = branch('claude/kit-change-here', { 'kit/VERSION': '1.0.2\n', 'kit/CHANGELOG.md': '## 1.0.2\n\n## 1.0.0\n', 'kit/node/npu.ts': 'export const npu = 3;\n' });
+  // This PC's Steward looks after none of the agents on the kit: itself alone, as on a PC that doesn't release Castellan.
+  const alone = () => {
+    const { c, r } = ctx(head);
+    c.settings.employees = [me];
+    return { c, r };
+  };
+  const said: string[] = [];
+  const { c } = alone();
+  assert.deepEqual(await vouchTrial(c, me, { dir: steward.checkout, head, say: (l) => said.push(l) }), { untried: "kit 1.0.2 not tried: no agents on this PC; main's trial tries them" });
+  assert.ok(said.includes("kit 1.0.2 isn't tried here: this PC has no agents to try it on (none main's trial tries has a clone here). Main's trial on the PC that releases Castellan tries them once it's merged"), said.join('\n'));
+  assert.ok(!said.some((l) => /passed \d+ of \d+/.test(l)), said.join('\n'));
+
+  // The vouch passes on its own checks, and its description on GitHub says the kit wasn't tried.
+  const v = alone();
+  const vouched = await vouch(v.c, { dir: steward.checkout, say: () => {} });
+  assert.equal(vouched.ok, true, vouched.message);
+  const status = v.r.gh.find((a) => a[0] === 'api');
+  assert.equal(status?.[9], `description=node -e process.exit(0) passed at ${head.slice(0, 7)}; kit 1.0.2 not tried: no agents on this PC; main's trial tries them`);
+});
