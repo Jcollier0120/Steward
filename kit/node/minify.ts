@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -146,7 +146,9 @@ export async function importsLeftOut(stage: string, esbuild: Esbuild, folders = 
   const carried = new Set(all.filter((f) => !f.endsWith('.d.ts')));
   const code = all.filter((f) => folders.some((d) => f.startsWith(`${d}/`)) && isCode(f));
   if (!code.length) return [];
-  const rel = (p: string) => path.relative(stage, p).replace(/\\/g, '/');
+  // esbuild names an importer by its real path: a stage reached through a link (a temp folder on a Dev Drive) is measured from there.
+  const real = realpathSync.native(stage);
+  const rel = (p: string) => path.relative(real, p).replace(/\\/g, '/');
   const found = new Map<string, LeftOut>();
   await esbuild
     .build({

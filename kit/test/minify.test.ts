@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -193,4 +193,18 @@ test('a release whose code imports only what it carries, types alone of what it 
   assert.deepEqual(await importsLeftOut(stage, esbuild as never), []);
   const m = await minifyRelease(stage, esbuild as never);
   assert.deepEqual({ ts: m.ts, js: m.js }, { ts: 2, js: 2 });
+});
+
+test('a stage reached through a link (a temp folder on a Dev Drive) names what it leaves out as from its root, and builds what it carries', async () => {
+  const esbuild = await loadEsbuild(steward);
+  assert.ok(!('error' in esbuild));
+  const linked = (name: string, files: Record<string, string>) => {
+    const link = path.join(tmp, `${name}-link`);
+    symlinkSync(stageOf(name, files), link, 'junction');
+    return link;
+  };
+  const leftOut = linked('linked-left-out', { 'package.json': '{ "type": "module" }', 'src/cli.ts': "import './assistants.ts';\n", 'src/assistants.ts': "import { quote } from './web/ps-arg.ts';\nexport const q = quote;\n" });
+  assert.deepEqual(await importsLeftOut(leftOut, esbuild as never), [{ file: 'src/assistants.ts', imports: 'src/web/ps-arg.ts', dynamic: false }]);
+  const carried = linked('linked-carried', { 'package.json': '{ "type": "module" }', 'src/cli.ts': "import { greet } from './greet.ts';\nexport const hi = greet;\n", 'src/greet.ts': 'export const greet = (who: string): string => `hello, ${who}`;\n' });
+  assert.deepEqual(await importsLeftOut(carried, esbuild as never), []);
 });
