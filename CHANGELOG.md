@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.272
+## 0.36.273
 
 **What the Steward and every agent on kit 2.146.8 say of Manor's Developer options matches Manor: they can be on with no developer staff, when you turn them on.**
 
