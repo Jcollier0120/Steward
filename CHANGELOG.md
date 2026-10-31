@@ -2,6 +2,15 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.271
+
+**A background fetch of a repository that isn't there, or isn't shared with you, no longer signs you out of Bitbucket or Azure DevOps (kit 2.146.6).**
+
+### What changed
+
+- **Kit 2.146.6** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): when a host refused the sign-in the Steward handed git, the command ran once more git's own way, and git had Git Credential Manager erase the sign-in. Bitbucket and Azure DevOps refuse a missing or unshared repository as if the sign-in were wrong, so one such fetch signed you out of the whole host until you signed in again in a window. Now a refused command runs once more only with a sign-in the helper renewed, and the helper is told to forget its sign-in only when the host is shown to refuse it elsewhere too. Only the hosts a command is handed a sign-in for have their helpers switched off.
+- **Azure DevOps (`dev.azure.com`)**, where Git Credential Manager keeps a sign-in per repository, is signed in per repository too. A URL with its own user is signed in as that user, and a clone's push URLs are signed in as well.
+
 ## 0.36.270
 
 **Kit 2.146.5 won't build a release whose code imports a file the release leaves out, as Reeve 0.19.10 and 0.19.11 did. A kit PR's vouch on a PC with no agents to try it on now says it wasn't tried, not "passed 0 of 0".**
