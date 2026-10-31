@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, type renameSync } from 'node:fs';
 import path from 'node:path';
 import { acceleratorConfigFile, type AcceleratorKind, configuredAccelerators, ENDPOINT_KINDS, type EndpointKind, readConfigFile, serves, toolsHome } from './accelerator-config.ts';
 import { expandEnv } from './accelerators.ts';
 import { manorStopped } from './manor.ts';
 import { NPU_CATALOG, serverExe } from './npu-vendors.ts';
+import { writeJson } from './store.ts';
 
 /**
  * A model server whose program is gone from where config.json starts it, set up again by the keeper (kit 2.113.5).
@@ -93,10 +94,12 @@ function readRecords(file: string): Record<string, RepairRecord> {
   }
 }
 
-function writeRecords(file: string, records: Record<string, RepairRecord>): void {
-  mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(`${file}.tmp`, JSON.stringify(records, null, 2) + '\n');
-  renameSync(`${file}.tmp`, file);
+/**
+ * Through store.ts' writeJson (kit 2.146.5): a rename Windows refuses for a moment (an antivirus, the indexer holding
+ * the file) is tried again for up to half a second, where a bare rename failed the look with EPERM.
+ */
+function writeRecords(file: string, records: Record<string, RepairRecord>, d: Pick<RepairDeps, 'rename' | 'sleep'>): void {
+  writeJson(file, records, { rename: d.rename, sleep: d.sleep });
 }
 
 /** The PC, as a repair sees it: swapped in tests. */
@@ -115,6 +118,9 @@ export interface RepairDeps {
   /** setup.ts' setupCommand, as local-ai runs it. */
   setup: (o: { ids: string[]; kinds?: EndpointKind[]; yes: true; configFile?: string }) => Promise<{ code: number }>;
   log: (line: string) => void;
+  /** server-repair.json's rename, and the wait between its tries (writeJson's): for tests. */
+  rename?: typeof renameSync;
+  sleep?: (ms: number) => void;
 }
 
 /** What one look did: set a server up again (its setup's code), or why it didn't. */
@@ -138,7 +144,7 @@ export async function repairMissing(d: RepairDeps): Promise<RepairOutcome> {
   }
   for (const id of Object.keys(before)) if (!records[id]) d.log(`${id}'s server program is back (${before[id].program})`);
   const changed = JSON.stringify(records) !== JSON.stringify(before);
-  if (changed) writeRecords(file, records);
+  if (changed) writeRecords(file, records, d);
   if (!missing.length) return { did: 'none' };
   const due = missing.find((m) => {
     const r = records[m.id];
@@ -148,7 +154,7 @@ export async function repairMissing(d: RepairDeps): Promise<RepairOutcome> {
   if ((d.stopped ?? manorStopped)()) return { did: 'stopped' };
   // Remembered before it starts: another keeper's look meanwhile (the Smith's, Reeve's) leaves it to this one.
   records[due.id] = { ...records[due.id], triedAt: new Date(now).toISOString() };
-  writeRecords(file, records);
+  writeRecords(file, records, d);
   d.log(`setting up ${due.id} again: its server program isn't installed where the staff look for it (${due.program})`);
   let code = 1;
   try {
@@ -157,7 +163,7 @@ export async function repairMissing(d: RepairDeps): Promise<RepairOutcome> {
     d.log(`setting up ${due.id} again stopped: ${String(e?.message ?? e).split(/\r?\n/)[0]}`);
   }
   const after = readRecords(file);
-  if (after[due.id]) writeRecords(file, { ...after, [due.id]: { ...after[due.id], code } });
+  if (after[due.id]) writeRecords(file, { ...after, [due.id]: { ...after[due.id], code } }, d);
   d.log(code === 0 ? `${due.id} is set up again` : `${due.id} couldn't be set up again (setup's code ${code}): tried again in ${Math.round(REPAIR_AGAIN_MS / 3600_000)} hours`);
   return { did: 'set-up', id: due.id, code };
 }

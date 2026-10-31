@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -132,4 +132,19 @@ test("nothing set up while the manor is stopped, nor a program setup doesn't put
   moved.later(MIN);
   assert.equal((await S.repairMissing(moved.deps)).did, 'set-up');
   assert.deepEqual(S.setupFolders(tools, ENV).map((f) => f.toLowerCase()), [tools.toLowerCase(), `${ENV.LOCALAPPDATA}\\GenieX CLI`.toLowerCase()], "the tools home, and GenieX's own folder");
+});
+
+test("server-repair.json's rename is tried again while Windows refuses it for a moment (an antivirus, the indexer), where it failed the look with EPERM", async () => {
+  const pc = fakePc([npu(exe('intel'))]);
+  const waits: number[] = [];
+  let refused = 0;
+  const rename: typeof renameSync = (from, to) => {
+    if (refused++ < 2) throw Object.assign(new Error(`EPERM: operation not permitted, rename '${from}'`), { code: 'EPERM' });
+    renameSync(from, to);
+  };
+  const deps = { ...pc.deps, rename, sleep: (ms: number) => void waits.push(ms) };
+  assert.deepEqual(await S.repairMissing(deps), { did: 'waiting', ids: ['npu'] });
+  assert.deepEqual(waits, [25, 25]);
+  assert.equal(pc.record().npu.program, exe('intel'));
+  assert.deepEqual(readdirSync(home).filter((f) => f.startsWith(path.basename(pc.file)) && f.endsWith('.tmp')), [], 'no temporary file left');
 });

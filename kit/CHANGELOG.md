@@ -2,6 +2,36 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.146.5
+
+**A release whose code imports a file the release leaves out isn't built. Reeve 0.19.10 and 0.19.11 started on no PC: their server imported a file in `src/web`, which a release doesn't carry.**
+
+### What changed
+
+- **`minifyRelease` (minify.ts) refuses a release whose code imports a file the release doesn't carry**, before it builds anything: `Not built: its code imports what the release doesn't carry, so the installed agent would stop there (ERR_MODULE_NOT_FOUND): src/assistants.ts imports src/web/ps-arg.ts. ...`, naming each file and the one it imports. The kit's release calls it, and so do Manor's and Reeve's own, so every agent's release is refused alike. The kit's readable release (`--readable`), which isn't minified, is refused the same way. Reeve's `src/assistants.ts` imported `src/web/ps-arg.ts`. `releasePage` leaves `src/web` out but its bundle, `page.js`, so the installed server stopped at `ERR_MODULE_NOT_FOUND` while the checkout's tests passed.
+- **What counts:** a static `import` (one kept only for what loading it does too), an `export ... from`, and an `import()` of a literal. esbuild's own parser reads them, as the release builds the code (`verbatimModuleSyntax`). `import type` and `export type` don't count, and neither does an `import()` of anything but a literal, or a package's import. **`import { type A } from` does:** Node and the built release both keep it, as `import './a.js'`.
+- **What a release doesn't carry:** tests, documents and `.d.ts` files; anything outside `src` and `art` but `package.json`, `LICENSE`, `kit.json` and `tools/kit.ts`; and, with a React page, `src/web` but `page.js`, and the kit's `react` part.
+- **Seven of the kit's modules write their JSON files through store.ts' `writeJson`**, so a rename Windows refuses for a moment (EPERM, EACCES or EBUSY: an antivirus or the indexer has the file open) is tried again every 25 ms, for up to half a second. Each wrote a temporary file and renamed it once, with no second try. These writes now retry:
+  - `set-up-again.json` (set-up-again.ts) and `server-repair.json` (server-repair.ts): both failed a look in a test in `%TEMP%` with EPERM, and a customer's antivirus could do the same;
+  - `signatures.json` (signatures.ts' `rememberSignatures`);
+  - `npu-report.json` and `npu-reporter.json` (npu-report.ts);
+  - each agent's answer speeds in `speed\` (boot-speed.ts' `noteSpeed`), the same text `core.sharedText` wrote;
+  - `npu-room.json` (npu-pace.ts), now written with 2-space indentation like the others rather than on one line (only the kit reads it, as JSON);
+  - a job's `job.json` for a run outside the packaged app (outside.ts' `runOutside`).
+- **Two such writes are left as they were**, as they aren't a JSON value written whole:
+  - assistants.ts writes an assistant's own settings file: its text as edited (JSONC, TOML or JSON, with the person's own layout kept), after a backup;
+  - prebuilt.ts copies a signed `.exe` or `.dll` into place, and a rename that fails there means another agent's copy got there first, which it then uses.
+
+### What's new
+
+- **`importsLeftOut(stage, esbuild, folders?)`** in minify.ts: the imports a staged release's code makes of files it doesn't carry, each `{ file, imports, dynamic }`. **`leftOutText(left)`** says them in words. They're for a release of your own that doesn't call `minifyRelease`.
+- **set-up-again.ts' `writeAgain`** is exported, with `rename` and `sleep` for tests, and server-repair.ts' `RepairDeps` takes `rename` and `sleep` too.
+
+### Before you update
+
+- **A server that imports a file in `src/web`** (other than its types, with `import type`) isn't released any more. Move the file out of `src/web` (Reeve#299 moves `ps-arg.ts` into `src`), or import its types alone. Run `npm run release` once after you update the kit, to see.
+- **`import { type A } from './web/x.ts'`** is a value import: write `import type { A } from './web/x.ts'`.
+
 ## 2.146.4
 
 **A repository's name keeps its server's own port: a GitLab or Gitea of your own at `http://127.0.0.1:8929` is named `127.0.0.1:8929/group/app`, so anything keyed by its name reaches it there.**

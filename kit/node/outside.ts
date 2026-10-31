@@ -1,12 +1,13 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceleratorsHome } from './accelerators.ts';
 import { alive } from './apart.ts';
 import { powershell } from './ps.ts';
+import { writeJson } from './store.ts';
 
 /**
  * Setting up outside a packaged app (kit 2.113.5). The Claude desktop app is an MSIX package, and so is every
@@ -322,12 +323,6 @@ function readJson(file: string): any {
   }
 }
 
-function writeWhole(file: string, value: unknown): void {
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
-  renameSync(tmp, file);
-}
-
 /**
  * Runs `job` outside the packaged app this process is in: as a one-off task Task Scheduler starts (outsideTaskXml),
  * each line it writes passed to `log` as it comes, until its result is written. The task is deleted after; its folder
@@ -342,7 +337,7 @@ export async function runOutside<T>(job: OutsideJob, o: OutsideOptions = {}): Pr
   const name = outsideTaskName(id, env);
   const files = { job: path.join(folder, 'job.json'), pid: path.join(folder, 'pid.json'), log: path.join(folder, 'log.txt'), result: path.join(folder, 'result.json'), xml: path.join(folder, 'task.xml') };
   mkdirSync(folder, { recursive: true });
-  writeWhole(files.job, { job, env: carriedEnv(env) });
+  writeJson(files.job, { job, env: carriedEnv(env) });
   const user = env.USERDOMAIN ? `${env.USERDOMAIN}\\${env.USERNAME ?? ''}` : (env.USERNAME ?? '');
   const xml = outsideTaskXml({ name, user, node: o.node ?? process.execPath, folder, what: jobWhat(job) });
   writeFileSync(files.xml, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(xml, 'utf16le')]));

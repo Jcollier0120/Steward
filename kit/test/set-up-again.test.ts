@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -316,6 +316,43 @@ test('a try that failed is made again 6 hours on, one that found the card in use
   blocked.deps.kit = '2.115.1';
   assert.equal((await A.setUpAgain(blocked.deps)).did, 'blocked', 'a later kit tries once more');
   assert.equal(blocked.asked.length, 2);
+});
+
+test("set-up-again.json's rename is tried again while Windows refuses it for a moment (an antivirus, the indexer), and given up on within half a second", async () => {
+  const { RENAME_TRIES } = await import('./fixture/src/kit/store.ts');
+  const file = path.join(home, 'refused', 'set-up-again.json');
+  const record = { tries: { [CARD_ID]: { key: 'llama.cpp', at: '2026-10-31T12:00:00.000Z', did: 'failed' as const } }, replaced: {} };
+  const refusal = (code: string) => Object.assign(new Error(`${code}: the rename was refused`), { code });
+  // Held open twice, as a look in %TEMP% met it (EPERM), then let through: written, nothing left beside it.
+  const waits: number[] = [];
+  let held = 2;
+  A.writeAgain(file, record, {
+    rename: (from, to) => {
+      if (held-- > 0) throw refusal('EPERM');
+      renameSync(from, to);
+    },
+    sleep: (ms) => void waits.push(ms),
+  });
+  assert.deepEqual(A.readAgain(file), record);
+  assert.deepEqual(waits, [25, 25]);
+  assert.deepEqual(readdirSync(path.dirname(file)), ['set-up-again.json'], 'no temporary file left');
+  // Refused all along: the error after RENAME_TRIES tries (about half a second of waits), the file as it was.
+  let tries = 0;
+  const later = { ...record, replaced: { 'C:\\tools\\servers\\old': '2026-10-31T12:00:00.000Z' } };
+  assert.throws(
+    () =>
+      A.writeAgain(file, later, {
+        rename: () => {
+          tries++;
+          throw refusal('EBUSY');
+        },
+        sleep: () => {},
+      }),
+    /EBUSY/,
+  );
+  assert.equal(tries, RENAME_TRIES);
+  assert.deepEqual(A.readAgain(file), record);
+  assert.deepEqual(readdirSync(path.dirname(file)), ['set-up-again.json'], 'its temporary file removed');
 });
 
 test('a card in use is left for a quiet look, and nothing is set up while the manor is stopped', async () => {

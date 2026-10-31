@@ -21,6 +21,8 @@ import { pathToFileURL } from 'node:url';
  *   (Manor's web/app.js) and a module keeps its imports (the kit's core).
  * - **.d.ts files go. CSS, PowerShell, JSON, SVG and the rest are as they were** (Manor reads themes.css as text).
  * - Names are kept (keepNames), so stack traces in the logs, and an error's or a class's name, read as they did.
+ * - **Nothing it imports is left out** (kit 2.146.5, importsLeftOut): a release whose code imports a file the release
+ *   doesn't carry isn't built, as the installed agent would stop there at ERR_MODULE_NOT_FOUND.
  *
  * esbuild is each agent's devDependency: `loadEsbuild(root)` finds it in the agent's node_modules.
  */
@@ -108,13 +110,100 @@ async function buildModule(esbuild: Esbuild, file: string): Promise<string> {
   return r.outputFiles![0].text;
 }
 
+/** A relative value import in a release's code of a file the release doesn't carry (importsLeftOut). */
+export interface LeftOut {
+  /** The file that imports it, relative to the release's root, forward slashes. */
+  file: string;
+  /** The file it imports, the same way. */
+  imports: string;
+  /** An `import()` of a literal; else a static `import` or `export … from`. */
+  dynamic: boolean;
+}
+
+/** The files a release's code is read from: its .ts (not .d.ts) and .js, as minifyRelease builds them. */
+const isCode = (rel: string) => (rel.endsWith('.ts') && !rel.endsWith('.d.ts')) || rel.endsWith('.js') || rel.endsWith('.mjs');
+
+/** An esbuild failure's first error, naming its file (`what` when esbuild names none), as minifyRelease says one of its own. */
+function buildError(e: unknown, what: string): Error {
+  const err = e as { errors?: { text: string; location?: { file?: string } | null }[]; message?: string };
+  const first = err.errors?.[0];
+  return new Error(`${first?.location?.file?.replace(/\\/g, '/') ?? what} couldn't be built: ${first?.text ?? String(err.message).split(/\r?\n/)[0]}`);
+}
+
+/**
+ * The value imports in a staged release's code (each .ts and .js under `folders`, as minifyRelease would build it) of a
+ * file the stage doesn't carry (kit 2.146.5): one the release leaves out (its tests and documents, src/web's files but
+ * the page's bundle, and the kit's react part: react-page.ts' releasePage; whatever is outside src and art; the .d.ts
+ * files minifyRelease drops), or one that was never there. The installed agent stops at each with ERR_MODULE_NOT_FOUND:
+ * Reeve 0.19.10 and 0.19.11 started on no PC, as src/assistants.ts imported src/web/ps-arg.ts, and the checkout's tests
+ * passed. Read by esbuild's own parser, in one build, as the release builds the code (`verbatimModuleSyntax`): a static
+ * `import`, an `export … from` and an `import()` of a literal count. `import type` and `export type` don't, but
+ * `import { type A } from` does: Node and the built release both keep it, as `import './a.js'`. Only relative imports
+ * (a package's are npm's). Throws, naming the file, when esbuild can't read one.
+ */
+export async function importsLeftOut(stage: string, esbuild: Esbuild, folders = ['src']): Promise<LeftOut[]> {
+  const all = walk(stage);
+  const carried = new Set(all.filter((f) => !f.endsWith('.d.ts')));
+  const code = all.filter((f) => folders.some((d) => f.startsWith(`${d}/`)) && isCode(f));
+  if (!code.length) return [];
+  const rel = (p: string) => path.relative(stage, p).replace(/\\/g, '/');
+  const found = new Map<string, LeftOut>();
+  await esbuild
+    .build({
+      // Named apart, so a .ts and a .js of one name don't share an output.
+      entryPoints: Object.fromEntries(code.map((f, i) => [`m${i}`, path.join(stage, f)])),
+      bundle: true,
+      write: false,
+      outdir: path.join(stage, '.imports'),
+      absWorkingDir: stage,
+      format: 'esm',
+      platform: 'node',
+      target: 'node22',
+      logLevel: 'silent',
+      tsconfigRaw: { compilerOptions: { verbatimModuleSyntax: true } },
+      plugins: [
+        {
+          name: 'left-out',
+          setup(b: { onResolve(o: { filter: RegExp }, f: (a: { path: string; importer: string; kind: string }) => unknown): void }) {
+            b.onResolve({ filter: /.*/ }, (a) => {
+              if (a.kind === 'entry-point') return undefined;
+              if ((a.kind === 'import-statement' || a.kind === 'dynamic-import') && /^\.{1,2}\//.test(a.path)) {
+                const file = rel(a.importer);
+                const imports = rel(path.resolve(path.dirname(a.importer), a.path.replace(/[?#].*$/, '')));
+                if (!carried.has(imports) && !found.has(`${file}>${imports}`)) found.set(`${file}>${imports}`, { file, imports, dynamic: a.kind === 'dynamic-import' });
+              }
+              return { path: a.path, external: true };
+            });
+          },
+        },
+      ],
+    })
+    .catch((e) => {
+      throw buildError(e, 'its code');
+    });
+  return [...found.values()].sort((x, y) => (x.file === y.file ? (x.imports < y.imports ? -1 : 1) : x.file < y.file ? -1 : 1));
+}
+
+/** Why a release isn't built, in words: importsLeftOut's imports, each file and what it imports, and what to do. */
+export function leftOutText(left: LeftOut[]): string {
+  const each = left.map((l) => `${l.file} imports ${l.imports}${l.dynamic ? ' (with import())' : ''}`).join('; ');
+  return (
+    `Not built: its code imports what the release doesn't carry, so the installed agent would stop there (ERR_MODULE_NOT_FOUND): ${each}. ` +
+    "A release carries src and art, but not their tests, documents or .d.ts files, and of the page's sources (src/web, the kit's react part) only its bundle, src/web/page.js: " +
+    'move what the server imports out of src/web, or import its types alone (import type).'
+  );
+}
+
 /**
  * Builds a staged release in place (`stage`, its root): under each of `folders` (src by default; Manor adds web),
  * each .ts becomes a minified .js (ENTRY_STUBS and `stubs` keep a stub), each .js is minified, and each .d.ts goes.
- * Throws, naming the file, when esbuild can't read one.
+ * First, a release whose code imports a file it doesn't carry isn't built (importsLeftOut). Throws, naming the file,
+ * when esbuild can't read one.
  */
 export async function minifyRelease(stage: string, esbuild: Esbuild, o: { folders?: string[]; stubs?: string[] } = {}): Promise<Minified> {
   const folders = o.folders ?? ['src'];
+  const left = await importsLeftOut(stage, esbuild, folders);
+  if (left.length) throw new Error(leftOutText(left));
   const stubs = new Set([...ENTRY_STUBS, ...(o.stubs ?? [])]);
   const out: Minified = { ts: 0, js: 0, before: 0, after: 0 };
   for (const folder of folders) {

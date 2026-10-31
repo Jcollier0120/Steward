@@ -259,7 +259,7 @@ async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: str
   // A kit PR's kit tried on the agents, as main's trial will try it once it's merged.
   const trial = await vouchTrial(ctx, e, o);
   if (trial && 'failed' in trial) return trial.failed;
-  const tried = trial ? `; ${trial.passed}` : '';
+  const tried = trial ? `; ${'passed' in trial ? trial.passed : trial.untried}` : '';
   if (stoodIn.by) return setVouch(ctx, e, o.repo, o.head, withTrial(stoodInDescription(e, stoodIn, o.head), tried));
   noteVouchTime(e.id, checkKind(scope), took, scope?.files);
   return setVouch(ctx, e, o.repo, o.head, withTrial(vouchDescription(e, scope, o.head), tried));
@@ -278,9 +278,10 @@ const withTrial = (description: string, tried: string) => `${description}${tried
  *
  * Null for any other repository, or a PR whose kit is main's: nothing to try. `failed` names each agent and the tests
  * that broke; a try the network cut short fails it too (vouch again), as no verdict on the kit. `passed`: what it came
- * to, for the vouch's description.
+ * to, for the vouch's description. `untried` (Steward 0.36.270): this PC has no agent to try it on, which neither passes
+ * nor fails it (main's trial on the PC that releases Castellan does), and the description says so.
  */
-export async function vouchTrial(ctx: Ctx, e: Employee, o: { dir: string; head: string; say: (line: string) => void }): Promise<{ failed: string } | { passed: string } | null> {
+export async function vouchTrial(ctx: Ctx, e: Employee, o: { dir: string; head: string; say: (line: string) => void }): Promise<{ failed: string } | { passed: string } | { untried: string } | null> {
   if (e.id !== APP.id) return null;
   const base = (await gitMaybe(ctx.run, o.dir, 'merge-base', `origin/${e.branch}`, o.head))?.trim();
   const now = await kitContentOf(ctx, o.dir, o.head);
@@ -293,6 +294,12 @@ export async function vouchTrial(ctx: Ctx, e: Employee, o: { dir: string; head: 
   o.say(`its kit ${kit} changes what the agents take from it: tried on each of them, one at a time, as main's trial will try it`);
   const t = await kitTrialOfClone(ctx, { dir: o.dir, head: o.head, kit }, o.say);
   if (t.cut) return { failed: `${t.cut}: no verdict on the kit, so vouch again` };
+  if (!t.staff) {
+    // A PC whose Steward looks after none of the agents on the kit (none has a clone here): nothing was tried, so
+    // nothing passed (Steward 0.36.270). "Passed 0 of 0" read as a verdict.
+    o.say(`kit ${kit} isn't tried here: this PC has no agents to try it on (none main's trial tries has a clone here). Main's trial on the PC that releases Castellan tries them once it's merged`);
+    return { untried: `kit ${kit} not tried: no agents on this PC; main's trial tries them` };
+  }
   const own = t.own.length ? `; ${t.own.map((f) => f.name).join(', ')} failed without it too, so not held against it` : '';
   if (t.failed.length) {
     const each = t.failed.map((f) => `${f.name}: ${f.message}`).join('; ');

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, type AcceleratorKind, configuredAccelerators, type Endpoint, ENDPOINT_KINDS, type EndpointKind, isSharedTools, readConfigFile, serverLogsDir, serves, toolsHome } from './accelerator-config.ts';
 import { expandEnv } from './accelerators.ts';
@@ -10,6 +10,7 @@ import { servers, stillAnswering, whatAnswers } from './npu-refresh.ts';
 import { type Pace, pace } from './pace.ts';
 import { inside } from './real-path.ts';
 import { bytesOf, configStrings, RETIRED_GRACE_MS, removeAside } from './retired.ts';
+import { writeJson } from './store.ts';
 import { download, type HfFile, installSignedBuild, type NpuRefreshRecord, pinnedHfFiles, pinnedRelease, planSetup, readNpuRefresh, type Release, type SetupIo, sizing, specFor, testNpuEmbed, testNpuEntry, testNpuRerank } from './setup.ts';
 
 /**
@@ -98,10 +99,13 @@ export function readAgain(file: string): AgainRecord {
   }
 }
 
-function writeAgain(file: string, r: AgainRecord): void {
-  mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(`${file}.tmp`, JSON.stringify(r, null, 2) + '\n');
-  renameSync(`${file}.tmp`, file);
+/**
+ * Writes set-up-again.json through store.ts' writeJson (kit 2.146.5): a temporary file and a rename, tried again for
+ * up to half a second while Windows refuses it for a moment (EPERM, EACCES, EBUSY: an antivirus or the indexer has the
+ * file open). Its own rename wasn't tried again, and a look in %TEMP% failed so. `rename` and `sleep` are for tests.
+ */
+export function writeAgain(file: string, r: AgainRecord, o: { rename?: typeof renameSync; sleep?: (ms: number) => void } = {}): void {
+  writeJson(file, r, o);
 }
 
 // ------------------------------------------------------------------------------------------------
