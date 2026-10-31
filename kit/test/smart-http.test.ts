@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 
 // `git ls-remote` over https answered in the agent's own process (kit 2.64.0), and git itself started without Git for
 // Windows' launcher.
-const { advertisedRefs, lsRemoteText, parseAdvertisement } = await import('./fixture/src/kit/smart-http.ts');
+const { advertisedRefs, lsRemoteText, parseAdvertisement, quirky: quirkyGit, readsWith } = await import('./fixture/src/kit/smart-http.ts');
 const { signedIn, remoteUrl } = await import('./fixture/src/kit/git-auth.ts');
 const { gitExe } = await import('./fixture/src/kit/git-exe.ts');
 
@@ -118,6 +118,12 @@ test("whatever isn't answered as git would is git's: other options, globs, refus
   assert.ok(await fellBack(['ls-remote', URL_], { env: { HTTPS_PROXY: 'http://proxy.test:8080' } }), 'a proxy');
   assert.ok(await fellBack(['ls-remote', URL_], { env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'url.https://mirror.test/.insteadOf', GIT_CONFIG_VALUE_0: 'https://example.test/' } }), 'a rewrite');
   assert.ok(await fellBack(['ls-remote', URL_], { env: { KIT_SMART_HTTP: '0' } }), 'turned off');
+  // The sign-in git-auth.ts hands git, for a host or a repository (kit 2.146.6), is asked the same way; a header of anyone else's isn't.
+  const entries = (...keys: string[]) => ({ ...ENV, GIT_CONFIG_COUNT: String(keys.length), ...Object.fromEntries(keys.flatMap((k, i) => [[`GIT_CONFIG_KEY_${i}`, k], [`GIT_CONFIG_VALUE_${i}`, 'x']])) });
+  assert.equal(quirkyGit(null, entries('credential.https://example.test.helper', 'http.https://example.test/.extraHeader')), false);
+  assert.equal(quirkyGit(null, entries('credential.https://dev.azure.test/o/p/_git/r.helper', 'http.https://dev.azure.test/o/p/_git/r.extraHeader')), false);
+  assert.equal(quirkyGit(null, entries('http.extraHeader')), true, "every host's");
+  assert.equal(quirkyGit(null, entries('http.https://example.test/.proxy')), true);
   const quirky = path.join(home, 'quirky');
   git(home, 'clone', '-q', work, quirky);
   git(quirky, 'remote', 'set-url', 'origin', URL_);
@@ -128,6 +134,24 @@ test("whatever isn't answered as git would is git's: other options, globs, refus
 });
 
 const advertedOrNull = (url: string) => advertisedRefs(url, { env: ENV, fetch: host().fetch });
+
+test("how a host answers a read, signed in or not (kit 2.146.6): 200 for refs, its status otherwise, null where it can't be asked", async () => {
+  const asked: (string | null)[] = [];
+  const answer = (res: () => Response) => (async (_url: string, init?: RequestInit) => (asked.push(new Headers(init?.headers).get('authorization')), res())) as typeof fetch;
+  const refs = () => new Response(advertisement, { status: 200, headers: { 'content-type': 'application/x-git-upload-pack-advertisement' } });
+  assert.equal(await readsWith(URL_, { env: ENV, authorization: 'Basic eA==', fetch: answer(refs) }), 200);
+  assert.equal(await readsWith(URL_, { env: ENV, fetch: answer(refs) }), 200);
+  assert.deepEqual(asked, ['Basic eA==', null], 'with the sign-in given, and with none');
+  for (const status of [401, 403, 404, 500]) assert.equal(await readsWith(URL_, { env: ENV, fetch: answer(() => new Response('no', { status })) }), status);
+  assert.equal(await readsWith(URL_, { env: ENV, fetch: answer(() => new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } })) }), null, 'a sign-in page');
+  assert.equal(await readsWith(URL_, { env: ENV, fetch: answer(() => new Response(null, { status: 302, headers: { location: 'https://elsewhere.test/' } })) }), 302);
+  assert.equal(await readsWith(URL_, { env: ENV, fetch: (async () => { throw new Error('offline'); }) as typeof fetch }), null);
+  const n = asked.length;
+  assert.equal(await readsWith(URL_, { env: { ...ENV, KIT_SMART_HTTP: '0' }, fetch: answer(refs) }), null);
+  assert.equal(await readsWith(URL_, { env: { ...ENV, HTTPS_PROXY: 'http://proxy.test:8080' }, fetch: answer(refs) }), null);
+  assert.equal(await readsWith('http://example.test/served.git', { env: ENV, fetch: answer(refs) }), null);
+  assert.equal(asked.length, n, 'none of those asked');
+});
 
 test('an advertisement: refs in order, peeled tags kept; protocol v2, another service or noise is none', () => {
   const refs = parseAdvertisement(advertisement)!;

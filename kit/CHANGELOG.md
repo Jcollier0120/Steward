@@ -2,6 +2,35 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.146.6
+
+**A background fetch no longer signs you out of Bitbucket or Azure DevOps. A host that refused a good sign-in (a repository that isn't there, or isn't shared with you) had git's credential helper erase it, and you had to sign in again.**
+
+### What changed
+
+- **A refused command is never run again git's own way** (git-auth.ts' `signedIn`). Until now, when a host refused the sign-in the kit handed git, the command ran once more with git's credential helper on. On that second refusal git told the helper to erase the sign-in it keeps (`credential reject`). Bitbucket and Azure DevOps refuse a repository that isn't there, or isn't shared with you, as if the sign-in were wrong (401), so a fetch of a missing or unshared repository signed the person out of the whole host. Git Credential Manager then needs a sign-in in a window, which nothing in the background can show. Now:
+  - the helper is asked once more, and the command runs once more only with a sign-in it renewed (Bitbucket's and Azure DevOps' helpers check theirs when asked);
+  - the helper is told to forget its sign-in only when the sign-in is shown to be stale: the host refuses it on another repository it read in this process, or on a public one it reads with no sign-in. The kit asks the host itself for that (`GET <url>/info/refs`, as git would, smart-http.ts' `readsWith`), once however many commands were refused meanwhile;
+  - a refusal of a sign-in the host still takes is the repository's own. It's left as it is, and that repository isn't looked into again for 30 minutes.
+- **Only the hosts a command is handed a sign-in for have their helpers switched off** (`credential.<origin>.helper`, empty), as `scriptEnv` already did. Every other host a command talks to signs in as before. Until now a command's every helper was switched off (`credential.helper`).
+- **A URL with its own user** (`https://me@bitbucket.org/…`) is signed in with that user's sign-in. Until now it was left to git, so its refusal went to the helper too.
+- **A URL with its own password** (`https://me:token@host/…`) signs in with it, and no helper is asked for one, or told to forget the one it keeps when the host refuses it.
+- **Where git asks helpers by path** (`credential.useHttpPath`, which Git Credential Manager sets for `dev.azure.com`), the helper is asked with the repository's path, and the sign-in is handed over for that repository alone (`http.<url>.extraHeader`), in `signedIn` and `scriptEnv`. Git is asked whether it does only when a host gives no sign-in of its own, so other hosts start no more processes for it.
+- **A clone's push URLs** (`pushurl`) are signed in too, and a push asks about its push URL.
+- smart-http.ts' `quirky` takes the sign-in's header for one repository, as it took the host's.
+
+### What's new
+
+- **`signInOf(url)`** in git-auth.ts: where an https URL signs in (its origin, its own user and password, its path as written and as git hands it over), or null.
+- **`remoteUrls(repo, { push: true })`** includes push URLs, and **`remoteUrl(repo, name, 'pushurl')`** reads one remote's.
+- **`signInEnv(headers, already, off?)`**: `off` lists URLs whose helpers are switched off with no header (a URL with its own password). A header's key may be a repository's URL.
+- **`signedIn(inner, now, { fetch })`**: the `fetch` the kit asks a host with. Under `node --test` it's only a test's own, so a test's made-up remote is never asked over the network.
+- **`readsWith(url, { authorization })`** in smart-http.ts: how a host answers a read of a repository, signed in or not: 200 for its refs, its status otherwise, or null where it can't be asked as git would.
+
+### Before you update
+
+- Nothing to do. A test that checked a git command's environment for `credential.helper` now finds `credential.<origin>.helper`.
+
 ## 2.146.5
 
 **A release whose code imports a file the release leaves out isn't built. Reeve 0.19.10 and 0.19.11 started on no PC: their server imported a file in `src/web`, which a release doesn't carry.**
