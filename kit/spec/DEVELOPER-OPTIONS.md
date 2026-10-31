@@ -1,20 +1,20 @@
 # Developer options
 
-Castellan is sold to three audiences: **general purpose** (photos, videos, documents), **gamers** (performance, stability, very large files) and **developers** (repositories, and every agent). Only developers see developer content. Whether developer staff are hired says which of them this PC belongs to, and every agent obeys it: on its page, and in what its API answers. "Developer options" (`developerOptions`) stays the name in code and in settings.json; it is no longer a switch anyone sees.
+Castellan is sold to three audiences: **general purpose** (photos, videos, documents), **gamers** (performance, stability, very large files) and **developers** (repositories, and every agent). Only developers see developer content. Developer options (`developerOptions`) say which of them this PC belongs to, and every agent obeys them: on its page, and in what its API answers. They are on while developer staff are employed, and otherwise as the person switches them in Manor's Settings, Employees: someone with no developer staff can still turn them on, to see a general agent's developer content (Heiward's, cleaning up their repositories).
 
 This is the rule for every agent on the kit (kit 2.39.0 and later). An agent that doesn't follow it yet keeps working; it just shows its developer content to everyone until it does.
 
 ## What turns it on
 
-- **Under Manor**, Manor's settings.json `"developerOptions"` decides, and Manor writes it from who is hired: `true` while any developer staff member is hired (staff.json marks them `"developer"`: Reeve, the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward), `false` once the last is let go. Manor has had no switch for it since Manor 0.16.33: hiring a developer staff member is what turns developer features on (its `developerOptionsOn`, written by `syncDeveloperOptions` at startup, after a hire or a let-go, and whenever its page looks). A hired developer staff member holds its office, with the general staff member that can fill it on duty behind it; not hired, the general one holds it.
+- **Under Manor**, Manor's settings.json `"developerOptions"` decides. Manor keeps it `true` while any developer staff member is employed (staff.json marks them `"developer"`: Reeve, the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward), and refuses to switch it off then. With none employed, the person switches it either way in Settings, Employees, so it can be `true` with no developer staff (Manor#530, the owner's choice). The kit never second-guesses it from staff.json. A hired developer staff member holds its office, with the general staff member that can fill it on duty behind it; not hired, the general one holds it.
 - **Without Manor**, or with a Manor that hasn't said, the agent's own: `"developerOptions": true` in its own settings.json. Off unless it says `true`.
-- It's read afresh on every request (`node/developer.ts`): a hire or a let-go in Manor takes effect at the next request, with no agent restarted. An open page notices within seconds (`/api/ping` says `developer`) and draws itself again.
-- An agent with a switch of its own shows `developerOptionsNote(setBy)` (`node/page.ts`) in its place while Manor decides: "Developer features show while developer staff are hired in <manor>", with a link to Manor's Settings, Employees (`manorStaffUrl`).
-- **What a person reads** never names a "Developer options" switch: it says developer staff, and hiring them (`DEVELOPER_ONLY_FORM`: "These settings can be changed only while developer staff are hired.").
+- It's read afresh on every request (`node/developer.ts`): a hire, a let-go or a switch in Manor takes effect at the next request, with no agent restarted. An open page notices within seconds (`/api/ping` says `developer`) and draws itself again.
+- An agent with a switch of its own shows `developerOptionsNote(setBy)` (`node/page.ts`) in its place while Manor decides: "Developer options are set in <manor>: on while developer staff are employed there, or when you turn them on", with "Change it in <manor>" linking to Manor's Settings, Employees (`manorStaffUrl`), where the switch is.
+- **What a person reads** names the switch as Manor does, "Developer options", and never says they are on only while developer staff are hired (`DEVELOPER_ONLY_FORM`: "These settings can be changed only while Developer options are on.").
 
 ## What a non-developer never sees
 
-With it off (no developer staff hired; "the switch" below is `developerOptions`, however it is set), none of this is on an agent's page, in its notices, or in what its API sends the page:
+With it off (`developerOptions` false, however it is set: no developer staff employed and the person's switch off; "the switch" below), none of this is on an agent's page, in its notices, or in what its API sends the page:
 
 - repositories, git and GitHub, branches, commits, pull requests, CI, releases as builds, build outputs, worktrees and checkouts;
 - ports, PIDs, process names and command lines;

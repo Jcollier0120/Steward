@@ -16,6 +16,20 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing: a page looks as before until it uses them.
+## 2.146.8
+
+**What an agent says of Manor's Developer options no longer claims they're on only while developer staff are hired. Manor lets the person turn them on with none (Manor#530), to see a general agent's developer content.**
+
+### What changed
+
+- **`developerOptionsNote(setBy)`** (page.ts), shown in place of an agent's own switch while Manor decides, now says "Developer options are set in <manor>: on while developer staff are employed there, or when you turn them on", with "Change it in <manor>" linking to Manor's Settings, Employees (`manorStaffUrl`), where the switch is. It said "Developer features show while developer staff are hired in <manor>" and "See the staff in <manor>", which was wrong whenever the person had switched them on with no developer staff.
+- **`DEVELOPER_ONLY_FORM`** (settings-kit.ts), a developer-only settings form's refusal while Developer options are off, now says "These settings can be changed only while Developer options are on." It said "only while developer staff are hired".
+- **spec/DEVELOPER-OPTIONS.md** gives the rule as Manor keeps it: `developerOptions` is true while any developer staff member is employed, and otherwise as the person switches it. Text a person reads names the switch "Developer options", as Manor does. The kit still reads only Manor's `developerOptions`, never staff.json. What's on and off for each agent is as before.
+- The comments in manor.ts, developer.ts and page.ts, and the README's account of `developerOptions`, say the same.
+
+### Before you update
+
+- Nothing to do. A test that compared an agent's page or a refused save with the old sentences now finds the new ones.
 
 ## 2.146.6
 

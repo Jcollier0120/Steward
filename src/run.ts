@@ -91,7 +91,9 @@ export function resolveCommand(cmd: string, args: string[]): [string, string[]] 
   if ((cmd === 'npm' || cmd === 'npx') && existsSync(npmCli(cmd))) return [process.execPath, [npmCli(cmd), ...args]];
   if (cmd === 'az' && process.platform === 'win32') {
     const python = azurePython();
-    if (python) return [python, ['-IBm', 'azure.cli', ...args]];
+    // -I leaves out PYTHONIOENCODING and PYTHONUTF8, as az.cmd does: UTF-8 is asked here, or a page holding a character
+    // the PC's code page hasn't ("∞") stops az with 'charmap' codec can't encode.
+    if (python) return [python, ['-IB', '-X', 'utf8', '-m', 'azure.cli', ...args]];
   }
   return [cmd, args];
 }
@@ -239,6 +241,13 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
   if (cmd === 'gh') {
     env.GH_TELEMETRY ??= '0';
     env.GH_NO_UPDATE_NOTIFIER ??= '1';
+  }
+  // The Azure CLI installs an extension a command needs unasked, or asks whether to: never for the Steward's commands.
+  // Its text is UTF-8 where az isn't started through its own Python (above).
+  if (cmd === 'az') {
+    env.AZURE_EXTENSION_USE_DYNAMIC_INSTALL ??= 'no';
+    env.PYTHONUTF8 ??= '1';
+    env.PYTHONIOENCODING ??= 'utf-8';
   }
   // At the checks pace a command gets as much more time as the cap slows it, and its wait for a turn (timeLimit): held to
   // the cap below everything else, and waiting its turn behind other runs, it takes longer (the Assayer's suite on a busy

@@ -485,14 +485,15 @@ function backToManor(m: ManorLink | null): string {
 
 /**
  * What stands in place of an agent's own Developer options switch while Manor sets them (manor.ts's
- * developerOptions() gives `setBy`): Manor has no switch, and hiring developer staff is what turns developer features
- * on (kit 2.97.1; before, it named a "Developer options" switch Manor no longer has). "Developer features show while
- * developer staff are hired in <manor>", and "See the staff in <manor>", to Manor's Settings, Employees. Nothing when
- * the agent's own switch applies (no Manor, or Manor hasn't said).
+ * developerOptions() gives `setBy`). Manor's Developer options are on while developer staff are employed there, and
+ * otherwise as the person switches them in Settings, Employees (kit 2.146.8; from kit 2.97.1 this said they were on
+ * only while developer staff are hired). "Developer options are set in <manor>: on while developer staff are employed
+ * there, or when you turn them on", and "Change it in <manor>", to Manor's Settings, Employees. Nothing when the agent's
+ * own switch applies (no Manor, or Manor hasn't said).
  */
 export function developerOptionsNote(setBy: ManorLink | null): string {
   if (!setBy) return '';
-  return `<p class="manor-decides"><span>Developer features show while developer staff are hired in ${esc(setBy.name)}.</span> <a href="${esc(manorStaffUrl(setBy))}">See the staff in ${esc(setBy.name)}</a></p>`;
+  return `<p class="manor-decides"><span>Developer options are set in ${esc(setBy.name)}: on while developer staff are employed there, or when you turn them on.</span> <a href="${esc(manorStaffUrl(setBy))}">Change it in ${esc(setBy.name)}</a></p>`;
 }
 
 /** A notice under the title bar while the agent is off duty: its scheduled rounds are paused (Manor's Stop, or `stop`). */

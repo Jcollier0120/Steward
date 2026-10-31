@@ -11,7 +11,7 @@ process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { after: next, claimVersion, claimsFile, loadClaims, pruneClaims, releaseClaim, stillHeld, titleVersions } = await import('../src/claims.ts');
-const { ctxFor, employee, fakeEmployee, ok, runner } = await import('./helpers.ts');
+const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 const { CLAIMS_FILE, CLAIMS_REF, parseClaims } = await import('../src/claims.ts');
 const { makersPcForTests } = await import('../src/maker.ts');
 const { readRef } = await import('../src/remote-ref.ts');
@@ -54,6 +54,31 @@ test('the next version: above the branch, every release, every open PR and every
   assert.equal(loadClaims().length, 3);
 });
 
+test("above every open PR's version: the one its title names after the kit's, and the one its head's version files set though its title names none", async () => {
+  rmSync(claimsFile(), { force: true });
+  // As #469 and #471 were: two open PRs above main's 0.4.10, neither title beginning with the name (Steward 0.36.274).
+  const s = setup('open-heads', {
+    titles: [
+      { title: 'Kit 2.36.1 and Fake 0.4.11: the About page', headRefName: 'claude/about' },
+      { title: 'The settings page reads Manor', headRefName: 'claude/settings' },
+      { title: 'From a fork, its branch not on origin', headRefName: 'someone/fork' },
+    ],
+  });
+  const branch = (name: string, version: string) => {
+    sh(s.checkout, 'checkout', '--quiet', '-b', name, 'main');
+    for (const f of s.e.versionFiles) writeFileSync(path.join(s.checkout, f), readFileSync(path.join(s.checkout, f), 'utf8').replaceAll('0.4.10', version));
+    sh(s.checkout, 'commit', '--quiet', '-am', `Fake ${version}`);
+    sh(s.checkout, 'push', '--quiet', 'origin', name);
+    sh(s.checkout, 'checkout', '--quiet', 'main');
+  };
+  branch('claude/about', '0.4.11');
+  branch('claude/settings', '0.4.12');
+  const a = await claimVersion(s.ctx, s.e, { branch: 'claude/next', by: 'claude', for: 'the next fix' });
+  assert.equal(a.claim.version, '0.4.13', 'above both: 0.4.11 by its title, 0.4.12 by its head');
+  const b = await claimVersion(s.ctx, s.e, { branch: 'claude/then', by: 'claude', for: 'the one after' });
+  assert.equal(b.claim.version, '0.4.14', 'and above the claim just made');
+});
+
 test('workers asking at the same moment each get a version of their own', async () => {
   rmSync(claimsFile(), { force: true });
   const s = setup('together');
@@ -78,7 +103,10 @@ test('a claim lives until its work lands, it is given back, or it goes stale wit
   assert.equal(stillHeld(c, { ...facts, now: 4 * DAY }), false, 'stale');
   assert.equal(stillHeld(c, { ...facts, now: 4 * DAY, openBranches: ['claude/a'] }), true, 'old, but its PR is open');
   assert.equal(stillHeld(c, { ...facts, now: 4 * DAY, openVersions: ['0.4.12'] }), true, 'old, but a PR sets it');
-  assert.deepEqual(titleVersions('Developer Herald', ['Developer Herald 0.5.3: a fix', 'Herald 0.5.9: no', 'Kit 2.1.0 (Developer Herald 0.5.4)']), ['0.5.3']);
+  assert.deepEqual(titleVersions('Developer Herald', ['Developer Herald 0.5.3: a fix', 'Herald 0.5.9: no', 'Kit 2.1.0 (Developer Herald 0.5.4)']), ['0.5.3', '0.5.4']);
+  assert.deepEqual(titleVersions('Herald', ['Developer Herald 0.5.3: not the Herald\'s', 'Kit 2.1.0, Herald 0.5.6: both']), ['0.5.6']);
+  assert.deepEqual(titleVersions('Steward', ["Kit 2.146.7 and Steward 0.36.272: About's What's new shows the newest 5 versions"]), ['0.36.272'], "#469's title: the Steward's version after the kit's");
+  assert.deepEqual(titleVersions('Steward', ['Steward 0.36.250: what Kit 2.1.0 and Steward 0.36.999 said']), ['0.36.250'], "only the title's lead, before its first colon");
   assert.deepEqual([next('0.4.9'), next('0.4.9', true)], ['0.4.10', '0.5.0']);
 
   writeFileSync(claimsFile(), JSON.stringify([c, { ...c, version: '0.4.13', branch: 'claude/b' }]));
