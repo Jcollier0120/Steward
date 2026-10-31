@@ -1,9 +1,10 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as core from './core/index.js';
 import { acceleratorsDir } from './lock.ts';
 import { RULES } from './rules.ts';
+import { writeJson } from './store.ts';
 
 /**
  * How fast each accelerator answers on this boot against earlier boots (spec/ACCELERATORS.md, "A slow start"): some PCs
@@ -30,10 +31,8 @@ export function noteSpeed(agent: string, s: core.Speed, o: { dir?: string; bootM
     try {
       current = core.speedsOf(readFileSync(file, 'utf8'));
     } catch {}
-    mkdirSync(dir, { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, core.sharedText(core.addSpeed(RULES, current, agent, o.bootMs ?? bootMs(), s)));
-    renameSync(tmp, file);
+    // writeJson writes core.sharedText's text (2-space JSON and a newline), and tries a refused rename again.
+    writeJson(file, core.addSpeed(RULES, current, agent, o.bootMs ?? bootMs(), s));
   } catch {}
 }
 

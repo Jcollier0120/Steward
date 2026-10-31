@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readJsonFile } from './file-cache.ts';
@@ -9,6 +9,7 @@ import { Npu, NpuBusy } from './npu.ts';
 import { CEILING_WORDS, LOAD, memoryInUse, PACE_CEILING } from './pace.ts';
 import { powershell } from './ps.ts';
 import { RULES } from './rules.ts';
+import { writeJson } from './store.ts';
 import { outsideWork, withWork } from './work-tasks.ts';
 
 /**
@@ -200,9 +201,7 @@ export async function npuRoom(o: { dir?: string; now?: () => number; look?: () =
   try {
     const text = await (o.look ?? (() => powershell(ROOM_SCRIPT, { timeoutMs: RULES.npuPace.lookWaitMs })))().catch((e: Error) => `problem: ${e.message}`);
     const room = roomOf(text, now());
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(room) + '\n');
-    renameSync(tmp, file);
+    writeJson(file, room);
     return room;
   } catch {
     return last;

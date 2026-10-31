@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,7 @@ import { ENDPOINT_KINDS, readConfigFile } from './accelerator-config.ts';
 import { acceleratorConfigFile, expandEnv } from './accelerators.ts';
 import { type SacState, smartAppControlOutsideTests } from './app-control.ts';
 import { acceleratorsDir } from './lock.ts';
+import { writeJson } from './store.ts';
 
 /**
  * Who signed the programs the staff's local models run (kit 2.108.0): every .exe, .dll, .pyd and .node in the folder of
@@ -218,10 +219,7 @@ export const signaturesFile = () => path.join(acceleratorsDir, 'signatures.json'
 export async function rememberSignatures(raw: Record<string, any>, file: string, o: InventoryOptions = {}): Promise<SignatureInventory | null> {
   try {
     const inv = await signatureInventory(serverPrograms(raw, o.env), o);
-    mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(inv, null, 2) + '\n');
-    renameSync(tmp, file);
+    writeJson(file, inv);
     return inv;
   } catch {
     return null;

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Detection } from './detect.ts';
@@ -7,6 +7,7 @@ import { checkSchema } from './json-schema.ts';
 import { acceleratorsDir } from './lock.ts';
 import type { NpuCheckReport } from './npu-check.ts';
 import { type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice } from './npu-vendors.ts';
+import { writeJson } from './store.ts';
 
 /**
  * The NPU report (spec/NPU-REPORTS.md): how this PC's NPU did when setup set it up (or the NPU check measured it), as
@@ -95,17 +96,8 @@ export const npuReporterFile = () => path.join(acceleratorsDir, 'npu-reporter.js
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-function writeWhole(file: string, value: unknown): void {
-  mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
-  try {
-    renameSync(tmp, file);
-  } catch (e) {
-    rmSync(tmp, { force: true });
-    throw e;
-  }
-}
+/** Written whole through store.ts' writeJson (kit 2.146.5): a rename Windows refuses for a moment is tried again. */
+const writeWhole = (file: string, value: unknown): void => writeJson(file, value);
 
 const readJson = (file: string): any => {
   try {
