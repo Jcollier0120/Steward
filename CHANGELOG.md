@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.282
+
+**On Azure DevOps, a pull request's owner-first and owner-done labels are seen again when the Steward asks for it by its number. `az repos pr show` leaves a pull request's labels out, so the Steward read every one as unlabelled.**
+
+### What changed
+
+- **A pull request's labels** come from Azure DevOps' labels route (`az devops invoke --resource pullRequestLabels`, GET) when it is asked by its number or branch (viewPr) with its labels wanted. Found live on WEASELDEV03 (AMD), 2026-10-31, on the owner's test organization:
+  - `az repos pr show` gave `"labels": null` on a pull request labelled `wright`;
+  - `az repos pr list` and the labels route both gave `wright`.
+  - So a recheck never saw owner-done on an Azure DevOps pull request (recheck.ts), and anything that read one by its number saw no owner-first.
+- Listed pull requests keep the labels `az repos pr list` gives, so a list asks nothing more. A label Azure DevOps marks inactive is left out.
+
 ## 0.36.277
 
 **It carries kit 2.147.0, whose pages can be laid out for a phone, a 1080p desktop and a 2K or 3K screen.**
