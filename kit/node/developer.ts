@@ -8,12 +8,12 @@ import { dataFile, readJson } from './store.ts';
  * repositories, git and GitHub, pull requests, builds, ports, process ids, the model servers' insides, logs, JSON,
  * file paths and commands. With them off, none of it is on an agent's page or in what its API answers.
  *
- * One source of truth. With Manor installed and saying (its settings.json's "developerOptions", which Manor writes
- * from who is hired: true while any developer staff member is, with no switch since Manor 0.16.33), Manor's value
- * wins. Otherwise the agent's own: "developerOptions" in its own settings.json, false unless it says true. Both are
- * read afresh on each call (two small files; a stat each while they are unchanged, file-cache.ts), so a hire or a
- * let-go in Manor takes effect at the next request, with no agent restarted: call developer() per request, never
- * once at start.
+ * One source of truth. With Manor installed and saying (its settings.json's "developerOptions": true while any
+ * developer staff member is employed, and otherwise as the person switches it in Manor's Settings, Employees, so it
+ * can be on with no developer staff), Manor's value wins. Otherwise the agent's own: "developerOptions" in its own
+ * settings.json, false unless it says true. Both are read afresh on each call (two small files; a stat each while they
+ * are unchanged, file-cache.ts), so a hire, a let-go or a switch in Manor takes effect at the next request, with no
+ * agent restarted: call developer() per request, never once at start.
  */
 export interface Developer {
   /** Whether developer content may be shown and served. */

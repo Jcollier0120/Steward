@@ -151,13 +151,13 @@ test("the graphics card beside the NPU: Manor's gpuWithNpu when it says; else th
   assert.equal(gpuWithNpu(true, later).on, false);
 });
 
-test('in place of the agent\'s own switch: developer features show while developer staff are hired in <manor>, and the way to its staff', () => {
+test('in place of the agent\'s own switch: Developer options are set in <manor>, on with its developer staff or its switch, and the way to change them', () => {
   const m = developerOptions(false, manorAt('note', { name: 'Weasel "&" Manor', port: 18600, developerOptions: true })).setBy;
   assert.equal(manorSettingsUrl(m!), 'http://castellan.localhost:18600/#/settings', "Manor's Settings page");
   assert.equal(manorStaffUrl(m!), 'http://castellan.localhost:18600/#/settings/employees', "Manor's Settings, Employees");
   assert.equal(developerOptionsNote(m),
-    '<p class="manor-decides"><span>Developer features show while developer staff are hired in Weasel &quot;&amp;&quot; Manor.</span> <a href="http://castellan.localhost:18600/#/settings/employees">See the staff in Weasel &quot;&amp;&quot; Manor</a></p>');
-  assert.doesNotMatch(developerOptionsNote(m), /Developer options/, 'Manor has no such switch');
+    '<p class="manor-decides"><span>Developer options are set in Weasel &quot;&amp;&quot; Manor: on while developer staff are employed there, or when you turn them on.</span> <a href="http://castellan.localhost:18600/#/settings/employees">Change it in Weasel &quot;&amp;&quot; Manor</a></p>');
+  assert.doesNotMatch(developerOptionsNote(m), /only while|are hired/, 'on with no developer staff too, as the person switches them (Manor#530)');
   assert.equal(developerOptionsNote(null), '', 'the agent\'s own switch stands');
   assert.match(page({ token: 't', body: '' }), /\.manor-decides \{/, 'its look is in every page');
 });
