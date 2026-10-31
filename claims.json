@@ -1,0 +1,18 @@
+[
+  {
+    "repo": "Jcollier0120/Steward#kit",
+    "version": "2.147.4",
+    "branch": "claude/git-auth-oauth-refresh",
+    "by": "AMD Dev Manager",
+    "for": "git-auth: a Gitea/Forgejo OAuth renewal fill carries the 401's WWW-Authenticate, and the new token is approved",
+    "at": "2026-10-31T20:34:21.087Z"
+  },
+  {
+    "repo": "Jcollier0120/Steward",
+    "version": "0.36.284",
+    "branch": "claude/git-auth-oauth-refresh",
+    "by": "AMD Dev Manager",
+    "for": "kit: Codeberg/Gitea OAuth stale-token renewal",
+    "at": "2026-10-31T20:34:25.615Z"
+  }
+]
