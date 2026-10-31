@@ -144,7 +144,7 @@ export async function readsWith(url: string, o: InfoRefsOptions = {}): Promise<n
 
 /**
  * readsWith's status, and on a 401 what the host asks a sign-in by: its WWW-Authenticate (several as fetch joins them,
- * with ", "), or null. kit 2.147.2: git hands it to its credential helper after a 401 (`wwwauth[]`), and Git Credential
+ * with ", "), or null. kit 2.147.4: git hands it to its credential helper after a 401 (`wwwauth[]`), and Git Credential
  * Manager knows a Gitea or Forgejo host (Codeberg) by it alone, so git-auth.ts hands it on when it asks for a new sign-in.
  */
 export async function answerTo(url: string, o: InfoRefsOptions = {}): Promise<{ status: number | null; challenge: string | null }> {

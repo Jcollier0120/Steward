@@ -309,7 +309,7 @@ test('a refused sign-in is forgotten only when shown stale: the host refuses it 
   }
 });
 
-test("cmdkey's list names a target: whole, ignoring case, with or without its type (kit 2.147.2)", () => {
+test("cmdkey's list names a target: whole, ignoring case, with or without its type (kit 2.147.4)", () => {
   const T = 'git:https://refresh_token.codeberg.org';
   const listed = (target: string) => `\r\nCurrently stored credentials for ${T}:\r\n\r\n    Target: ${target}\r\n    Type: Generic \r\n    User: someone\r\n    Local machine persistence\r\n`;
   assert.ok(listsTarget(listed(T), T));
@@ -322,7 +322,7 @@ test("cmdkey's list names a target: whole, ignoring case, with or without its ty
   assert.ok(!listsTarget(listed('git:https://codeberg.org'), T), 'the access token alone');
 });
 
-test('an access token Git Credential Manager hands back stale is forgotten where it keeps a refresh token: once a while, the refresh token kept (kit 2.147.2)', async () => {
+test('an access token Git Credential Manager hands back stale is forgotten where it keeps a refresh token: once a while, the refresh token kept (kit 2.147.4)', async () => {
   const repo = repoWith('oauth', 'https://forge.example.test/me/private.git');
   const PROBE = 'https://forge.example.test/me/private.git/info/refs?service=git-upload-pack';
   const ACCESS = 'git:https://forge.example.test';

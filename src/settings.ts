@@ -109,6 +109,11 @@ export interface Settings {
   stagesAtOnce: number;
   /** A vouch and a PR tested here run only the tests its change reaches (affected.ts); false: the whole suite. Absent: on. */
   affectedTests?: boolean;
+  /**
+   * Between builds, a round vouches for the team's open PRs (stages/roundvouch.ts): their checks run here as `steward
+   * vouch` runs them, and a pass sets the same status. Absent from the file: on on the makers' PCs, off on anyone else's.
+   */
+  roundVouches?: boolean;
   /** On duty, a round every `roundMinutes`: between builds it looks; at a build it releases each repository's main (pipeline.ts). */
   byItself: boolean;
   roundMinutes: number;
@@ -337,6 +342,8 @@ export const DEFAULT_SETTINGS: Settings = {
   parallel: 2,
   stagesAtOnce: 2,
   affectedTests: true,
+  // On the makers' PCs, unless their file says otherwise (normalizeSettings).
+  roundVouches: false,
   // It builds and releases by itself only once the person says yes.
   byItself: false,
   roundMinutes: 10,
@@ -597,6 +604,14 @@ export const SETTINGS_SCHEMA: Field[] = [
     help: "A PR's tests run only the test files its change reaches; a change to the setup runs them all. Off: the whole suite every time.",
   },
   {
+    key: 'roundVouches',
+    kind: 'switch',
+    advanced: true,
+    label: "Vouches for the team's PRs between builds",
+    tab: 'How it works',
+    help: "Between builds, a round runs the checks of one of your team's open PRs (not a draft) that no one has vouched for, as steward vouch would, and marks it tested once they pass. It never merges, comments on or pushes to a PR, and stops for the build. Off: only steward vouch does.",
+  },
+  {
     key: 'tasteBeforeRelease',
     kind: 'switch',
     label: "Waits for the Assayer's release check",
@@ -849,6 +864,8 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       parallel: Number.isInteger(parallel) ? Math.min(10, Math.max(1, parallel)) : d.parallel,
       stagesAtOnce: Number.isInteger(stagesAtOnce) ? Math.min(4, Math.max(1, stagesAtOnce)) : d.stagesAtOnce,
       affectedTests: typeof r.affectedTests === 'boolean' ? r.affectedTests : d.affectedTests,
+      // Never written for the file by itself: absent, on the makers' PCs and off elsewhere, as it reads each time.
+      roundVouches: typeof r.roundVouches === 'boolean' ? r.roundVouches : makers,
       byItself: typeof r.byItself === 'boolean' ? r.byItself : d.byItself,
       roundMinutes: Number.isInteger(roundMinutes) ? Math.min(240, Math.max(2, roundMinutes)) : d.roundMinutes,
       mergeMinAgeMinutes: Number.isInteger(mergeMinAge) ? Math.min(1440, Math.max(0, mergeMinAge)) : d.mergeMinAgeMinutes,

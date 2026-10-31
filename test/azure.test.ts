@@ -243,6 +243,40 @@ test("what az says when Azure DevOps doesn't let its sign-in in, or its extensio
   assert.equal(refused({ code: 0, out: 'jcollier0120\n', err: '', what: 'az account show' }, null, false).code, 0);
 });
 
+test("a pull request asked by its number has its labels from Azure DevOps' labels route: az repos pr show leaves them out", async () => {
+  // Found live, 2026-10-31: az repos pr show gave "labels": null on a labelled pull request; az repos pr list and the
+  // pullRequestLabels route gave the label. So owner-first and owner-done were never seen on one asked by its number.
+  const { host, ran } = recorded((at) => {
+    if (at === 'pr show 7') return ok(pull({ labels: null }));
+    if (at === 'pr list active refs/heads/claude/feature') return ok([pull()]);
+    if (at === 'pr list active') return ok([pull({ labels: [{ name: 'owner-done', active: true }] })]);
+    if (at === 'GET pullRequestLabels pullRequestId=7') return list([{ id: 'l-1', name: 'owner-first', active: true }, { id: 'l-2', name: 'taken-off', active: false }]);
+  });
+  const viewed = JSON.parse(must(await host.viewPr(R, 7, 'state,isDraft,labels')));
+  assert.deepEqual(viewed.labels, [{ name: 'owner-first' }], 'its labels from the route, an inactive one left out');
+  assert.deepEqual(ran.map((r) => r.at), ['pr show 7', 'GET pullRequestLabels pullRequestId=7']);
+  assert.deepEqual(words(ran[1].args, '--route-parameters'), ['project=proj', 'repositoryId=fake', 'pullRequestId=7']);
+  assert.deepEqual(parsePrs(JSON.stringify([prOf(R, pull({ labels: null }), { labels: [{ name: 'owner-first' }] })]), ['Jcollier0120'])[0].labels, ['owner-first']);
+
+  ran.length = 0;
+  assert.deepEqual(JSON.parse(must(await host.viewPr(R, 'claude/feature', 'number,labels'))).labels, [{ name: 'owner-first' }], 'by its branch: found by list, then shown');
+  assert.deepEqual(ran.map((r) => r.at), ['pr list active refs/heads/claude/feature', 'pr show 7', 'GET pullRequestLabels pullRequestId=7']);
+
+  ran.length = 0;
+  must(await host.viewPr(R, 7, 'state,isDraft'));
+  assert.deepEqual(ran.map((r) => r.at), ['pr show 7'], 'labels not asked: the route not asked');
+
+  ran.length = 0;
+  assert.deepEqual(JSON.parse(must(await host.listPrs(R, { state: 'open', fields: 'number,labels' })))[0].labels, [{ name: 'owner-done' }], 'listed: list gives them');
+  assert.deepEqual(ran.map((r) => r.at), ['pr list active']);
+
+  // The route refused: said as az said it, not as a pull request with no labels.
+  const refusing = recorded((at) => (at === 'pr show 7' ? ok(pull({ labels: null })) : at.startsWith('GET pullRequestLabels') ? { code: 1, out: '', err: 'ERROR: TF401180: The requested pull request was not found.' } : undefined));
+  const r = await refusing.host.viewPr(R, 7, 'labels');
+  assert.equal(r.code, 1);
+  assert.match(r.err, /TF401180/);
+});
+
 test('a branch with no active pull request says so as gh does, so steward vouch vouches for the branch', async () => {
   const { host, ran } = recorded(() => ok([]));
   const a = await host.viewPr(R, 'claude/feature', 'number,state,headRefOid,isCrossRepository');

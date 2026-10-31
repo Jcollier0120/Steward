@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.147.2
+## 2.147.4
 
 **A fetch or push to Codeberg, or another host Git Credential Manager signs in to by OAuth, works again once its sign-in is an hour old. GCM handed back its expired access token, the host refused it, and since 2.146.6 nothing told GCM to make a new one.**
 
@@ -30,6 +30,52 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing to do. An agent whose runner can't start `cmdkey` (it isn't on PATH) gets nothing from it, and the refusal stands as before.
+## 2.147.3
+
+**A release built in a folder reached through a link, such as a temp folder on a Dev Drive, is built again. Kit 2.146.5's check refused it, naming every file its code imports as left out.**
+
+### What changed
+
+- **`importsLeftOut(stage)`** (minify.ts) measures each import from the stage's real path. esbuild names every importer by its real path, so a stage behind a link (a junction, a symbolic link, or a folder mounted from another drive) was measured from the wrong place. Each file then counted as not carried, and the release wasn't built ("Not built: its code imports what the release doesn't carry"). On Windows a link to another drive gave whole paths in place of the stage's own. Found on a PC whose `%TEMP%` is a link to a Dev Drive: an agent's `npm run release` and the kit's own release tests stopped there.
+
+### Before you update
+
+- Nothing to do.
+
+## 2.147.1
+
+**About's What's new shows only the newest 5 versions, not up to 10, and says how many older ones it leaves out, so the page stays short.**
+
+### What changed
+
+- **whats-new.ts sends About at most 5 versions' entries** (`MAX_SHOWN`, 10 before), the newest of those the latest updates brought. The older ones' entries aren't sent at all, only how many there are, so the page carries no more than it shows. Which versions the updates brought is worked out as before (the latest update, and every other of the last 30 days).
+- **`/api/whats-new` answers `{ versions, older }`**: `older` is how many older versions with an entry the same updates brought besides the 5, 0 when none was left out.
+- **The section (react/whats-new.tsx)**: with older ones left out, its line reads "The newest 5 versions that came with Watchman's latest updates, newest first.", and a line under the versions says "3 older versions aren't shown here." ("1 older version isn't shown here."). With none left out it reads as before, "4 versions came with Watchman's latest updates, newest first.", and has no line under them.
+- A release still carries its changelog's newest 20 entries (notes.ts' `RELEASE_ENTRIES`), so About can count the older versions up to 15 of them.
+
+### What's new
+
+- **`chooseWhatsNew(entries, record, version, now)`** and **`whatsNewAnswer(now)`** in whats-new.ts give `{ versions, older }` (`WhatsNewAnswer`). `chooseVersions` and `whatsNew` still give the versions alone.
+- **`olderOf(json)`** in react/whats-new.tsx reads `older` from `/api/whats-new`'s answer, and `WhatsNewList` takes `older`.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 2.147.0
+
+**A page can be laid out for three widths, a phone, a 1080p desktop and a 2K or 3K screen, so a wide screen shows sections side by side rather than one long column.**
+
+### What's new
+
+- **`Columns` and `Span`** (react/layout.tsx, their styles in react/layout-css.ts): sections side by side, with CSS only. One column when narrow (under 1200 px); `desktop` columns from 1200 px, a 1080p screen (1 to 3, default 2); `wide` columns from 2000 px, a 2K or 3K screen (1 to 4, default 3). `weights="2 1"` makes them unequal. A `Span` takes the whole row (`cols="all"`) or two columns of three or four (`cols={2}`).
+- **`PageTabs` `side`**: from that width up (`'wide'` or `'desktop'`), a page's tabs are drawn side by side, a column each under its name, with no tab strip. Narrower, they stay tabs. Every panel is drawn as before, so nothing about the tour or what's typed in a tab changes.
+- **`useWidth()`** and `widthNow()` give `'narrow' | 'desktop' | 'wide'`, kept as the window is resized, for a page that changes more than its columns. `DESKTOP_FROM` and `WIDE_FROM` give the widths.
+- **spec/LAYOUT.md** says how to lay a page out at the three widths, and how to check it.
+
+### Before you update
+
+- Nothing: a page looks as before until it uses them.
 
 ## 2.146.8
 
@@ -3811,6 +3857,7 @@ Written on the Intel laptop and released first in this version.
 
 - Take the kit and release as usual.
 - Check your own scripts for `path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)`, or the `pathToFileURL(...).href === import.meta.url` form, and compare real paths instead (spec/DEV-DRIVES.md, rule 2). Started from a linked folder, such a script does nothing and exits 0.
+
 ## 2.73.0
 
 **The checks pace holds to the gentle cap, with memory caps and turns, and the pace is the owner's setting alone: viewing a page, Run now or a fast vouch no longer lifts it.**

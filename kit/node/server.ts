@@ -20,7 +20,7 @@ import { shadowedRoutes } from './kit-routes.ts';
 import { dataFile, writeJson } from './store.ts';
 import { repair, repairKinds } from './repair.ts';
 import { peerResult, workStatus, type WorkExtra } from './work-status.ts';
-import { noteVersion, whatsNew } from './whats-new.ts';
+import { noteVersion, whatsNewAnswer } from './whats-new.ts';
 
 /**
  * The agent's page and API, on 127.0.0.1 only. On top of that, the same rules as Manor's server:
@@ -254,8 +254,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     // (over Manor's link: GET /agents/<id>/result). Read only.
     '/api/peer/result': ({ query }) => peerResult(query),
     // What's new (whats-new.ts, kit 2.143.0): its changelog's entries for its latest updates, newest first, which the
-    // About view asks for as it opens. The changelog is read at the first ask, and kept.
-    '/api/whats-new': () => ({ json: { versions: whatsNew() } }),
+    // About view asks for as it opens: the newest 5, and how many older ones are left out (kit 2.147.1). The changelog
+    // is read at the first ask, and kept.
+    '/api/whats-new': () => ({ json: whatsNewAnswer() }),
     ...opts.get,
   };
   const post: Record<string, Handler> = {

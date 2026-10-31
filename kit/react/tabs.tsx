@@ -81,8 +81,11 @@ export function usePageTab(ids: readonly string[]): [string, (id: string) => voi
  * whatever the tab (a summary). Each tab's panel is drawn and kept while hidden, so what's typed or ticked in one
  * stays, and the tour finds every part (it shows the tab a part is in: SHOW_TAB). A Section titled as its tab leaves
  * the title to the tab (TabLabel). A short page needs none.
+ *
+ * `side` (kit 2.147.0, layout.tsx): from that width up ('desktop' or 'wide'), the tabs are drawn side by side, a column
+ * each under its name, with no strip of tabs: a wide screen shows them all at once. Narrower, they're tabs as before.
  */
-export function PageTabs({ tabs, label = 'Sections' }: { tabs: PageTab[]; label?: string }) {
+export function PageTabs({ tabs, label = 'Sections', side }: { tabs: PageTab[]; label?: string; side?: 'desktop' | 'wide' }) {
   const ids = tabs.map((t) => t.id);
   const [tab, choose] = usePageTab(ids);
   useEffect(() => {
@@ -93,14 +96,28 @@ export function PageTabs({ tabs, label = 'Sections' }: { tabs: PageTab[]; label?
     window.addEventListener(SHOW_TAB, show);
     return () => window.removeEventListener(SHOW_TAB, show);
   }, [ids.join(' ')]);
+  const panels = tabs.map((t) => (
+    <div key={t.id} className="tab-panel" role="tabpanel" id={`page-panel-${t.id}`} aria-labelledby={`page-tab-${t.id}`} hidden={t.id !== tab}>
+      {side && (
+        <h2 className="ui-side-title">
+          {t.label}
+          {t.count !== undefined && <span className="muted ui-count"> · {t.count}</span>}
+        </h2>
+      )}
+      <TabLabel.Provider value={t.label}>{t.content}</TabLabel.Provider>
+    </div>
+  ));
+  if (side)
+    return (
+      <div className={`ui-tabs-side ui-tabs-side-${side}`} style={{ '--ui-tabs': tabs.length } as Record<string, number>}>
+        <Tabs tabs={tabs} tab={tab} onChoose={choose} label={label} prefix="page" />
+        <div className="ui-side-panels">{panels}</div>
+      </div>
+    );
   return (
     <>
       <Tabs tabs={tabs} tab={tab} onChoose={choose} label={label} prefix="page" />
-      {tabs.map((t) => (
-        <div key={t.id} className="tab-panel" role="tabpanel" id={`page-panel-${t.id}`} aria-labelledby={`page-tab-${t.id}`} hidden={t.id !== tab}>
-          <TabLabel.Provider value={t.label}>{t.content}</TabLabel.Provider>
-        </div>
-      ))}
+      {panels}
     </>
   );
 }

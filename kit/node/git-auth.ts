@@ -24,7 +24,7 @@ import { advertisedRefs, answerTo, lsRemoteText } from './smart-http.ts';
  *   repository's own, and is left as it is. A host whose sign-in can't be read (none kept, a public repository, SSH,
  *   http) is left to git as before.
  * - Git Credential Manager hands back an OAuth access token however old (Codeberg's last an hour), and makes a new one
- *   from its refresh token only once it keeps none. So since kit 2.147.2, a sign-in the host refuses (401) on a private
+ *   from its refresh token only once it keeps none. So since kit 2.147.4, a sign-in the host refuses (401) on a private
  *   repository, with nothing else to show why, is forgotten where Windows Credential Manager names its refresh token
  *   (`git:https://refresh_token.<host>`): once a while for each sign-in, the refresh token kept. The helper is then
  *   asked again with the host's WWW-Authenticate, as git asks after a 401 (GCM knows a Gitea or Forgejo host by it
@@ -298,7 +298,7 @@ export function listsTarget(out: string, target: string): boolean {
 
 /**
  * What git's credential helper keeps for a sign-in: the header it makes, and its answer as given (to forget it by, or
- * keep it by). `made`: the helper made it from its refresh token once told to forget the access token (kit 2.147.2).
+ * keep it by). `made`: the helper made it from its refresh token once told to forget the access token (kit 2.147.4).
  */
 interface Fill {
   header: string;
@@ -365,7 +365,7 @@ interface Used {
  * `o.fetch` asks a host itself (an ls-remote, and whether a refused sign-in is stale). Under node --test only a test's
  * own is used: a test's made-up remote is never asked over the network.
  *
- * `o.windows` looks in Windows Credential Manager for Git Credential Manager's refresh tokens (kit 2.147.2). Under
+ * `o.windows` looks in Windows Credential Manager for Git Credential Manager's refresh tokens (kit 2.147.4). Under
  * node --test only where a test says so: a test never reads the person's Credential Manager.
  */
 export function signedIn<O extends GitRunOptions, R extends GitRan>(inner: GitRunner<O, R>, now: () => number = Date.now, o: { fetch?: typeof fetch; windows?: boolean } = {}): GitRunner<O, R> {

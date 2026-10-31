@@ -153,7 +153,7 @@ test("how a host answers a read, signed in or not (kit 2.146.6): 200 for refs, i
   assert.equal(asked.length, n, 'none of those asked');
 });
 
-test("what a host asks a sign-in by on a 401 (kit 2.147.2): its WWW-Authenticate, several joined as fetch joins them; none otherwise", async () => {
+test("what a host asks a sign-in by on a 401 (kit 2.147.4): its WWW-Authenticate, several joined as fetch joins them; none otherwise", async () => {
   const answer = (res: () => Response) => (async () => res()) as typeof fetch;
   const refused = (h: [string, string][]) => answer(() => new Response('no', { status: 401, headers: h }));
   assert.deepEqual(await answerTo(URL_, { env: ENV, fetch: refused([['www-authenticate', 'Basic realm="Gitea"']]) }), { status: 401, challenge: 'Basic realm="Gitea"' });
