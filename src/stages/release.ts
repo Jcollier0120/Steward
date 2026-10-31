@@ -487,7 +487,8 @@ async function tagRelease(ctx: Ctx, e: Employee, o: { repo: string; commit: stri
     }
     ctx.log(`[${e.id}] releasing ${tag} from ${o.remote} (${o.commit.slice(0, 7)}): a ${hostFor(ctx, e).name} release, its notes ${entry ? 'the CHANGELOG.md entry' : p.changelog === 'none' ? 'none' : "the host's"}`);
     const r = await hostFor(ctx, e).createRelease(e.repo, { tag, target: o.commit, title: `${e.name} ${o.version}`, notesFile });
-    if (r.code !== 0) return result(e, 'failed', `gh release create ${tag} failed (exit ${r.code}): ${(r.err || r.out).trim().split('\n').pop()}${networkNote(`${r.out}\n${r.err}`)}`, { version: o.version, commit: o.commit.slice(0, 7) });
+    // Said as its host's own (glab's on a GitLab, tea's on a Gitea), not as gh's whichever made it.
+    if (r.code !== 0) return result(e, 'failed', `the ${hostFor(ctx, e).name} release ${tag} couldn't be made (exit ${r.code}): ${(r.err || r.out).trim().split('\n').pop()}${networkNote(`${r.out}\n${r.err}`)}`, { version: o.version, commit: o.commit.slice(0, 7) });
   } finally {
     rmSync(notesDir, { recursive: true, force: true });
   }

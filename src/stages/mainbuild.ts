@@ -52,7 +52,7 @@ export async function coveredBy(ctx: Ctx, e: Employee, commit: string): Promise<
   if (hostIs(ctx, e) === 'git') return null;
   const team = ctx.settings.team;
   const sha = commit.slice(0, 7);
-  const direct = await vouchOn(ctx, e.repo, commit, team).catch(() => null);
+  const direct = await vouchOn(ctx, e, commit, team).catch(() => null);
   if (direct) return `${direct} vouched for ${sha}`;
   const repo = checkoutOf(e);
   const parents = (await gitMaybe(ctx.run, repo, 'rev-list', '--parents', '-n', '1', commit))?.trim().split(/\s+/).slice(1) ?? [];
@@ -61,7 +61,7 @@ export async function coveredBy(ctx: Ctx, e: Employee, commit: string): Promise<
   if (!tree) return null;
   for (const p of parents) {
     if ((await gitMaybe(ctx.run, repo, 'rev-parse', `${p}^{tree}`))?.trim() !== tree) continue;
-    const by = await vouchOn(ctx, e.repo, p, team).catch(() => null);
+    const by = await vouchOn(ctx, e, p, team).catch(() => null);
     if (by) return `${by} vouched for ${p.slice(0, 7)}, which ${sha} merged unchanged`;
   }
   return null;

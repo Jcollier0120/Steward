@@ -5,6 +5,7 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { GlanceRelease, RepoGlance } from './glance.ts';
 import { bitbucketLogin, TOKEN_HOST, whereBitbucket } from './hosts/bitbucket.ts';
 import { teaLogins, whereGitea } from './hosts/gitea.ts';
+import { glabLogin } from './hosts/gitlab.ts';
 import { remoteOf } from './git.ts';
 import { tagGlob, versionOfTag, type ResolvedPipeline } from './repoconfig.ts';
 import type { Runner } from './run.ts';
@@ -198,7 +199,7 @@ export function whyPlainGit(e: Parameters<typeof hostOf>[0], s: Parameters<typeo
   const server = e.repo.split('/')[0].toLowerCase();
   const missing = {
     github: has(look, 'gh') ? "the GitHub CLI isn't signed in (gh auth login)" : "the GitHub CLI isn't installed",
-    gitlab: has(look, 'glab') ? "the GitLab CLI isn't signed in (glab auth login)" : "the GitLab CLI isn't installed",
+    gitlab: has(look, 'glab') ? `the GitLab CLI isn't signed in (${glabLogin(e.resolvedPipeline?.host?.baseUrl)})` : "the GitLab CLI isn't installed",
     azure: has(look, 'az') ? "the Azure CLI isn't signed in (az login)" : "the Azure CLI isn't installed",
     gitea: has(look, 'tea') ? `the Gitea CLI has no login for ${server} (tea login add --url ${e.resolvedPipeline?.host?.baseUrl ?? `https://${server}`})` : "the Gitea CLI (tea) isn't installed",
     bitbucket: "no Bitbucket API token is in this PC's credential store",

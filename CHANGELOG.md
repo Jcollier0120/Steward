@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.268
+
+**GitLab's way on a GitLab of your own, tried on a real GitLab CE, and the Rust sample built by cargo: two more opt-in live tests, and what they found fixed.**
+
+### What changed
+
+- **A GitLab of your own on another port, or on http** (`"baseUrl": "http://gitlab.acme.lan:8080"`) is worked with GitLab's way. glab was asked with `--hostname` and the port gone, so every request went to https on port 443, and a claim, a vouch and a release all failed. glab's `--hostname` refuses a port, so the Steward names such a server to glab by `GITLAB_HOST`.
+- **Its vouches count:** a vouch on such a GitLab is seen when its merge is built. It was looked up over plain git, by the repository's name alone, so main was tested again before every release.
+- **Its merge command and its sign-in** name the server with its port: `glab mr merge 7 --repo http://gitlab.acme.lan:8080/team/app`, and `glab auth login --hostname gitlab.acme.lan:8080 --api-protocol http --git-protocol http` in the dry run's "why plain git" line. Without the port, glab answers "404 Not Found".
+- **A failed release on a host** names that host ("the GitLab release v1.2.0 couldn't be made"), not `gh release create`.
+- **docs/PIPELINE.md** gives the GitLab sign-in on http or another port and the sentence the dry run says until glab is signed in. It also says that the dry run needs Developer options, and how to install Rust (MSVC with Visual Studio's Build Tools, GNU without them).
+- **Live tests** (skipped unless switched on):
+  - `STEWARD_LIVE_HOSTS=1` with `GITLAB_CE_URL` (`http://127.0.0.1:<port>` only) and `GITLAB_CE_TOKEN_FILE` (a file holding only its admin token) runs `test/gitlab-ce-live.test.ts`. It makes a user of its own with a token, and a group, subgroup and projects, and signs glab in to a config folder of its own. Then it runs scm.ts's detection, Look after, the dry run, a claim through its claims ref, a vouch on a merge request, the merge command it says, a release on the GitLab through glab, a tag release, and the dry run's sentence once signed out. Afterwards it hard-deletes the user, and the group it alone owns goes with it.
+  - `STEWARD_LIVE_HOSTS=1` with cargo installed runs the Rust sample in a copy of its own: its dry run, then cargo's build, tests and release command, a failing test that holds it, and its tags by its own format. Without cargo, it's skipped and says why.
+
 ## 0.36.267
 
 **The kit's AI assistants and the Steward's any-host pipeline, tried with the real tools: opt-in live tests, and what they found fixed.**
