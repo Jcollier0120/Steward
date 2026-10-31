@@ -75,7 +75,7 @@ tag. Every tool keeps its own sign-in, and the Steward never reads, stores or sh
 | Host | Its tool | Sign in | The Steward checks with |
 | --- | --- | --- | --- |
 | GitHub, GitHub Enterprise | the GitHub CLI, `gh` | `gh auth login` | `gh auth token` (its exit code only) |
-| GitLab, self-hosted GitLab | the GitLab CLI, `glab` | `glab auth login --hostname gitlab.acme.com` | `glab auth status` |
+| GitLab, self-hosted GitLab | the GitLab CLI, `glab` | `glab auth login --hostname gitlab.acme.com` (on http or another port: `glab auth login --hostname gitlab.acme.lan:8080 --api-protocol http --git-protocol http`) | `glab auth status` |
 | Azure DevOps | the Azure CLI, `az` | `az login` | `az account show` |
 | Gitea, Forgejo, Codeberg | the Gitea CLI, `tea` (a version with `tea api`) | `tea login add --url https://codeberg.org` | `tea logins list` |
 | Bitbucket Cloud | Git for Windows | an Atlassian API token in Windows' Credential Manager, as `git:https://api.bitbucket.org` (your email as the user name) | `git credential fill` |
@@ -83,6 +83,15 @@ tag. Every tool keeps its own sign-in, and the Steward never reads, stores or sh
 
 With Settings' **Team** empty, the accounts these tools are signed in as are the team: theirs are the vouches the
 Steward trusts.
+
+Where a repository's pipeline names its host but that host's tool isn't installed or signed in here, the dry run (below)
+says so in its second line, and what to run. For a GitLab of your own at `http://gitlab.acme.lan:8080`:
+
+```text
+why plain git: its pipeline names GitLab, but the GitLab CLI isn't signed in (glab auth login --hostname gitlab.acme.lan:8080 --api-protocol http --git-protocol http), as the Steward last looked (2026-10-31 02:30 UTC): plain git until then
+```
+
+Until then a release to its host (`"releaseTo": "host"`) is held, and the build says why: plain git has no releases.
 
 ## An example for each stack
 
@@ -119,6 +128,10 @@ Each of these is a sample in [samples/pipelines](../samples/pipelines), ready to
   "releaseTo": "command"
 }
 ```
+
+Install Rust with rustup (`winget install Rustlang.Rustup`). Its usual toolchain, MSVC, links with Visual Studio's C++
+Build Tools. On a PC without them, `rustup default stable-x86_64-pc-windows-gnu` switches to the GNU toolchain, which
+links by itself. The Rust sample builds, tests and releases with either.
 
 **.NET:** published, then released to a folder.
 
@@ -162,12 +175,17 @@ to a folder.
 }
 ```
 
+On http or another port, give its address as it is (`"baseUrl": "http://gitlab.acme.lan:8080"`): the Steward asks glab
+for it there, and the merge command a vouch says names it there too
+(`glab mr merge 7 --repo http://gitlab.acme.lan:8080/team/app`).
+
 ## See it first: the dry run
 
 `steward build --dry-run` prints each step a build of one repository would take, and runs, fetches and writes nothing.
 It takes a repository the Steward looks after (its id or name), or the folder of any clone on this PC, looked after or
 not. A clone that isn't looked after yet is read as Look after would take it, so you can try a `.steward.json` before
-you add the repository.
+you add the repository. Like the Steward's other commands for developers, it needs Developer options on in Manor's
+Settings.
 
 ```bash
 node tools/samples.ts

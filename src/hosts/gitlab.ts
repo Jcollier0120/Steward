@@ -35,16 +35,17 @@ export class GitLab implements SourceHost {
     this.site = site;
   }
 
-  /** One request: `glab api <endpoint> --hostname <host>`, a body as JSON from a file (--input), never inline. */
+  /** One request: `glab api <endpoint> --hostname <host>` (glabHost), a body as JSON from a file (--input), never inline. */
   private async api(hostname: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', endpoint: string, body?: Record<string, unknown>, timeoutMs = 2 * MINUTE): Promise<Answer> {
-    const args = ['api', endpoint, '--hostname', hostname, ...(method === 'GET' ? [] : ['-X', method])];
+    const where = glabHost(hostname, this.site);
+    const args = ['api', endpoint, ...where.args, ...(method === 'GET' ? [] : ['-X', method])];
     const what = `glab api ${method} ${endpoint}`;
-    if (!body) return { ...(await this.run('glab', args, { cwd: this.cwd, timeoutMs })), what };
+    if (!body) return { ...(await this.run('glab', args, { cwd: this.cwd, timeoutMs, env: where.env })), what };
     const dir = mkdtempSync(path.join(os.tmpdir(), 'steward-body-'));
     try {
       const file = path.join(dir, 'body.json');
       writeFileSync(file, JSON.stringify(body));
-      return { ...(await this.run('glab', [...args, '--input', file, '-H', 'Content-Type: application/json'], { cwd: this.cwd, timeoutMs })), what };
+      return { ...(await this.run('glab', [...args, '--input', file, '-H', 'Content-Type: application/json'], { cwd: this.cwd, timeoutMs, env: where.env })), what };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -204,6 +205,51 @@ const MR_STATE: Record<PrState, string> = { open: 'opened', closed: 'closed', me
 export function whereIs(repo: string): { hostname: string; project: string } {
   const i = repo.indexOf('/');
   return { hostname: repo.slice(0, i), project: repo.slice(i + 1) };
+}
+
+/** A GitLab of your own's address (its pipeline's host baseUrl) taken apart, or null for one that isn't an http(s) URL. Pure. */
+function siteOf(site: string | null): { hostname: string; host: string; origin: string; plain: boolean } | null {
+  if (!site) return null;
+  try {
+    const u = new URL(site);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return { hostname: u.hostname.toLowerCase(), host: u.host.toLowerCase(), origin: u.origin, plain: u.protocol === 'https:' && !u.port };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How glab is told which GitLab a request goes to: `--hostname <host>`, as before; for a GitLab of your own on another
+ * port or on http (its pipeline's baseUrl), GITLAB_HOST set to its address instead. glab 1.126's api refuses a port in
+ * --hostname ("invalid hostname"), and without one asks https on port 443 (Steward 0.36.268, found live on a GitLab CE
+ * at http://127.0.0.1:8929). Pure.
+ */
+export function glabHost(hostname: string, site: string | null): { args: string[]; env?: Record<string, string> } {
+  const s = siteOf(site);
+  if (s && !s.plain && s.hostname === hostname.toLowerCase()) return { args: [], env: { GITLAB_HOST: s.origin } };
+  return { args: ['--hostname', hostname] };
+}
+
+/**
+ * How to sign glab in to a repository's GitLab, said in a hint: `glab auth login`, with the server of your own named by
+ * its pipeline's baseUrl, its port and its http kept. Pure.
+ */
+export function glabLogin(site: string | null | undefined): string {
+  const s = siteOf(site ?? null);
+  if (!s) return 'glab auth login';
+  return `glab auth login --hostname ${s.host}${s.origin.startsWith('http:') ? ' --api-protocol http --git-protocol http' : ''}`;
+}
+
+/**
+ * The repository a "glab mr merge" is told (--repo): its host/path name, or for a GitLab of your own on another port or
+ * on http, its address and path (http://127.0.0.1:8929/group/app), which glab takes; the name alone, its port gone,
+ * glab answers "404 Not Found" (found live). Pure.
+ */
+export function glabRepo(repo: string, site: string | null | undefined): string {
+  const s = siteOf(site ?? null);
+  const { hostname, project } = whereIs(repo);
+  return s && !s.plain && s.hostname === hostname.toLowerCase() ? `${s.origin}/${project}` : repo;
 }
 
 const parsed = <T>(text: string): T | null => {

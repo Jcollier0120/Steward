@@ -67,7 +67,7 @@ test("a build trusts a team member's vouch on main's head, or on the PR head a m
     return ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
   };
 
-  assert.equal(await vouchOn(look({ [merge]: [byTeam, { context: 'other', state: 'failure', creator: { login: 'someone' } }] }), e.repo, merge, ['Jcollier0120']), 'jcollier0120');
+  assert.equal(await vouchOn(look({ [merge]: [byTeam, { context: 'other', state: 'failure', creator: { login: 'someone' } }] }), e, merge, ['Jcollier0120']), 'jcollier0120');
   assert.equal(await coveredBy(look({ [merge]: [byTeam] }), e, merge), `jcollier0120 vouched for ${merge.slice(0, 7)}`);
   assert.equal(await coveredBy(look({ [prHead]: [byTeam] }), e, merge), `jcollier0120 vouched for ${prHead.slice(0, 7)}, which ${merge.slice(0, 7)} merged unchanged`);
   assert.equal(await coveredBy(look({ [otherHead]: [byTeam] }), e, moved), null, "a PR head's vouch doesn't cover a merge that changed its code");

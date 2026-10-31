@@ -21,6 +21,7 @@ import { kitContentOf, kitTrialOfClone } from './trial.ts';
 import { noteVouchTime, vouchLimit } from './vouchtime.ts';
 import { hostFor } from '../hosts/index.ts';
 import { teaLogin, whereGitea } from '../hosts/gitea.ts';
+import { glabRepo } from '../hosts/gitlab.ts';
 
 /**
  * A PR whose checks its author ran and saw pass, at its head commit: its author merges it (Steward 0.36.124: the Steward
@@ -60,16 +61,18 @@ export const isWrightPr = (pr: PrInfo) => pr.labels.includes(WRIGHT_LABEL) || pr
  */
 export async function vouchedBy(ctx: Ctx, e: Employee, pr: PrInfo, team: string[]): Promise<string | null> {
   if (pr.whose !== 'team' || pr.fork || !pr.headOid || isWrightPr(pr)) return null;
-  return vouchOn(ctx, e.repo, pr.headOid, team);
+  return vouchOn(ctx, e, pr.headOid, team);
 }
 
 /**
- * The team member who vouched for a commit of `repo` (the latest VOUCH_CONTEXT status on it says success, and one of
- * `team`'s accounts set it), or null. A PR's head (vouchedBy), or main's head at a build (mainbuild.ts).
+ * The team member who vouched for a commit of the employee's repository (the latest VOUCH_CONTEXT status on it says
+ * success, and one of `team`'s accounts set it), or null. A PR's head (vouchedBy), or main's head at a build
+ * (mainbuild.ts). Its host is asked as its pipeline says (a GitLab of your own at its baseUrl): by its name alone, one
+ * whose name doesn't say gitlab was asked over plain git, so its vouches were never seen (Steward 0.36.268, found live).
  * Never throws.
  */
-export async function vouchOn(ctx: Ctx, repo: string, commit: string, team: string[]): Promise<string | null> {
-  const r = await hostFor(ctx, { repo }).statuses(repo, commit);
+export async function vouchOn(ctx: Ctx, e: Pick<Employee, 'repo' | 'resolvedPipeline'>, commit: string, team: string[]): Promise<string | null> {
+  const r = await hostFor(ctx, e).statuses(e.repo, commit);
   if (r.code !== 0) return null;
   let list: any[];
   try {
@@ -88,15 +91,16 @@ export async function vouchOn(ctx: Ctx, repo: string, commit: string, team: stri
  * What to do once vouched: merge it yourself, and the next build releases it. Said as its host takes it (GitHub's gh, as
  * before, unless `o` says), with its pipeline's merge method (repoconfig.ts). tea takes a repository as owner/name and
  * its server as a login (`o.login`, else one named after its host, as tea login add names one), never host/owner/name,
- * which it answers "not found" (Steward 0.36.267, found live). Pure.
+ * which it answers "not found" (Steward 0.36.267, found live). glab takes a GitLab of your own on another port or on
+ * http by its address (`o.site`, its pipeline's baseUrl: glabRepo). Pure.
  */
-export function MERGE_IT_YOURSELF(pr: number | null, repo: string, o: { host?: Host; method?: MergeMethod; login?: string | null } = {}): string {
+export function MERGE_IT_YOURSELF(pr: number | null, repo: string, o: { host?: Host; method?: MergeMethod; login?: string | null; site?: string | null } = {}): string {
   const n = pr ?? '<number>';
   const method = o.method ?? 'merge';
   const gitea = whereGitea(repo);
   const how: Record<Exclude<Host, 'git'>, [string, string]> = {
     github: ['GitHub', `gh pr merge ${n} --repo ${repo} --${method}`],
-    gitlab: ['GitLab', `glab mr merge ${n} --repo ${repo}${method === 'merge' ? '' : ` --${method}`}`],
+    gitlab: ['GitLab', `glab mr merge ${n} --repo ${glabRepo(repo, o.site)}${method === 'merge' ? '' : ` --${method}`}`],
     azure: ['Azure DevOps', `az repos pr update --id ${n} --status completed${method === 'squash' ? ' --squash true' : ''}`],
     gitea: ['Gitea', gitea ? `tea pr merge ${n} --repo ${gitea.owner}/${gitea.name} --login ${o.login || gitea.hostname} --style ${method}` : `tea pr merge ${n} --style ${method}, in its clone`],
     bitbucket: ['Bitbucket', `its Merge button on bitbucket.org, ${method === 'merge' ? 'merge commit' : method === 'squash' ? 'squash' : 'fast-forward'}`],
@@ -166,7 +170,7 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   o.say(`${e.name} #${pr.number} at ${head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, { ...o, repo, head });
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `#${pr.number}'s checks failed at ${head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): ${MERGE_IT_YOURSELF(pr.number, repo, { host: hostIs(ctx, e), method: p.mergeMethod, login: await mergeLogin(ctx, e, repo) })}. Push to it again, and vouch again.` };
+  return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): ${MERGE_IT_YOURSELF(pr.number, repo, { host: hostIs(ctx, e), method: p.mergeMethod, login: await mergeLogin(ctx, e, repo), site: p.host?.baseUrl })}. Push to it again, and vouch again.` };
 }
 
 /**
@@ -369,5 +373,5 @@ async function vouchBranch(ctx: Ctx, e: Employee, o: { dir: string; repo: string
   o.say(`${e.name} ${o.branch} (${claim ? `v${claim.version}, ` : ''}no PR yet) at ${o.head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, o);
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `${o.branch}'s checks failed at ${o.head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  return { ok: true, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): open its PR${claim ? ` (v${claim.version})` : ''} from that commit, and ${MERGE_IT_YOURSELF(null, o.repo, { host: hostIs(ctx, e), method: pipelineOf(e).mergeMethod, login: await mergeLogin(ctx, e, o.repo) })}` };
+  return { ok: true, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): open its PR${claim ? ` (v${claim.version})` : ''} from that commit, and ${MERGE_IT_YOURSELF(null, o.repo, { host: hostIs(ctx, e), method: pipelineOf(e).mergeMethod, login: await mergeLogin(ctx, e, o.repo), site: pipelineOf(e).host?.baseUrl })}` };
 }

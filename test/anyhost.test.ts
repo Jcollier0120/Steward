@@ -17,7 +17,8 @@ const L = await import('../src/links.ts');
 const S = await import('../src/scm.ts');
 const { hostFor } = await import('../src/hosts/index.ts');
 const { PlainGit } = await import('../src/hosts/plaingit.ts');
-const { MERGE_IT_YOURSELF, PLAIN_GIT_VOUCH } = await import('../src/stages/vouch.ts');
+const { MERGE_IT_YOURSELF, PLAIN_GIT_VOUCH, vouchOn } = await import('../src/stages/vouch.ts');
+const { glabHost, glabLogin, glabRepo } = await import('../src/hosts/gitlab.ts');
 const { readVersion, setVersion } = await import('../src/versions.ts');
 const { remoteOf } = await import('../src/git.ts');
 const { notClaimed } = await import('../src/claims.ts');
@@ -92,6 +93,41 @@ test("a server of your own on another port or on http: its pages at its pipeline
   assert.equal(hostFor(o as any, { repo: 'codeberg.org/me/app' }).releaseUrl('codeberg.org/me/app', 'v1'), 'https://codeberg.org/me/app/releases/tag/v1', 'no baseUrl: as before');
   const gitlab = hostFor({ ...o, host: () => 'gitlab' as const } as any, { repo: 'code.acme.com/team/app', resolvedPipeline: resolvePipeline({ repo: 'code.acme.com/team/app', test: [], versionFiles: [], release: '' }, { file: { host: { kind: 'gitlab', baseUrl: 'http://code.acme.com:8080' } } }) });
   assert.equal(gitlab.releaseUrl('code.acme.com/team/app', 'v1'), 'http://code.acme.com:8080/team/app/-/releases/v1');
+});
+
+test("a GitLab of your own on another port or on http: glab told it by GITLAB_HOST, its vouches seen, its merge and sign-in said with its port (found live)", async () => {
+  // glab 1.126's api refuses --hostname 127.0.0.1:8929 ("invalid hostname"), and --hostname 127.0.0.1 asks https on 443.
+  const ce = 'http://127.0.0.1:8929';
+  assert.deepEqual(glabHost('127.0.0.1', ce), { args: [], env: { GITLAB_HOST: 'http://127.0.0.1:8929' } });
+  assert.deepEqual(glabHost('code.acme.com', 'https://code.acme.com:8443'), { args: [], env: { GITLAB_HOST: 'https://code.acme.com:8443' } });
+  assert.deepEqual(glabHost('code.acme.com', 'http://code.acme.com'), { args: [], env: { GITLAB_HOST: 'http://code.acme.com' } }, 'http on its own port too');
+  assert.deepEqual(glabHost('code.acme.com', 'https://code.acme.com'), { args: ['--hostname', 'code.acme.com'] }, 'https on 443: as before');
+  assert.deepEqual(glabHost('gitlab.com', null), { args: ['--hostname', 'gitlab.com'] });
+  assert.deepEqual(glabHost('gitlab.com', ce), { args: ['--hostname', 'gitlab.com'] }, "another host's address: its own, as before");
+  assert.equal(glabLogin(ce), 'glab auth login --hostname 127.0.0.1:8929 --api-protocol http --git-protocol http');
+  assert.equal(glabLogin('https://code.acme.com:8443'), 'glab auth login --hostname code.acme.com:8443');
+  assert.equal(glabLogin(undefined), 'glab auth login');
+  assert.equal(glabRepo('127.0.0.1/g/sub/app', ce), 'http://127.0.0.1:8929/g/sub/app');
+  assert.equal(glabRepo('gitlab.com/g/app', null), 'gitlab.com/g/app');
+  assert.equal(glabRepo('code.acme.com/g/app', 'https://code.acme.com'), 'code.acme.com/g/app');
+
+  // Its requests, as the host makes them: no --hostname, GITLAB_HOST its address.
+  const repo = '127.0.0.1/g/sub/app';
+  const e = { repo, resolvedPipeline: resolvePipeline({ repo, test: [], versionFiles: [], release: '' }, { file: { host: { kind: 'gitlab', baseUrl: ce } } }) };
+  const asked: { args: string[]; env?: Record<string, string | undefined> }[] = [];
+  const statuses = [{ name: 'steward/tested', status: 'success', author: { username: 'steward-live' }, created_at: '2026-10-31T00:00:00Z', id: 1 }];
+  const run = async (_cmd: string, args: string[], opts?: { env?: Record<string, string | undefined> }) => (asked.push({ args, env: opts?.env }), { code: 0, out: JSON.stringify(args[1] === 'user' ? { username: 'steward-live' } : statuses), err: '' });
+  const ctx = { run, neutralDir: home, host: (x: { repo: string; resolvedPipeline?: unknown }) => S.hostOf(x as any, { sourceControl: 'auto', releasesCastellan: false }, signedIn('glab')) };
+  const gl = hostFor(ctx as any, e);
+  assert.equal((await gl.whoAmI()).out.trim(), 'steward-live');
+  assert.deepEqual(asked.at(-1), { args: ['api', 'user'], env: { GITLAB_HOST: ce } });
+  // A vouch on it is seen at a build: asked of its GitLab as its pipeline says, not over plain git by its name alone.
+  assert.equal(await vouchOn(ctx as any, e, 'abc123', ['steward-live']), 'steward-live');
+  assert.deepEqual(asked.at(-1), { args: ['api', 'projects/g%2Fsub%2Fapp/repository/commits/abc123/statuses?per_page=100'], env: { GITLAB_HOST: ce } });
+  assert.equal(await vouchOn(ctx as any, { repo }, 'abc123', ['steward-live']), null, 'by its name alone: plain git, no statuses');
+  assert.match(MERGE_IT_YOURSELF(3, repo, { host: 'gitlab', method: 'squash', site: ce }), /\(glab mr merge 3 --repo http:\/\/127\.0\.0\.1:8929\/g\/sub\/app --squash\)/);
+  const look = { at: '2026-10-30T23:59:00.000Z', tools: [{ cmd: 'git', name: 'Git', version: 'git version 2.55.0', supported: true }, { cmd: 'glab', name: 'GitLab CLI', version: 'glab 1.126.0', supported: true, signedIn: false }] };
+  assert.equal(S.whyPlainGit(e, { sourceControl: 'auto', releasesCastellan: false }, look), "its pipeline names GitLab, but the GitLab CLI isn't signed in (glab auth login --hostname 127.0.0.1:8929 --api-protocol http --git-protocol http), as the Steward last looked (2026-10-30 23:59 UTC): plain git until then");
 });
 
 test("why plain git, where a pipeline names its host: the dry run says what would give it its host's way (found live)", () => {
