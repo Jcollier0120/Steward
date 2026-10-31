@@ -39,13 +39,13 @@ export const LAYOUT_CSS = `
 .ui-side-title { display: none; margin: 0 0 4px; }
 @media ${query(DESKTOP_FROM)} {
   .ui-tabs-side-desktop > .tabs { display: none; }
-  .ui-tabs-side-desktop > .ui-side-panels { display: grid; grid-template-columns: repeat(var(--ui-tabs), minmax(0, 1fr)); column-gap: 20px; align-items: start; }
+  .ui-tabs-side-desktop > .ui-side-panels { display: grid; grid-template-columns: repeat(var(--ui-tabs), minmax(0, 1fr)); column-gap: 20px; align-items: start; margin-top: 22px; }
   .ui-tabs-side-desktop > .ui-side-panels > .tab-panel[hidden] { display: block; }
   .ui-tabs-side-desktop .ui-side-title { display: block; }
 }
 @media ${query(WIDE_FROM)} {
   .ui-tabs-side-wide > .tabs { display: none; }
-  .ui-tabs-side-wide > .ui-side-panels { display: grid; grid-template-columns: repeat(var(--ui-tabs), minmax(0, 1fr)); column-gap: 20px; align-items: start; }
+  .ui-tabs-side-wide > .ui-side-panels { display: grid; grid-template-columns: repeat(var(--ui-tabs), minmax(0, 1fr)); column-gap: 20px; align-items: start; margin-top: 22px; }
   .ui-tabs-side-wide > .ui-side-panels > .tab-panel[hidden] { display: block; }
   .ui-tabs-side-wide .ui-side-title { display: block; }
 }
