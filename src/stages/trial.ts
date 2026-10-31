@@ -244,7 +244,7 @@ async function tryAll(ctx: Ctx, steward: Employee, commit: string, t: KitTrial, 
       if (again) t.retry = (t.retry ?? []).filter((x) => x.id !== id);
       else t.pending = (t.pending ?? []).filter((x) => x !== id);
       const retry = again ? [] : counted.filter(underLoad);
-      for (const r of retry) ctx.log(`[${r.id}] kit ${t.kit} trial: its failure may be this PC's load, not the kit's: tried once more, alone, once the rest are tried`);
+      for (const r of retry) ctx.log(`[${r.id}] kit ${t.kit} trial: it didn't pass, which may be this PC's load, not the kit's: tried once more, alone, once the rest are tried`);
       if (retry.length) t.retry = [...(t.retry ?? []), ...retry.map((r) => ({ id: r.id, name: r.name, message: r.message }))];
       const settled = counted.filter((r) => !retry.includes(r)).map((r) => (again && r.outcome === 'failed' ? { ...r, message: `${r.message}; tried once more, alone, after the rest: it failed again` } : r));
       t.failed = [...t.failed, ...failuresOf(settled)];
@@ -455,15 +455,16 @@ export async function kitTrialAtMain(ctx: Ctx, steward: Employee, at: { commit: 
   // Retired since it failed (retired.ts): it gets no kit, so its failure no longer holds it.
   const gone = trial.failed.filter((f) => retired.has(f.id));
   if (gone.length) {
-    ctx.log(`[${APP.id}] ${gone.map((f) => f.name).join(', ')} failed kit ${trial.kit}'s checks, and Manor has retired ${gone.length === 1 ? 'it' : 'them'} since: no longer held against the kit`);
+    ctx.log(`[${APP.id}] ${gone.map((f) => f.name).join(', ')} didn't pass kit ${trial.kit}'s checks, and Manor has retired ${gone.length === 1 ? 'it' : 'them'} since: no longer held against the kit`);
     trial.failed = trial.failed.filter((f) => !retired.has(f.id));
   }
   if (!fresh && trial.failed.length) {
     // Fixed on the agents' side: each whose branch moved since is tried again with the same kit.
     const moved = await movedOn(ctx, trial);
     if (moved.length) {
-      const why = trial.steward === APP.version ? `moved on since kit ${trial.kit} failed their checks` : `failed kit ${trial.kit}'s checks as Steward ${trial.steward ?? 'before 0.35.73'} tried them`;
-      ctx.log(`[${APP.id}] ${moved.map((e) => e.name).join(', ')} ${why}: trying ${moved.length === 1 ? 'it' : 'them'} again`);
+      const one = moved.length === 1;
+      const why = trial.steward === APP.version ? `${one ? 'has' : 'have'} changed since kit ${trial.kit} didn't pass ${one ? 'its' : 'their'} checks there` : `didn't pass kit ${trial.kit}'s checks as Steward ${trial.steward ?? 'before 0.35.73'} tried them`;
+      ctx.log(`[${APP.id}] ${moved.map((e) => e.name).join(', ')} ${why}: trying ${one ? 'it' : 'them'} again`);
       const results = await withKitTree(ctx, steward, at.commit, (dir) => tryEach(ctx, moved, trial.kit, dir, { repo, head: at.commit }));
       // Cut short by the network: the kept verdict stands, and the next build tries them again (their main still moved).
       for (const r of results) if (r.outcome === 'failed' && (await networkFailure(ctx, r.message))) return { state: 'going', why: `its kit's trial on ${r.name} was cut short by the network: the next round tries again` };

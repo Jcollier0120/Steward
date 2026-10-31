@@ -21,6 +21,46 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. Where round vouches are on, a round that vouches for a PR takes as long as that PR's checks, and the next round waits for it.
 
+## 0.36.282
+
+**On Azure DevOps, a pull request's owner-first and owner-done labels are seen again when the Steward asks for it by its number. `az repos pr show` leaves a pull request's labels out, so the Steward read every one as unlabelled.**
+
+### What changed
+
+- **A pull request's labels** come from Azure DevOps' labels route (`az devops invoke --resource pullRequestLabels`, GET) when it is asked by its number or branch (viewPr) with its labels wanted. Found live on WEASELDEV03 (AMD), 2026-10-31, on the owner's test organization:
+  - `az repos pr show` gave `"labels": null` on a pull request labelled `wright`;
+  - `az repos pr list` and the labels route both gave `wright`.
+  - So a recheck never saw owner-done on an Azure DevOps pull request (recheck.ts), and anything that read one by its number saw no owner-first.
+- Listed pull requests keep the labels `az repos pr list` gives, so a list asks nothing more. A label Azure DevOps marks inactive is left out.
+
+## 0.36.281
+
+**A release is built again on a PC whose temp folder, or an agent's own folder, is reached through a link, such as a Dev Drive (kit 2.147.3).**
+
+### What changed
+
+- **Kit 2.147.3** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): the check that a release carries every file its code imports measured the imports from the folder's linked path, while esbuild gives their real path. Every file then counted as left out, and nothing was built. It measures from the real path now.
+
+## 0.36.279
+
+**The Steward's log no longer reads as a failure where it only says an agent is tried again, no longer holds a kit back, or the PC woke. The Surveyor took each such line for one and raised a warning on Manor.**
+
+### What changed
+
+- **Main's kit trial** says "Assayer has changed since kit 2.146.6 didn't pass its checks there: trying it again", where it said "Assayer moved on since kit 2.146.6 failed their checks". The Surveyor reads "failed" anywhere in a line of the Steward's log as something going wrong, so Manor showed a warning for a retry that then passed. Three more of the trial's lines are worded the same way: a verdict another Steward kept ("didn't pass kit 2.146.6's checks as Steward 0.36.270 tried them: trying it again"), an agent Manor has retired since ("didn't pass kit 2.146.6's checks, and Manor has retired it since: no longer held against the kit"), and a failure that may be this PC's load ("it didn't pass, which may be this PC's load, not the kit's: tried once more, alone").
+- **The PC waking** is "the PC woke after 855 min: what didn't go through before is tried again" in serve.log, not "what failed before".
+- **A line that says something failed** is worded as it was, and is still a warning. So is a line that runs something again but quotes the failure's own words, such as an agent's checks run once more: those words match, so its wording was left as it was.
+- The tests read each line as the Surveyor does: `test/surveyor.ts` copies its test of a line (Surveyor `src/logs.ts`, ERROR_RE and NOT_AN_ERROR).
+
+## 0.36.278
+
+**What's new, at the top of every agent's About page, now shows just the newest 5 versions an update brought, so it stays short.**
+
+### What changed
+
+- **Kit 2.147.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): an agent's About page showed every version its latest updates brought, up to 10, each in its own card. Now it shows the newest 5. When the updates brought more than that, the line above them says "The newest 5 versions that came with Watchman's latest updates, newest first.", and a short line under them says how many older ones aren't shown ("3 older versions aren't shown here."). The older versions' notes are still in Manor's What's new for each update.
+- Each agent gets it with the kit, through the Steward, at its next update.
+
 ## 0.36.277
 
 **It carries kit 2.147.0, whose pages can be laid out for a phone, a 1080p desktop and a 2K or 3K screen.**
@@ -32,6 +72,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
 ## 0.36.275
 
 **Repositories on Azure DevOps are worked with again where the organization is one of Microsoft accounts: the Steward asks Azure DevOps through the Azure CLI's azure-devops extension, not `az rest`, which got the organization's sign-in page, never its API.**
@@ -1144,6 +1185,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Each employee gets these with the kit 2.101.0. An X Elite or X Plus laptop set up before keeps the model it has; to move it to the small model, set up local AI again.
+
 ## 0.36.180
 
 **A new kit is no longer held back because an employee's test copied the words the kit just changed, or because of what happens to be on this PC.**
@@ -2790,6 +2832,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 - A pull request that sets no version above its branch is no longer read again every round while nothing about it has changed.
 - A branch with no version found at its head isn't read again until the branch moves.
 - The staff table reads a clone's branch correctly from git when the clone uses git's newer reftable format.
+
 ## 0.36.38
 
 **Kit 2.74.5: the NPU's local AI gets faster on PCs already set up, Intel's NPU 3720 writes about 13% faster, AMD's NPU runs on a 16 GB Ryzen AI, and a newer NPU is tried instead of refused.**
@@ -2836,6 +2879,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 ### Before you update
 
 - Nothing: it updates itself as usual. Settings' "Catch PRs up" switches this off along with the round's catch-ups.
+
 ## 0.36.32
 
 **It hands out kit 2.74.4: each PowerShell an agent starts is one process, not two.**
@@ -2871,6 +2915,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 - All the releases waiting to be signed share one alarm, raised at once so you know to connect SimplySign. It clears by itself once they're released. They are no longer filed as failures that the rounds won't try again, and none is handed to the Wright: there's nothing in the code to fix.
 - A release that loses SimplySign partway through its build waits the same way.
 - Releases that failed earlier only because SimplySign wasn't connected are tried again: they wait for it like the rest.
+
 ## 0.36.29
 
 **Tests, checks and builds run faster: they get a third of the processor, three at a time, and long test runs get the time they need.**
@@ -2904,6 +2949,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 ### Before you update
 
 - Nothing: it updates itself as usual. The time limit starts once three vouches of a repository have passed on this version.
+
 ## 0.36.27
 
 **Your second development PC can claim versions of the manor's repositories.**
@@ -2917,6 +2963,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 ### Before you update
 
 - Nothing: it updates itself as usual. To claim from another PC, see "Except a version claim from the maker's other development PCs" in the README.
+
 ## 0.36.26
 
 **Kit 2.74.0: a page layout for the agents your AI assistant calls, taken from Reeve's page, so they all read alike.**
@@ -2924,6 +2971,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 ### What's new
 
 - The kit the Steward hands out (2.74.0) has a shared page layout for agents that serve MCP, like Reeve and the Assayer: what needs you first, then a row of tiles at a glance, connecting your AI, what was kept out of its context, then the agent's own sections. Lists show one line per item; details and long output open beside the page instead of filling it. Agents take it up as they pin kit 2.74.0, the Assayer first.
+
 ## 0.36.25
 
 **The other agents see a merge within seconds, however long the Steward's round takes.**
@@ -2933,6 +2981,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 - The Steward shares the branches of your repositories on GitHub with the other agents, so they needn't ask GitHub themselves. Reeve uses them to bring each clone's main up to a merge. Before, they were read only as a round began, and a long round (one trying a new kit can take hours) left them out of date: the agents asked GitHub again, and Reeve couldn't tell a clone was behind.
 - Now the Steward's page also reads them on its own every 5 minutes, unless a round just did, and 10 seconds after each pull request it merges.
 - It costs about one of GitHub's 5,000 points an hour per read, and only happens while the Steward merges and releases by itself and is on duty. It never touches the tenth of GitHub's limit the Steward keeps spare.
+
 ## 0.36.24
 
 **The Steward starts fewer git commands when it takes its turn in a repository or shares a version claim, and when it clears its work folders, so its rounds put less load on your PC.**
@@ -2943,6 +2992,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 - Reading a turn record or the claims back no longer starts git to read the file. The Steward reads it from the objects it already has, and asks git only when they're packed.
 - Clearing a stage's worktree used to list every worktree with git, remove it, and then always tidy up git's records of worktrees. The Steward now reads those records from git's own files and tidies up only when a worktree folder has gone missing. A folder that isn't there anymore costs no git command at all. Worktrees under a junction or a Dev Drive, and ones deleted by hand, are still found and cleared as before.
 - The Steward's own tests of these parts run faster: on the owner's laptop, the turn and claims tests went from 29 to 23 seconds and the catch-up's from 37 to 35.
+
 ## 0.36.23
 
 **Kit 2.73.5: the kit sees one folder as one folder, however it's named.**
@@ -2955,6 +3005,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
 ## 0.36.22
 
 **The Steward's kit 2.73.4: an NPU that loads its model slowly is given the time its own settings allow.**
@@ -2969,6 +3020,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 ### Before you update
 
 - Nothing: it updates itself as usual. The agents get it as each takes kit 2.73.4.
+
 ## 0.36.21
 
 **An update cut short by a crash no longer leaves an agent that can't start: what an update or a save writes is on the disk before it takes its place.**
@@ -3037,6 +3089,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 ### Before you update
 
 - Nothing: it updates itself as usual. If you set the Work folder in settings.json to a Dev Drive's own letter to get releases going, you can leave it: it now works either way.
+
 ## 0.36.13
 
 **The Steward's checks go easier on your PC: a quarter of the processor at most, a cap on memory, two runs at a time, and your Settings as the only switch.**
