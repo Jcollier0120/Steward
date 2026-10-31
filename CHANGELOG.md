@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.286
+
+**While the Watchman rolls back a graphics card's driver, or a new driver is being installed on it, no model work goes to that card until it's done: the Steward hands kit 2.148.0 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.148.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): the kit reads the Watchman's `driver-work.json`, which names each card whose driver its guard is changing (a rollback, through a crash until the start-up that finishes it, or a driver being installed). While a card is named there, no request goes to it, a person's included, and no model server starts on it. The keeper stops the servers it has there within seconds, after a 10-second grace for requests under way. Nothing is marked failed, and the other cards and the processor go on. Found on GAMING-010 on 2026-10-31: the manor started a model server on the RTX 4080 SUPER in the middle of the guard's rollback, and Windows stopped with an error about 14 seconds later.
+
+### Before you update
+
+- Nothing: it updates itself as usual, and the agents take kit 2.148.0 through their kit updates.
+
 ## 0.36.284
 
 **The Steward's fetches and pushes to Codeberg work again once Git Credential Manager's sign-in there is an hour old: it hands kit 2.147.4 out, and runs on it.**
