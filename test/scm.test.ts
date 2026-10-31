@@ -244,3 +244,30 @@ test("Release it: tag, over plain git: the Steward's own annotated tag; a tag al
   assert.match((await pushReleaseTag(ctx, e, { repo: f.checkout, commit: head, version: '1.2.1' })) ?? '', /^origin has v1\.2\.1 already, at .{7}, not .{7}$/);
   assert.equal(await pushReleaseTag(ctx, e, { repo: f.checkout, commit: sh(f.origin, 'rev-parse', 'v1.2.0^{commit}'), version: '1.2.0' }), null);
 });
+
+test("a release its host refuses: said as that host's own, not as gh's, with what the host said after a space", async () => {
+  const f = fakeEmployee(path.join(home, 'notes'), { version: '1.4.0', kit: null });
+  writeFileSync(
+    path.join(home, 'settings.json'),
+    JSON.stringify({
+      employees: [{ id: 'notes', name: 'Notes', repo: 'gitlab.com/me/notes', checkout: f.checkout, branch: 'main', usesKit: false, parts: [], fill: '', test: [], versionFiles: ['package.json'], release: 'tag', install: '', approve: '' }],
+      workRoot: path.join(home, 'work'),
+      releasesCastellan: false,
+      tasteBeforeRelease: false,
+      afterRelease: [],
+      alarms: { manorUrl: '', surveyorUrl: '', toast: false },
+    }),
+  );
+  const asked: string[][] = [];
+  const run = async (cmd: string, args: string[], opts?: any) => {
+    if (cmd === 'gh') return { code: 127, out: '', err: "gh isn't installed" };
+    if (cmd !== 'glab') return realRun(cmd, args, opts);
+    asked.push(args);
+    return args.includes('POST') ? { code: 1, out: '', err: 'glab: 403 Forbidden (HTTP 403)' } : { code: 0, out: '[]', err: '' };
+  };
+  const scm: ScmLook = { at: new Date().toISOString(), tools: [{ cmd: 'git', name: 'Git', version: 'git version 2.55.0', supported: true }, { cmd: 'glab', name: 'GitLab CLI', version: 'glab 1.126.0', supported: true, signedIn: true }] };
+  const out = await runStage('release', {}, { run, scm });
+  assert.equal(out.results[0].outcome, 'failed', out.log.join('\n'));
+  assert.equal(out.results[0].message, "the GitLab release v1.4.0 couldn't be made (exit 1): glab: 403 Forbidden (HTTP 403)");
+  assert.ok(asked.some((a) => a.includes('POST') && a.some((x) => /^projects\/me%2Fnotes\/releases$/.test(x))), 'asked of its GitLab through glab');
+});
