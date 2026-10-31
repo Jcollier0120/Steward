@@ -126,14 +126,14 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   // By itself (Settings' default): it builds at set times, a build releasing each repository's main, its rounds only
   // looking between builds but for an urgent fix; and Run now, in the title bar.
   assert.match(withOne, /It builds at set times \(00:00, 06:00, 12:00, 18:00; Settings: Build pipeline\): a build releases each employee whose branch carries something new \(everyone merges their own PRs\)/);
-  assert.match(withOne, /Between builds, a round every 10 minutes only looks, except for an urgent fix/);
+  assert.match(withOne, /Between builds, a round every 10 minutes releases nothing, except for an urgent fix/);
   // A vendor's screen saver putting the PC to sleep (the kit's sleep-cause.ts): its line, after the rest; none under
   // node --test, where nothing of the PC is read.
   assert.equal(body.round.asleep, null);
   assert.doesNotMatch(withOne, /went to sleep/);
   const asleep = "This PC went to sleep 3 times since Wednesday at 16:54, the last today at 11:10, each about 30 seconds after ASUS's OLED Care screen saver came on. The staff stop while it sleeps: to keep them working while you're away, turn off Pixel Refresh in MyASUS → OLED Care.";
   const sleeping = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true, asleep } });
-  assert.match(sleeping, /only looks, except for an urgent fix[^<]*This PC went to sleep 3 times since Wednesday at 16:54[^<]*turn off Pixel Refresh in MyASUS → OLED Care\./);
+  assert.match(sleeping, /releases nothing, except for an urgent fix[^<]*This PC went to sleep 3 times since Wednesday at 16:54[^<]*turn off Pixel Refresh in MyASUS → OLED Care\./);
   assert.match((await renderStewardBody('RunNow'))(body), /data-post="\/api\/run"[^>]*>Run now</);
   // No turn taken yet: nothing said of release PCs.
   assert.equal(body.turns, null);

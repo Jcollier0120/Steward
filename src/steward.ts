@@ -29,6 +29,7 @@ import { releaseUnreleased, roundDidSomething, roundFailuresFile, signedBetween,
 import { clearRolloutHolds, loadRolloutFailures, rollout, takeRolloutResults, urgentKit } from './stages/rollout.ts';
 import { loadSelfFailures, releaseSelf, selfFactsAlone, selfToFinish, trialAhead } from './stages/self.ts';
 import { heldKit, kitTrialsFile, TRIAL_GOING, type KitTrial } from './stages/trial.ts';
+import { roundVouch } from './stages/roundvouch.ts';
 import { stampAll } from './stages/stamp.ts';
 import { compareVersions } from './kitfiles.ts';
 import { settleWholeSuite } from './stages/wholesuite.ts';
@@ -574,6 +575,17 @@ async function kitAhead(ctx: Ctx, o: StageOptions): Promise<string | null> {
   }
 }
 
+/**
+ * Of the repositories a round's vouch has a PR to vouch for in (stages/roundvouch.ts), those this PC releases: their
+ * turns taken with the round's (lease.ts), so each is vouched for on one PC only. The Steward's own among them as its
+ * own turn.
+ */
+async function vouchTurns(ctx: Ctx, o: StageOptions, es: Employee[]): Promise<Employee[]> {
+  const self = es.find((e) => e.id === APP.id && !ctx.settings.employees.includes(e)) ?? null;
+  const t = await takeTurnsFor(ctx, o, es.filter((e) => e !== self), self, true);
+  return [...t.acting, ...(self && t.selfActs ? [self] : [])];
+}
+
 /** Runs a stage in one of the stages' slots (stages/slots.ts), records it, and refreshes the staff's table; a round only when it did something. */
 /** A round this long or longer says where its time went (lapped). */
 export const SLOW_ROUND_MS = 10_000;
@@ -658,7 +670,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       let rolloutWaits: { kit: string; own: string } | null = null;
       /** Whether this round took turns (lease.ts): then each repository's shared claims are looked at too. */
       let turnsOn = false;
-      // The build pipeline (pipeline.ts): between builds a round only looks; a build's rounds release each main.
+      // The build pipeline (pipeline.ts): between builds a round releases nothing (it may vouch for a PR); a build's rounds release each main.
       const pipeline = name === 'round' && !quiet && pipelineRounds(o) ? loadPipeline() : null;
       const planned: PipelineMode = pipeline ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { buildNow: ask.buildNow, employees: ask.employees, wokeAt: lastWoke() }) : { kind: 'outside' };
       // An urgent fix on main between builds (stages/urgent.ts): a build of its own for its repository, at once.
@@ -713,6 +725,12 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             if (ahead) {
               log(`[${APP.id}] ${ahead}`);
               if (ahead.includes(TRIAL_GOING)) out.soon = true;
+            }
+            // One of the team's open PRs vouched for, as steward vouch would (stages/roundvouch.ts): not while the kit's
+            // trial ahead is still going, which has the PC's checks to itself until it ends.
+            if (!ahead?.includes(TRIAL_GOING)) {
+              for (const line of await roundVouch(ctx, { next: mode.next ?? null, self: selfEmployee(ctx, o), now: at, acting: (es) => vouchTurns(ctx, o, es) })) log(line);
+              lap('round vouches');
             }
           }
         } else if (name === 'round') {

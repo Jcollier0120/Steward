@@ -353,9 +353,10 @@ export interface CloneTrial {
  * tries them (tryEach: a worktree and branch of each agent's own, only the tests the kit reaches, in a scratch profile,
  * nothing committed or pushed), but one at a time: a person waits on a vouch, on a PC they're working at. One that fails
  * as under load (underLoad) is tried once more, alone, after the rest, as main's trial does. A try the network cut
- * short stops it (`cut`). `say` hears each agent's turn and what it came to.
+ * short stops it (`cut`), and so does `at.stop`, asked before each agent's try: its reason, when it gives one (a round's
+ * vouch yields to the build: roundvouch.ts). `say` hears each agent's turn and what it came to.
  */
-export async function kitTrialOfClone(ctx: Ctx, at: { dir: string; head: string; kit: string }, say: (line: string) => void): Promise<CloneTrial> {
+export async function kitTrialOfClone(ctx: Ctx, at: { dir: string; head: string; kit: string; stop?: () => string | null }, say: (line: string) => void): Promise<CloneTrial> {
   const staff = trialStaff(ctx, retiredOf(ctx));
   const t: CloneTrial = { kit: at.kit, staff: staff.length, passed: 0, failed: [], own: [], cut: null };
   const retry: Employee[] = [];
@@ -376,12 +377,15 @@ export async function kitTrialOfClone(ctx: Ctx, at: { dir: string; head: string;
     t.passed += settled.outcome === 'done' ? 1 : 0;
     t.own.push(...ownFailuresOf([settled]));
   };
+  const stopped = () => (t.cut = at.stop?.() ?? null);
   for (const [i, e] of staff.entries()) {
+    if (stopped()) return t;
     say(`kit ${at.kit} tried on ${e.name} (${i + 1} of ${staff.length})`);
     await tryOne(e, false);
     if (t.cut) return t;
   }
   for (const e of retry) {
+    if (stopped()) return t;
     say(`kit ${at.kit} tried on ${e.name} once more, alone`);
     await tryOne(e, true);
     if (t.cut) return t;
