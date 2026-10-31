@@ -6,7 +6,7 @@ import { after, test } from 'node:test';
 
 // Connecting an agent's MCP server to the AI assistants (node/assistants.ts, kit 2.146.0), each in a home of its own
 // under the temp folder: nothing here reads or writes this PC's own assistants, and ~/.claude.json is never written.
-const { ASSISTANTS, CLAUDE_MSIX, addServer, assistantsFound, claudeAddArgs, pasteFor, removeServer, serverProblem, serverStatus } = await import('./fixture/src/kit/assistants.ts');
+const { ASSISTANTS, CLAUDE_MSIX, addServer, assistantOfClient, assistantsFound, claudeAddArgs, pasteFor, removeServer, serverProblem, serverStatus } = await import('./fixture/src/kit/assistants.ts');
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'kit-assistants-test-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
@@ -93,6 +93,16 @@ const CASES: Case[] = [
     broken: 'model = "o4-mini\n[mcp_servers.other\n',
   },
   {
+    id: 'copilot-cli',
+    folder: '.copilot',
+    file: '.copilot/mcp-config.json',
+    // As `copilot mcp add other -- node other.js` writes it (Copilot CLI 1.0.105).
+    others: '{\n  "mcpServers": {\n    "other": {\n      "tools": [\n        "*"\n      ],\n      "type": "local",\n      "command": "node",\n      "args": [\n        "other.js"\n      ]\n    }\n  }\n}\n',
+    keep: ['    "other": {\n      "tools": [\n        "*"\n      ],\n      "type": "local",\n      "command": "node",\n      "args": [\n        "other.js"\n      ]\n    }'],
+    broken: '{\n  "mcpServers": {\n    "other": { "type": "local", "command": "node" }\n',
+    json: 'mcpServers',
+  },
+  {
     id: 'cline',
     folder: `${R}/Code/User/globalStorage/saoudrizwan.claude-dev`,
     file: `${R}/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`,
@@ -119,13 +129,26 @@ const CASES: Case[] = [
   },
 ];
 
-test('the matrix covers every assistant the kit knows: ten, by these names', () => {
-  assert.deepEqual(ASSISTANTS.map((a) => a.id), ['claude-code', 'claude-desktop', 'cursor', 'vscode', 'windsurf', 'gemini', 'codex', 'cline', 'continue', 'zed']);
+test('the matrix covers every assistant the kit knows: eleven, by these names', () => {
+  assert.deepEqual(ASSISTANTS.map((a) => a.id), ['claude-code', 'claude-desktop', 'cursor', 'vscode', 'windsurf', 'gemini', 'codex', 'copilot-cli', 'cline', 'continue', 'zed']);
   assert.deepEqual([...CASES.map((c) => c.id), 'claude-code'].sort(), ASSISTANTS.map((a) => a.id).sort());
   for (const a of ASSISTANTS) {
     assert.ok(a.name && a.key && ['cli', 'json', 'jsonc', 'toml', 'yaml'].includes(a.format), a.id);
     for (const os of ['win32', 'darwin', 'linux'] as const) assert.ok(a.configPaths[os].length && a.installedPaths[os].length, `${a.id} on ${os}`);
+    assert.ok(a.clients.length, `${a.id}: what it calls itself at connect`);
   }
+});
+
+test('each assistant by what it calls itself at connect (clientInfo.name), as agents have seen them', () => {
+  const of = (client: string) => assistantOfClient(client)?.id ?? null;
+  assert.deepEqual(
+    ['claude-code', 'claude-ai', 'cursor-vscode', 'Visual Studio Code', 'Visual Studio Code - Insiders', 'windsurf-client', 'gemini-cli-mcp-client', 'mcp-test-client', 'codex-mcp-client', 'copilot-cli', 'Cline', 'continue-client', 'continue-cli-client', 'Zed'].map(of),
+    ['claude-code', 'claude-desktop', 'cursor', 'vscode', 'vscode', 'windsurf', 'gemini', 'gemini', 'codex', 'copilot-cli', 'cline', 'continue', 'continue', 'zed'],
+  );
+  assert.equal(of('notepad'), null);
+  assert.equal(of('cline'), null, 'as it says it, case and all');
+  const all = ASSISTANTS.flatMap((a) => a.clients);
+  assert.equal(new Set(all).size, all.length, 'no name for two assistants');
 });
 
 for (const c of CASES) {
@@ -143,7 +166,7 @@ for (const c of CASES) {
     assert.equal(added.backup, undefined, 'no file before: no backup');
     assert.match(added.words, /has castellan now/);
     assert.deepEqual(serverStatus(c.id, 'castellan', o), { id: c.id, name: 'castellan', state: 'connected', file, entry: { command: 'node', args: ['C:\\Castellan\\mcp.js'] } });
-    if (c.json) assert.deepEqual(JSON.parse(readFileSync(file, 'utf8'))[c.json].castellan, { command: 'node', args: ['C:\\Castellan\\mcp.js'], env: { CASTELLAN_HOME: 'C:\\Castellan' } });
+    if (c.json) assert.deepEqual(JSON.parse(readFileSync(file, 'utf8'))[c.json].castellan, { ...(c.id === 'copilot-cli' ? { tools: ['*'], type: 'local' } : {}), command: 'node', args: ['C:\\Castellan\\mcp.js'], env: { CASTELLAN_HOME: 'C:\\Castellan' } });
     if (c.id === 'continue') assert.match(readFileSync(file, 'utf8'), /^name: Local Assistant\nversion: 1\.0\.0\nschema: v1\nmcpServers:\n {2}- name: "castellan"\n/, 'a new config.yaml has what Continue needs at its top');
     if (c.id === 'vscode') assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).servers.castellan.type, 'stdio');
     // The same again: nothing to write.
@@ -288,7 +311,7 @@ test('an unknown assistant is said, and nothing is done', async () => {
   for (const id of ['notepad', '', 'Cursor', '../cursor']) {
     const s = serverStatus(id, 'castellan', { home });
     assert.equal(s.state, 'not-installed');
-    assert.match(s.problem ?? '', /isn't an AI assistant the kit knows: claude-code, claude-desktop, cursor, vscode, windsurf, gemini, codex, cline, continue, zed\./);
+    assert.match(s.problem ?? '', /isn't an AI assistant the kit knows: claude-code, claude-desktop, cursor, vscode, windsurf, gemini, codex, copilot-cli, cline, continue, zed\./);
     for (const r of [await addServer(id, SERVER, { home }), await removeServer(id, 'castellan', { home })]) {
       assert.deepEqual([r.ok, r.changed], [false, false]);
       assert.match(r.words, /isn't an AI assistant the kit knows/);
@@ -402,21 +425,25 @@ test("Claude Code: claude runs in the home and env the kit was given, never this
   assert.deepEqual(envs, [{ PATH: path.join(home, 'bin'), CLAUDE_CONFIG_DIR: config, HOME: home, USERPROFILE: home }]);
 });
 
-test('CODEX_HOME and GEMINI_CLI_HOME move those assistants as their CLIs read them (found live)', async () => {
+test('CODEX_HOME, COPILOT_HOME and GEMINI_CLI_HOME move those assistants as their CLIs read them (found live)', async () => {
   const home = homeWith();
   const codex = path.join(homeWith('codex-elsewhere'), 'codex-elsewhere');
+  const copilot = path.join(homeWith('copilot-elsewhere'), 'copilot-elsewhere');
   const gemini = homeWith('.gemini');
-  const env = { CODEX_HOME: codex, GEMINI_CLI_HOME: gemini };
+  const env = { CODEX_HOME: codex, COPILOT_HOME: copilot, GEMINI_CLI_HOME: gemini };
   assert.deepEqual(assistantsFound(home, { platform: 'win32', env }).map((a) => [a.id, a.file]), [
     ['gemini', path.join(gemini, '.gemini', 'settings.json')],
     ['codex', path.join(codex, 'config.toml')],
+    ['copilot-cli', path.join(copilot, 'mcp-config.json')],
   ]);
-  for (const id of ['codex', 'gemini']) {
+  assert.deepEqual(serverStatus('copilot-cli', 'castellan', { home, platform: 'win32' }).state, 'not-installed', 'without it: the home has none');
+  for (const id of ['codex', 'copilot-cli', 'gemini']) {
     const r = await addServer(id, SERVER, { home, platform: 'win32', env });
     assert.deepEqual([r.ok, r.changed], [true, true], r.words);
     assert.equal(serverStatus(id, 'castellan', { home, platform: 'win32', env }).state, 'connected');
   }
   assert.match(readFileSync(path.join(codex, 'config.toml'), 'utf8'), /^\[mcp_servers\.castellan\]$/m);
+  assert.equal(JSON.parse(readFileSync(path.join(copilot, 'mcp-config.json'), 'utf8')).mcpServers.castellan.type, 'local');
   assert.ok(JSON.parse(readFileSync(path.join(gemini, '.gemini', 'settings.json'), 'utf8')).mcpServers.castellan);
   assert.deepEqual(filesIn(home), [], 'nothing in the home: each went where its variable says');
   // Without them: the home's own.
@@ -449,6 +476,7 @@ test('the text to paste, in each assistant\'s own form', () => {
   assert.equal(pasteFor('vscode', s), JSON.stringify({ servers: { castellan: { type: 'stdio', command: 'node', args: ['mcp.js'] } } }, null, 2));
   assert.equal(pasteFor('zed', s), JSON.stringify({ context_servers: { castellan: { command: 'node', args: ['mcp.js'] } } }, null, 2));
   assert.equal(pasteFor('codex', s), '[mcp_servers.castellan]\ncommand = "node"\nargs = ["mcp.js"]');
+  assert.equal(pasteFor('copilot-cli', s), JSON.stringify({ mcpServers: { castellan: { tools: ['*'], type: 'local', command: 'node', args: ['mcp.js'] } } }, null, 2));
   assert.equal(pasteFor('continue', s), 'mcpServers:\n  - name: "castellan"\n    command: "node"\n    args:\n      - "mcp.js"');
   assert.equal(pasteFor('claude-code', s), 'claude mcp add --scope user castellan -- node mcp.js');
 });
@@ -529,10 +557,10 @@ test("Cline 4: ~/.cline/data's settings once that folder is there, even beside V
 
 test('on macOS and Linux: each assistant in its own place', () => {
   const sup = 'Library/Application Support';
-  const mac = homeWith(`${sup}/Claude`, `${sup}/Code/User`, '.config/zed', '.cursor', '.codex');
+  const mac = homeWith(`${sup}/Claude`, `${sup}/Code/User`, '.config/zed', '.cursor', '.codex', '.copilot');
   assert.deepEqual(
     assistantsFound(mac, { platform: 'darwin' }).map((a) => [a.id, a.file!.slice(mac.length + 1).replace(/\\/g, '/')]),
-    [['claude-desktop', `${sup}/Claude/claude_desktop_config.json`], ['cursor', '.cursor/mcp.json'], ['vscode', `${sup}/Code/User/mcp.json`], ['codex', '.codex/config.toml'], ['zed', '.config/zed/settings.json']],
+    [['claude-desktop', `${sup}/Claude/claude_desktop_config.json`], ['cursor', '.cursor/mcp.json'], ['vscode', `${sup}/Code/User/mcp.json`], ['codex', '.codex/config.toml'], ['copilot-cli', '.copilot/mcp-config.json'], ['zed', '.config/zed/settings.json']],
   );
   const linux = homeWith('.config/Claude', '.config/Code/User/globalStorage/saoudrizwan.claude-dev', '.config/zed', '.gemini');
   assert.deepEqual(

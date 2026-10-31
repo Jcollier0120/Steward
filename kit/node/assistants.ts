@@ -20,7 +20,7 @@ import path from 'node:path';
  *   command, the text to paste is given.
  */
 
-export type AssistantId = 'claude-code' | 'claude-desktop' | 'cursor' | 'vscode' | 'windsurf' | 'gemini' | 'codex' | 'cline' | 'continue' | 'zed';
+export type AssistantId = 'claude-code' | 'claude-desktop' | 'cursor' | 'vscode' | 'windsurf' | 'gemini' | 'codex' | 'copilot-cli' | 'cline' | 'continue' | 'zed';
 
 /** How an assistant keeps its servers: through its own command (cli), or in a file of JSON, JSON with comments, TOML or YAML. */
 export type AssistantFormat = 'cli' | 'json' | 'jsonc' | 'toml' | 'yaml';
@@ -53,6 +53,11 @@ export interface Assistant {
    * yet or not, and the old places never again (Claude Desktop's Claude-Data on Windows, Cline's ~/.cline/data).
    */
   moved?: boolean;
+  /**
+   * What it calls itself when it connects to an MCP server (its clientInfo.name), as agents have seen it (Reeve's
+   * records): an agent names a connected client by these. Empty where none was seen.
+   */
+  clients: string[];
 }
 
 /** An MCP server as an agent gives it: its name in the assistant, and the command that starts it. */
@@ -72,7 +77,7 @@ const vscodeUser = (rest: string): AssistantPaths => ({ win32: [`{appData}/Code/
 const both = (first: string[], then: AssistantPaths): AssistantPaths => ({ win32: [...first, ...then.win32], darwin: [...first, ...then.darwin], linux: [...first, ...then.linux] });
 
 export const ASSISTANTS: readonly Assistant[] = [
-  { id: 'claude-code', name: 'Claude Code', configPaths: each(['~/.claude.json']), format: 'cli', key: 'mcpServers', installedPaths: each(['~/.claude', '~/.claude.json']) },
+  { id: 'claude-code', name: 'Claude Code', configPaths: each(['~/.claude.json']), format: 'cli', key: 'mcpServers', installedPaths: each(['~/.claude', '~/.claude.json']), clients: ['claude-code'] },
   {
     id: 'claude-desktop',
     name: 'Claude Desktop',
@@ -89,12 +94,16 @@ export const ASSISTANTS: readonly Assistant[] = [
     key: 'mcpServers',
     installedPaths: { win32: [`{localAppData}/Claude-Data/${CLAUDE_MSIX}`, `{localAppData}/Packages/${CLAUDE_MSIX}`, '{appData}/Claude'], darwin: ['{appData}/Claude'], linux: ['{appData}/Claude'] },
     moved: true,
+    clients: ['claude-ai'],
   },
-  { id: 'cursor', name: 'Cursor', configPaths: each(['~/.cursor/mcp.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.cursor']) },
-  { id: 'vscode', name: 'VS Code (Copilot)', configPaths: vscodeUser('mcp.json'), format: 'jsonc', key: 'servers', installedPaths: vscodeUser('') },
-  { id: 'windsurf', name: 'Windsurf', configPaths: each(['~/.codeium/windsurf/mcp_config.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.codeium/windsurf']) },
-  { id: 'gemini', name: 'Gemini CLI', configPaths: each(['~/.gemini/settings.json']), format: 'jsonc', key: 'mcpServers', installedPaths: each(['~/.gemini']) },
-  { id: 'codex', name: 'Codex CLI', configPaths: each(['~/.codex/config.toml']), format: 'toml', key: 'mcp_servers', installedPaths: each(['~/.codex']) },
+  { id: 'cursor', name: 'Cursor', configPaths: each(['~/.cursor/mcp.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.cursor']), clients: ['cursor-vscode'] },
+  { id: 'vscode', name: 'VS Code (Copilot)', configPaths: vscodeUser('mcp.json'), format: 'jsonc', key: 'servers', installedPaths: vscodeUser(''), clients: ['Visual Studio Code', 'Visual Studio Code - Insiders'] },
+  { id: 'windsurf', name: 'Windsurf', configPaths: each(['~/.codeium/windsurf/mcp_config.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.codeium/windsurf']), clients: ['windsurf-client'] },
+  // Gemini CLI's `gemini mcp list` connects as mcp-test-client.
+  { id: 'gemini', name: 'Gemini CLI', configPaths: each(['~/.gemini/settings.json']), format: 'jsonc', key: 'mcpServers', installedPaths: each(['~/.gemini']), clients: ['gemini-cli-mcp-client', 'mcp-test-client'] },
+  { id: 'codex', name: 'Codex CLI', configPaths: each(['~/.codex/config.toml']), format: 'toml', key: 'mcp_servers', installedPaths: each(['~/.codex']), clients: ['codex-mcp-client'] },
+  // GitHub Copilot's CLI (kit 2.146.3): `copilot mcp add` writes the same file, as plain JSON. VS Code's Copilot Chat is vscode.
+  { id: 'copilot-cli', name: 'Copilot CLI', configPaths: each(['~/.copilot/mcp-config.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.copilot']), clients: ['copilot-cli'] },
   {
     id: 'cline',
     name: 'Cline',
@@ -104,8 +113,9 @@ export const ASSISTANTS: readonly Assistant[] = [
     key: 'mcpServers',
     installedPaths: both(['~/.cline/data'], vscodeUser('globalStorage/saoudrizwan.claude-dev')),
     moved: true,
+    clients: ['Cline'],
   },
-  { id: 'continue', name: 'Continue', configPaths: each(['~/.continue/config.yaml']), format: 'yaml', key: 'mcpServers', installedPaths: each(['~/.continue']) },
+  { id: 'continue', name: 'Continue', configPaths: each(['~/.continue/config.yaml']), format: 'yaml', key: 'mcpServers', installedPaths: each(['~/.continue']), clients: ['continue-client', 'continue-cli-client'] },
   {
     id: 'zed',
     name: 'Zed',
@@ -113,8 +123,12 @@ export const ASSISTANTS: readonly Assistant[] = [
     format: 'jsonc',
     key: 'context_servers',
     installedPaths: { win32: ['{appData}/Zed'], darwin: ['~/.config/zed'], linux: ['{appData}/zed'] },
+    clients: ['Zed'],
   },
 ];
+
+/** The assistant that calls itself `client` when it connects (clientInfo.name), or null for one the kit doesn't know. Pure. */
+export const assistantOfClient = (client: string): Assistant | null => ASSISTANTS.find((a) => a.clients.includes(client)) ?? null;
 
 /**
  * Where the assistants are looked for. `home` alone (a test's, or another account's) reads nothing of this PC's
@@ -143,10 +157,12 @@ function placeOf(o: AssistantOptions = {}): Place {
 
 /**
  * The folders an assistant's own variable moves, as its CLI reads them (as CLAUDE_CONFIG_DIR does Claude Code's):
- * CODEX_HOME is Codex's ~/.codex itself; GEMINI_CLI_HOME is the home Gemini CLI's .gemini is in.
+ * CODEX_HOME is Codex's ~/.codex itself, as COPILOT_HOME is Copilot CLI's ~/.copilot; GEMINI_CLI_HOME is the home
+ * Gemini CLI's .gemini is in.
  */
 const MOVED: readonly { from: string; variable: string; under: string }[] = [
   { from: '~/.codex', variable: 'CODEX_HOME', under: '' },
+  { from: '~/.copilot', variable: 'COPILOT_HOME', under: '' },
   { from: '~/.gemini', variable: 'GEMINI_CLI_HOME', under: '.gemini' },
 ];
 
@@ -295,6 +311,8 @@ function entryFor(a: Assistant, s: McpServer): Record<string, unknown> {
   const env = s.env && Object.keys(s.env).length ? s.env : undefined;
   if (a.id === 'vscode') return { type: 'stdio', command: s.command, args, ...(env ? { env } : {}) };
   if (a.id === 'continue') return { name: s.name, command: s.command, args, ...(env ? { env } : {}) };
+  // As `copilot mcp add` writes one, all its tools on: the same server added either way reads as the same.
+  if (a.id === 'copilot-cli') return { tools: ['*'], type: 'local', command: s.command, args, ...(env ? { env } : {}) };
   return { command: s.command, args, ...(env ? { env } : {}) };
 }
 

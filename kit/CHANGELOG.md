@@ -4,18 +4,25 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.146.3
 
-**assistants.ts, tried with the real assistants: Claude Desktop from the Store is connected where it reads its settings now, claude runs in the home it was given, and CODEX_HOME and GEMINI_CLI_HOME are followed.**
+**assistants.ts, tried with the real assistants: Copilot CLI is the eleventh, each assistant says the names it connects by, Claude Desktop from the Store and Cline 4 are connected where they read their settings now, claude runs in the home it was given, and CODEX_HOME and GEMINI_CLI_HOME are followed.**
+
+### What's new
+
+- **Copilot CLI** (`copilot-cli`, an id added to `AssistantId`): GitHub Copilot's CLI keeps its servers in `~/.copilot/mcp-config.json` (`COPILOT_HOME` moves the folder, as its CLI reads it). The kit writes its entry as `copilot mcp add` does (`"tools": ["*"]`, `"type": "local"`, then its command, arguments and env), so a server added either way reads as the same. VS Code's Copilot Chat is still `vscode`.
+- **`clients`** on every assistant: what it calls itself when it connects to an MCP server (its clientInfo name: `copilot-cli`, as Copilot CLI 1.0.105 gave it, `claude-code`, `claude-ai`, `cursor-vscode`, …), as the agents have seen it. `assistantOfClient(name)` gives the assistant a connected client is.
+- The Staff page spec names the eleven.
 
 ### What changed
 
 - **Claude Desktop from the Store** keeps its data in `%LOCALAPPDATA%\Claude-Data\Claude_pzs8sxrjxfjjc` now, and leaves its old folders with a `.user-data-left` marker. Its servers were written to the package's old copy, which it no longer reads: they go in `Claude-Data`'s `claude_desktop_config.json` now, whenever that folder is there.
+- **Cline 4** keeps its servers in `~/.cline/data/settings/cline_mcp_settings.json`, shared with its own CLI, and no longer reads or makes VS Code's storage copy: the kit didn't find Cline at all. Once `~/.cline/data` is there, that file is the only one read and written.
 - **Claude Code:** `addServer` and `removeServer` run `claude` in the `home` and `env` they were given (its `CLAUDE_CONFIG_DIR`, else that home), as `serverStatus` reads them. It ran in this process's own environment, so it added to this account's Claude Code and then said the server wasn't there. A test's `run` is handed that environment as its third argument.
 - **Codex CLI and Gemini CLI:** `CODEX_HOME` (Codex's `.codex` itself) and `GEMINI_CLI_HOME` (the home its `.gemini` is in) are followed, as `CLAUDE_CONFIG_DIR` is for Claude Code.
-- **Live tests:** `kit/test/assistants-live.test.ts`, skipped unless `STEWARD_LIVE_ASSISTANTS=1`, runs Claude Code, Codex CLI, Gemini CLI, VS Code and Cursor's agent CLI both ways round in temp homes.
+- **Live tests:** `kit/test/assistants-live.test.ts`, skipped unless `STEWARD_LIVE_ASSISTANTS=1`, runs Claude Code, Codex CLI, Gemini CLI, Copilot CLI, VS Code and Cursor's agent CLI both ways round in temp homes. With `STEWARD_LIVE_APPS=1` too, it starts Zed, and VS Code with Cline and with Continue, each in a temp profile (their windows open), and sees each start the kit's server beside the person's own.
 
 ### Before you update
 
-- Nothing.
+- Nothing to do. `copilot-cli` is a new `AssistantId`: code that names every id (a `switch` over them, a list of its own) has one more to name.
 
 ## 2.146.2
 

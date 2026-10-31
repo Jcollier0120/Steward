@@ -10,7 +10,7 @@ import { after, test } from 'node:test';
 // and the kit reads it, and the kit adds one and the assistant's own command reads it back (and, where its command
 // does, starts it). Each runs in a home or config folder of its own under the temp folder: nothing of yours is read or
 // written but the paths assistantsFound looks at, and the last test checks that none of your settings has this run's
-// servers. This process's own CLAUDE_CONFIG_DIR, CODEX_HOME and GEMINI_CLI_HOME are a decoy folder, so a command run
+// servers. This process's own CLAUDE_CONFIG_DIR, CODEX_HOME, COPILOT_HOME and GEMINI_CLI_HOME are a decoy folder, so a command run
 // in this process's environment by mistake writes there, never to yours. An assistant not installed here is skipped,
 // and says so.
 const LIVE = process.env.STEWARD_LIVE_ASSISTANTS === '1';
@@ -26,7 +26,7 @@ const dir = (...parts: string[]) => {
   return d;
 };
 
-const MOVED = ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GEMINI_CLI_HOME'];
+const MOVED = ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'COPILOT_HOME', 'GEMINI_CLI_HOME'];
 const base: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !MOVED.includes(k)));
 const decoy = dir('decoy');
 for (const k of MOVED) process.env[k] = decoy;
@@ -196,6 +196,59 @@ test("Gemini CLI: the kit writes, and gemini mcp list starts it, Connected, besi
   const after = geminiList();
   assert.doesNotMatch(after, new RegExp(mine.name));
   assert.match(after, new RegExp(`${geminiFrom.name}: .* - Connected`), "gemini's own is kept");
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Copilot CLI: copilot mcp add, get and list (--json), with COPILOT_HOME a folder of its own (the home's .copilot). Its
+// commands only read and write the file: it starts a server in a session, which needs a GitHub sign-in, never made here.
+
+const copilotHome = dir('copilot-home');
+const copilotDir = dir('copilot-home', '.copilot');
+const copilotEnv = { ...base, COPILOT_HOME: copilotDir, COPILOT_AUTO_UPDATE: 'false' };
+const copilotFrom = tiny('copilot-own', 'from copilot');
+type CopilotServer = { type?: string; command: string; args: string[]; env?: Record<string, string>; tools: string[]; source: string; enabled: boolean };
+const copilotGet = (n: string) => {
+  const r = ps(['copilot', 'mcp', 'get', n, '--json'], copilotEnv);
+  assert.equal(r.status, 0, r.out);
+  return (JSON.parse(r.stdout) as Record<string, CopilotServer>)[n];
+};
+/** The servers in its user settings (not its built-in GitHub one). */
+const copilotNames = () => {
+  const r = ps(['copilot', 'mcp', 'list', '--json'], copilotEnv);
+  assert.equal(r.status, 0, r.out);
+  return Object.entries((JSON.parse(r.stdout) as { mcpServers: Record<string, CopilotServer> }).mcpServers).filter(([, s]) => s.source === 'user').map(([n]) => n).sort();
+};
+
+test('Copilot CLI: copilot mcp add writes the server, and the kit reads it connected, by its home or by COPILOT_HOME', { skip: notInstalled('copilot'), timeout: 180_000 }, async () => {
+  const add = ps(['copilot', 'mcp', 'add', copilotFrom.name, '--env', `TINY_LOG=${copilotFrom.env.TINY_LOG}`, '--', node, ...copilotFrom.args], copilotEnv);
+  assert.equal(add.status, 0, add.out);
+  const want = { id: 'copilot-cli', name: copilotFrom.name, state: 'connected', file: path.join(copilotDir, 'mcp-config.json'), entry: { command: node, args: copilotFrom.args } };
+  assert.deepEqual(serverStatus('copilot-cli', copilotFrom.name, { home: copilotHome }), want);
+  assert.deepEqual(serverStatus('copilot-cli', copilotFrom.name, { home: dir('copilot-elsewhere'), env: { COPILOT_HOME: copilotDir } }), want);
+  // The kit's own entry is the one copilot writes: the same server added through the kit is already there.
+  const same = await addServer('copilot-cli', copilotFrom, { home: copilotHome });
+  assert.deepEqual([same.ok, same.changed], [true, false], same.words);
+});
+
+test("Copilot CLI: the kit writes, and copilot mcp get reads it, enabled with all its tools; copilot's own kept; removed", { skip: notInstalled('copilot'), timeout: 300_000 }, async () => {
+  const mine = tiny('copilot-kit');
+  const o = { home: copilotHome };
+  const added = await addServer('copilot-cli', mine, o);
+  assert.deepEqual([added.ok, added.changed], [true, true], added.words);
+  const got = copilotGet(mine.name);
+  assert.deepEqual([got.type, got.command, got.args, got.env, got.tools, got.source, got.enabled], ['local', node, mine.args, mine.env, ['*'], 'user', true]);
+  assert.deepEqual(copilotNames(), [copilotFrom.name, mine.name].sort(), "copilot's own kept");
+  assert.deepEqual(copilotGet(copilotFrom.name).env, copilotFrom.env);
+  const newer = { ...mine, args: [...mine.args, '--newer'] };
+  assert.equal((await addServer('copilot-cli', newer, o)).changed, true);
+  assert.deepEqual(copilotGet(mine.name).args, newer.args);
+  // copilot's own commands still work on the file the kit wrote: it adds and removes beside the kit's.
+  const extra = tiny('copilot-extra');
+  assert.equal(ps(['copilot', 'mcp', 'add', extra.name, '--', node, ...extra.args], copilotEnv).status, 0);
+  assert.equal(ps(['copilot', 'mcp', 'remove', extra.name], copilotEnv).status, 0);
+  assert.deepEqual(serverStatus('copilot-cli', mine.name, o).entry, { command: node, args: newer.args }, "the kit's entry as it left it");
+  assert.deepEqual([(await removeServer('copilot-cli', mine.name, o)).changed, copilotNames()], [true, [copilotFrom.name]]);
+  assert.deepEqual([(await removeServer('copilot-cli', copilotFrom.name, o)).changed, copilotNames()], [true, []]);
 });
 
 // ---------------------------------------------------------------------------------------------------------------
