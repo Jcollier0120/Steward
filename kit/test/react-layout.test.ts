@@ -68,7 +68,9 @@ test("the styles: one column by default, each count inside its width's query, a 
     return LAYOUT_CSS.slice(start, LAYOUT_CSS.indexOf('\n}', start));
   };
   const base = LAYOUT_CSS.slice(0, LAYOUT_CSS.indexOf('@media'));
-  assert.match(base, /\.ui-cols \{ display: grid; grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(base, /\.ui-cols \{ display: grid; grid-template-columns: minmax\(0, 1fr\); gap: 22px 20px; align-items: start; margin-top: 22px; \}/, "a section's space above it, and between its rows");
+  assert.match(base, /\.ui-cols > :is\(\.ui-section, \.card, h2, h3\), \.ui-cols > \* > :is\(\.ui-section, \.card, h2, h3\):first-child \{ margin-top: 0; \}/, 'its cells start at the top of their row');
+  assert.match(base, /\.tab-panel > \.ui-cols:first-child, \.tab-panel > \.ui-side-title \+ \.ui-cols \{ margin-top: 0; \}/, 'first in a tab, it starts at the top, as a Section does');
   assert.ok(!/span 2/.test(base), 'one column: a span of 2 would make a second');
   assert.match(at(1200), /\.ui-cols\.ui-d2, \.ui-cols\.ui-weighted\.ui-d2 \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/);
   assert.match(at(1200), /\.ui-cols\.ui-d3 > \.ui-span-2 \{ grid-column: span 2; \}/);

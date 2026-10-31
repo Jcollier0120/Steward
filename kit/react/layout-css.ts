@@ -19,10 +19,13 @@ const counts = (prefix: 'd' | 'w', n: number[]) => n.map((k) => `.ui-cols.ui-${p
 
 /** Columns' and Span's styles, and PageTabs' `side`: part of UI_CSS. */
 export const LAYOUT_CSS = `
-.ui-cols { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 20px; align-items: start; }
+/* Columns is spaced as a section is (22 px above it) and its rows as sections are, by its row gap; so its cells' first
+   parts start at their row's top, and a Columns first in a tab starts at the tab's top, as a Section does. */
+.ui-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px 20px; align-items: start; margin-top: 22px; }
 .ui-cols > * { min-width: 0; }
 .ui-cols > .ui-span-all { grid-column: 1 / -1; }
-.ui-span > .ui-section:first-child, .ui-cols > .ui-section { margin-top: 22px; }
+.ui-cols > :is(.ui-section, .card, h2, h3), .ui-cols > * > :is(.ui-section, .card, h2, h3):first-child { margin-top: 0; }
+.tab-panel > .ui-cols:first-child, .tab-panel > .ui-side-title + .ui-cols { margin-top: 0; }
 @media ${query(DESKTOP_FROM)} {
   ${counts('d', [1, 2, 3])}
   .ui-cols.ui-weighted:is(.ui-d2, .ui-d3) { grid-template-columns: var(--ui-weights); }
