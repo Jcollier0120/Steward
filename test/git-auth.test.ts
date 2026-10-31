@@ -320,6 +320,7 @@ test("cmdkey's list names a target: whole, ignoring case, with or without its ty
   assert.ok(!listsTarget(listed(`${T}.example`), T));
   assert.ok(!listsTarget(listed(`x${T}`), T));
   assert.ok(!listsTarget(listed('git:https://codeberg.org'), T), 'the access token alone');
+  assert.ok(!listsTarget(listed('git:https://oauth-refresh-token.gitlab.com'), 'git:https://refresh_token.gitlab.com'), "GitLab's refresh token (GCM's own name) is no refresh_token target: never forgotten");
 });
 
 test('an access token Git Credential Manager hands back stale is forgotten where it keeps a refresh token: once a while, the refresh token kept (kit 2.147.4)', async () => {
@@ -447,6 +448,30 @@ test('an access token Git Credential Manager hands back stale is forgotten where
     assert.deepEqual([f.rejects().length, f.gits().length], [1, 1]);
     assert.ok(store.has(REFRESH));
   }
+});
+
+test("on gitlab.com a stale access token is never forgotten: GCM keeps its refresh token by a name of its own and renews it itself, and its erase would take that too", async () => {
+  const repo = repoWith('gitlab', 'https://gitlab.com/me/private.git');
+  // Git Credential Manager's names for a GitLab sign-in: its access token, and its refresh token as GCM itself names it.
+  const store = new Set(['git:https://gitlab.com', 'git:https://oauth-refresh-token.gitlab.com']);
+  const cmdkeys: string[][] = [];
+  const f = fake({ answer: () => REFUSED });
+  const inner: Runner = async (cmd, args, opts) => {
+    if (cmd === 'cmdkey') {
+      cmdkeys.push(args);
+      const asked = args[0].replace(/^\/list:/, '');
+      const name = [...store].find((k) => k.toLowerCase() === asked.toLowerCase());
+      return { code: 0, out: `\r\nCurrently stored credentials for ${asked}:\r\n\r\n${name ? `    Target: ${name}\r\n    Type: Generic \r\n    User: someone\r\n` : '* NONE *\r\n'}`, err: '' };
+    }
+    if (args[0] === 'credential' && args[1] === 'reject') store.clear();
+    return f.inner(cmd, args, opts);
+  };
+  // A private repository: refused with the stale token and with none, which shows nothing about why.
+  const h = host(() => 401, 'Bearer realm="GitLab"');
+  assert.deepEqual(await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+  assert.deepEqual(cmdkeys, [['/list:git:https://refresh_token.gitlab.com']], 'asked only by the refresh_token name, which GitLab has none of');
+  assert.deepEqual([f.rejects().length, f.approves().length, f.gits().length], [0, 0, 1], 'nothing forgotten, nothing kept, run once');
+  assert.deepEqual([...store], ['git:https://gitlab.com', 'git:https://oauth-refresh-token.gitlab.com'], 'the whole GitLab sign-in kept');
 });
 
 test('a URL with its own user is asked for that user; one with its own password keeps the helpers out; two users of one host go git’s own way', async () => {

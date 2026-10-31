@@ -39,7 +39,10 @@ export class Bitbucket implements SourceHost {
 
   /**
    * One request: curl with the token from a config file of its own (deleted after), a body as JSON from a file, the
-   * HTTP status written after the body; an HTTP error is a failure. `out` is set: the response written there.
+   * HTTP status written after the body; an HTTP error is a failure. A GET follows Bitbucket's redirects (https only, five
+   * at most), as its diffstat answers with one; any other method doesn't, curl sending its method again to wherever one
+   * points, so a redirect there is a failure. The token goes only to the first host (curl's `user`, never
+   * --location-trusted). `out` is set: the response written there.
    */
   private async api(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, body?: unknown, o: { timeoutMs?: number; out?: string } = {}): Promise<Answer> {
     const what = `curl ${method} ${url}`;
@@ -54,7 +57,8 @@ export class Bitbucket implements SourceHost {
         writeFileSync(path.join(dir, 'body.json'), JSON.stringify(body));
         args.push('--header', 'Content-Type: application/json', '--data-binary', `@${path.join(dir, 'body.json')}`);
       }
-      if (o.out) args.push('--location', '--output', o.out);
+      if (method === 'GET') args.push('--location', '--proto-redir', '=https', '--max-redirs', '5');
+      if (o.out) args.push('--output', o.out);
       return { ...answered(await this.run('curl', args, { cwd: this.cwd, timeoutMs: o.timeoutMs ?? 2 * MINUTE })), what };
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -295,14 +299,16 @@ export const curlQuoted = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, 
 
 /**
  * What curl answered, as a command's answer: the body, then the HTTP status on its own last line (--write-out); a 4xx
- * or 5xx is a failure, its message Bitbucket's error. Pure.
+ * or 5xx is a failure, its message Bitbucket's error. So is a redirect (3xx) it ended on: its body is empty, never an
+ * empty answer. Pure.
  */
 export function answered(r: { code: number; out: string; err: string }): { code: number; out: string; err: string } {
   if (r.code !== 0) return r;
   const i = r.out.lastIndexOf('\n');
   const status = Number(r.out.slice(i + 1).trim());
   const body = i >= 0 ? r.out.slice(0, i) : '';
-  if (!status || status < 400) return { code: 0, out: body, err: '' };
+  if (!status || status < 300) return { code: 0, out: body, err: '' };
+  if (status < 400) return { code: 1, out: '', err: `HTTP ${status}: a redirect, not an answer` };
   const e = parsed<any>(body)?.error;
   const message = [e?.message, e?.detail].filter((x) => typeof x === 'string' && x).join(': ');
   return { code: 1, out: '', err: `HTTP ${status}${message ? `: ${message}` : body.trim() ? `: ${body.trim().slice(0, 300)}` : ''}` };

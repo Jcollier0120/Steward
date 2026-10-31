@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.285
+
+**On Bitbucket, a pull request in conflict reads as conflicting again, with its files and line counts. Its diffstat answers with a redirect, which the Steward took for an empty answer: every pull request read as mergeable, with no files.**
+
+### What changed
+
+- **A Bitbucket read (GET) follows a redirect**: https only, five at most. Found live on Bitbucket Cloud, 2026-10-31:
+  - `GET …/pullrequests/<n>/diffstat` answers 302 with an empty body, a documented redirect to the repository's diffstat for the pull request;
+  - followed, it gives 200 and the files.
+  - So every Bitbucket pull request read as MERGEABLE and CLEAN, one in conflict too, with no files and 0 lines.
+- **A redirect is never an empty success.** One the Steward ends on fails, as "HTTP 302: a redirect, not an answer". A POST, PUT or DELETE never follows one, as curl would send that method again to wherever it points.
+- The API token still goes only to api.bitbucket.org, in curl's config file. It is never handed on to where a redirect points.
+- A test pins that on gitlab.com, a stale access token is never forgotten. Git Credential Manager keeps GitLab's refresh token as `git:https://oauth-refresh-token.gitlab.com`, renews it itself, and its erase would delete that too. Nothing in the kit changes.
+
 ## 0.36.284
 
 **The Steward's fetches and pushes to Codeberg work again once Git Credential Manager's sign-in there is an hour old: it hands kit 2.147.4 out, and runs on it.**

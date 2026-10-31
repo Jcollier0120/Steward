@@ -98,7 +98,70 @@ test("curl's answers: the status after the body, an HTTP error a failure with Bi
   assert.deepEqual(answered(http(404, { type: 'error', error: { message: 'Repository not found' } })), { code: 1, out: '', err: 'HTTP 404: Repository not found' });
   assert.deepEqual(answered({ code: 6, out: '', err: 'curl: (6) Could not resolve host' }), { code: 6, out: '', err: 'curl: (6) Could not resolve host' });
   assert.deepEqual(answered({ code: 0, out: '\n204', err: '' }), { code: 0, out: '', err: '' });
+  // A redirect it ended on is a failure, never an empty answer: Bitbucket's diffstat answers 302 with nothing in it.
+  assert.deepEqual(answered(http(302, '')), { code: 1, out: '', err: 'HTTP 302: a redirect, not an answer' });
+  assert.deepEqual(answered(http(301, { values: [] })), { code: 1, out: '', err: 'HTTP 301: a redirect, not an answer' });
   assert.equal(curlQuoted('a"b\\c'), 'a\\"b\\\\c');
+});
+
+test("a pull request's diffstat is read through Bitbucket's redirect, and a redirect not followed is a failure, never an empty diffstat", async () => {
+  const diffstat = [
+    { status: 'modified', lines_added: 4, lines_removed: 2, old: { path: 'src/a.ts' }, new: { path: 'src/a.ts' } },
+    { status: 'merge conflict', lines_added: 1, lines_removed: 3, old: { path: 'src/b.ts' }, new: { path: 'src/b.ts' } },
+  ];
+  // As Bitbucket Cloud answered it live (2026-10-31): 302 with an empty body, the values only where it points.
+  const answer = (values: unknown[]) => (c: ReturnType<typeof call>) => {
+    if (c.at === '/pullrequests?state=OPEN&pagelen=50') return http(200, { values: [pull()] });
+    if (c.at === '/pullrequests/7') return http(200, pull());
+    if (c.at === '/pullrequests/7/diffstat?pagelen=500') return c.args.includes('--location') ? http(200, { values }) : http(302, '');
+  };
+  const fields = 'number,files,additions,deletions,mergeable,mergeStateStatus';
+  const conflicting = recorded(answer(diffstat));
+  const one = JSON.parse(must(await conflicting.host.viewPr(R, 7, fields)));
+  assert.deepEqual([one.files, one.additions, one.deletions, one.mergeable, one.mergeStateStatus], [[{ path: 'src/a.ts' }, { path: 'src/b.ts' }], 5, 5, 'CONFLICTING', 'DIRTY']);
+  const [listed] = JSON.parse(must(await conflicting.host.listPrs(R, { state: 'open', fields })));
+  assert.deepEqual([listed.files.length, listed.additions, listed.deletions, listed.mergeable, listed.mergeStateStatus], [2, 5, 5, 'CONFLICTING', 'DIRTY']);
+  const clean = JSON.parse(must(await recorded(answer(diffstat.slice(0, 1))).host.viewPr(R, 7, fields)));
+  assert.deepEqual([clean.files, clean.additions, clean.deletions, clean.mergeable, clean.mergeStateStatus], [[{ path: 'src/a.ts' }], 4, 2, 'MERGEABLE', 'CLEAN']);
+
+  // A redirect curl didn't follow (one to http, or past five) fails the read: never MERGEABLE with no files.
+  const stuck = recorded((c) => (c.at === '/pullrequests/7/diffstat?pagelen=500' ? http(302, '') : answer(diffstat)(c)));
+  for (const a of [await stuck.host.viewPr(R, 7, fields), await stuck.host.listPrs(R, { state: 'open', fields })]) {
+    assert.equal(a.code, 1);
+    assert.match(a.err, /^HTTP 302: a redirect, not an answer$/);
+  }
+});
+
+test('only a GET follows a redirect: https only, five at most, the token never handed on', async () => {
+  const { host, ran } = recorded(({ method, at }) => {
+    if (at === '/pullrequests?state=OPEN&pagelen=50') return http(200, { values: [pull()], next: `${B}/pullrequests?state=OPEN&pagelen=50&page=2` });
+    if (at === '/pullrequests?state=OPEN&pagelen=50&page=2') return http(200, { values: [] });
+    if (at === '/pullrequests/7' && method === 'GET') return http(200, pull());
+    if (at === '/pullrequests/7/decline') return http(200, pull({ state: 'DECLINED' }));
+    if (at === 'https://api.bitbucket.org/2.0/user') return http(200, { nickname: 'jcollier0120' });
+    if (method !== 'GET') return http(method === 'DELETE' ? 204 : 201, method === 'DELETE' ? '' : pull({ id: 8 }));
+  });
+  must(await host.listPrs(R, { state: 'open', fields: 'number' }));
+  must(await host.whoAmI());
+  must(await host.createPr(R, { base: 'main', head: 'claude/x', title: 'T', body: 'B' }));
+  must(await host.editPr(R, 7, { body: 'new' }));
+  must(await host.closePr(R, 7, { comment: 'bye', deleteBranch: true }));
+  const { Bitbucket } = await import('../src/hosts/bitbucket.ts');
+  const saved = fake(() => http(200, ''));
+  must(await (new Bitbucket(saved.run, tmp) as any).api('GET', `${B}/src/main/a.ts`, undefined, { out: path.join(tmp, 'a.ts') }));
+  ran.push(...saved.ran);
+
+  const after = (args: string[], flag: string) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
+  assert.deepEqual([...new Set(ran.map((c) => c.method))].sort(), ['DELETE', 'GET', 'POST', 'PUT']);
+  for (const c of ran.filter((c) => c.method === 'GET')) {
+    assert.equal(c.args.filter((a) => a === '--location').length, 1, `${c.at}: ${c.args.join(' ')}`);
+    assert.deepEqual([after(c.args, '--proto-redir'), after(c.args, '--max-redirs')], ['=https', '5'], c.at);
+  }
+  assert.ok(ran.some((c) => c.at.endsWith('&page=2')), "a list's next page is a GET of its own");
+  assert.equal(saved.ran[0].out, path.join(tmp, 'a.ts'), 'a download is still written where it was asked');
+  for (const c of ran.filter((c) => c.method !== 'GET')) assert.ok(!c.args.includes('--location'), `${c.method} ${c.at}: ${c.args.join(' ')}`);
+  assert.ok(ran.every((c) => !c.args.some((a) => a.startsWith('--location-trusted'))), 'never --location-trusted');
+  assert.ok(ran.every((c) => c.auth.startsWith('user = "')), "the token stays in curl's config, sent to the first host only");
 });
 
 test("a pull request in GitHub's words: what the Steward reads of one", () => {
