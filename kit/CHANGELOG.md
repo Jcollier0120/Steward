@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.146.3
+
+**assistants.ts, tried with the real assistants: Claude Desktop from the Store is connected where it reads its settings now, claude runs in the home it was given, and CODEX_HOME and GEMINI_CLI_HOME are followed.**
+
+### What changed
+
+- **Claude Desktop from the Store** keeps its data in `%LOCALAPPDATA%\Claude-Data\Claude_pzs8sxrjxfjjc` now, and leaves its old folders with a `.user-data-left` marker. Its servers were written to the package's old copy, which it no longer reads: they go in `Claude-Data`'s `claude_desktop_config.json` now, whenever that folder is there.
+- **Claude Code:** `addServer` and `removeServer` run `claude` in the `home` and `env` they were given (its `CLAUDE_CONFIG_DIR`, else that home), as `serverStatus` reads them. It ran in this process's own environment, so it added to this account's Claude Code and then said the server wasn't there. A test's `run` is handed that environment as its third argument.
+- **Codex CLI and Gemini CLI:** `CODEX_HOME` (Codex's `.codex` itself) and `GEMINI_CLI_HOME` (the home its `.gemini` is in) are followed, as `CLAUDE_CONFIG_DIR` is for Claude Code.
+- **Live tests:** `kit/test/assistants-live.test.ts`, skipped unless `STEWARD_LIVE_ASSISTANTS=1`, runs Claude Code, Codex CLI, Gemini CLI, VS Code and Cursor's agent CLI both ways round in temp homes.
+
+### Before you update
+
+- Nothing.
+
 ## 2.146.2
 
 **The Repositories spec says where a repository's own build and release steps are: its `.steward.json`.**

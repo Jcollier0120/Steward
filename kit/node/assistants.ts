@@ -71,13 +71,17 @@ export const ASSISTANTS: readonly Assistant[] = [
     id: 'claude-desktop',
     name: 'Claude Desktop',
     configPaths: {
-      win32: [`{localAppData}/Packages/${CLAUDE_MSIX}/LocalCache/Roaming/Claude/claude_desktop_config.json`, '{appData}/Claude/claude_desktop_config.json'],
+      win32: [
+        `{localAppData}/Claude-Data/${CLAUDE_MSIX}/claude_desktop_config.json`,
+        `{localAppData}/Packages/${CLAUDE_MSIX}/LocalCache/Roaming/Claude/claude_desktop_config.json`,
+        '{appData}/Claude/claude_desktop_config.json',
+      ],
       darwin: ['{appData}/Claude/claude_desktop_config.json'],
       linux: ['{appData}/Claude/claude_desktop_config.json'],
     },
     format: 'json',
     key: 'mcpServers',
-    installedPaths: { win32: [`{localAppData}/Packages/${CLAUDE_MSIX}`, '{appData}/Claude'], darwin: ['{appData}/Claude'], linux: ['{appData}/Claude'] },
+    installedPaths: { win32: [`{localAppData}/Claude-Data/${CLAUDE_MSIX}`, `{localAppData}/Packages/${CLAUDE_MSIX}`, '{appData}/Claude'], darwin: ['{appData}/Claude'], linux: ['{appData}/Claude'] },
   },
   { id: 'cursor', name: 'Cursor', configPaths: each(['~/.cursor/mcp.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.cursor']) },
   { id: 'vscode', name: 'VS Code (Copilot)', configPaths: vscodeUser('mcp.json'), format: 'jsonc', key: 'servers', installedPaths: vscodeUser('') },
@@ -111,8 +115,8 @@ export interface AssistantOptions {
   home?: string;
   env?: Record<string, string | undefined>;
   platform?: NodeJS.Platform;
-  /** Runs a command (the claude command); for tests. */
-  run?: (cmd: string, args: string[]) => Promise<{ code: number; out: string; err: string }>;
+  /** Runs a command (the claude command), in `env` (this process's own when it is undefined); for tests. */
+  run?: (cmd: string, args: string[], env?: Record<string, string | undefined>) => Promise<{ code: number; out: string; err: string }>;
 }
 
 interface Place {
@@ -128,8 +132,19 @@ function placeOf(o: AssistantOptions = {}): Place {
   return { home, env, platform };
 }
 
+/**
+ * The folders an assistant's own variable moves, as its CLI reads them (as CLAUDE_CONFIG_DIR does Claude Code's):
+ * CODEX_HOME is Codex's ~/.codex itself; GEMINI_CLI_HOME is the home Gemini CLI's .gemini is in.
+ */
+const MOVED: readonly { from: string; variable: string; under: string }[] = [
+  { from: '~/.codex', variable: 'CODEX_HOME', under: '' },
+  { from: '~/.gemini', variable: 'GEMINI_CLI_HOME', under: '.gemini' },
+];
+
 /** A path from ASSISTANTS, as a full path here. */
 function resolve(p: string, at: Place): string {
+  const moved = MOVED.find((m) => at.env[m.variable] && (p === m.from || p.startsWith(`${m.from}/`)));
+  if (moved) return path.normalize(path.join(at.env[moved.variable]!, moved.under, p.slice(moved.from.length)).replace(/[\\/]$/, ''));
   const appData =
     at.platform === 'win32'
       ? (at.env.APPDATA ?? path.join(at.home, 'AppData', 'Roaming'))
@@ -177,11 +192,14 @@ function installedHere(a: Assistant, at: Place): boolean {
 /**
  * The settings file an assistant's servers go in: the first of its files that is there; else, with none yet, the one
  * that goes with the first of its installed folders that is (Claude Desktop from the Store: its package's own copy).
+ * Claude Desktop that keeps its data in %LOCALAPPDATA%\Claude-Data (the Store's, as it is now) reads only the file
+ * there, there yet or not: it leaves its old folders with a .user-data-left marker, and never reads them again.
  */
 function fileOf(a: Assistant, at: Place): string | null {
   if (a.id === 'claude-code') return claudeCodeFiles(at).json;
   const files = a.configPaths[at.platform].map((p) => resolve(p, at));
   const installed = a.installedPaths[at.platform];
+  if (a.id === 'claude-desktop' && at.platform === 'win32' && there(resolve(installed[0], at))) return files[0];
   return files.find(there) ?? files.find((_, i) => there(resolve(installed[Math.min(i, installed.length - 1)], at))) ?? null;
 }
 
@@ -347,13 +365,13 @@ async function change(id: string, name: string, server: McpServer | null, o: Ass
 
 const cmdQuote = (s: string) => (/^[A-Za-z0-9_\-.:\\/=@]+$/.test(s) ? s : `"${s.replace(/"/g, '""')}"`);
 
-/** Runs a command, quietly: a .cmd or .bat through cmd.exe, as Windows needs. */
-function runQuiet(cmd: string, args: string[]): Promise<{ code: number; out: string; err: string }> {
+/** Runs a command, quietly, in `env` (this process's own when undefined): a .cmd or .bat through cmd.exe, as Windows needs. */
+function runQuiet(cmd: string, args: string[], env?: Record<string, string | undefined>): Promise<{ code: number; out: string; err: string }> {
   const viaCmd = /\.(cmd|bat)$/i.test(cmd);
-  const file = viaCmd ? (process.env.ComSpec ?? 'cmd.exe') : cmd;
+  const file = viaCmd ? ((env ?? process.env).ComSpec ?? process.env.ComSpec ?? 'cmd.exe') : cmd;
   const argv = viaCmd ? ['/d', '/s', '/c', `"${[cmd, ...args].map(cmdQuote).join(' ')}"`] : args;
   return new Promise((done) => {
-    execFile(file, argv, { windowsHide: true, timeout: 60_000, windowsVerbatimArguments: viaCmd, encoding: 'utf8' }, (e, out, err) => done({ code: e ? (typeof (e as { code?: unknown }).code === 'number' ? ((e as { code: number }).code) : 1) : 0, out: String(out ?? ''), err: String(err ?? (e ? e.message : '')) }));
+    execFile(file, argv, { windowsHide: true, timeout: 60_000, windowsVerbatimArguments: viaCmd, encoding: 'utf8', ...(env ? { env } : {}) }, (e, out, err) => done({ code: e ? (typeof (e as { code?: unknown }).code === 'number' ? ((e as { code: number }).code) : 1) : 0, out: String(out ?? ''), err: String(err ?? (e ? e.message : '')) }));
   });
 }
 
@@ -363,7 +381,10 @@ async function claudeCode(a: Assistant, at: Place, name: string, server: McpServ
   const status = serverStatus(a.id, name, o);
   const paste = server ? pasteFor(a.id, server) : `claude mcp remove ${psQuote(name)} --scope user`;
   if (!claude && !o.run) return { ok: false, changed: false, words: `Claude Code's claude command isn't on this PC's PATH, so ${server ? 'add' : 'remove'} it yourself: run this once in a terminal.`, paste };
-  const run = o.run ?? runQuiet;
+  // claude runs where it was asked about: a home or env given (a test's, another account's) is its own, so the file it
+  // writes is the one read here (its CLAUDE_CONFIG_DIR, else that home's), never this process's.
+  const env = o.home || o.env ? { ...at.env, ...(o.home ? { HOME: at.home, USERPROFILE: at.home } : {}) } : undefined;
+  const run = (c: string, args: string[]) => (o.run ?? runQuiet)(c, args, env);
   const cmd = claude ?? 'claude';
   if (server) {
     const want = [server.command, ...(server.args ?? [])].join(' ');

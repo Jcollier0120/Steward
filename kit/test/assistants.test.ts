@@ -380,6 +380,49 @@ test('Claude Code: its claude command adds and removes, for every project; ~/.cl
   assert.deepEqual([(await removeServer('claude-code', 'castellan', o)).changed, calls], [false, []]);
 });
 
+test("Claude Code: claude runs in the home and env the kit was given, never this process's own (found live)", { skip: process.platform !== 'win32' && 'a .cmd stands in for claude' }, async () => {
+  const home = homeWith('.claude', 'bin');
+  const seen = path.join(home, 'seen.txt');
+  // A claude that notes where it would write: its CLAUDE_CONFIG_DIR and home, as cmd.exe sees them.
+  writeFileSync(path.join(home, 'bin', 'claude.cmd'), `@echo off\r\n>>"${seen}" echo config=%CLAUDE_CONFIG_DIR% home=%USERPROFILE%\r\n`);
+  const config = path.join(home, 'config');
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = path.join(home, 'this-process');
+  try {
+    const r = await addServer('claude-code', SERVER, { home, platform: 'win32', env: { PATH: path.join(home, 'bin'), CLAUDE_CONFIG_DIR: config } });
+    assert.deepEqual([r.ok, r.changed], [true, true], r.words);
+    assert.equal(readFileSync(seen, 'utf8').trim(), `config=${config} home=${home}`);
+  } finally {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+  }
+  // A test's run is handed the same.
+  const envs: unknown[] = [];
+  await addServer('claude-code', SERVER, { home, platform: 'win32', env: { PATH: path.join(home, 'bin'), CLAUDE_CONFIG_DIR: config }, run: async (_c, _a, env) => (envs.push(env), { code: 0, out: '', err: '' }) });
+  assert.deepEqual(envs, [{ PATH: path.join(home, 'bin'), CLAUDE_CONFIG_DIR: config, HOME: home, USERPROFILE: home }]);
+});
+
+test('CODEX_HOME and GEMINI_CLI_HOME move those assistants as their CLIs read them (found live)', async () => {
+  const home = homeWith();
+  const codex = path.join(homeWith('codex-elsewhere'), 'codex-elsewhere');
+  const gemini = homeWith('.gemini');
+  const env = { CODEX_HOME: codex, GEMINI_CLI_HOME: gemini };
+  assert.deepEqual(assistantsFound(home, { platform: 'win32', env }).map((a) => [a.id, a.file]), [
+    ['gemini', path.join(gemini, '.gemini', 'settings.json')],
+    ['codex', path.join(codex, 'config.toml')],
+  ]);
+  for (const id of ['codex', 'gemini']) {
+    const r = await addServer(id, SERVER, { home, platform: 'win32', env });
+    assert.deepEqual([r.ok, r.changed], [true, true], r.words);
+    assert.equal(serverStatus(id, 'castellan', { home, platform: 'win32', env }).state, 'connected');
+  }
+  assert.match(readFileSync(path.join(codex, 'config.toml'), 'utf8'), /^\[mcp_servers\.castellan\]$/m);
+  assert.ok(JSON.parse(readFileSync(path.join(gemini, '.gemini', 'settings.json'), 'utf8')).mcpServers.castellan);
+  assert.deepEqual(filesIn(home), [], 'nothing in the home: each went where its variable says');
+  // Without them: the home's own.
+  assert.deepEqual(serverStatus('codex', 'castellan', { home, platform: 'win32' }).state, 'not-installed');
+});
+
 test("Claude Code without its claude command: the line to paste, and nothing written", async () => {
   const home = homeWith('.claude');
   const o = { home, platform: 'win32' as const };
@@ -444,6 +487,19 @@ test('Claude Desktop from the Store: its package\'s own copy of the settings, el
   assert.equal(at(old), roaming);
   // Installed from its own installer: AppData's.
   assert.equal(at(homeWith(`${R}/Claude`)), roaming);
+  // As the Store's keeps it now (found live): its data in Claude-Data, the old folders left with a marker. Only that
+  // file is read, there yet or not, even beside an old one.
+  const data = `AppData/Local/Claude-Data/${CLAUDE_MSIX}`;
+  const moved = homeWith(pkg, data, path.dirname(cache), `${R}/Claude`);
+  writeFileSync(path.join(moved, cache), '{}');
+  writeFileSync(path.join(moved, roaming), '{}');
+  writeFileSync(path.join(moved, path.dirname(cache), `.user-data-left.${CLAUDE_MSIX.toLowerCase()}`), '');
+  assert.equal(at(moved), `${data}/claude_desktop_config.json`);
+  const first = await addServer('claude-desktop', SERVER, { home: moved, platform: 'win32' });
+  assert.deepEqual([first.ok, first.changed, first.backup], [true, true, undefined], first.words);
+  assert.equal(serverStatus('claude-desktop', 'castellan', { home: moved, platform: 'win32' }).state, 'connected');
+  assert.equal(readFileSync(path.join(moved, cache), 'utf8'), '{}', 'the old copy left as it was');
+  assert.deepEqual(JSON.parse(readFileSync(path.join(moved, data, 'claude_desktop_config.json'), 'utf8')).mcpServers.castellan.command, 'node');
   // APPDATA and LOCALAPPDATA when given.
   const env = homeWith('elsewhere/Roaming/Claude');
   assert.equal(assistantsFound(env, { platform: 'win32', env: { APPDATA: path.join(env, 'elsewhere', 'Roaming') } })[0]?.file, path.join(env, 'elsewhere', 'Roaming', 'Claude', 'claude_desktop_config.json'));
