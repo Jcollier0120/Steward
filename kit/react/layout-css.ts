@@ -36,7 +36,9 @@ export const LAYOUT_CSS = `
   .ui-cols.ui-w2 > .ui-span-2 { grid-column: 1 / -1; }
   .ui-cols:is(.ui-w3, .ui-w4) > .ui-span-2 { grid-column: span 2; }
 }
-.ui-side-title { display: none; margin: 0 0 4px; }
+.ui-side-title { display: none; margin: 0 0 8px; }
+/* Under its title, a side-by-side tab's first part starts at once, as it does at the top of a tab. */
+.tab-panel > .ui-side-title + :is(h2, h3, .ui-section, .card) { margin-top: 0; }
 @media ${query(DESKTOP_FROM)} {
   .ui-tabs-side-desktop > .tabs { display: none; }
   .ui-tabs-side-desktop > .ui-side-panels { display: grid; grid-template-columns: repeat(var(--ui-tabs), minmax(0, 1fr)); column-gap: 20px; align-items: start; margin-top: 22px; }

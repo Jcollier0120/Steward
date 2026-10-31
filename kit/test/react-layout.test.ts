@@ -79,4 +79,5 @@ test("the styles: one column by default, each count inside its width's query, a 
   assert.match(LAYOUT_CSS, /@media \(min-width: 2000px\) \{\n  \.ui-tabs-side-wide > \.tabs \{ display: none; \}/);
   assert.match(LAYOUT_CSS, /\.ui-tabs-side-wide > \.ui-side-panels > \.tab-panel\[hidden\] \{ display: block; \}/);
   assert.match(LAYOUT_CSS, /\.ui-side-title \{ display: none;/, 'narrower, the tab names the panel, not a title');
+  assert.match(LAYOUT_CSS, /\.tab-panel > \.ui-side-title \+ :is\(h2, h3, \.ui-section, \.card\) \{ margin-top: 0; \}/, "the first part under a side tab's title starts at once");
 });
