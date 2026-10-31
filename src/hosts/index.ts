@@ -17,15 +17,17 @@ export { must, type Answer, type PrState, type SourceHost } from './host.ts';
  * `host` (scm.ts's hostOf) says is worked with its way, else GitHub's. One worked with plain git asks none: the stages
  * pass over it before they would. With no repository named, GitHub (the Steward's own repository, the Wright's queue).
  * One worked with plain git that isn't on GitHub (another host, a server of your own, none at all) gets PlainGit, which
- * refuses every question in words, rather than GitHub's asked about a repository that isn't there.
+ * refuses every question in words, rather than GitHub's asked about a repository that isn't there. A GitLab or a Gitea
+ * of your own is at its pipeline's host baseUrl, where it gives one (its pages: links.ts).
  */
-export function hostFor(o: { run: Runner; neutralDir: string; host?: (e: Pick<Employee, 'repo'>) => Host }, e?: Pick<Employee, 'repo'>): SourceHost {
+export function hostFor(o: { run: Runner; neutralDir: string; host?: (e: Pick<Employee, 'repo'>) => Host }, e?: Pick<Employee, 'repo' | 'resolvedPipeline'>): SourceHost {
   const host = e ? o.host?.(e) : undefined;
-  if (e && host === 'gitlab') return new GitLab(o.run, o.neutralDir, whereIs(e.repo).hostname);
+  const site = e?.resolvedPipeline?.host?.baseUrl ?? null;
+  if (e && host === 'gitlab') return new GitLab(o.run, o.neutralDir, whereIs(e.repo).hostname, site);
   const azure = e && host === 'azure' ? whereAzure(e.repo) : null;
   if (azure) return new AzureDevOps(o.run, o.neutralDir, azure.base);
   const gitea = e && host === 'gitea' ? whereGitea(e.repo) : null;
-  if (gitea) return new Gitea(o.run, o.neutralDir, gitea.hostname);
+  if (gitea) return new Gitea(o.run, o.neutralDir, gitea.hostname, site);
   if (e && host === 'bitbucket') return new Bitbucket(o.run, o.neutralDir);
   if (e && host === 'git' && !isGithubRepo(e.repo)) return new PlainGit(e.repo);
   return new GitHub(o.run, o.neutralDir);

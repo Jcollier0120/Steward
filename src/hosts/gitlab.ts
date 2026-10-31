@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { releaseUrl } from '../links.ts';
 import type { Runner } from '../run.ts';
 import type { Answer, PrState, SourceHost } from './host.ts';
 
@@ -24,11 +25,14 @@ export class GitLab implements SourceHost {
   private readonly cwd: string;
   /** The GitLab asked when a call names no repository (whoAmI). */
   private readonly hostname: string;
+  /** Its address where its pipeline gives one (repoconfig.ts's host baseUrl): a GitLab of your own on another port, or on http. */
+  private readonly site: string | null;
 
-  constructor(run: Runner, cwd: string, hostname = 'gitlab.com') {
+  constructor(run: Runner, cwd: string, hostname = 'gitlab.com', site: string | null = null) {
     this.run = run;
     this.cwd = cwd;
     this.hostname = hostname;
+    this.site = site;
   }
 
   /** One request: `glab api <endpoint> --hostname <host>`, a body as JSON from a file (--input), never inline. */
@@ -190,7 +194,7 @@ export class GitLab implements SourceHost {
   }
 
   releaseUrl(repo: string, tag: string): string {
-    return `https://${repo}/-/releases/${encodeURIComponent(tag)}`;
+    return releaseUrl(repo, 'gitlab', tag, this.site) ?? '';
   }
 }
 

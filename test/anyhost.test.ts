@@ -71,6 +71,48 @@ test("a repository's pages on its own host; none for a local one", () => {
   assert.deepEqual(['octo/app', 'gitlab.com/g/a', 'local/x', 'git.acme.com/a/b'].map((r) => L.hostWord(r)), ['GitHub', 'GitLab', 'this PC', 'its host']);
 });
 
+test("a server of your own on another port or on http: its pages at its pipeline's baseUrl (found live)", async () => {
+  // A Gitea at http://127.0.0.1:51412 is named 127.0.0.1/me/app, its port gone: its pages were https://127.0.0.1/….
+  const site = 'http://127.0.0.1:51412';
+  assert.equal(L.repoUrl('127.0.0.1/me/app', site), 'http://127.0.0.1:51412/me/app');
+  assert.equal(L.releaseUrl('127.0.0.1/me/app', 'gitea', 'demo-v0.1.1', site), 'http://127.0.0.1:51412/me/app/releases/tag/demo-v0.1.1');
+  assert.equal(L.commitUrl('127.0.0.1/me/app', 'gitea', 'abc', site), 'http://127.0.0.1:51412/me/app/commit/abc');
+  assert.equal(L.compareUrl('127.0.0.1/me/app', 'gitea', 'v1', 'main', site), 'http://127.0.0.1:51412/me/app/compare/v1...main');
+  assert.equal(L.releaseUrl('code.acme.com/team/app', 'gitlab', 'v1', 'https://code.acme.com:8443'), 'https://code.acme.com:8443/team/app/-/releases/v1');
+  assert.equal(L.repoUrl('acme.com/git/team/app', 'https://acme.com/git'), 'https://acme.com/git/team/app', 'a server under a path: the path said once');
+  assert.equal(L.repoUrl('codeberg.org/me/app', 'https://git.acme.com'), 'https://codeberg.org/me/app', "another host's address: its own host's, as before");
+  assert.equal(L.repoUrl('codeberg.org/me/app', null), 'https://codeberg.org/me/app');
+  assert.equal(L.repoUrl('octo/app', site), 'https://github.com/octo/app');
+  // The host itself says it so: a release's URL in a round's result, and how to sign tea in.
+  const p = (baseUrl: string) => resolvePipeline({ repo: '127.0.0.1/me/app', test: [], versionFiles: [], release: '' }, { file: { host: { kind: 'gitea', baseUrl } } });
+  const o = { run: async () => ({ code: 0, out: '[]', err: '' }), neutralDir: home, host: () => 'gitea' as const };
+  const gitea = hostFor(o as any, { repo: '127.0.0.1/me/app', resolvedPipeline: p(site) });
+  assert.equal(gitea.releaseUrl('127.0.0.1/me/app', 'v0.1.1'), 'http://127.0.0.1:51412/me/app/releases/tag/v0.1.1');
+  assert.match((await gitea.listReleases('127.0.0.1/me/app', 'tagName')).err, /^the Gitea CLI has no login for 127\.0\.0\.1: tea login add --url http:\/\/127\.0\.0\.1:51412$/);
+  assert.equal(hostFor(o as any, { repo: 'codeberg.org/me/app' }).releaseUrl('codeberg.org/me/app', 'v1'), 'https://codeberg.org/me/app/releases/tag/v1', 'no baseUrl: as before');
+  const gitlab = hostFor({ ...o, host: () => 'gitlab' as const } as any, { repo: 'code.acme.com/team/app', resolvedPipeline: resolvePipeline({ repo: 'code.acme.com/team/app', test: [], versionFiles: [], release: '' }, { file: { host: { kind: 'gitlab', baseUrl: 'http://code.acme.com:8080' } } }) });
+  assert.equal(gitlab.releaseUrl('code.acme.com/team/app', 'v1'), 'http://code.acme.com:8080/team/app/-/releases/v1');
+});
+
+test("why plain git, where a pipeline names its host: the dry run says what would give it its host's way (found live)", () => {
+  const s = { sourceControl: 'auto' as const, releasesCastellan: false };
+  const e = (host: unknown, repo = '127.0.0.1/me/app') => ({ repo, resolvedPipeline: resolvePipeline({ repo, test: [], versionFiles: [], release: '' }, { file: { host } }) });
+  const gitea = e({ kind: 'gitea', baseUrl: 'http://127.0.0.1:51412' });
+  const at = '2026-10-30T23:59:00.000Z';
+  const look = (tools: import('../src/scm.ts').ScmLook['tools']): import('../src/scm.ts').ScmLook => ({ at, tools: [{ cmd: 'git', name: 'Git', version: 'git version 2.55.0', supported: true }, ...tools] });
+  assert.match(S.whyPlainGit(gitea, s, null)!, /^its pipeline names Gitea, but the Steward hasn't looked at this PC's source control yet \(its page and its rounds look\): plain git until it finds Gitea's way here$/);
+  assert.equal(S.whyPlainGit(gitea, s, look([{ cmd: 'tea', name: 'Gitea CLI', version: 'Version: 0.16.0', supported: true, hosts: [], signedIn: false }])), "its pipeline names Gitea, but the Gitea CLI has no login for 127.0.0.1 (tea login add --url http://127.0.0.1:51412), as the Steward last looked (2026-10-30 23:59 UTC): plain git until then");
+  assert.match(S.whyPlainGit(gitea, s, look([]))!, /but the Gitea CLI \(tea\) isn't installed, as/);
+  assert.equal(S.whyPlainGit(gitea, s, look([{ cmd: 'tea', name: 'Gitea CLI', version: 'Version: 0.16.0', supported: true, hosts: ['127.0.0.1'], signedIn: true }])), null, 'signed in there: worked with Gitea');
+  assert.match(S.whyPlainGit(e('gitlab', 'gitlab.com/g/app'), s, look([{ cmd: 'glab', name: 'GitLab CLI', version: 'glab 1.126.0', supported: true, signedIn: false }]))!, /names GitLab, but the GitLab CLI isn't signed in \(glab auth login\)/);
+  assert.match(S.whyPlainGit(e('azure', 'dev.azure.com/o/p/_git/a'), s, look([]))!, /names Azure DevOps, but the Azure CLI isn't installed/);
+  assert.match(S.whyPlainGit(e('bitbucket', 'bitbucket.org/t/a'), s, look([]))!, /names Bitbucket, but no Bitbucket API token is in this PC's credential store/);
+  assert.match(S.whyPlainGit(gitea, { ...s, sourceControl: 'git' as const }, null)!, /Settings' Source control is Git: plain git for every repository$/);
+  assert.equal(S.whyPlainGit(e('git'), s, null), null, 'plain git asked for: nothing to say');
+  assert.equal(S.whyPlainGit(e('none'), s, null), null);
+  assert.equal(S.whyPlainGit({ repo: 'code.acme.com/team/app' }, s, null), null, 'no pipeline naming one: nothing said, as before');
+});
+
 test("the host a repository is worked with: its pipeline's, Manor's hint, else its name; plain git where its CLI isn't signed in", () => {
   const s = { sourceControl: 'auto' as const, releasesCastellan: false };
   const gitlabHere = signedIn('glab');
@@ -106,7 +148,9 @@ test("merge it yourself: each host's own command, by the pipeline's merge method
   assert.match(MERGE_IT_YOURSELF(7, 'gitlab.com/g/app', { host: 'gitlab' }), /once GitLab says it merges cleanly \(glab mr merge 7 --repo gitlab\.com\/g\/app\)/);
   assert.match(MERGE_IT_YOURSELF(7, 'gitlab.com/g/app', { host: 'gitlab', method: 'squash' }), /glab mr merge 7 --repo gitlab\.com\/g\/app --squash/);
   assert.match(MERGE_IT_YOURSELF(7, 'dev.azure.com/o/p/_git/a', { host: 'azure', method: 'squash' }), /Azure DevOps.*az repos pr update --id 7 --status completed --squash true/);
-  assert.match(MERGE_IT_YOURSELF(7, 'codeberg.org/me/app', { host: 'gitea', method: 'rebase' }), /Gitea.*tea pr merge 7 --repo codeberg\.org\/me\/app --style rebase/);
+  // tea takes owner/name and its server's login, never host/owner/name, which it answers "not found" (found live).
+  assert.match(MERGE_IT_YOURSELF(7, 'codeberg.org/me/app', { host: 'gitea', method: 'rebase' }), /Gitea.*\(tea pr merge 7 --repo me\/app --login codeberg\.org --style rebase\)/);
+  assert.match(MERGE_IT_YOURSELF(1, '127.0.0.1/steward-admin/demo', { host: 'gitea', login: 'sandbox' }), /\(tea pr merge 1 --repo steward-admin\/demo --login sandbox --style merge\)/);
   assert.match(MERGE_IT_YOURSELF(null, 'bitbucket.org/t/a', { host: 'bitbucket', method: 'squash' }), /Bitbucket.*its Merge button on bitbucket\.org, squash/);
   assert.match(MERGE_IT_YOURSELF(null, 'octo/app'), /gh pr merge <number>/);
 });

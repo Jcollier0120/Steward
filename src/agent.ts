@@ -137,10 +137,11 @@ export function askOf(body: any): StageAsk {
 
 /**
  * The staff's table as the page shows it: each PR with what its steward block asks for once merged, in words, and each
- * repository with how it is worked with (scm.ts's hostOf), so its PRs go by their host's name.
+ * repository with how it is worked with (scm.ts's hostOf), so its PRs go by their host's name, and where its pages are
+ * when its pipeline gives its host's address (`site`: links.ts).
  */
-export const staffView = (s: Staff | null, host?: (r: StaffRow) => Host): StaffView | null =>
-  s && { ...s, rows: s.rows.map((r) => ({ ...r, ...(host ? { host: host(r) } : {}), prs:r.prs.map((p) => ({ ...p, afterText: p.after ? afterWords(p.after) : null })) })) };
+export const staffView = (s: Staff | null, host?: (r: StaffRow) => Host, site?: (r: StaffRow) => string | null): StaffView | null =>
+  s && { ...s, rows: s.rows.map((r) => ({ ...r, ...(host ? { host: host(r) } : {}), ...(site?.(r) ? { site: site(r) } : {}), prs:r.prs.map((p) => ({ ...p, afterText: p.after ? afterWords(p.after) : null })) })) };
 
 /** /api/page's body with Developer options off, off the maker's laptop (maker.ts): the plain line, the rest empty. */
 export const offView = (): StewardView => ({ off: DEVELOPER_ONLY, staff: null, last: null, running: null, runs: [], full: false, refreshing: false, team: [], round: { on: false, minutes: 0, onDuty: false, lastRunAt: null } });
@@ -452,7 +453,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const team = teamOf(s.team, o.owner, hostLogins());
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
     const scm = loadScm();
-    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), passedOver: passedLines(loadStaff()?.rows ?? []).map((l) => passedWords(l)), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined, wholeSuite: loadWholeJob() };
+    // Each row as its employee, pipeline and all: worked with the host its pipeline names, its pages at its baseUrl.
+    const employeeOf = (r: StaffRow) => s.employees.find((e) => e.id === r.id);
+    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), passedOver: passedLines(loadStaff()?.rows ?? []).map((l) => passedWords(l)), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(employeeOf(r) ?? r, s, scm), (r) => employeeOf(r)?.resolvedPipeline?.host?.baseUrl ?? null), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined, wholeSuite: loadWholeJob() };
     return { shell: pageShell({ busy, title: runs.length ? `(${runs.map((r) => r.stage).join(', ')}) ${APP.name}` : APP.name }), body };
   };
 

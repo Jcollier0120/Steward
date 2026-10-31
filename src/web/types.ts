@@ -39,8 +39,11 @@ export interface RoundView {
 
 /** A PR as the page shows it: with what its steward block asks for once merged, in words (after.ts's afterWords). */
 export type PrView = PrInfo & { afterText: string | null };
-/** A repository as the page shows it, with how the Steward works with it (scm.ts's hostOf): its PRs go by that host's name. */
-export type StaffRowView = Omit<StaffRow, 'prs'> & { prs: PrView[]; host?: Host };
+/**
+ * A repository as the page shows it, with how the Steward works with it (scm.ts's hostOf): its PRs go by that host's name.
+ * `site`: its pipeline's host baseUrl, where its pages are when that isn't https on its host (links.ts).
+ */
+export type StaffRowView = Omit<StaffRow, 'prs'> & { prs: PrView[]; host?: Host; site?: string | null };
 export type StaffView = Omit<Staff, 'rows'> & { rows: StaffRowView[] };
 
 /** The repositories Reeve found that could be looked after (found.ts's foundView). */

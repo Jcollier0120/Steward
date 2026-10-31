@@ -4,7 +4,7 @@ import { readClone } from './found.ts';
 import { originName, originOf } from './kit/manor.ts';
 import { expandEnv } from './kit/settings-kit.ts';
 import { dryRunLines, PIPELINE_FILE, readPipelineFile, resolvePipeline, withPipeline } from './repoconfig.ts';
-import { hostOf, type ScmLook } from './scm.ts';
+import { hostOf, whyPlainGit, type ScmLook } from './scm.ts';
 import { settingsPipelineFor, type Employee, type Settings } from './settings.ts';
 
 /**
@@ -23,6 +23,8 @@ export function dryRun(s: Settings, which: string, o: { look: ScmLook | null; cw
   const e = found ?? adHoc(s, asFolder, o.currentBranch);
   if (!e) return { lines: [`no repository called ${want} here, and ${asFolder} is no clone (it has no .git): give an id (${s.employees.map((x) => x.id).join(', ') || 'none yet'}), a repository's name, or a clone's folder`], code: 1 };
   const lines = dryRunLines(e, hostOf(e, s, o.look));
+  const why = whyPlainGit(e, s, o.look);
+  if (why) lines.splice(1, 0, `why plain git: ${why}`);
   if (!found) lines.splice(1, 0, `not looked after yet: read from ${asFolder} as Look after would take it${existsSync(path.join(asFolder, PIPELINE_FILE)) ? '' : ` (it has no ${PIPELINE_FILE})`}`);
   return { lines, code: lines.some((l) => l.startsWith('held: ')) ? 1 : 0 };
 }
