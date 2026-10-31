@@ -212,11 +212,12 @@ button.ui-copy.ui-copy-failed .ui-copy-said { position: static; width: auto; hei
 .ui-list-row:first-child { padding-top: 2px; }
 .ui-line-more { margin: 6px 0 2px; padding-left: 12px; border-left: 2px solid var(--line); }
 .ui-line-more > :first-child { margin-top: 0; }
-/* What's new, at the top of About (whats-new.tsx): each version a card, the older folded. Long words and code wrap,
-   so a narrow window never scrolls sideways. */
+/* What's new, at the top of About (whats-new.tsx): each version a card, the older folded, and a line under them when
+   older versions are left out. Long words and code wrap, so a narrow window never scrolls sideways. */
 .whats-new { margin: 0 0 18px; }
 .whats-new > h3 { margin: 0 0 6px; color: var(--fg); }
 .whats-new-note { margin: 0 0 8px; font-size: 13px; }
+.whats-new-older { margin: 8px 0 0; }
 .release-entry { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; margin: 8px 0; overflow-wrap: anywhere; }
 details.release-entry > summary { cursor: pointer; }
 details.release-entry:not([open]) > summary { margin: 0; }

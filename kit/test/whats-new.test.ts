@@ -108,9 +108,10 @@ test("About shows the versions since the one before the latest update, and those
   assert.match(latest[0].entry, /^\*\*What 0\.4\.31 is about\.\*\*\n\n### What changed\n\n- A point of 0\.4\.31\.\n\n### Before you update/);
 
   // And the other updates of the last 30 days: to 0.4.27 (20 days ago, from 0.4.25) and to 0.4.29 (10 days ago), not
-  // the one to 0.4.25 (40 days ago).
+  // the one to 0.4.25 (40 days ago). They brought 0.4.26 to 0.4.31: the newest 5 are shown, and 0.4.26 is left out.
   const month = rec(['0.4.20', ago(90)], ['0.4.25', ago(40)], ['0.4.27', ago(20)], ['0.4.29', ago(10)], ['0.4.31', ago(1)]);
-  assert.deepEqual(shown(W.chooseVersions(entries, month, '0.4.31', NOW)), ['0.4.31', '0.4.30', '0.4.29', '0.4.28', '0.4.27', '0.4.26']);
+  assert.deepEqual(shown(W.chooseVersions(entries, month, '0.4.31', NOW)), ['0.4.31', '0.4.30', '0.4.29', '0.4.28', '0.4.27']);
+  assert.equal(W.chooseWhatsNew(entries, month, '0.4.31', NOW).older, 1);
   // All of them within the 30 days: from 0.4.20 on, but at most MAX_SHOWN.
   const busy = rec(['0.4.20', ago(29)], ['0.4.25', ago(20)], ['0.4.31', ago(1)]);
   assert.deepEqual(shown(W.chooseVersions(entries, busy, '0.4.31', NOW)), line(31).slice(0, W.MAX_SHOWN));
@@ -122,6 +123,36 @@ test("About shows the versions since the one before the latest update, and those
   // A version with no entry is passed over; one newer than the version running (a checkout's next) isn't its news.
   const gaps = entriesOf(changelog(['0.4.33', '0.4.31', '0.4.29', '0.4.28']));
   assert.deepEqual(shown(W.chooseVersions(gaps, rec(['0.4.28', ago(40)], ['0.4.31', ago(1)]), '0.4.31', NOW)), ['0.4.31', '0.4.29']);
+});
+
+test('About carries only the newest 5 versions, and says how many older ones the same updates brought', () => {
+  assert.equal(W.MAX_SHOWN, 5);
+  const entries = entriesOf(changelog(line(31)));
+  const rec = (...r: [string, string | null][]) => r.map(([version, since]) => ({ version, since }));
+  // Updated from 0.4.23 to 0.4.31 today, as Watchman was from 0.2.1 to 0.3.5: 8 versions came, the newest 5 go to the
+  // page, each whole, and the 3 older are only counted.
+  const eight = W.chooseWhatsNew(entries, rec(['0.4.23', ago(40)], ['0.4.31', ago(0)]), '0.4.31', NOW);
+  assert.deepEqual(shown(eight.versions), ['0.4.31', '0.4.30', '0.4.29', '0.4.28', '0.4.27']);
+  assert.equal(eight.older, 3);
+  assert.deepEqual(eight.versions.map((x) => x.since), [ago(0), null, null, null, null]);
+  assert.match(eight.versions[4].entry, /^\*\*What 0\.4\.27 is about\.\*\*/);
+  assert.doesNotMatch(JSON.stringify(eight), /0\.4\.2[4-6]/, "the left-out versions' entries aren't carried at all");
+  // Exactly 5, or fewer: all of them, nothing left out.
+  assert.deepEqual(W.chooseWhatsNew(entries, rec(['0.4.26', ago(40)], ['0.4.31', ago(0)]), '0.4.31', NOW).older, 0);
+  assert.equal(W.chooseWhatsNew(entries, rec(['0.4.26', ago(40)], ['0.4.31', ago(0)]), '0.4.31', NOW).versions.length, 5);
+  assert.deepEqual(W.chooseWhatsNew(entries, rec(['0.4.29', ago(40)], ['0.4.31', ago(0)]), '0.4.31', NOW), {
+    versions: [
+      { version: '0.4.31', since: ago(0), entry: entries[0].entry },
+      { version: '0.4.30', since: null, entry: entries[1].entry },
+    ],
+    older: 0,
+  });
+  // Only a version's own entry: nothing older to count. No changelog: nothing at all.
+  assert.deepEqual(W.chooseWhatsNew(entries, rec(['0.4.31', ago(1)]), '0.4.31', NOW).older, 0);
+  assert.deepEqual(W.chooseWhatsNew([], rec(['0.4.20', ago(9)], ['0.4.31', ago(1)]), '0.4.31', NOW), { versions: [], older: 0 });
+  // A version with no entry isn't counted among the older either.
+  const gaps = entriesOf(changelog(['0.4.31', '0.4.30', '0.4.29', '0.4.28', '0.4.27', '0.4.25', '0.4.21']));
+  assert.equal(W.chooseWhatsNew(gaps, rec(['0.4.20', ago(40)], ['0.4.31', ago(1)]), '0.4.31', NOW).older, 2);
 });
 
 test("a fresh install, a step back, or a record that doesn't end at the version running: that version's own entry", () => {
@@ -143,7 +174,8 @@ test('entriesOf reads every entry in one pass; a release carries the opening and
 
   const whole = changelog(line(50));
   const carried = releaseChangelog(whole);
-  assert.equal(RELEASE_ENTRIES, 2 * W.MAX_SHOWN);
+  assert.equal(RELEASE_ENTRIES, 20);
+  assert.ok(RELEASE_ENTRIES > W.MAX_SHOWN, 'more than About shows, so it can count the older versions it leaves out');
   assert.deepEqual(shown(entriesOf(carried)), line(50).slice(0, RELEASE_ENTRIES));
   assert.ok(carried.startsWith("# Fixture's changelog\n\nEach version of Fixture, newest first.\n\n## 0.4.50\n"), 'its opening, then the newest');
   assert.equal(entriesOf(carried)[RELEASE_ENTRIES - 1].entry, entriesOf(whole)[RELEASE_ENTRIES - 1].entry, 'the last kept whole');
@@ -158,7 +190,9 @@ test('serve() notes the version as the page starts, and /api/whats-new answers w
     assert.deepEqual(shown(record.versions), [APP.version]);
     const r = await fetch(`http://127.0.0.1:${port}/api/whats-new`);
     assert.equal(r.status, 200);
-    assert.deepEqual(await r.json(), { versions: [] }, "the fixture has no CHANGELOG.md: nothing, and no error");
+    assert.deepEqual(await r.json(), { versions: [], older: 0 }, "the fixture has no CHANGELOG.md: nothing, and no error");
+    assert.deepEqual(W.whatsNewAnswer(), { versions: [], older: 0 }, 'what the route answers');
+    assert.deepEqual(W.whatsNew(), []);
     assert.equal(pageShell().whatsNew, false, 'nor a What\'s new for About');
   } finally {
     await close();
@@ -166,12 +200,17 @@ test('serve() notes the version as the page starts, and /api/whats-new answers w
 });
 
 /** The section and the frame, rendered as the page draws them. */
-const { list, page, versionsOf } = await bundleForNode<{ list: (v: unknown[]) => string; page: (d: unknown) => string; versionsOf: (j: unknown) => unknown[] }>(
+const { list, page, versionsOf, olderOf } = await bundleForNode<{
+  list: (v: unknown[], older?: number) => string;
+  page: (d: unknown) => string;
+  versionsOf: (j: unknown) => unknown[];
+  olderOf: (j: unknown) => number;
+}>(
   `import { renderToStaticMarkup } from 'react-dom/server';
-   import { WhatsNewList, versionsOf } from '${importPath(path.join(STEWARD, 'kit/react/whats-new.tsx'))}';
+   import { WhatsNewList, versionsOf, olderOf } from '${importPath(path.join(STEWARD, 'kit/react/whats-new.tsx'))}';
    import { Page } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
-   export { versionsOf };
-   export const list = (versions) => renderToStaticMarkup(<WhatsNewList versions={versions} name="Fixture" />);
+   export { versionsOf, olderOf };
+   export const list = (versions, older) => renderToStaticMarkup(<WhatsNewList versions={versions} name="Fixture" older={older} />);
    export const page = (data) => renderToStaticMarkup(<Page data={data} reload={() => {}}><p>page</p></Page>);`,
   { location: { hash: '' }, document: { documentElement: { dataset: {} } } },
 );
@@ -200,6 +239,27 @@ test("the section: each version under its own, newest open and the older folded,
   assert.deepEqual(versionsOf({ versions: [{ version: '1.2.3', since: 5, entry: 'x' }, { version: '1.2.4', entry: ' ' }, null, { version: 1, entry: 'y' }] }), [{ version: '1.2.3', since: null, entry: 'x' }]);
   assert.deepEqual(versionsOf({ error: 'not found' }), []);
   assert.deepEqual(versionsOf(null), []);
+});
+
+test('the section says when older versions are left out: the count line names the newest it shows, and a line under them how many more', () => {
+  const v = (n: number) => ({ version: `0.3.${n}`, since: null, entry: `**What 0.3.${n} is about.**` });
+  const five = [5, 4, 3, 2, 1].map(v);
+  const html = list(five, 3);
+  assert.match(html, /<h3 id="whats-new-title">What&#x27;s new<\/h3><p class="muted whats-new-note">The newest 5 versions that came with Fixture&#x27;s latest updates, newest first\.<\/p>/);
+  assert.equal(html.match(/<details class="release-entry"/g)?.length, 5);
+  assert.match(html, /<\/details><p class="muted whats-new-note whats-new-older">3 older versions aren&#x27;t shown here\.<\/p><\/section>$/, 'under the versions, last');
+  assert.match(list(five, 1), /<p class="muted whats-new-note whats-new-older">1 older version isn&#x27;t shown here\.<\/p><\/section>$/);
+  // Nothing left out (0, or from an older page server, no count at all): as before, and no line under them.
+  for (const none of [list(five, 0), list(five)]) {
+    assert.match(none, /<p class="muted whats-new-note">5 versions came with Fixture&#x27;s latest updates, newest first\.<\/p>/);
+    assert.doesNotMatch(none, /whats-new-older|older version/);
+  }
+  // One version shown with older ones left out: its own card, and the line.
+  assert.match(list([v(5)], 2), /<div class="release-entry">.*<\/div><p class="muted whats-new-note whats-new-older">2 older versions aren&#x27;t shown here\.<\/p><\/section>$/);
+  assert.equal(list([], 3), '', 'no versions: no section');
+
+  assert.equal(olderOf({ versions: [], older: 3 }), 3);
+  for (const odd of [{ older: 0 }, { older: -2 }, { older: 1.5 }, { older: '3' }, {}, null, 'x']) assert.equal(olderOf(odd), 0, JSON.stringify(odd));
 });
 
 test("About is there whenever it has a What's new, with nothing else to say; the section waits for the page's ask", () => {

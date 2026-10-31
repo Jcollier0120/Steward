@@ -16,6 +16,7 @@ const { APP } = await import('../src/app.ts');
 const { writeJson } = await import('../src/kit/store.ts');
 const { bumpOne, kitTrialLogOf, trialBranch, trialDirOf } = await import('../src/stages/bump.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+const { roundLine, surveyorWarns } = await import('./surveyor.ts');
 
 const kitTool = readFileSync(new URL('../tools/kit.ts', import.meta.url), 'utf8');
 // An agent's test that relies on what the kit says, as nine agents' tests relied on kit 2.19.0's "note from the NPU".
@@ -63,6 +64,7 @@ test("main's kit fails an agent: it isn't released, the agent named with what it
   assert.equal(t.why, failsWords(t.t));
   assert.ok(c.lines.some((l) => l.startsWith('[good] kit 1.0.1 trial: done')), c.lines.join('\n'));
   assert.ok(c.lines.some((l) => l.startsWith('[bad] kit 1.0.1 trial: failed')), c.lines.join('\n'));
+  assert.ok(c.lines.filter((l) => l.startsWith('[bad] kit 1.0.1 trial: failed')).every((l) => surveyorWarns(roundLine(l))), 'a failure is a warning on the Manor still');
 
   const k = kept()[mainKeyOf(head)];
   assert.deepEqual([k.kit, k.commit, k.passed, k.steward, k.pending, k.retry], ['1.0.1', head, 1, APP.version, undefined, undefined]);
@@ -108,7 +110,9 @@ test("an agent the kit failed is tried again, alone, once its main moves: fixed 
   const moved = push('README.md', 'Bad\n');
   const still = ctx();
   assert.equal((await kitTrialAtMain(still.c, me, at)).state, 'failed');
-  assert.match(still.c.lines.join('\n'), /Bad moved on since kit 1\.0\.1 failed their checks: trying it again/);
+  const again = still.c.lines.find((l) => l.includes("Bad has changed since kit 1.0.1 didn't pass its checks there: trying it again"));
+  assert.ok(again, still.c.lines.join('\n'));
+  assert.ok(!surveyorWarns(roundLine(again)), 'a retry is no warning on the Manor');
   assert.deepEqual(tries(still.c.lines).map((l) => l.split(':')[0]), ['[bad] kit 1.0.1 trial'], 'only it is tried');
   assert.equal(kept()[mainKeyOf(head)].failed[0].main, moved);
 
@@ -150,7 +154,9 @@ test("a failure another Steward kept is tried again, once, whatever its commit: 
   writeJson(kitTrialsFile(), { [mainKeyOf(head)]: { kit: '1.0.1', failed: [{ id: 'good', name: 'Good', message: 'Could not resolve "react"', main: null }], passed: 1, at: new Date().toISOString(), commit: head, steward: '0.0.1' } });
   const older = ctx();
   assert.equal((await kitTrialAtMain(older.c, me, at)).state, 'passed', older.c.lines.join('\n'));
-  assert.ok(older.c.lines.some((l) => l.includes("Good failed kit 1.0.1's checks as Steward 0.0.1 tried them: trying it again")), older.c.lines.join('\n'));
+  const again = older.c.lines.find((l) => l.includes("Good didn't pass kit 1.0.1's checks as Steward 0.0.1 tried them: trying it again"));
+  assert.ok(again, older.c.lines.join('\n'));
+  assert.ok(!surveyorWarns(roundLine(again)), 'a retry is no warning on the Manor');
   assert.equal(kept()[mainKeyOf(head)].steward, APP.version);
 });
 
@@ -162,6 +168,22 @@ test('an agent that fails without the kit too is not held against it', async () 
   assert.ok(c.lines.some((l) => l.startsWith("[broken] kit 1.0.1 trial: skipped: fails its checks without kit 1.0.1 too, so not the kit's doing")), c.lines.join('\n'));
   const t = kept()[mainKeyOf(head)];
   assert.deepEqual([t.passed, t.failed.length, t.own.map((f: { id: string }) => f.id)], [1, 0, ['broken']]);
+});
+
+test("a failure that looks like this PC's load is tried once more, alone, and the line that says so is no warning", async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  // The kit fails it, and its step's words say EBUSY, as a file still busy would (UNDER_LOAD).
+  const busy = employee(fakeEmployee(path.join(tmp, 'busy'), { files: { 'tools/kit.ts': kitTool, 'check.mjs': CHECK } }).checkout, { id: 'busy', name: 'Busy', test: ['node check.mjs EBUSY'] });
+  const { c } = ctx([good, busy]);
+  assert.equal((await kitTrialAtMain(c, me, at)).state, 'failed', c.lines.join('\n'));
+  const once = c.lines.find((l) => l.startsWith("[busy] kit 1.0.1 trial: it didn't pass, which may be this PC's load, not the kit's: tried once more, alone, once the rest are tried"));
+  assert.ok(once, c.lines.join('\n'));
+  assert.ok(!surveyorWarns(roundLine(once)), 'a retry is no warning on the Manor');
+  // Each try that fails is a failure, and a warning; failing again, it holds the kit.
+  const failed = c.lines.filter((l) => l.startsWith('[busy] kit 1.0.1 trial: failed'));
+  assert.equal(failed.length, 2, c.lines.join('\n'));
+  for (const l of failed) assert.ok(surveyorWarns(roundLine(l)), l);
+  assert.match(kept()[mainKeyOf(head)].failed[0].message, /tried once more, alone, after the rest: it failed again$/);
 });
 
 test("an agent Manor has retired isn't tried, and a failure of its kept from before no longer holds the kit (retired.ts)", async () => {
@@ -180,7 +202,9 @@ test("an agent Manor has retired isn't tried, and a failure of its kept from bef
   const since = ctx([good, sour]);
   since.c.retired = new Set(['sour']);
   assert.equal((await kitTrialAtMain(since.c, me, at)).state, 'passed', since.c.lines.join('\n'));
-  assert.ok(since.c.lines.some((l) => l.includes("Sour failed kit 1.0.1's checks, and Manor has retired it since: no longer held against the kit")), since.c.lines.join('\n'));
+  const gone = since.c.lines.find((l) => l.includes("Sour didn't pass kit 1.0.1's checks, and Manor has retired it since: no longer held against the kit"));
+  assert.ok(gone, since.c.lines.join('\n'));
+  assert.ok(!surveyorWarns(roundLine(gone)), 'no longer held against the kit is no warning on the Manor');
   assert.deepEqual(tries(since.c.lines), []);
   assert.deepEqual(kept()[mainKeyOf(head)].failed, []);
 });

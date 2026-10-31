@@ -41,7 +41,7 @@ export function watchWake(onWake: () => void, everyMs = 30_000, now: () => numbe
     const gap = t - last;
     last = t;
     if (gap > WOKE_AFTER_MS) {
-      console.log(`${new Date(t).toISOString()} the PC woke after ${Math.round(gap / 60_000)} min: what failed before is tried again`);
+      console.log(`${new Date(t).toISOString()} the PC woke after ${Math.round(gap / 60_000)} min: what didn't go through before is tried again`);
       woke = t;
       noteFreshStart();
       onWake();
