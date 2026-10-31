@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.273
+
+**It carries kit 2.147.0, whose pages can be laid out for a phone, a 1080p desktop and a 2K or 3K screen.**
+
+### What changed
+
+- **Kit 2.147.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): `Columns`, `Span`, `PageTabs`' `side` and `useWidth`, for an agent's page to put its sections side by side on a wide screen. The Steward's own page looks as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.271
 
 **A background fetch of a repository that isn't there, or isn't shared with you, no longer signs you out of Bitbucket or Azure DevOps (kit 2.146.6).**
