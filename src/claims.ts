@@ -1,4 +1,4 @@
-import { showFile } from './git.ts';
+import { fetchBranches, showFile } from './git.ts';
 import { compareVersions } from './kitfiles.ts';
 import { withLock } from './kit/lock.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
@@ -25,7 +25,8 @@ import { pushable } from './found.ts';
  * version" when they began, the same one, and found out only when the second conflicted with the first on its way
  * in. Now a worker (a Claude Code session, the Wright, a person) asks the Steward for the version before it starts:
  * `node src\cli.ts claim-version <employee or owner/repo> --branch <its branch> --for "<what>"`. The Steward hands out
- * the next one no one has: above the branch's version, every release, every open PR's (by its title), and every live
+ * the next one no one has: above the branch's version, every release, every open PR's (by its title, and by its head's
+ * version files), and every live
  * claim; records it; and never hands it out again while the claim lives. One machine-wide lock makes claims one at a
  * time, so two workers asking at once get two versions. Asking again for the same branch returns the same claim.
  *
@@ -36,7 +37,8 @@ import { pushable } from './found.ts';
  * so the next build's stamp or claim carries it.
  *
  * The kit is claimed the same way, as a part of the Steward's repository (`claim-version kit`): kit/VERSION, its
- * kit-v<version> releases, the kit versions open PRs' titles name, and claims under `<repo>#kit` (stages/kitpart.ts).
+ * kit-v<version> releases, the kit versions open PRs' titles name and their heads' kit/VERSION, and claims under
+ * `<repo>#kit` (stages/kitpart.ts).
  *
  * The maker's other development PCs (Steward 0.36.27) claim versions of the manor's repositories too, though nothing
  * else of them is theirs: GitHub says their account can push there (maker.ts' claimRefused). They run no rounds to
@@ -126,12 +128,28 @@ export function after(v: string, minor = false): string {
   return `${x}.${y + 1}.0`;
 }
 
-/** The versions an employee's open PRs set, read from their titles ("Porter 0.4.12: …"). */
-export const titleVersions = (name: string, titles: string[]): string[] =>
-  titles.flatMap((t) => {
-    const m = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (\\d+\\.\\d+\\.\\d+)\\b`, 'i').exec(t);
-    return m ? [m[1]] : [];
-  });
+/**
+ * The versions an employee's open PRs set, read from their titles' lead (before the first ": "): "Porter 0.4.12: …",
+ * and the name after another part's version, as a kit PR names both ("Kit 2.146.7 and Steward 0.36.272: …", "Kit 2.1.0
+ * (Developer Herald 0.5.4)"). Until Steward 0.36.274 only a title that began with the name counted, so the Steward's
+ * version in a kit PR's title went unseen, and two PRs were handed 0.36.272.
+ */
+export const titleVersions = (name: string, titles: string[]): string[] => {
+  const re = new RegExp(`(?:^|\\band |, |\\(|\\+ |& )${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (\\d+\\.\\d+\\.\\d+)\\b`, 'gi');
+  return titles.flatMap((t) => [...t.slice(0, t.includes(': ') ? t.indexOf(': ') : t.length).matchAll(re)].map((m) => m[1]));
+};
+
+/**
+ * The versions open PRs' heads set in the version files (the kit's: kit/VERSION), where their branch is the
+ * repository's own (a fork's isn't on its origin): those branches fetched in one go, and each file read at each head.
+ * A PR whose title doesn't name its version holds it all the same (Steward 0.36.274).
+ */
+export async function headVersions(run: Runner, repo: string, branches: string[], files: string[]): Promise<string[]> {
+  const own = [...new Set(branches)].filter((b) => /^[\w.\/-]+$/.test(b) && !b.includes('..') && !b.startsWith('-'));
+  const got = await fetchBranches(run, repo, own);
+  const read = await Promise.all(got.map(async (b) => agreedVersion(await Promise.all(files.map(async (f) => [f, await showFile(run, repo, `origin/${b}`, f)] as [string, string | null])))));
+  return read.flatMap((r) => ('version' in r ? [r.version] : []));
+}
 
 /**
  * Whether a claim still holds, given what is known of its repository now: its version not yet on the branch or
@@ -198,8 +216,9 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
   const released = kit ? (await kitInfo(ctx.run, ctx.neutralDir, e.repo)).released : (await releasedOf(ctx, e)).map((r) => r.version);
   // Worked with plain git (scm.ts): no pull requests, so none sets a version.
   const prs = hostIs(ctx, e) === 'git' ? [] : (JSON.parse(must(await hostFor(ctx, e).listPrs(e.repo, { state: 'open', limit: 100, fields: 'title,headRefName' })) || '[]') as { title: string; headRefName: string }[]);
-  const openVersions = kit ? kitTitleVersions(prs.map((p) => p.title)) : titleVersions(e.name, prs.map((p) => p.title));
   const openBranches = prs.map((p) => p.headRefName);
+  const named = kit ? kitTitleVersions(prs.map((p) => p.title)) : titleVersions(e.name, prs.map((p) => p.title));
+  const openVersions = [...new Set([...named, ...(await headVersions(ctx.run, repo, openBranches, files))])];
   const facts = { branchVersion, released, openBranches, openVersions, now };
   const ask: Ask = { key, branch: o.branch ?? null, by: o.by, for: o.for, minor: !!o.minor, now, facts, what: kit ? 'The kit' : e.name, files, from: `origin/${e.branch}`, move: o.move, marks: o.marks };
   const remote = o.remote !== undefined ? o.remote : process.env.NODE_TEST_CONTEXT ? null : await remoteFor(ctx.run, ctx.settings, e).catch(() => null);
