@@ -2,6 +2,25 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.283
+
+**Between builds, the Steward vouches for your team's open pull requests itself: it runs their checks as `steward vouch` would, and marks the ones that pass as tested, ready for their authors to merge.**
+
+### What's new
+
+- **Round vouches.** Between builds, a round takes one of your team's open PRs that no one has vouched for yet and runs its checks here, the same ones `steward vouch` runs: its version files checked first, then only the tests its change reaches; a kit PR of the Steward's own has its kit tried on the agents too. Once they pass, the PR's head gets the same `steward/tested` status, saying "… passed in the Steward's round at …". The Steward never merges, comments on or pushes to the PR: its author still merges it, and the next build releases it without testing that code again.
+- **Which PRs**: those an account in Settings' Team opened, not drafts, not from a fork, into the branch the Steward releases, in a repository on GitHub, GitLab, Bitbucket, Azure DevOps or Gitea whose pipeline vouches, and only on the PC that releases that repository. A head a team member vouched for already isn't run; code that already passed (in the Assayer, here or on another PC) gets the status without a run. The PR due to merge next goes first: in each repository, the lowest version above main's.
+- **Gently**: one PR a round, at the checks pace. None starts within 15 minutes of a build, or while main's kit is being tried ahead of it, and a run still going 5 minutes before a build is stopped, to be tried again after it. A PR pushed to, closed or made a draft while its checks run is dropped, and nothing is set on it. A failure sets nothing and is remembered for that commit, so it isn't run every round; a new push is tried afresh.
+- **A setting**, "Vouches for the team's PRs between builds" (`roundVouches`, under Settings' How it works, advanced). Left alone, it is on on the makers' PCs and off on every other: turn it on to have your PC vouch for your team's PRs.
+
+### What changed
+
+- The Steward's page, `steward round` and `steward vouch` in its help, and its README say that a round between builds releases nothing (it no longer "only looks"), and that it may vouch for a PR.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Where round vouches are on, a round that vouches for a PR takes as long as that PR's checks, and the next round waits for it.
+
 ## 0.36.277
 
 **It carries kit 2.147.0, whose pages can be laid out for a phone, a 1080p desktop and a 2K or 3K screen.**

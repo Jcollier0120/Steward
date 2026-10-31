@@ -54,10 +54,11 @@ const USAGE = `${APP.id}: ${APP.role}
                    one round, as the Steward runs by itself on duty (Settings): main's unstamped entries
                    stamped, a new kit released once its trial passes and rolled out, then each main with a
                    version not yet released tested (unless a vouch covers it) and released. It goes by the
-                   build pipeline (Settings: Build pipeline): between builds a round only looks, except for an
-                   urgent fix (a commit on main whose changelog entry starts "**Urgent fix:"), which builds at
-                   once for its repository; an urgent kit goes out to every agent in that build, and each is
-                   built at once after it
+                   build pipeline (Settings: Build pipeline): between builds a round releases nothing, except
+                   for an urgent fix (a commit on main whose changelog entry starts "**Urgent fix:"), which
+                   builds at once for its repository; an urgent kit goes out to every agent in that build, and
+                   each is built at once after it. Between builds it vouches for one of the team's open PRs
+                   no one has vouched for, as vouch would (Settings: roundVouches), and never merges it
   build --dry-run <repo>
                    the steps a build of one repository takes by its pipeline (its .steward.json, Settings'
                    Pipelines, or what its fields always said): its builds, tests, version, notes, release,
@@ -112,6 +113,8 @@ const USAGE = `${APP.id}: ${APP.role}
                    The checks run at the checks pace, a share of the processor (Manor's Settings change it).
                    When the Assayer already passed every check on exactly HEAD's tree (same
                    dependencies and kit, within a day), nothing runs again: its pass is taken.
+                   Where Settings' roundVouches is on, a round between builds does the same for the team's
+                   open PRs no one has vouched for yet, one a round, on the PC that releases each.
   claims [--json]  the versions claimed and not yet landed
   Only on the PC Castellan is made on (elsewhere they say so, and do nothing):
   claim-port <agent id> [--branch <b>] [--for "<what>"] [--by <who>] [--json]

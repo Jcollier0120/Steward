@@ -13,7 +13,8 @@ import { originUrl, repoFromUrl, type Host } from '../scm.ts';
 import { heldBy, pipelineOf, type MergeMethod } from '../repoconfig.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, readVersion } from '../versions.ts';
-import { checkKind, runChecks, type AffectedScope } from './bump.ts';
+import { checkKind, runChecks, type AffectedScope, type ChecksOptions, type FailedChecks } from './bump.ts';
+import type { CheckTask } from './seneschal.ts';
 import type { StoodIn } from './standin.ts';
 import { hostIs, type Ctx } from './common.ts';
 import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
@@ -245,24 +246,39 @@ export function versionFix(texts: [string, string | null][], want?: string): str
  * (their failure, or "its checks passed, but GitHub wouldn't take the status: …").
  */
 async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: string; head: string; say: (line: string) => void; overMs?: number }): Promise<string | null> {
-  // Only the tests this change reaches (affected.ts), unless Settings say the whole suite.
+  // A person waits on a vouch: the Seneschal's first lane (stages/seneschal.ts).
+  const c = await vouchChecks(ctx, e, { ...o, timeLimit: (kind, files) => vouchLimit(e.id, kind, { overMs: o.overMs, files }), task: { lane: 'person' } });
+  return 'failed' in c ? c.failed : setVouch(ctx, e, o.repo, o.head, c.description);
+}
+
+/**
+ * A vouch's checks in the clone at `dir`, at `head`, as `steward vouch` runs them and a round's vouch (roundvouch.ts):
+ * only the tests the change reaches (affected.ts), unless Settings say the whole suite; then a kit PR's kit tried on the
+ * agents (vouchTrial). The status's description once they pass, or why they didn't (`failed`). Sets nothing.
+ *
+ * A pass of exactly this tree stands in (runChecks, standin.ts): the Assayer's (whole, or the tests this change reaches),
+ * this PC's or another PC's on the licence. Then nothing is run again, so the PC isn't loaded twice. A run of its own is
+ * kept toward the vouch's average time (vouchtime.ts). `where` goes in the description after "passed" (" in the
+ * Steward's round"); `stop`, asked before each agent of a kit's trial, cuts it short with its reason.
+ */
+export async function vouchChecks(
+  ctx: Ctx,
+  e: Employee,
+  o: { dir: string; head: string; say: (line: string) => void; timeLimit?: ChecksOptions['timeLimit']; task?: CheckTask; failed?: FailedChecks; elsewhere?: boolean; where?: string; stop?: () => string | null },
+): Promise<{ failed: string } | { description: string }> {
   const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
-  // Stopped five minutes past its usual time for as many test files (vouchtime.ts); a pass is kept toward that average. A pass of exactly
-  // this tree stands in (runChecks, standin.ts): the Assayer's (whole, or the tests this change reaches), this PC's or
-  // another PC's on the licence. Then nothing is run again, so the PC isn't loaded twice.
   const started = Date.now();
   const stoodIn: StoodIn = {};
-  // A person waits on a vouch: the Seneschal's first lane (stages/seneschal.ts).
-  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind, files) => vouchLimit(e.id, kind, { overMs: o.overMs, files }), stoodIn, task: { lane: 'person' } });
-  if (failed) return failed;
+  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), ...(o.timeLimit ? { timeLimit: o.timeLimit } : {}), stoodIn, ...(o.task ? { task: o.task } : {}), ...(o.failed ? { failed: o.failed } : {}), ...(o.elsewhere ? { elsewhere: true } : {}) });
+  if (failed) return { failed };
   const took = Date.now() - started;
   // A kit PR's kit tried on the agents, as main's trial will try it once it's merged.
   const trial = await vouchTrial(ctx, e, o);
-  if (trial && 'failed' in trial) return trial.failed;
+  if (trial && 'failed' in trial) return { failed: trial.failed };
   const tried = trial ? `; ${'passed' in trial ? trial.passed : trial.untried}` : '';
-  if (stoodIn.by) return setVouch(ctx, e, o.repo, o.head, withTrial(stoodInDescription(e, stoodIn, o.head), tried));
+  if (stoodIn.by) return { description: withTrial(stoodInDescription(e, stoodIn, o.head), tried) };
   noteVouchTime(e.id, checkKind(scope), took, scope?.files);
-  return setVouch(ctx, e, o.repo, o.head, withTrial(vouchDescription(e, scope, o.head), tried));
+  return { description: withTrial(vouchDescription(e, scope, o.head, o.where), tried) };
 }
 
 /** A vouch's description and its kit trial's words after it, as far as GitHub keeps (140 characters). Pure. */
@@ -281,7 +297,7 @@ const withTrial = (description: string, tried: string) => `${description}${tried
  * to, for the vouch's description. `untried` (Steward 0.36.270): this PC has no agent to try it on, which neither passes
  * nor fails it (main's trial on the PC that releases Castellan does), and the description says so.
  */
-export async function vouchTrial(ctx: Ctx, e: Employee, o: { dir: string; head: string; say: (line: string) => void }): Promise<{ failed: string } | { passed: string } | { untried: string } | null> {
+export async function vouchTrial(ctx: Ctx, e: Employee, o: { dir: string; head: string; say: (line: string) => void; stop?: () => string | null }): Promise<{ failed: string } | { passed: string } | { untried: string } | null> {
   if (e.id !== APP.id) return null;
   const base = (await gitMaybe(ctx.run, o.dir, 'merge-base', `origin/${e.branch}`, o.head))?.trim();
   const now = await kitContentOf(ctx, o.dir, o.head);
@@ -292,8 +308,8 @@ export async function vouchTrial(ctx: Ctx, e: Employee, o: { dir: string; head: 
   const kit = (await showFile(ctx.run, o.dir, o.head, 'kit/VERSION'))?.trim();
   if (!kit) return { failed: `its kit changes, and its kit/VERSION can't be read at ${o.head.slice(0, 7)}: the kit can't be tried on the agents` };
   o.say(`its kit ${kit} changes what the agents take from it: tried on each of them, one at a time, as main's trial will try it`);
-  const t = await kitTrialOfClone(ctx, { dir: o.dir, head: o.head, kit }, o.say);
-  if (t.cut) return { failed: `${t.cut}: no verdict on the kit, so vouch again` };
+  const t = await kitTrialOfClone(ctx, { dir: o.dir, head: o.head, kit, ...(o.stop ? { stop: o.stop } : {}) }, o.say);
+  if (t.cut) return { failed: `${t.cut}: ${NO_VERDICT}, so vouch again` };
   if (!t.staff) {
     // A PC whose Steward looks after none of the agents on the kit (none has a clone here): nothing was tried, so
     // nothing passed (Steward 0.36.270). "Passed 0 of 0" read as a verdict.
@@ -309,6 +325,9 @@ export async function vouchTrial(ctx: Ctx, e: Employee, o: { dir: string; head: 
   o.say(`${passed}${t.staff - t.passed - t.own.length ? ` (the rest not tried: nothing they take from the kit changes)` : ''}${own}`);
   return { passed };
 }
+
+/** What a kit's trial cut short (the network, a round's vouch yielding to the build) says of the kit. */
+export const NO_VERDICT = 'no verdict on the kit';
 
 /** The vouch's description when a pass stood in for running the checks: whose, and at which commit. */
 export function stoodInDescription(e: Employee, s: StoodIn, head: string): string {

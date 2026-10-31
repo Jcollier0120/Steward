@@ -192,7 +192,7 @@ export type PipelineMode =
    * gives it.
    */
   | { kind: 'outside' }
-  /** Between builds: it only looks. */
+  /** Between builds: it releases nothing (stages/roundvouch.ts may vouch for a PR). */
   | { kind: 'between'; next: Date | null; line: string }
   /** A build's round: `closing` once its window has run out, when it releases whatever it merged and ends. */
   | { kind: 'build'; run: BuildRun; fresh: boolean; closing: boolean };

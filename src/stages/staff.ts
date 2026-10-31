@@ -273,6 +273,7 @@ export function parsePrs(json: string, team: string[]): PrInfo[] {
         changed: (Number(p.additions) || 0) + (Number(p.deletions) || 0),
         files: Array.isArray(p.files) ? p.files.map((f: any) => String(f?.path ?? '')).filter(Boolean) : [],
         closes: closedIssues(String(p.body ?? '')),
+        ...(p.isCrossRepository === true ? { fork: true } : {}),
       };
     })
     .sort((a, b) => a.number - b.number);
