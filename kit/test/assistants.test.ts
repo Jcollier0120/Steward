@@ -505,6 +505,28 @@ test('Claude Desktop from the Store: its package\'s own copy of the settings, el
   assert.equal(assistantsFound(env, { platform: 'win32', env: { APPDATA: path.join(env, 'elsewhere', 'Roaming') } })[0]?.file, path.join(env, 'elsewhere', 'Roaming', 'Claude', 'claude_desktop_config.json'));
 });
 
+test("Cline 4: ~/.cline/data's settings once that folder is there, even beside VS Code's old copy (found live)", async () => {
+  const legacyFolder = `${R}/Code/User/globalStorage/saoudrizwan.claude-dev`;
+  const legacy = `${legacyFolder}/settings/cline_mcp_settings.json`;
+  const fresh = '.cline/data/settings/cline_mcp_settings.json';
+  const at = (home: string) => assistantsFound(home, { platform: 'win32' }).find((a) => a.id === 'cline')?.file?.slice(home.length + 1).replace(/\\/g, '/');
+  // As Cline 4 makes it on its first start, beside the copy an older Cline left.
+  const home = homeWith('.cline/data/settings', path.dirname(legacy));
+  writeFileSync(path.join(home, fresh), '{\n  "mcpServers": {}\n}');
+  const old = '{"mcpServers":{"old":{"command":"node"}}}';
+  writeFileSync(path.join(home, legacy), old);
+  assert.equal(at(home), fresh);
+  const r = await addServer('cline', SERVER, { home, platform: 'win32' });
+  assert.deepEqual([r.ok, r.changed], [true, true], r.words);
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(path.join(home, fresh), 'utf8')).mcpServers), ['castellan']);
+  assert.equal(readFileSync(path.join(home, legacy), 'utf8'), old, 'the old copy left as it was');
+  assert.equal(serverStatus('cline', 'old', { home, platform: 'win32' }).state, 'installed', "the old copy's servers aren't Cline's now");
+  // Its data folder alone, before the file: there.
+  assert.equal(at(homeWith('.cline/data')), fresh);
+  // A .cline with no data in it (as Cline 4 leaves one while it still reads VS Code's old copy): the old copy.
+  assert.equal(at(homeWith('.cline', legacyFolder)), legacy);
+});
+
 test('on macOS and Linux: each assistant in its own place', () => {
   const sup = 'Library/Application Support';
   const mac = homeWith(`${sup}/Claude`, `${sup}/Code/User`, '.config/zed', '.cursor', '.codex');

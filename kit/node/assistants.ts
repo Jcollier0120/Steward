@@ -48,6 +48,11 @@ export interface Assistant {
   key: string;
   /** The folders that are there when it is installed, per OS. */
   installedPaths: AssistantPaths;
+  /**
+   * Its first folder is where it moved its settings to: once that folder is there, only its first file is read, there
+   * yet or not, and the old places never again (Claude Desktop's Claude-Data on Windows, Cline's ~/.cline/data).
+   */
+  moved?: boolean;
 }
 
 /** An MCP server as an agent gives it: its name in the assistant, and the command that starts it. */
@@ -64,6 +69,7 @@ export const CLAUDE_MSIX = 'Claude_pzs8sxrjxfjjc';
 
 const each = (p: string[]): AssistantPaths => ({ win32: p, darwin: p, linux: p });
 const vscodeUser = (rest: string): AssistantPaths => ({ win32: [`{appData}/Code/User/${rest}`], darwin: [`{appData}/Code/User/${rest}`], linux: [`{appData}/Code/User/${rest}`] });
+const both = (first: string[], then: AssistantPaths): AssistantPaths => ({ win32: [...first, ...then.win32], darwin: [...first, ...then.darwin], linux: [...first, ...then.linux] });
 
 export const ASSISTANTS: readonly Assistant[] = [
   { id: 'claude-code', name: 'Claude Code', configPaths: each(['~/.claude.json']), format: 'cli', key: 'mcpServers', installedPaths: each(['~/.claude', '~/.claude.json']) },
@@ -82,6 +88,7 @@ export const ASSISTANTS: readonly Assistant[] = [
     format: 'json',
     key: 'mcpServers',
     installedPaths: { win32: [`{localAppData}/Claude-Data/${CLAUDE_MSIX}`, `{localAppData}/Packages/${CLAUDE_MSIX}`, '{appData}/Claude'], darwin: ['{appData}/Claude'], linux: ['{appData}/Claude'] },
+    moved: true,
   },
   { id: 'cursor', name: 'Cursor', configPaths: each(['~/.cursor/mcp.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.cursor']) },
   { id: 'vscode', name: 'VS Code (Copilot)', configPaths: vscodeUser('mcp.json'), format: 'jsonc', key: 'servers', installedPaths: vscodeUser('') },
@@ -91,10 +98,12 @@ export const ASSISTANTS: readonly Assistant[] = [
   {
     id: 'cline',
     name: 'Cline',
-    configPaths: vscodeUser('globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json'),
+    // Cline 4 keeps them in ~/.cline/data, shared with its own CLI; before, in VS Code's storage for it.
+    configPaths: both(['~/.cline/data/settings/cline_mcp_settings.json'], vscodeUser('globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json')),
     format: 'json',
     key: 'mcpServers',
-    installedPaths: vscodeUser('globalStorage/saoudrizwan.claude-dev'),
+    installedPaths: both(['~/.cline/data'], vscodeUser('globalStorage/saoudrizwan.claude-dev')),
+    moved: true,
   },
   { id: 'continue', name: 'Continue', configPaths: each(['~/.continue/config.yaml']), format: 'yaml', key: 'mcpServers', installedPaths: each(['~/.continue']) },
   {
@@ -192,14 +201,15 @@ function installedHere(a: Assistant, at: Place): boolean {
 /**
  * The settings file an assistant's servers go in: the first of its files that is there; else, with none yet, the one
  * that goes with the first of its installed folders that is (Claude Desktop from the Store: its package's own copy).
- * Claude Desktop that keeps its data in %LOCALAPPDATA%\Claude-Data (the Store's, as it is now) reads only the file
- * there, there yet or not: it leaves its old folders with a .user-data-left marker, and never reads them again.
+ * One that moved its settings reads only the new place's file once that folder is there, there yet or not: Claude
+ * Desktop from the Store (its data in %LOCALAPPDATA%\Claude-Data now, its old folders left with a .user-data-left
+ * marker), Cline 4 (~/.cline/data, VS Code's storage for it left as it was).
  */
 function fileOf(a: Assistant, at: Place): string | null {
   if (a.id === 'claude-code') return claudeCodeFiles(at).json;
   const files = a.configPaths[at.platform].map((p) => resolve(p, at));
   const installed = a.installedPaths[at.platform];
-  if (a.id === 'claude-desktop' && at.platform === 'win32' && there(resolve(installed[0], at))) return files[0];
+  if (a.moved && there(resolve(installed[0], at))) return files[0];
   return files.find(there) ?? files.find((_, i) => there(resolve(installed[Math.min(i, installed.length - 1)], at))) ?? null;
 }
 

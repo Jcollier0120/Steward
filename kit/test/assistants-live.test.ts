@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -264,6 +264,101 @@ test("Cursor: the kit writes ~/.cursor/mcp.json, and cursor-agent mcp list start
   const after = list();
   assert.doesNotMatch(after, new RegExp(mine.name));
   assert.match(after, new RegExp(`${theirs.name}: ready`));
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// The apps with no command that reads their servers, started for real (STEWARD_LIVE_APPS=1: their windows open for a
+// few seconds): each with a profile and home of its own, first alone (so it writes its own settings, as it does), then
+// after the kit added its server beside the person's own. The server's log says the app started it.
+
+const APPS = process.env.STEWARD_LIVE_APPS === '1';
+const programs = path.join(process.env.LOCALAPPDATA ?? '', 'Programs');
+const appSkip = (exe: string) => (!APPS ? 'set STEWARD_LIVE_APPS=1 to start the real apps (their windows open)' : process.platform !== 'win32' ? 'these live tests run on Windows' : existsSync(exe) ? false : `${exe} isn't installed here`);
+const starts = (s: { name: string }) => (existsSync(path.join(tmp, `${s.name}.log`)) ? readFileSync(path.join(tmp, `${s.name}.log`), 'utf8').match(/^started/gm)?.length ?? 0 : 0);
+
+/** Starts an app, until `done` or `seconds` pass (and a few more, for what it starts beside), then ends it and all it started. */
+async function launch(exe: string, args: string[], env: NodeJS.ProcessEnv, done: () => boolean, seconds = 90): Promise<void> {
+  const app = spawn(exe, args, { env, stdio: 'ignore', windowsHide: false });
+  const t0 = Date.now();
+  try {
+    while (Date.now() - t0 < seconds * 1000 && !done()) await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 4000));
+  } finally {
+    spawnSync('taskkill', ['/PID', String(app.pid), '/T', '/F'], { windowsHide: true });
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+const zedExe = path.join(programs, 'Zed', 'zed.exe');
+test("Zed: started with the kit's server beside the person's own, it starts both; the kit's taken out, it starts only theirs", { skip: appSkip(zedExe), timeout: 300_000 }, async () => {
+  // Zed's --user-data-dir keeps its settings in <dir>\config; the kit's home has AppData\Roaming\Zed joined to it.
+  const data = dir('zed-data');
+  const home = dir('zed-home');
+  await launch(zedExe, ['--user-data-dir', data, '--foreground', dir('zed-work')], base, () => existsSync(path.join(data, 'config')), 30);
+  dir('zed-home', 'AppData', 'Roaming');
+  execFileSync('cmd.exe', ['/d', '/c', 'mklink', '/J', path.join(home, 'AppData', 'Roaming', 'Zed'), path.join(data, 'config')], { windowsHide: true });
+  const file = path.join(data, 'config', 'settings.json');
+  const theirs = tiny('zed-own', 'theirs');
+  // As Zed's Add Custom Server writes it.
+  writeFileSync(file, `// Zed settings\n{\n  "context_servers": {\n    "${theirs.name}": { "source": "custom", "command": ${JSON.stringify(node)}, "args": ${JSON.stringify(theirs.args)}, "env": ${JSON.stringify(theirs.env)} }\n  }\n}\n`);
+  const mine = tiny('zed-kit');
+  const added = await addServer('zed', mine, { home });
+  assert.deepEqual([added.ok, added.changed], [true, true], added.words);
+  await launch(zedExe, ['--user-data-dir', data, '--foreground', dir('zed-work')], base, () => started(mine) && started(theirs));
+  assert.deepEqual([starts(mine), starts(theirs)], [1, 1], 'Zed started both');
+  assert.deepEqual([(await removeServer('zed', mine.name, { home })).changed], [true]);
+  assert.match(readFileSync(file, 'utf8'), /^\/\/ Zed settings\n/, 'its comment kept');
+  await launch(zedExe, ['--user-data-dir', data, '--foreground', dir('zed-work')], base, () => starts(theirs) === 2);
+  assert.deepEqual([starts(mine), starts(theirs)], [1, 2], 'Zed started only theirs');
+});
+
+/** VS Code with a profile, extensions folder and home of their own, and the extension `id` installed in it. */
+function vscodeWith(id: string, at: string) {
+  const home = dir(at, 'home');
+  const data = dir(at, 'home', 'AppData', 'Roaming', 'Code');
+  const extensions = dir(at, 'extensions');
+  const env = { ...base, USERPROFILE: home, HOME: home };
+  const cli = vscodeCli(path.join(programs, 'Microsoft VS Code', 'bin', 'code.cmd'))!;
+  cli(['--user-data-dir', data, '--extensions-dir', extensions, '--install-extension', id], env);
+  writeFileSync(path.join(dir(at, 'home', 'AppData', 'Roaming', 'Code', 'User'), 'settings.json'), '{ "security.workspace.trust.enabled": false, "telemetry.telemetryLevel": "off" }\n');
+  const exe = path.join(programs, 'Microsoft VS Code', 'Code.exe');
+  const work = dir(at, 'work');
+  return { home, run: (done: () => boolean, seconds?: number) => launch(exe, ['--user-data-dir', data, '--extensions-dir', extensions, '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--new-window', work], env, done, seconds) };
+}
+const codeExe = path.join(programs, 'Microsoft VS Code', 'Code.exe');
+
+test("Cline in VS Code: it writes its own settings, the kit adds its server there, and Cline starts it beside the person's own", { skip: appSkip(codeExe), timeout: 600_000 }, async () => {
+  const vs = vscodeWith('saoudrizwan.claude-dev', 'cline');
+  // Cline 4 keeps them in ~/.cline/data, and makes nothing in VS Code's storage for it.
+  const file = path.join(vs.home, '.cline', 'data', 'settings', 'cline_mcp_settings.json');
+  await vs.run(() => existsSync(file), 60);
+  assert.ok(existsSync(file), 'Cline made its own settings file');
+  assert.equal(assistantsFound(vs.home).find((a) => a.id === 'cline')?.file, file, 'the kit finds Cline by it');
+  const theirs = tiny('cline-own', 'theirs');
+  const settings = JSON.parse(readFileSync(file, 'utf8'));
+  settings.mcpServers = { ...settings.mcpServers, [theirs.name]: { command: node, args: theirs.args, env: theirs.env, disabled: false, autoApprove: [] } };
+  writeFileSync(file, JSON.stringify(settings, null, 2));
+  const mine = tiny('cline-kit');
+  const added = await addServer('cline', mine, { home: vs.home });
+  assert.deepEqual([added.ok, added.changed], [true, true], added.words);
+  await vs.run(() => started(mine) && started(theirs));
+  assert.deepEqual([started(mine), started(theirs)], [true, true], 'Cline started both');
+  assert.deepEqual([(await removeServer('cline', mine.name, { home: vs.home })).changed, serverStatus('cline', theirs.name, { home: vs.home }).state], [true, 'connected']);
+});
+
+test("Continue in VS Code: it writes its own config.yaml, the kit adds its server to it, and Continue starts it", { skip: appSkip(codeExe), timeout: 600_000 }, async () => {
+  const vs = vscodeWith('Continue.continue', 'continue');
+  const file = path.join(vs.home, '.continue', 'config.yaml');
+  await vs.run(() => existsSync(file), 60);
+  assert.ok(existsSync(file), 'Continue made its own config.yaml');
+  const own = readFileSync(file, 'utf8');
+  const mine = tiny('continue-kit');
+  const added = await addServer('continue', mine, { home: vs.home });
+  assert.deepEqual([added.ok, added.changed], [true, true], added.words);
+  await vs.run(() => started(mine));
+  assert.ok(started(mine), 'Continue started it');
+  assert.deepEqual([(await removeServer('continue', mine.name, { home: vs.home })).changed], [true]);
+  assert.equal(readFileSync(file, 'utf8').replace(/^mcpServers: \[\]\r?\n/m, ''), own.replace(/^mcpServers: \[\]\r?\n/m, ''), 'the rest of its config.yaml as Continue wrote it');
 });
 
 // ---------------------------------------------------------------------------------------------------------------
