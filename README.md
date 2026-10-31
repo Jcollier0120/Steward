@@ -529,6 +529,8 @@ npm run kit-release  # artifacts\kit\kit-<version>.zip and its SHA256SUMS.txt; -
 npm run ui:inventory # docs\UI-INVENTORY.md and .html: the page's components, their sizes, and markup written out more than once
 ```
 
+**Live tests**, skipped unless switched on, try the real tools on this PC, each in temp homes and profiles, never your own settings, never gh or a signed-in account (Steward 0.36.267). `STEWARD_LIVE_ASSISTANTS=1` runs the kit's assistants (`kit/test/assistants-live.test.ts`: Claude Code, Codex, Gemini, Copilot CLI, VS Code and Cursor's CLI, both ways round), and `STEWARD_LIVE_APPS=1` with it starts Zed, and VS Code with Cline and with Continue (their windows open). `STEWARD_LIVE_HOSTS=1` runs `test/hosts-live.test.ts`: plain git on a `file://` remote and with none, gitlab.com through glab anonymously, Azure DevOps and Bitbucket signed out, and every sample built and released where its toolchain is installed; and a Gitea of your own, when `STEWARD_GITEA_SANDBOX` names its address (`http://127.0.0.1:<port>`, a throwaway admin made with `gitea admin user create`), `STEWARD_GITEA_TEA_CONFIG` the folder holding tea's login for it (`tea/config.yml`, as `XDG_CONFIG_HOME`) and `STEWARD_GITEA_GIT_CREDENTIALS` a git credential store file for it. Run each file with `node --import=./src/kit/test-git.ts --test <file>`.
+
 ### The UI inventory
 
 `npm run ui:inventory` (tools/ui-inventory.ts, ported from GamerNexus's apps/mobile script) asks what a page is made of, and flags what could be broken down and reused. It reads the Steward and its kit by default, and any agent's repository or Manor's with `-- --repo <folder>`: every page is moving to React, and the same questions apply in JSX as in template strings.

@@ -121,6 +121,8 @@ test("each stack's dry run: its builds, tests, version, notes and release as its
   const gitlab = lines('gitlab-hello');
   assert.match(gitlab, /gitlab-hello \(gitlab\.example\.test\/samples\/gitlab-hello\), branch main, worked with plain git/, 'glab not signed in here: plain git');
   assert.match(gitlab, /host from \.steward\.json/);
+  assert.match(gitlab, /^why plain git: its pipeline names GitLab, but the Steward hasn't looked at this PC's source control yet/m, 'said why, not left to guess');
+  assert.doesNotMatch(node, /why plain git/, 'one whose pipeline names no host: nothing to say');
   const folder = lines('folder-release');
   assert.match(folder, /build +npm run build/);
   assert.match(folder, /copies dist to .*releases\\folder-release\\v<version>/);

@@ -183,6 +183,29 @@ export function hostOf(e: Pick<Employee, 'repo'> & { resolvedPipeline?: Resolved
   return !look || githubReady(look) ? 'github' : 'git';
 }
 
+/**
+ * Why a repository whose pipeline names its host's kind is worked with plain git here all the same (hostOf), in words,
+ * with what would give it its host's way: the build's dry run says it, so "worked with plain git" is never left
+ * unexplained (Steward 0.36.267, found live: a Gitea pipeline on a home the Steward hadn't looked from yet). Null when
+ * it isn't worked with plain git, or its pipeline asked for that. Pure.
+ */
+export function whyPlainGit(e: Parameters<typeof hostOf>[0], s: Parameters<typeof hostOf>[1], look: ScmLook | null): string | null {
+  const said = e.resolvedPipeline?.host?.kind;
+  if (!said || said === 'none' || said === 'git' || hostOf(e, s, look) !== 'git') return null;
+  const name = { github: 'GitHub', gitlab: 'GitLab', azure: 'Azure DevOps', gitea: 'Gitea', bitbucket: 'Bitbucket' }[said];
+  if (s.sourceControl === 'git') return `its pipeline names ${name}, but Settings' Source control is Git: plain git for every repository`;
+  if (!look) return `its pipeline names ${name}, but the Steward hasn't looked at this PC's source control yet (its page and its rounds look): plain git until it finds ${name}'s way here`;
+  const server = e.repo.split('/')[0].toLowerCase();
+  const missing = {
+    github: has(look, 'gh') ? "the GitHub CLI isn't signed in (gh auth login)" : "the GitHub CLI isn't installed",
+    gitlab: has(look, 'glab') ? "the GitLab CLI isn't signed in (glab auth login)" : "the GitLab CLI isn't installed",
+    azure: has(look, 'az') ? "the Azure CLI isn't signed in (az login)" : "the Azure CLI isn't installed",
+    gitea: has(look, 'tea') ? `the Gitea CLI has no login for ${server} (tea login add --url ${e.resolvedPipeline?.host?.baseUrl ?? `https://${server}`})` : "the Gitea CLI (tea) isn't installed",
+    bitbucket: "no Bitbucket API token is in this PC's credential store",
+  }[said];
+  return `its pipeline names ${name}, but ${missing}, as the Steward last looked (${look.at.slice(0, 16).replace('T', ' ')} UTC): plain git until then`;
+}
+
 /** What Automatic comes to on this PC, in words, for Settings and the page. Pure. */
 export function autoWords(look: ScmLook | null): string {
   if (!look) return "Automatic: the Steward hasn't looked at this PC's source control yet";

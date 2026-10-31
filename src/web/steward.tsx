@@ -39,7 +39,7 @@ function ReleaseCell({ r }: { r: StaffRowView }) {
     <>
       {rel ? (
         <>
-          <Link url={releaseUrl(r.repo, r.host, rel.tag)}>{rel.tag}</Link>
+          <Link url={releaseUrl(r.repo, r.host, rel.tag, r.site)}>{rel.tag}</Link>
           <Text variant="muted">{kit}</Text>
         </>
       ) : (
@@ -146,7 +146,7 @@ function NextBuild({ r }: { r: StaffRowView }) {
   // Over plain git an owner/name's commits aren't linked, as before: its origin may be any server's (a NAS's), so named.
   const linked = !(r.host === 'git' && kindOf(r.repo, null) === 'github');
   const gh = linked && kindOf(r.repo, r.host) === 'github' ? repoUrl(r.repo) : null;
-  const compare = linked ? compareUrl(r.repo, r.host, n.commit, r.branch) : null;
+  const compare = linked ? compareUrl(r.repo, r.host, n.commit, r.branch, r.site) : null;
   const commits = `${n.count} ${n.count === 1 ? 'commit' : 'commits'} since ${n.tag}`;
   const more = n.count - n.commits.length;
   return (
@@ -168,7 +168,7 @@ function NextBuild({ r }: { r: StaffRowView }) {
             return (
               <tr key={c.sha}>
                 <td className="pr-num">
-                  <Link url={c.pr !== null ? (gh ? `${gh}/pull/${c.pr}` : null) : linked ? commitUrl(r.repo, r.host, c.sha) : null}>{label}</Link>
+                  <Link url={c.pr !== null ? (gh ? `${gh}/pull/${c.pr}` : null) : linked ? commitUrl(r.repo, r.host, c.sha, r.site) : null}>{label}</Link>
                 </td>
                 <td>{c.title}</td>
               </tr>
@@ -214,7 +214,7 @@ function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRow
       <tr className={below ? 'has-prs' : undefined}>
         <td>
           <strong>
-            <Link url={repoUrl(r.repo)}>{r.name}</Link>
+            <Link url={repoUrl(r.repo, r.site)}>{r.name}</Link>
           </strong>
           <br />
           {castellan ? <Text variant="muted">{r.main?.parts?.join(', ') || 'no parts'}</Text> : <Allowed r={r} />}

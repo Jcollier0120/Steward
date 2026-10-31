@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.267
+
+**The kit's AI assistants and the Steward's any-host pipeline, tried with the real tools: opt-in live tests, and what they found fixed.**
+
+### What changed
+
+- **A Gitea of your own, merged as said:** the "merge it yourself" command a vouch gives for a Gitea repository is `tea pr merge <n> --repo <owner>/<name> --login <its login> --style <method>`. It named the repository by its host too, which tea answers "Error: not found", and left tea to guess which server.
+- **A server of your own on another port, or on http:** its release pages, the page's links and the "tea login add" hint go to the pipeline's `host.baseUrl` (`http://127.0.0.1:3000/…`), not `https://` on its host name with its port lost.
+- **A batch file a pipeline names runs** (`test.cmd`, as the local-only sample's test; `gradlew`, `pnpm` or `yarn`, found by name in the clone or on PATH as a `.cmd` or `.bat`): through cmd.exe, as Windows starts one. Node starts none itself, so each failed with "spawn EINVAL" (or "spawn ENOENT" by its name alone), and the sample was never released.
+- **Why plain git:** where a repository's pipeline names its host but the Steward works it with plain git, `steward build --dry-run` says why in one line (the host's CLI isn't installed, isn't signed in, has no login for that server, Settings' Source control is Git, or the Steward hasn't looked at this PC's tools yet) and what would change it.
+- **Live tests** (skipped unless switched on):
+  - `STEWARD_LIVE_HOSTS=1` runs `test/hosts-live.test.ts`: a Gitea of your own through tea (`STEWARD_GITEA_SANDBOX`, its address; `STEWARD_GITEA_TEA_CONFIG`, the folder with tea's login for it; `STEWARD_GITEA_GIT_CREDENTIALS`, a git credential store file for it), with Look after, the dry run, a claim through its claims ref, a vouch, its merge command and releases by `.steward.json`'s tag format, to the host and to a folder; plain git on a bare `file://` remote; a repository with no remote; gitlab.com through glab anonymously; Azure DevOps and Bitbucket signed out; and every sample through a real dry run and, where its toolchain is installed, a real build, test and release. It never uses gh or anything signed in, and pushes only to the sandbox or a folder.
+  - `STEWARD_LIVE_ASSISTANTS=1` runs the kit's `kit/test/assistants-live.test.ts` (and `STEWARD_LIVE_APPS=1` the apps with windows). The kit 2.146.3 has what they found, and Copilot CLI as the eleventh assistant.
+
 ## 0.36.266
 
 **Each repository is built and released by its own instructions: a `.steward.json` in it (or Settings' Pipelines) says its build and test commands, how it is versioned, its tag format, its notes and where a release goes. A repository on GitLab, Azure DevOps, Gitea, Bitbucket, any git server or this PC alone is looked after as fully as one on GitHub, and `steward build --dry-run` shows a build's steps before anything runs.**

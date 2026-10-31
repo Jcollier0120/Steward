@@ -20,7 +20,7 @@ import path from 'node:path';
  *   command, the text to paste is given.
  */
 
-export type AssistantId = 'claude-code' | 'claude-desktop' | 'cursor' | 'vscode' | 'windsurf' | 'gemini' | 'codex' | 'cline' | 'continue' | 'zed';
+export type AssistantId = 'claude-code' | 'claude-desktop' | 'cursor' | 'vscode' | 'windsurf' | 'gemini' | 'codex' | 'copilot-cli' | 'cline' | 'continue' | 'zed';
 
 /** How an assistant keeps its servers: through its own command (cli), or in a file of JSON, JSON with comments, TOML or YAML. */
 export type AssistantFormat = 'cli' | 'json' | 'jsonc' | 'toml' | 'yaml';
@@ -48,6 +48,16 @@ export interface Assistant {
   key: string;
   /** The folders that are there when it is installed, per OS. */
   installedPaths: AssistantPaths;
+  /**
+   * Its first folder is where it moved its settings to: once that folder is there, only its first file is read, there
+   * yet or not, and the old places never again (Claude Desktop's Claude-Data on Windows, Cline's ~/.cline/data).
+   */
+  moved?: boolean;
+  /**
+   * What it calls itself when it connects to an MCP server (its clientInfo.name), as agents have seen it (Reeve's
+   * records): an agent names a connected client by these. Empty where none was seen.
+   */
+  clients: string[];
 }
 
 /** An MCP server as an agent gives it: its name in the assistant, and the command that starts it. */
@@ -64,35 +74,48 @@ export const CLAUDE_MSIX = 'Claude_pzs8sxrjxfjjc';
 
 const each = (p: string[]): AssistantPaths => ({ win32: p, darwin: p, linux: p });
 const vscodeUser = (rest: string): AssistantPaths => ({ win32: [`{appData}/Code/User/${rest}`], darwin: [`{appData}/Code/User/${rest}`], linux: [`{appData}/Code/User/${rest}`] });
+const both = (first: string[], then: AssistantPaths): AssistantPaths => ({ win32: [...first, ...then.win32], darwin: [...first, ...then.darwin], linux: [...first, ...then.linux] });
 
 export const ASSISTANTS: readonly Assistant[] = [
-  { id: 'claude-code', name: 'Claude Code', configPaths: each(['~/.claude.json']), format: 'cli', key: 'mcpServers', installedPaths: each(['~/.claude', '~/.claude.json']) },
+  { id: 'claude-code', name: 'Claude Code', configPaths: each(['~/.claude.json']), format: 'cli', key: 'mcpServers', installedPaths: each(['~/.claude', '~/.claude.json']), clients: ['claude-code'] },
   {
     id: 'claude-desktop',
     name: 'Claude Desktop',
     configPaths: {
-      win32: [`{localAppData}/Packages/${CLAUDE_MSIX}/LocalCache/Roaming/Claude/claude_desktop_config.json`, '{appData}/Claude/claude_desktop_config.json'],
+      win32: [
+        `{localAppData}/Claude-Data/${CLAUDE_MSIX}/claude_desktop_config.json`,
+        `{localAppData}/Packages/${CLAUDE_MSIX}/LocalCache/Roaming/Claude/claude_desktop_config.json`,
+        '{appData}/Claude/claude_desktop_config.json',
+      ],
       darwin: ['{appData}/Claude/claude_desktop_config.json'],
       linux: ['{appData}/Claude/claude_desktop_config.json'],
     },
     format: 'json',
     key: 'mcpServers',
-    installedPaths: { win32: [`{localAppData}/Packages/${CLAUDE_MSIX}`, '{appData}/Claude'], darwin: ['{appData}/Claude'], linux: ['{appData}/Claude'] },
+    installedPaths: { win32: [`{localAppData}/Claude-Data/${CLAUDE_MSIX}`, `{localAppData}/Packages/${CLAUDE_MSIX}`, '{appData}/Claude'], darwin: ['{appData}/Claude'], linux: ['{appData}/Claude'] },
+    moved: true,
+    clients: ['claude-ai'],
   },
-  { id: 'cursor', name: 'Cursor', configPaths: each(['~/.cursor/mcp.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.cursor']) },
-  { id: 'vscode', name: 'VS Code (Copilot)', configPaths: vscodeUser('mcp.json'), format: 'jsonc', key: 'servers', installedPaths: vscodeUser('') },
-  { id: 'windsurf', name: 'Windsurf', configPaths: each(['~/.codeium/windsurf/mcp_config.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.codeium/windsurf']) },
-  { id: 'gemini', name: 'Gemini CLI', configPaths: each(['~/.gemini/settings.json']), format: 'jsonc', key: 'mcpServers', installedPaths: each(['~/.gemini']) },
-  { id: 'codex', name: 'Codex CLI', configPaths: each(['~/.codex/config.toml']), format: 'toml', key: 'mcp_servers', installedPaths: each(['~/.codex']) },
+  { id: 'cursor', name: 'Cursor', configPaths: each(['~/.cursor/mcp.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.cursor']), clients: ['cursor-vscode'] },
+  { id: 'vscode', name: 'VS Code (Copilot)', configPaths: vscodeUser('mcp.json'), format: 'jsonc', key: 'servers', installedPaths: vscodeUser(''), clients: ['Visual Studio Code', 'Visual Studio Code - Insiders'] },
+  { id: 'windsurf', name: 'Windsurf', configPaths: each(['~/.codeium/windsurf/mcp_config.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.codeium/windsurf']), clients: ['windsurf-client'] },
+  // Gemini CLI's `gemini mcp list` connects as mcp-test-client.
+  { id: 'gemini', name: 'Gemini CLI', configPaths: each(['~/.gemini/settings.json']), format: 'jsonc', key: 'mcpServers', installedPaths: each(['~/.gemini']), clients: ['gemini-cli-mcp-client', 'mcp-test-client'] },
+  { id: 'codex', name: 'Codex CLI', configPaths: each(['~/.codex/config.toml']), format: 'toml', key: 'mcp_servers', installedPaths: each(['~/.codex']), clients: ['codex-mcp-client'] },
+  // GitHub Copilot's CLI (kit 2.146.3): `copilot mcp add` writes the same file, as plain JSON. VS Code's Copilot Chat is vscode.
+  { id: 'copilot-cli', name: 'Copilot CLI', configPaths: each(['~/.copilot/mcp-config.json']), format: 'json', key: 'mcpServers', installedPaths: each(['~/.copilot']), clients: ['copilot-cli'] },
   {
     id: 'cline',
     name: 'Cline',
-    configPaths: vscodeUser('globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json'),
+    // Cline 4 keeps them in ~/.cline/data, shared with its own CLI; before, in VS Code's storage for it.
+    configPaths: both(['~/.cline/data/settings/cline_mcp_settings.json'], vscodeUser('globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json')),
     format: 'json',
     key: 'mcpServers',
-    installedPaths: vscodeUser('globalStorage/saoudrizwan.claude-dev'),
+    installedPaths: both(['~/.cline/data'], vscodeUser('globalStorage/saoudrizwan.claude-dev')),
+    moved: true,
+    clients: ['Cline'],
   },
-  { id: 'continue', name: 'Continue', configPaths: each(['~/.continue/config.yaml']), format: 'yaml', key: 'mcpServers', installedPaths: each(['~/.continue']) },
+  { id: 'continue', name: 'Continue', configPaths: each(['~/.continue/config.yaml']), format: 'yaml', key: 'mcpServers', installedPaths: each(['~/.continue']), clients: ['continue-client', 'continue-cli-client'] },
   {
     id: 'zed',
     name: 'Zed',
@@ -100,8 +123,12 @@ export const ASSISTANTS: readonly Assistant[] = [
     format: 'jsonc',
     key: 'context_servers',
     installedPaths: { win32: ['{appData}/Zed'], darwin: ['~/.config/zed'], linux: ['{appData}/zed'] },
+    clients: ['Zed'],
   },
 ];
+
+/** The assistant that calls itself `client` when it connects (clientInfo.name), or null for one the kit doesn't know. Pure. */
+export const assistantOfClient = (client: string): Assistant | null => ASSISTANTS.find((a) => a.clients.includes(client)) ?? null;
 
 /**
  * Where the assistants are looked for. `home` alone (a test's, or another account's) reads nothing of this PC's
@@ -111,8 +138,8 @@ export interface AssistantOptions {
   home?: string;
   env?: Record<string, string | undefined>;
   platform?: NodeJS.Platform;
-  /** Runs a command (the claude command); for tests. */
-  run?: (cmd: string, args: string[]) => Promise<{ code: number; out: string; err: string }>;
+  /** Runs a command (the claude command), in `env` (this process's own when it is undefined); for tests. */
+  run?: (cmd: string, args: string[], env?: Record<string, string | undefined>) => Promise<{ code: number; out: string; err: string }>;
 }
 
 interface Place {
@@ -128,8 +155,21 @@ function placeOf(o: AssistantOptions = {}): Place {
   return { home, env, platform };
 }
 
+/**
+ * The folders an assistant's own variable moves, as its CLI reads them (as CLAUDE_CONFIG_DIR does Claude Code's):
+ * CODEX_HOME is Codex's ~/.codex itself, as COPILOT_HOME is Copilot CLI's ~/.copilot; GEMINI_CLI_HOME is the home
+ * Gemini CLI's .gemini is in.
+ */
+const MOVED: readonly { from: string; variable: string; under: string }[] = [
+  { from: '~/.codex', variable: 'CODEX_HOME', under: '' },
+  { from: '~/.copilot', variable: 'COPILOT_HOME', under: '' },
+  { from: '~/.gemini', variable: 'GEMINI_CLI_HOME', under: '.gemini' },
+];
+
 /** A path from ASSISTANTS, as a full path here. */
 function resolve(p: string, at: Place): string {
+  const moved = MOVED.find((m) => at.env[m.variable] && (p === m.from || p.startsWith(`${m.from}/`)));
+  if (moved) return path.normalize(path.join(at.env[moved.variable]!, moved.under, p.slice(moved.from.length)).replace(/[\\/]$/, ''));
   const appData =
     at.platform === 'win32'
       ? (at.env.APPDATA ?? path.join(at.home, 'AppData', 'Roaming'))
@@ -177,11 +217,15 @@ function installedHere(a: Assistant, at: Place): boolean {
 /**
  * The settings file an assistant's servers go in: the first of its files that is there; else, with none yet, the one
  * that goes with the first of its installed folders that is (Claude Desktop from the Store: its package's own copy).
+ * One that moved its settings reads only the new place's file once that folder is there, there yet or not: Claude
+ * Desktop from the Store (its data in %LOCALAPPDATA%\Claude-Data now, its old folders left with a .user-data-left
+ * marker), Cline 4 (~/.cline/data, VS Code's storage for it left as it was).
  */
 function fileOf(a: Assistant, at: Place): string | null {
   if (a.id === 'claude-code') return claudeCodeFiles(at).json;
   const files = a.configPaths[at.platform].map((p) => resolve(p, at));
   const installed = a.installedPaths[at.platform];
+  if (a.moved && there(resolve(installed[0], at))) return files[0];
   return files.find(there) ?? files.find((_, i) => there(resolve(installed[Math.min(i, installed.length - 1)], at))) ?? null;
 }
 
@@ -267,6 +311,8 @@ function entryFor(a: Assistant, s: McpServer): Record<string, unknown> {
   const env = s.env && Object.keys(s.env).length ? s.env : undefined;
   if (a.id === 'vscode') return { type: 'stdio', command: s.command, args, ...(env ? { env } : {}) };
   if (a.id === 'continue') return { name: s.name, command: s.command, args, ...(env ? { env } : {}) };
+  // As `copilot mcp add` writes one, all its tools on: the same server added either way reads as the same.
+  if (a.id === 'copilot-cli') return { tools: ['*'], type: 'local', command: s.command, args, ...(env ? { env } : {}) };
   return { command: s.command, args, ...(env ? { env } : {}) };
 }
 
@@ -347,13 +393,13 @@ async function change(id: string, name: string, server: McpServer | null, o: Ass
 
 const cmdQuote = (s: string) => (/^[A-Za-z0-9_\-.:\\/=@]+$/.test(s) ? s : `"${s.replace(/"/g, '""')}"`);
 
-/** Runs a command, quietly: a .cmd or .bat through cmd.exe, as Windows needs. */
-function runQuiet(cmd: string, args: string[]): Promise<{ code: number; out: string; err: string }> {
+/** Runs a command, quietly, in `env` (this process's own when undefined): a .cmd or .bat through cmd.exe, as Windows needs. */
+function runQuiet(cmd: string, args: string[], env?: Record<string, string | undefined>): Promise<{ code: number; out: string; err: string }> {
   const viaCmd = /\.(cmd|bat)$/i.test(cmd);
-  const file = viaCmd ? (process.env.ComSpec ?? 'cmd.exe') : cmd;
+  const file = viaCmd ? ((env ?? process.env).ComSpec ?? process.env.ComSpec ?? 'cmd.exe') : cmd;
   const argv = viaCmd ? ['/d', '/s', '/c', `"${[cmd, ...args].map(cmdQuote).join(' ')}"`] : args;
   return new Promise((done) => {
-    execFile(file, argv, { windowsHide: true, timeout: 60_000, windowsVerbatimArguments: viaCmd, encoding: 'utf8' }, (e, out, err) => done({ code: e ? (typeof (e as { code?: unknown }).code === 'number' ? ((e as { code: number }).code) : 1) : 0, out: String(out ?? ''), err: String(err ?? (e ? e.message : '')) }));
+    execFile(file, argv, { windowsHide: true, timeout: 60_000, windowsVerbatimArguments: viaCmd, encoding: 'utf8', ...(env ? { env } : {}) }, (e, out, err) => done({ code: e ? (typeof (e as { code?: unknown }).code === 'number' ? ((e as { code: number }).code) : 1) : 0, out: String(out ?? ''), err: String(err ?? (e ? e.message : '')) }));
   });
 }
 
@@ -363,7 +409,10 @@ async function claudeCode(a: Assistant, at: Place, name: string, server: McpServ
   const status = serverStatus(a.id, name, o);
   const paste = server ? pasteFor(a.id, server) : `claude mcp remove ${psQuote(name)} --scope user`;
   if (!claude && !o.run) return { ok: false, changed: false, words: `Claude Code's claude command isn't on this PC's PATH, so ${server ? 'add' : 'remove'} it yourself: run this once in a terminal.`, paste };
-  const run = o.run ?? runQuiet;
+  // claude runs where it was asked about: a home or env given (a test's, another account's) is its own, so the file it
+  // writes is the one read here (its CLAUDE_CONFIG_DIR, else that home's), never this process's.
+  const env = o.home || o.env ? { ...at.env, ...(o.home ? { HOME: at.home, USERPROFILE: at.home } : {}) } : undefined;
+  const run = (c: string, args: string[]) => (o.run ?? runQuiet)(c, args, env);
   const cmd = claude ?? 'claude';
   if (server) {
     const want = [server.command, ...(server.args ?? [])].join(' ');

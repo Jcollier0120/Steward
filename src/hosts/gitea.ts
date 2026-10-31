@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { releaseUrl } from '../links.ts';
 import type { Runner } from '../run.ts';
 import type { Answer, PrState, SourceHost } from './host.ts';
 
@@ -26,11 +27,14 @@ export class Gitea implements SourceHost {
   private readonly cwd: string;
   /** The server asked: the repository's host (codeberg.org). */
   private readonly hostname: string;
+  /** Its address where its pipeline gives one (repoconfig.ts's host baseUrl): a server of your own on another port, or on http. */
+  private readonly site: string | null;
 
-  constructor(run: Runner, cwd: string, hostname: string) {
+  constructor(run: Runner, cwd: string, hostname: string, site: string | null = null) {
     this.run = run;
     this.cwd = cwd;
     this.hostname = hostname;
+    this.site = site;
   }
 
   /**
@@ -39,8 +43,8 @@ export class Gitea implements SourceHost {
    */
   private async api(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', endpoint: string, body?: unknown, o: { timeoutMs?: number; out?: string } = {}): Promise<Answer> {
     const what = `tea api ${method} ${endpoint}`;
-    const login = await loginFor(this.run, this.cwd, this.hostname);
-    if (!login) return { code: 1, out: '', err: `the Gitea CLI has no login for ${this.hostname}: tea login add --url https://${this.hostname}`, what };
+    const login = await teaLogin(this.run, this.cwd, this.hostname);
+    if (!login) return { code: 1, out: '', err: `the Gitea CLI has no login for ${this.hostname}: tea login add --url ${this.site ?? `https://${this.hostname}`}`, what };
     const args = ['api', '--login', login, '-i', ...(method === 'GET' ? [] : ['-X', method]), ...(o.out ? ['-o', o.out] : [])];
     const dir = body === undefined ? null : mkdtempSync(path.join(os.tmpdir(), 'steward-body-'));
     try {
@@ -233,15 +237,18 @@ export class Gitea implements SourceHost {
   }
 
   releaseUrl(repo: string, tag: string): string {
-    return `https://${repo}/releases/tag/${encodeURIComponent(tag)}`;
+    return releaseUrl(repo, 'gitea', tag, this.site) ?? '';
   }
 }
 
 /** The tea logins on this PC (`tea logins list --output json`), by server, as each runner last read them (an hour). */
 const logins = new WeakMap<Runner, { at: number; byHost: Map<string, string> }>();
 
-/** The tea login for a server: the one whose URL is on its host (the default one first, when there are two). */
-async function loginFor(run: Runner, cwd: string, hostname: string): Promise<string | null> {
+/**
+ * The tea login for a server: the one whose URL is on its host (the default one first, when there are two). Its name is
+ * what tea's own commands take with --login (stages/vouch.ts' MERGE_IT_YOURSELF).
+ */
+export async function teaLogin(run: Runner, cwd: string, hostname: string): Promise<string | null> {
   let known = logins.get(run);
   if (!known || Date.now() - known.at > 60 * MINUTE) {
     const r = await run('tea', ['logins', 'list', '--output', 'json'], { cwd, timeoutMs: MINUTE }).catch(() => null);

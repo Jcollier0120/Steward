@@ -96,6 +96,44 @@ export function resolveCommand(cmd: string, args: string[]): [string, string[]] 
   return [cmd, args];
 }
 
+/**
+ * The batch file a command starts on Windows, which Node won't start itself ("spawn EINVAL" for a .cmd or .bat named, or
+ * "spawn ENOENT" for a name only a .cmd answers to, as pnpm, yarn and gradlew do): the name when it is one, else what
+ * cmd would find for it, in the folder it runs in and then on PATH, by PATHEXT's endings, when that is one. Null for
+ * anything else (a program, or nothing found). Found live (Steward 0.36.267): the local-only sample's `test.cmd`.
+ */
+export function batchFile(name: string, cwd: string | undefined, env: Record<string, string | undefined>, there: (p: string) => boolean = existsSync): string | null {
+  const win = path.win32;
+  const folder = cwd ?? process.cwd();
+  // One in the folder by its path there: cmd looks in its folder only when NoDefaultCurrentDirectoryInExePath is unset.
+  if (/\.(cmd|bat)$/i.test(name)) return !win.isAbsolute(name) && there(win.join(folder, name)) ? win.join(folder, name) : name;
+  if (win.extname(name) || /[\\/]/.test(name)) return null;
+  const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  const ends = (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+  const inDir = (dir: string) => ends.find((x) => there(win.join(dir, name + x)));
+  const batch = (found: string) => (/\.(cmd|bat)$/i.test(found) ? found : null);
+  const here = inDir(folder);
+  if (here) return batch(win.join(folder, name + here));
+  // On PATH, where each of gh's and tea's many runs would look again: what was found last, while it is still there.
+  const key = `${name}\n${env[pathKey]}\n${env.PATHEXT}`;
+  const known = there === existsSync ? foundOnPath.get(key) : undefined;
+  if (known && there(known)) return batch(known);
+  for (const dir of (env[pathKey] ?? '').split(';').filter(Boolean)) {
+    const end = inDir(dir);
+    if (!end) continue;
+    if (there === existsSync) foundOnPath.set(key, win.join(dir, name + end));
+    return batch(win.join(dir, name + end));
+  }
+  return null;
+}
+const foundOnPath = new Map<string, string>();
+
+/** A word of a cmd.exe line: as it is when plain, else in double quotes (a quote in it doubled). */
+const cmdWord = (s: string) => (/^[A-Za-z0-9_\-.:\\/=@+,]+$/.test(s) ? s : `"${s.replace(/"/g, '""')}"`);
+
+/** The cmd.exe line that runs a batch file with its arguments: /s takes what's between the outer quotes as it is. */
+export const batchLine = (file: string, args: string[]) => ['/d', '/s', '/c', `"${[file, ...args].map(cmdWord).join(' ')}"`];
+
 /** The Azure CLI's Python on Windows (az.cmd runs `python.exe -IBm azure.cli`), where it installs; null when it isn't. */
 function azurePython(): string | null {
   for (const root of [process.env.ProgramFiles, process.env['ProgramFiles(x86)']]) {
@@ -180,14 +218,22 @@ export function stoppedForTime(ms: number, paced: boolean): string {
 }
 
 const runPlain: Runner = async (cmd, args, opts = {}) => {
-  const [resolved, resolvedArgs] = resolveCommand(cmd, args);
-  const paced = opts.paced ? await pacedCommand(resolved, resolvedArgs) : null;
-  const [file, argv] = paced ? [paced.file, paced.args] : [resolved, resolvedArgs];
-  const env = { ...process.env, ...paced?.env, ...opts.env };
-  const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  const [program, resolvedArgs] = resolveCommand(cmd, args);
   if (dotnetDir === undefined) dotnetDir = dotnetWithSdk();
-  env[pathKey] = [nodeDir, dotnetDir, env[pathKey] ?? ''].filter(Boolean).join(path.delimiter);
+  const withPath = (e: NodeJS.ProcessEnv) => {
+    const pathKey = Object.keys(e).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+    e[pathKey] = [nodeDir, dotnetDir, e[pathKey] ?? ''].filter(Boolean).join(path.delimiter);
+    return e;
+  };
+  // A batch file, by its path: cmd.exe starts it, as Windows does (neither Node nor the pace's launcher finds one by its
+  // name alone, and Node starts none itself).
+  const batch = WINDOWS ? batchFile(program, opts.cwd, withPath({ ...process.env, ...opts.env })) : null;
+  const resolved = batch ?? program;
+  const paced = opts.paced ? await pacedCommand(resolved, resolvedArgs) : null;
+  const env = withPath({ ...process.env, ...paced?.env, ...opts.env });
   if (dotnetDir) env.DOTNET_ROOT = dotnetDir;
+  const launched = !!paced && paced.file !== resolved;
+  const [file, argv] = launched ? [paced.file, paced.args] : batch ? [env.ComSpec ?? 'cmd.exe', batchLine(batch, resolvedArgs)] : [resolved, resolvedArgs];
   // gh sends its telemetry from a copy of itself started after each command, with a console host of its own; and asks
   // for a newer version once a day. Neither for the Steward's commands, unless the person set them.
   if (cmd === 'gh') {
@@ -210,7 +256,7 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
       argv,
       // execFile hands its options to spawn, detached among them, though its type doesn't name it. On Windows the time
       // limit is our own timer (below), so it ends the whole tree.
-      { cwd: opts.cwd, env, timeout: WINDOWS ? 0 : timeout, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...startOptions(cmd, { shares: sharesConsole(), background: BACKGROUND }) } as ExecFileOptionsWithStringEncoding,
+      { cwd: opts.cwd, env, timeout: WINDOWS ? 0 : timeout, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...(batch && !launched ? { windowsVerbatimArguments: true } : {}), ...startOptions(cmd, { shares: sharesConsole(), background: BACKGROUND }) } as ExecFileOptionsWithStringEncoding,
       (e: any, stdout: string, stderr: string) => {
         clearTimeout(timer);
         if (onStop) opts.stop?.removeEventListener('abort', onStop);

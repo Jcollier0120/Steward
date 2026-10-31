@@ -24,16 +24,27 @@ export function kindOf(repo: string, host: Host | null | undefined): Kind | null
   return null;
 }
 
-/** A repository's own page. A host/path one is at https on its host, whatever its host is; a local one has none. */
-export function repoUrl(repo: string): string | null {
+/**
+ * A repository's own page. A host/path one is at https on its host, whatever its host is; a local one has none. `site`,
+ * its pipeline's host baseUrl (repoconfig.ts), is its host's address where that is on the same host: a server of your
+ * own on another port or on http (Steward 0.36.267, found live: a Gitea at http://127.0.0.1:51412 named 127.0.0.1/me/app).
+ */
+export function repoUrl(repo: string, site?: string | null): string | null {
   if (!repo || /^local\//i.test(repo)) return null;
   if (OWNER_NAME.test(repo) && !/\./.test(repo.split('/')[0])) return `https://github.com/${repo}`;
-  return /^[^/\s]+\.[^/\s]+\/\S+/.test(repo) ? `https://${repo}` : null;
+  if (!/^[^/\s]+\.[^/\s]+\/\S+/.test(repo)) return null;
+  const host = repo.split('/')[0];
+  const at = site ? /^https?:\/\/([^/:]+)(?::\d+)?(\/[^?#]*)?$/i.exec(site.replace(/\/+$/, '')) : null;
+  if (!at || at[1].toLowerCase() !== host.toLowerCase()) return `https://${repo}`;
+  // A server under a path (https://acme.com/git) is named with it (acme.com/git/me/app): the path is said once.
+  const rest = repo.slice(host.length);
+  const under = at[2] ?? '';
+  return `${site!.replace(/\/+$/, '')}${under && rest.toLowerCase().startsWith(`${under.toLowerCase()}/`) ? rest.slice(under.length) : rest}`;
 }
 
 /** A release's page, by its tag: the host's release, or its tag's tree where the host keeps no releases. */
-export function releaseUrl(repo: string, host: Host | null | undefined, tag: string): string | null {
-  const base = repoUrl(repo);
+export function releaseUrl(repo: string, host: Host | null | undefined, tag: string, site?: string | null): string | null {
+  const base = repoUrl(repo, site);
   const t = encodeURIComponent(tag);
   switch (base ? kindOf(repo, host) : null) {
     case 'github':
@@ -51,8 +62,8 @@ export function releaseUrl(repo: string, host: Host | null | undefined, tag: str
 }
 
 /** A commit's page. */
-export function commitUrl(repo: string, host: Host | null | undefined, sha: string): string | null {
-  const base = repoUrl(repo);
+export function commitUrl(repo: string, host: Host | null | undefined, sha: string, site?: string | null): string | null {
+  const base = repoUrl(repo, site);
   switch (base ? kindOf(repo, host) : null) {
     case 'github':
     case 'gitea':
@@ -68,8 +79,8 @@ export function commitUrl(repo: string, host: Host | null | undefined, sha: stri
 }
 
 /** The commits from one to another (a tag or a commit to a branch), where the host shows them on one page. */
-export function compareUrl(repo: string, host: Host | null | undefined, from: string, to: string): string | null {
-  const base = repoUrl(repo);
+export function compareUrl(repo: string, host: Host | null | undefined, from: string, to: string, site?: string | null): string | null {
+  const base = repoUrl(repo, site);
   switch (base ? kindOf(repo, host) : null) {
     case 'github':
     case 'gitea':
