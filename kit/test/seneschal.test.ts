@@ -336,10 +336,10 @@ test("a task a worker is handed is read again: one that names anything but a rep
 
 test("a task's repository on any host: owner/name on GitHub as always, host/path anywhere else; never a path out", () => {
   const good = { id: 'b4', kind: 'pr-check', repo: 'Jcollier0120/Reeve', commit: 'c'.repeat(40), lane: 'normal', what: 'x' };
-  for (const repo of ['Jcollier0120/Reeve', 'gitlab.com/group/sub/app', 'gitlab.acme.io/platform/tools/app', 'dev.azure.com/acme/Platform/_git/app', 'dev.azure.com/acme/My%20Project/_git/app', 'bitbucket.org/team/app', 'bitbucket.acme.com/~jo/app', 'codeberg.org/me/app', 'github.acme.com/team/app', 'local/app']) {
+  for (const repo of ['Jcollier0120/Reeve', 'gitlab.com/group/sub/app', 'gitlab.acme.io/platform/tools/app', 'dev.azure.com/acme/Platform/_git/app', 'dev.azure.com/acme/My%20Project/_git/app', 'bitbucket.org/team/app', 'bitbucket.acme.com/~jo/app', 'codeberg.org/me/app', 'github.acme.com/team/app', 'local/app', '127.0.0.1:8929/group/app', 'gitea.acme.local:65535/me/app']) {
     assert.equal(jobOf({ ...good, repo })?.repo, repo, repo);
   }
-  for (const repo of ['Reeve', '../Reeve', 'gitlab.com/../app', 'gitlab.com/./app', 'gitlab.com/group/..', 'a/b c', 'a\\b', 'C:/repos/app', `${'a/'.repeat(9)}b`, `a/${'b'.repeat(101)}`, 'https://gitlab.com/group/app', 'gitlab.com//app', '-x/app', 'a/b?c']) {
+  for (const repo of ['Reeve', '../Reeve', 'gitlab.com/../app', 'gitlab.com/./app', 'gitlab.com/group/..', 'a/b c', 'a\\b', 'C:/repos/app', `${'a/'.repeat(9)}b`, `a/${'b'.repeat(101)}`, 'https://gitlab.com/group/app', 'gitlab.com//app', '-x/app', 'a/b?c', 'gitlab.acme.com:0/team/app', 'gitlab.acme.com:65536/team/app', 'gitlab.acme.com:/team/app', 'gitlab.acme.com/team:80/app', '..:80/app']) {
     assert.equal(jobOf({ ...good, repo }), null, repo);
   }
 });

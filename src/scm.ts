@@ -6,6 +6,7 @@ import type { GlanceRelease, RepoGlance } from './glance.ts';
 import { bitbucketLogin, TOKEN_HOST, whereBitbucket } from './hosts/bitbucket.ts';
 import { teaLogins, whereGitea } from './hosts/gitea.ts';
 import { glabLogin } from './hosts/gitlab.ts';
+import { serverOf } from './links.ts';
 import { remoteOf } from './git.ts';
 import { tagGlob, versionOfTag, type ResolvedPipeline } from './repoconfig.ts';
 import type { Runner } from './run.ts';
@@ -145,7 +146,7 @@ export const bitbucketReady = (look: ScmLook | null) => !!look?.tools.find((t) =
 export const giteaHosts = (look: ScmLook | null): string[] => look?.tools.find((t) => t.cmd === 'tea' && t.version && t.signedIn)?.hosts ?? [];
 
 /** A repository on a Gitea or Forgejo the Gitea CLI is signed in to, as repoFromUrl names one: codeberg.org/acme/app. Pure. */
-export const isGiteaRepo = (repo: string, look: ScmLook | null) => !!whereGitea(repo) && giteaHosts(look).includes(whereGitea(repo)!.hostname);
+export const isGiteaRepo = (repo: string, look: ScmLook | null) => !!whereGitea(repo) && giteaHosts(look).includes(serverOf(repo).hostname);
 
 /** A repository on Azure DevOps, as repoFromUrl names one: dev.azure.com/…, ssh.dev.azure.com/v3/… or org.visualstudio.com/…. Pure. */
 export const isAzureRepo = (repo: string) => /^(ssh\.)?dev\.azure\.com\/|^[^./]+\.visualstudio\.com\//i.test(repo);
@@ -175,7 +176,8 @@ export function hostOf(e: Pick<Employee, 'repo'> & { resolvedPipeline?: Resolved
   if (said === 'gitlab') return look && gitlabReady(look) ? 'gitlab' : 'git';
   if (said === 'azure') return look && azureReady(look) ? 'azure' : 'git';
   if (said === 'bitbucket') return look && bitbucketReady(look) ? 'bitbucket' : 'git';
-  if (said === 'gitea') return look && giteaHosts(look).includes(e.repo.split('/')[0].toLowerCase()) ? 'gitea' : 'git';
+  // tea's logins are by host: a name with its port (127.0.0.1:3000/me/app, kit 2.146.4) is on its host.
+  if (said === 'gitea') return look && giteaHosts(look).includes(serverOf(e.repo).hostname) ? 'gitea' : 'git';
   if (isGitlabRepo(e.repo)) return look && gitlabReady(look) ? 'gitlab' : 'git';
   if (isAzureRepo(e.repo)) return look && azureReady(look) ? 'azure' : 'git';
   if (whereBitbucket(e.repo)) return look && bitbucketReady(look) ? 'bitbucket' : 'git';
@@ -199,7 +201,7 @@ export function whyPlainGit(e: Parameters<typeof hostOf>[0], s: Parameters<typeo
   const server = e.repo.split('/')[0].toLowerCase();
   const missing = {
     github: has(look, 'gh') ? "the GitHub CLI isn't signed in (gh auth login)" : "the GitHub CLI isn't installed",
-    gitlab: has(look, 'glab') ? `the GitLab CLI isn't signed in (${glabLogin(e.resolvedPipeline?.host?.baseUrl)})` : "the GitLab CLI isn't installed",
+    gitlab: has(look, 'glab') ? `the GitLab CLI isn't signed in (${glabLogin(e.resolvedPipeline?.host?.baseUrl, e.repo)})` : "the GitLab CLI isn't installed",
     azure: has(look, 'az') ? "the Azure CLI isn't signed in (az login)" : "the Azure CLI isn't installed",
     gitea: has(look, 'tea') ? `the Gitea CLI has no login for ${server} (tea login add --url ${e.resolvedPipeline?.host?.baseUrl ?? `https://${server}`})` : "the Gitea CLI (tea) isn't installed",
     bitbucket: "no Bitbucket API token is in this PC's credential store",
