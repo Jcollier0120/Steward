@@ -380,3 +380,59 @@ test("every sample through a real dry run, then built, tested and released for r
   assert.deepEqual(g.refused, []);
   t.diagnostic(`toolchains here: ${JSON.stringify(here)}`);
 });
+
+// The Rust sample built for real (Steward 0.36.268): cargo on this PC (rustup; the GNU toolchain links by itself where
+// Visual Studio's Build Tools aren't installed), else skipped and said why.
+const hasCargo = spawnSync('cargo', ['--version'], { encoding: 'utf8' }).status === 0;
+const noCargo = skip || (!hasCargo && "cargo isn't installed here: install Rust (rustup) to build the Rust sample for real");
+
+test('the Rust sample in a copy of its own: its dry run, then cargo builds, tests and runs it, a failing test holds it, and it is tagged by its own format', { skip: noCargo, timeout: 20 * 60_000 }, async (t) => {
+  freshSettings();
+  const [s] = spinUp(path.join(home, 'rust'), { only: ['rust-hello'] });
+  const dir = s.dir;
+  const bare = s.origin!;
+  // As docs/PIPELINE.md says a person would see it first: each step, nothing run.
+  const dry = steward(dir, 'build', '--dry-run', dir);
+  assert.equal(dry.code, 0, dry.out);
+  for (const line of [/^rust-hello \(local\/rust-hello\), branch main, worked with plain git$/m, /^ 1\. build {5}cargo build --release {2}\(in a fresh worktree of origin\/main\)$/m, /^ 2\. test {6}cargo test {2}\(in a fresh worktree of origin\/main; must pass\)$/m, /^ 3\. version {3}the version in Cargo\.toml, as you set it; nothing claimed$/m, /^ 5\. release {3}cargo run --release {2}\(in a fresh worktree of the commit released, then tags rust-hello-v<version> on its origin\)$/m, /^Nothing was run \(dry run\)\.$/m]) assert.match(dry.out, line);
+  assert.ok(!existsSync(path.join(dir, 'target')), 'the dry run built nothing');
+  // A tree of its own: the samples' test above built the same tree, and checks that passed on a tree aren't run again.
+  files(dir, { 'COPY.md': 'The Rust sample, in a copy of its own.\n' });
+  git(dir, 'add', 'COPY.md');
+  git(dir, 'commit', '-q', '-m', 'A copy of its own');
+  git(dir, 'push', '-q', 'origin', 'main');
+  const e = lookAfterClone(dir);
+  const logs: string[] = [];
+  const g = guarded();
+  const build = () => runStage('round', { full: true, buildNow: { toCustomers: false } }, { run: g.run, scm: null, log: (l) => logs.push(l) });
+
+  // Built, tested and released by its own command, then tagged by its own format on its origin.
+  const first = await build();
+  assert.equal(first.error, undefined);
+  assert.match(resultOf(first, e.id), /^release: released v0\.1\.0 from origin\/main \(.{7}\), tagged rust-hello-v0\.1\.0 on its origin$/m, `${resultOf(first, e.id)}\n${logs.join('\n')}`);
+  assert.equal(git(bare, 'rev-parse', 'rust-hello-v0.1.0^{commit}'), git(bare, 'rev-parse', 'main'));
+  const cargo = g.asked.filter((a) => a.startsWith('cargo '));
+  assert.deepEqual([...new Set(cargo)], ['cargo build --release', 'cargo test', 'cargo run --release'], cargo.join('\n'));
+  assert.ok(cargo.indexOf('cargo build --release') < cargo.indexOf('cargo test') && cargo.lastIndexOf('cargo run --release') > cargo.lastIndexOf('cargo test'), 'built before its tests, released after');
+  assert.ok(logs.some((l) => /Hello, world!/.test(l)) || logs.some((l) => /test result: ok\. 1 passed/.test(l)), logs.join('\n'));
+  assert.match(resultOf(await build(), e.id), /0\.1\.0 is already released/);
+
+  // 0.1.1 with a failing test: held, nothing tagged, and why said by cargo's own words.
+  const toml = readFileSync(path.join(dir, 'Cargo.toml'), 'utf8');
+  const main = readFileSync(path.join(dir, 'src', 'main.rs'), 'utf8');
+  files(dir, { 'Cargo.toml': toml.replace('version = "0.1.0"', 'version = "0.1.1"'), 'src/main.rs': main.replace('"Hello, Steward!"', '"Goodbye, Steward!"') });
+  git(dir, 'commit', '-q', '-am', 'rust-hello 0.1.1: a failing test');
+  git(dir, 'push', '-q', 'origin', 'main');
+  const held = resultOf(await build(), e.id);
+  assert.match(held, /v0\.1\.1 wasn't released: its checks failed here at .{7}, twice: cargo test failed/, held);
+  assert.equal(spawnSync('git', ['-C', bare, 'rev-parse', '--verify', '--quiet', 'rust-hello-v0.1.1'], { encoding: 'utf8' }).status, 1, 'not tagged');
+
+  // Fixed: released, and tagged at the fix.
+  files(dir, { 'src/main.rs': main });
+  git(dir, 'commit', '-q', '-am', 'rust-hello 0.1.1: its test fixed');
+  git(dir, 'push', '-q', 'origin', 'main');
+  assert.match(resultOf(await build(), e.id), /^release: released v0\.1\.1 from origin\/main \(.{7}\), tagged rust-hello-v0\.1\.1 on its origin$/m);
+  assert.equal(git(bare, 'rev-parse', 'rust-hello-v0.1.1^{commit}'), git(bare, 'rev-parse', 'main'));
+  assert.deepEqual(g.refused, []);
+  t.diagnostic(`${spawnSync('cargo', ['--version'], { encoding: 'utf8' }).stdout.trim()}, ${/^host: (.+)$/m.exec(spawnSync('rustc', ['-vV'], { encoding: 'utf8' }).stdout)?.[1]?.trim() ?? 'its host unknown'}`);
+});
