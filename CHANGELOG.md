@@ -10,6 +10,13 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **Kit 2.147.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): an agent's About page showed every version its latest updates brought, up to 10, each in its own card. Now it shows the newest 5. When the updates brought more than that, the line above them says "The newest 5 versions that came with Watchman's latest updates, newest first.", and a short line under them says how many older ones aren't shown ("3 older versions aren't shown here."). The older versions' notes are still in Manor's What's new for each update.
 - Each agent gets it with the kit, through the Steward, at its next update.
+## 0.36.277
+
+**It carries kit 2.147.0, whose pages can be laid out for a phone, a 1080p desktop and a 2K or 3K screen.**
+
+### What changed
+
+- **Kit 2.147.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): `Columns`, `Span`, `PageTabs`' `side` and `useWidth`, for an agent's page to put its sections side by side on a wide screen. The Steward's own page looks as before.
 
 ### Before you update
 

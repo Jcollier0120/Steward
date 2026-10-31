@@ -21,6 +21,20 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing: it updates itself as usual.
+## 2.147.0
+
+**A page can be laid out for three widths, a phone, a 1080p desktop and a 2K or 3K screen, so a wide screen shows sections side by side rather than one long column.**
+
+### What's new
+
+- **`Columns` and `Span`** (react/layout.tsx, their styles in react/layout-css.ts): sections side by side, with CSS only. One column when narrow (under 1200 px); `desktop` columns from 1200 px, a 1080p screen (1 to 3, default 2); `wide` columns from 2000 px, a 2K or 3K screen (1 to 4, default 3). `weights="2 1"` makes them unequal. A `Span` takes the whole row (`cols="all"`) or two columns of three or four (`cols={2}`).
+- **`PageTabs` `side`**: from that width up (`'wide'` or `'desktop'`), a page's tabs are drawn side by side, a column each under its name, with no tab strip. Narrower, they stay tabs. Every panel is drawn as before, so nothing about the tour or what's typed in a tab changes.
+- **`useWidth()`** and `widthNow()` give `'narrow' | 'desktop' | 'wide'`, kept as the window is resized, for a page that changes more than its columns. `DESKTOP_FROM` and `WIDE_FROM` give the widths.
+- **spec/LAYOUT.md** says how to lay a page out at the three widths, and how to check it.
+
+### Before you update
+
+- Nothing: a page looks as before until it uses them.
 ## 2.146.8
 
 **What an agent says of Manor's Developer options no longer claims they're on only while developer staff are hired. Manor lets the person turn them on with none (Manor#530), to see a general agent's developer content.**
