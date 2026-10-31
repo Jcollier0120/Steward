@@ -2,6 +2,32 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.147.2
+
+**A fetch or push to Codeberg, or another host Git Credential Manager signs in to by OAuth, works again once its sign-in is an hour old. GCM handed back its expired access token, the host refused it, and since 2.146.6 nothing told GCM to make a new one.**
+
+### What changed
+
+- **A stale OAuth access token is forgotten where GCM keeps a refresh token** (git-auth.ts' `signedIn`).
+  - GCM hands back the access token it keeps however old it is (Codeberg's last an hour). It makes a new one from its refresh token only once it keeps none.
+  - Since 2.146.6 a refused sign-in is forgotten only when shown stale. On a private repository, the only one a process reads, nothing shows that: the host refuses it (401) with the sign-in and without. So the refusal stood until a person signed in again. Found live on WEASELDEV03 (AMD), 2026-10-31: `git ls-remote` of the owner's private Codeberg repository was refused with GCM's 1-hour-old token, through kit 2.146.6+.
+  - Now, when the host refuses a sign-in (401) and nothing shows why, the kit asks Windows Credential Manager for GCM's refresh token by name: `cmdkey /list:git:https://refresh_token.<host>`. cmdkey lists names, never secrets.
+  - Where it is there, the helper is told to forget the access token (`git credential reject`, the helper's own answer). It is then asked again, makes a new access token from its refresh token, and the command runs once more with it. GCM's erase leaves the refresh token as it is.
+  - This happens at most once every 30 minutes for each sign-in, so a repository refused with a new token too isn't looked into again meanwhile.
+  - Without a refresh token, a 401 on a private repository may be the repository's own (Bitbucket's and Azure DevOps' refusals of one that isn't there or isn't shared). It is left as it is, as in 2.146.6. So is a refusal the host says otherwise (403, 404).
+- **Not covered:**
+  - GCM keeping its sign-ins elsewhere than Windows Credential Manager (`credential.credentialStore` dpapi, cache, plaintext, gpg; macOS, Linux). There, no refresh token can be seen, and such a refusal is left as before.
+  - Bitbucket keeps its refresh token under another name (`git:https://bitbucket.org/refresh_token`). Its helper checks its sign-in when asked again, as before.
+
+### What's new
+
+- **`signedIn(inner, now, { fetch, windows })`**: `windows` says whether to look in Windows Credential Manager for GCM's refresh tokens. By default that's on Windows, and never under `node --test` unless a test says so, so a test never reads the person's Credential Manager.
+- **`listsTarget(out, target)`**: whether cmdkey's list names a target, ignoring case as Windows does, with or without its type (`LegacyGeneric:target=…`), in any language. Pure.
+
+### Before you update
+
+- Nothing to do. An agent whose runner can't start `cmdkey` (it isn't on PATH) gets nothing from it, and the refusal stands as before.
+
 ## 2.146.8
 
 **What an agent says of Manor's Developer options no longer claims they're on only while developer staff are hired. Manor lets the person turn them on with none (Manor#530), to see a general agent's developer content.**

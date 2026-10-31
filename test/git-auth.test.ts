@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { headerOf, httpsOrigin, originsOf, refused, remoteOrigins, signedIn, signInEnv, signInOf, subcommand } from '../src/git-auth.ts';
+import { headerOf, httpsOrigin, listsTarget, originsOf, refused, remoteOrigins, signedIn, signInEnv, signInOf, subcommand } from '../src/git-auth.ts';
 import { fetchFor, hasObject } from '../src/git.ts';
 import type { Ran, Runner, RunOptions } from '../src/run.ts';
 import { gitExe } from '../src/kit/git-exe.ts';
@@ -305,6 +305,119 @@ test('a refused sign-in is forgotten only when shown stale: the host refuses it 
     const { f, inner } = setUp('none');
     await signedIn(inner)('git', ['fetch', 'origin'], { cwd: missing });
     assert.equal(f.rejects().length, 0);
+  }
+});
+
+test("cmdkey's list names a target: whole, ignoring case, with or without its type (kit 2.147.2)", () => {
+  const T = 'git:https://refresh_token.codeberg.org';
+  const listed = (target: string) => `\r\nCurrently stored credentials for ${T}:\r\n\r\n    Target: ${target}\r\n    Type: Generic \r\n    User: someone\r\n    Local machine persistence\r\n`;
+  assert.ok(listsTarget(listed(T), T));
+  assert.ok(listsTarget(listed('git:https://REFRESH_TOKEN.Codeberg.org'), T), 'Windows ignores case');
+  assert.ok(listsTarget(listed(`LegacyGeneric:target=${T}`), T), 'as `cmdkey /list` names it');
+  assert.ok(listsTarget(`Ziel: ${T}`, T), 'in another language');
+  assert.ok(!listsTarget(`\r\nCurrently stored credentials for ${T}:\r\n\r\n* NONE *\r\n`, T), 'none: the name it was asked for is no target');
+  assert.ok(!listsTarget(listed(`${T}.example`), T));
+  assert.ok(!listsTarget(listed(`x${T}`), T));
+  assert.ok(!listsTarget(listed('git:https://codeberg.org'), T), 'the access token alone');
+});
+
+test('an access token Git Credential Manager hands back stale is forgotten where it keeps a refresh token: once a while, the refresh token kept (kit 2.147.2)', async () => {
+  const repo = repoWith('oauth', 'https://forge.example.test/me/private.git');
+  const PROBE = 'https://forge.example.test/me/private.git/info/refs?service=git-upload-pack';
+  const ACCESS = 'git:https://forge.example.test';
+  const REFRESH = 'git:https://refresh_token.forge.example.test';
+  const auth = HEADER.replace(/^authorization:\s*/i, '');
+  const ok: Ran = { code: 0, out: 'ok', err: '' };
+  /**
+   * Git Credential Manager on Windows, its OAuth access token (FILL) past its hour: it hands that back however old, and
+   * once told to forget it (erasing the access token alone), makes a new one (FILL2) from its refresh token, unless
+   * `refreshes` is false. cmdkey lists the names it keeps. The host takes `good` sign-ins, and refuses (401) the rest
+   * and anyone without one: the repository is private.
+   */
+  const gcm = (o: { refresh?: boolean; refreshes?: boolean; good?: string[] } = {}) => {
+    const store = new Map<string, string>([[ACCESS, FILL]]);
+    if (o.refresh !== false) store.set(REFRESH, 'a refresh token');
+    const cmdkeys: string[][] = [];
+    const f = fake({
+      fill: () => {
+        if (!store.has(ACCESS) && store.has(REFRESH) && o.refreshes !== false) store.set(ACCESS, FILL2);
+        return store.has(ACCESS) ? { code: 0, out: store.get(ACCESS)!, err: '' } : { code: 1, out: '', err: 'fatal: no sign-in' };
+      },
+      answer: (_a, opts) => ((o.good ?? [HEADER2]).includes(settings(opts.env)['http.https://forge.example.test/.extraHeader']) ? ok : REFUSED),
+    });
+    const inner: Runner = async (cmd, args, opts) => {
+      if (cmd === 'cmdkey') {
+        cmdkeys.push(args);
+        const asked = args[0].replace(/^\/list:/, '');
+        const name = [...store.keys()].find((k) => k.toLowerCase() === asked.toLowerCase());
+        return { code: 0, out: `\r\nCurrently stored credentials for ${asked}:\r\n\r\n${name ? `    Target: ${name}\r\n    Type: Generic \r\n    User: someone\r\n` : '* NONE *\r\n'}`, err: '' };
+      }
+      if (args[0] === 'credential' && args[1] === 'reject') store.delete(ACCESS);
+      return f.inner(cmd, args, opts);
+    };
+    return { f, inner, store, cmdkeys, h: host(() => 401) };
+  };
+  const headers = (f: ReturnType<typeof fake>) => f.gits().map((c) => settings(c.opts.env)['http.https://forge.example.test/.extraHeader']);
+
+  {
+    // The refresh token is there: the access token forgotten, a new one made, the command run once more with it.
+    const { f, inner, store, cmdkeys, h } = gcm();
+    const r = await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo });
+    assert.deepEqual(r, ok);
+    assert.deepEqual(h.asked, [{ url: PROBE, auth }, { url: PROBE, auth: null }], 'refused with it and without: nothing shows why');
+    assert.deepEqual(cmdkeys, [[`/list:${REFRESH}`]], 'its refresh token asked of cmdkey by name alone');
+    assert.equal(f.rejects().length, 1);
+    assert.equal(f.rejects()[0].opts.input, `${FILL.trimEnd()}\n\n`, "the access token's own answer, nothing of the refresh token's");
+    assert.equal(f.rejects()[0].opts.env?.GCM_INTERACTIVE, 'never');
+    assert.deepEqual(headers(f), [HEADER, HEADER2]);
+    assert.ok(store.has(REFRESH), 'the refresh token kept');
+  }
+  {
+    // No refresh token: a 401 on a private repository may be the repository's own. Nothing forgotten, run once.
+    const { f, inner, cmdkeys, h } = gcm({ refresh: false });
+    assert.deepEqual(await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+    assert.equal(cmdkeys.length, 1);
+    assert.equal(f.rejects().length, 0);
+    assert.equal(f.gits().length, 1);
+  }
+  {
+    // Not Windows, or under node --test unless a test says so: Credential Manager isn't asked, nothing forgotten.
+    for (const windows of [false, undefined]) {
+      const { f, inner, cmdkeys, h } = gcm();
+      assert.deepEqual(await signedIn(inner, Date.now, { fetch: h.fetch, windows })('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+      assert.deepEqual([cmdkeys.length, f.rejects().length, f.gits().length], [0, 0, 1], String(windows));
+    }
+  }
+  {
+    // The host says something other than 401 (a 404: the sign-in taken, the repository not there or not shared): the
+    // sign-in isn't refused, so nothing is forgotten and cmdkey isn't asked.
+    const { f, inner, cmdkeys } = gcm();
+    const h = host(() => 404);
+    await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo });
+    assert.deepEqual([cmdkeys.length, f.rejects().length], [0, 0]);
+  }
+  {
+    // The new access token refused too (the repository taken away, say): forgotten once, not again a while.
+    let t = 1_000_000;
+    const { f, inner, store, cmdkeys, h } = gcm({ good: [] });
+    const run = signedIn(inner, () => t, { fetch: h.fetch, windows: true });
+    assert.deepEqual(await run('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+    assert.deepEqual(headers(f), [HEADER, HEADER2], 'run once more with the new one');
+    assert.deepEqual(await run('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+    assert.deepEqual([f.rejects().length, cmdkeys.length], [1, 1], 'refused again: nothing more forgotten, cmdkey not asked again');
+    assert.equal(f.gits().length, 3);
+    assert.ok(store.has(REFRESH), 'the refresh token kept');
+    t += 31 * 60_000;
+    await run('git', ['fetch', 'origin'], { cwd: repo });
+    assert.equal(f.rejects().length, 2, 'half an hour on: forgotten once more');
+    assert.ok(store.has(REFRESH));
+  }
+  {
+    // The refresh token no longer makes one (revoked): the refusal stands, not run again, the refresh token left as it is.
+    const { f, inner, store, h } = gcm({ refreshes: false });
+    assert.deepEqual(await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+    assert.deepEqual([f.rejects().length, f.gits().length], [1, 1]);
+    assert.ok(store.has(REFRESH));
   }
 });
 

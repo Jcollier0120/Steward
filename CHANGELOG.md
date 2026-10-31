@@ -2,6 +2,14 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.280
+
+**The Steward's fetches and pushes to Codeberg work again once Git Credential Manager's sign-in there is an hour old: it hands kit 2.147.2 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.147.2** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a stale OAuth access token that a host refuses is forgotten where Git Credential Manager keeps a refresh token for it (`git:https://refresh_token.<host>` in Windows Credential Manager). GCM then makes a new one, and the command runs once more with it. Before, a private repository on Codeberg was refused from an hour after signing in until the person signed in again.
+
 ## 0.36.275
 
 **Repositories on Azure DevOps are worked with again where the organization is one of Microsoft accounts: the Steward asks Azure DevOps through the Azure CLI's azure-devops extension, not `az rest`, which got the organization's sign-in page, never its API.**
