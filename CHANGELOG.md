@@ -4,7 +4,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.283
 
-**Between builds, the Steward vouches for your team's open pull requests itself: it runs their checks as `steward vouch` would, and marks the ones that pass as tested, ready for their authors to merge.**
+**Urgent fix: between builds, the Steward vouches for your team's open pull requests itself. It runs their checks as `steward vouch` would, and marks the ones that pass as tested, ready for their authors to merge.**
 
 ### What's new
 
