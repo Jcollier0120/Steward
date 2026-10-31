@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 
 // `git ls-remote` over https answered in the agent's own process (kit 2.64.0), and git itself started without Git for
 // Windows' launcher.
-const { advertisedRefs, lsRemoteText, parseAdvertisement, quirky: quirkyGit, readsWith } = await import('./fixture/src/kit/smart-http.ts');
+const { advertisedRefs, answerTo, lsRemoteText, parseAdvertisement, quirky: quirkyGit, readsWith } = await import('./fixture/src/kit/smart-http.ts');
 const { signedIn, remoteUrl } = await import('./fixture/src/kit/git-auth.ts');
 const { gitExe } = await import('./fixture/src/kit/git-exe.ts');
 
@@ -151,6 +151,18 @@ test("how a host answers a read, signed in or not (kit 2.146.6): 200 for refs, i
   assert.equal(await readsWith(URL_, { env: { ...ENV, HTTPS_PROXY: 'http://proxy.test:8080' }, fetch: answer(refs) }), null);
   assert.equal(await readsWith('http://example.test/served.git', { env: ENV, fetch: answer(refs) }), null);
   assert.equal(asked.length, n, 'none of those asked');
+});
+
+test("what a host asks a sign-in by on a 401 (kit 2.147.4): its WWW-Authenticate, several joined as fetch joins them; none otherwise", async () => {
+  const answer = (res: () => Response) => (async () => res()) as typeof fetch;
+  const refused = (h: [string, string][]) => answer(() => new Response('no', { status: 401, headers: h }));
+  assert.deepEqual(await answerTo(URL_, { env: ENV, fetch: refused([['www-authenticate', 'Basic realm="Gitea"']]) }), { status: 401, challenge: 'Basic realm="Gitea"' });
+  assert.deepEqual(await answerTo(URL_, { env: ENV, fetch: refused([['www-authenticate', 'Bearer realm="x"'], ['www-authenticate', 'Basic realm="y"']]) }), { status: 401, challenge: 'Bearer realm="x", Basic realm="y"' });
+  assert.deepEqual(await answerTo(URL_, { env: ENV, fetch: refused([]) }), { status: 401, challenge: null }, 'a 401 that names none');
+  assert.deepEqual(await answerTo(URL_, { env: ENV, fetch: answer(() => new Response('no', { status: 403, headers: { 'www-authenticate': 'Basic realm="z"' } })) }), { status: 403, challenge: null }, 'only a 401 asks for a sign-in');
+  const refs = () => new Response(advertisement, { status: 200, headers: { 'content-type': 'application/x-git-upload-pack-advertisement' } });
+  assert.deepEqual(await answerTo(URL_, { env: ENV, fetch: answer(refs) }), { status: 200, challenge: null });
+  assert.deepEqual(await answerTo(URL_, { env: { ...ENV, KIT_SMART_HTTP: '0' }, fetch: answer(refs) }), { status: null, challenge: null });
 });
 
 test('an advertisement: refs in order, peeled tags kept; protocol v2, another service or noise is none', () => {

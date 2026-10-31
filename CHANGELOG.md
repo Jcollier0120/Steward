@@ -2,6 +2,13 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.284
+
+**The Steward's fetches and pushes to Codeberg work again once Git Credential Manager's sign-in there is an hour old: it hands kit 2.147.4 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.147.4** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a stale OAuth access token that a host refuses is forgotten where Git Credential Manager keeps a refresh token for it (`git:https://refresh_token.<host>` in Windows Credential Manager). GCM is then asked for a new one with the host's `WWW-Authenticate`, as git asks after a 401, and the command runs once more with it; once the host takes it, GCM is told to keep it. Before, a private repository on Codeberg was refused from an hour after signing in until the person signed in again.
 ## 0.36.283
 
 **Urgent fix: between builds, the Steward vouches for your team's open pull requests itself. It runs their checks as `steward vouch` would, and marks the ones that pass as tested, ready for their authors to merge.**

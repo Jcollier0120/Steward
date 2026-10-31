@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { headerOf, httpsOrigin, originsOf, refused, remoteOrigins, signedIn, signInEnv, signInOf, subcommand } from '../src/git-auth.ts';
+import { headerOf, httpsOrigin, listsTarget, originsOf, refused, remoteOrigins, signedIn, signInEnv, signInOf, subcommand } from '../src/git-auth.ts';
 import { fetchFor, hasObject } from '../src/git.ts';
 import type { Ran, Runner, RunOptions } from '../src/run.ts';
 import { gitExe } from '../src/kit/git-exe.ts';
@@ -49,6 +49,7 @@ function fake(o: { fill?: Ran | ((input: string, n: number) => Ran); config?: Ra
     fills: () => of('credential fill').length,
     fillInputs: () => of('credential fill').map((c) => c.opts.input),
     rejects: () => of('credential reject'),
+    approves: () => of('credential approve'),
     configs: () => of('config'),
     gits: () => calls.filter((c) => c.args[0] !== 'credential' && c.args[0] !== 'config'),
   };
@@ -61,8 +62,8 @@ function settings(env: Record<string, string | undefined> | undefined, from = Nu
   return out;
 }
 
-/** A stand-in host for the kit's own requests: `answer(url, authorization)`'s status, noting each. */
-function host(answer: (url: string, auth: string | null) => number) {
+/** A stand-in host for the kit's own requests: `answer(url, authorization)`'s status, noting each; `challenge` its 401s' WWW-Authenticate. */
+function host(answer: (url: string, auth: string | null) => number, challenge: string | null = null) {
   const asked: { url: string; auth: string | null }[] = [];
   const fetch = (async (url: string, init?: RequestInit) => {
     const auth = new Headers(init?.headers).get('authorization');
@@ -70,7 +71,7 @@ function host(answer: (url: string, auth: string | null) => number) {
     const status = answer(String(url), auth);
     return status === 200
       ? new Response(Buffer.from('001e# service=git-upload-pack\n0000'), { status, headers: { 'content-type': 'application/x-git-upload-pack-advertisement' } })
-      : new Response('no', { status });
+      : new Response('no', { status, headers: status === 401 && challenge ? { 'www-authenticate': challenge } : {} });
   }) as typeof globalThis.fetch;
   return { fetch, asked };
 }
@@ -305,6 +306,146 @@ test('a refused sign-in is forgotten only when shown stale: the host refuses it 
     const { f, inner } = setUp('none');
     await signedIn(inner)('git', ['fetch', 'origin'], { cwd: missing });
     assert.equal(f.rejects().length, 0);
+  }
+});
+
+test("cmdkey's list names a target: whole, ignoring case, with or without its type (kit 2.147.4)", () => {
+  const T = 'git:https://refresh_token.codeberg.org';
+  const listed = (target: string) => `\r\nCurrently stored credentials for ${T}:\r\n\r\n    Target: ${target}\r\n    Type: Generic \r\n    User: someone\r\n    Local machine persistence\r\n`;
+  assert.ok(listsTarget(listed(T), T));
+  assert.ok(listsTarget(listed('git:https://REFRESH_TOKEN.Codeberg.org'), T), 'Windows ignores case');
+  assert.ok(listsTarget(listed(`LegacyGeneric:target=${T}`), T), 'as `cmdkey /list` names it');
+  assert.ok(listsTarget(`Ziel: ${T}`, T), 'in another language');
+  assert.ok(!listsTarget(`\r\nCurrently stored credentials for ${T}:\r\n\r\n* NONE *\r\n`, T), 'none: the name it was asked for is no target');
+  assert.ok(!listsTarget(listed(`${T}.example`), T));
+  assert.ok(!listsTarget(listed(`x${T}`), T));
+  assert.ok(!listsTarget(listed('git:https://codeberg.org'), T), 'the access token alone');
+});
+
+test('an access token Git Credential Manager hands back stale is forgotten where it keeps a refresh token: once a while, the refresh token kept (kit 2.147.4)', async () => {
+  const repo = repoWith('oauth', 'https://forge.example.test/me/private.git');
+  const PROBE = 'https://forge.example.test/me/private.git/info/refs?service=git-upload-pack';
+  const ACCESS = 'git:https://forge.example.test';
+  const REFRESH = 'git:https://refresh_token.forge.example.test';
+  const auth = HEADER.replace(/^authorization:\s*/i, '');
+  const ok: Ran = { code: 0, out: 'ok', err: '' };
+  const GITEA = 'Basic realm="Gitea"';
+  /**
+   * Git Credential Manager 2.9 on Windows, its OAuth access token (FILL) past its hour: it hands that back however old,
+   * and once told to forget it (erasing the access token alone), makes a new one (FILL2) from its refresh token, unless
+   * `refreshes` is false: only when asked with the host's `wwwauth[]=Basic realm="Gitea"`, its one way of knowing the
+   * host, as live on 2026-10-31 (without it: "Cannot prompt because user interactivity has been disabled"). It keeps the
+   * new one only when told to (`credential approve`). cmdkey lists the names it keeps. The host takes `good` sign-ins,
+   * and refuses (401, with `challenge`) the rest and anyone without one: the repository is private.
+   */
+  const gcm = (o: { refresh?: boolean; refreshes?: boolean; good?: string[]; challenge?: string | null } = {}) => {
+    const store = new Map<string, string>([[ACCESS, FILL]]);
+    if (o.refresh !== false) store.set(REFRESH, 'a refresh token');
+    const cmdkeys: string[][] = [];
+    const f = fake({
+      fill: (input) => {
+        if (store.has(ACCESS)) return { code: 0, out: store.get(ACCESS)!, err: '' };
+        if (store.has(REFRESH) && o.refreshes !== false && input.includes(`wwwauth[]=${GITEA}\n`)) return { code: 0, out: FILL2, err: '' };
+        return { code: 128, out: '', err: 'fatal: Cannot prompt because user interactivity has been disabled.' };
+      },
+      answer: (_a, opts) => ((o.good ?? [HEADER2]).includes(settings(opts.env)['http.https://forge.example.test/.extraHeader']) ? ok : REFUSED),
+    });
+    const inner: Runner = async (cmd, args, opts) => {
+      if (cmd === 'cmdkey') {
+        cmdkeys.push(args);
+        const asked = args[0].replace(/^\/list:/, '');
+        const name = [...store.keys()].find((k) => k.toLowerCase() === asked.toLowerCase());
+        return { code: 0, out: `\r\nCurrently stored credentials for ${asked}:\r\n\r\n${name ? `    Target: ${name}\r\n    Type: Generic \r\n    User: someone\r\n` : '* NONE *\r\n'}`, err: '' };
+      }
+      if (args[0] === 'credential' && args[1] === 'reject') store.delete(ACCESS);
+      if (args[0] === 'credential' && args[1] === 'approve') store.set(ACCESS, opts?.input ?? '');
+      return f.inner(cmd, args, opts);
+    };
+    return { f, inner, store, cmdkeys, h: host(() => 401, o.challenge === undefined ? GITEA : o.challenge) };
+  };
+  const headers = (f: ReturnType<typeof fake>) => f.gits().map((c) => settings(c.opts.env)['http.https://forge.example.test/.extraHeader']);
+
+  {
+    // The refresh token is there: the access token forgotten, a new one made, the command run once more with it.
+    const { f, inner, store, cmdkeys, h } = gcm();
+    const r = await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo });
+    assert.deepEqual(r, ok);
+    assert.deepEqual(h.asked, [{ url: PROBE, auth }, { url: PROBE, auth: null }], 'refused with it and without: nothing shows why');
+    assert.deepEqual(cmdkeys, [[`/list:${REFRESH}`]], 'its refresh token asked of cmdkey by name alone');
+    assert.equal(f.rejects().length, 1);
+    assert.equal(f.rejects()[0].opts.input, `${FILL.trimEnd()}\n\n`, "the access token's own answer, nothing of the refresh token's");
+    assert.equal(f.rejects()[0].opts.env?.GCM_INTERACTIVE, 'never');
+    const plain = 'protocol=https\nhost=forge.example.test\n\n';
+    assert.deepEqual(f.fillInputs(), [plain, plain, `protocol=https\nhost=forge.example.test\nwwwauth[]=${GITEA}\n\n`], "asked for a new one with the host's WWW-Authenticate, as git asks after a 401");
+    assert.deepEqual(headers(f), [HEADER, HEADER2]);
+    assert.deepEqual(f.approves().map((c) => [c.opts.input, c.opts.env?.GCM_INTERACTIVE]), [[`${FILL2.trimEnd()}\n\n`, 'never']], 'the new one kept once the host took it');
+    assert.ok(f.calls.indexOf(f.rejects()[0]) < f.calls.indexOf(f.approves()[0]));
+    assert.ok(store.has(REFRESH), 'the refresh token kept');
+    // The next process asks Credential Manager as before, and is handed the new one.
+    const next = gcm();
+    next.store.set(ACCESS, store.get(ACCESS)!);
+    assert.deepEqual(await signedIn(next.inner, Date.now, { fetch: next.h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo }), ok);
+    assert.deepEqual([headers(next.f), next.f.rejects().length, next.f.approves().length, next.h.asked.length], [[HEADER2], 0, 0, 0]);
+  }
+  {
+    // A 401 that names no way to sign in (or GCM's own asking stays silent): no new one made, the refusal stands, nothing kept.
+    const { f, inner, store, h } = gcm({ challenge: null });
+    assert.deepEqual(await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+    assert.equal(f.fillInputs().at(-1), 'protocol=https\nhost=forge.example.test\n\n', 'asked as before, with nothing to hand on');
+    assert.deepEqual([f.rejects().length, f.approves().length, f.gits().length], [1, 0, 1]);
+    assert.ok(store.has(REFRESH) && !store.has(ACCESS));
+  }
+  {
+    // No refresh token: a 401 on a private repository may be the repository's own. Nothing forgotten, run once.
+    const { f, inner, cmdkeys, h } = gcm({ refresh: false });
+    assert.deepEqual(await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+    assert.equal(cmdkeys.length, 1);
+    assert.equal(f.rejects().length, 0);
+    assert.equal(f.gits().length, 1);
+  }
+  {
+    // Not Windows, or under node --test unless a test says so: Credential Manager isn't asked, nothing forgotten.
+    for (const windows of [false, undefined]) {
+      const { f, inner, cmdkeys, h } = gcm();
+      assert.deepEqual(await signedIn(inner, Date.now, { fetch: h.fetch, windows })('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+      assert.deepEqual([cmdkeys.length, f.rejects().length, f.gits().length], [0, 0, 1], String(windows));
+    }
+  }
+  {
+    // The host says something other than 401 (a 404: the sign-in taken, the repository not there or not shared): the
+    // sign-in isn't refused, so nothing is forgotten and cmdkey isn't asked.
+    const { f, inner, cmdkeys } = gcm();
+    const h = host(() => 404);
+    await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo });
+    assert.deepEqual([cmdkeys.length, f.rejects().length], [0, 0]);
+  }
+  {
+    // The new access token refused too (the repository taken away, say): forgotten once, not again a while.
+    let t = 1_000_000;
+    const { f, inner, store, cmdkeys, h } = gcm({ good: [] });
+    const run = signedIn(inner, () => t, { fetch: h.fetch, windows: true });
+    assert.deepEqual(await run('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+    assert.deepEqual(headers(f), [HEADER, HEADER2], 'run once more with the new one');
+    assert.equal(f.approves().length, 0, 'refused: not kept');
+    assert.deepEqual(await run('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+    assert.deepEqual([f.rejects().length, cmdkeys.length], [1, 1], 'refused again: nothing more forgotten, cmdkey not asked again');
+    assert.equal(f.gits().length, 3);
+    assert.ok(store.has(REFRESH), 'the refresh token kept');
+    t += 31 * 60_000;
+    await run('git', ['fetch', 'origin'], { cwd: repo });
+    assert.deepEqual([headers(f).at(-1), f.rejects().length], [undefined, 1], 'half an hour on, the refused one never kept: Credential Manager hands over none, so git signs in its own way');
+    store.set(ACCESS, FILL);
+    t += 11 * 60_000;
+    await run('git', ['fetch', 'origin'], { cwd: repo });
+    assert.equal(f.rejects().length, 2, 'handed one again, past the time a missing one is remembered: forgotten once more');
+    assert.ok(store.has(REFRESH));
+  }
+  {
+    // The refresh token no longer makes one (revoked): the refusal stands, not run again, the refresh token left as it is.
+    const { f, inner, store, h } = gcm({ refreshes: false });
+    assert.deepEqual(await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+    assert.deepEqual([f.rejects().length, f.gits().length], [1, 1]);
+    assert.ok(store.has(REFRESH));
   }
 });
 
