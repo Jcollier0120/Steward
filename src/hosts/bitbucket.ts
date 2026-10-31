@@ -18,8 +18,9 @@ export const TOKEN_HOST = 'api.bitbucket.org';
  * repository is named as scm.ts's repoFromUrl names it, bitbucket.org/<workspace>/<repo>.
  *
  * Its answers are said in GitHub's words (host.ts). Bitbucket names a pull request's head commit by a short hash, so the
- * full one is asked; whether it merges, its files and its line counts come from its diffstat (a file "merge conflict"
- * means it can't); its checks are its head's build statuses. Bitbucket keeps no ref for a pull request's head: its
+ * full one is asked; its files and its line counts come from its diffstat, and whether it merges is unknown (Bitbucket
+ * Cloud no longer says: mergeStatesOf), unless a file there is in "merge conflict"; its checks are its head's build
+ * statuses. Bitbucket keeps no ref for a pull request's head: its
  * branch is fetched (a fork's isn't worked with). It merges with no head to match, so the head is checked just before.
  * A build status doesn't say who set it, so the vouch's own says so in its name ("steward/tested by <nickname>"); setting
  * one needs write access to the repository. Bitbucket has no releases: a release is a v<version> tag, its message the
@@ -341,11 +342,15 @@ function checkState(state: string): string {
   return 'FAILURE';
 }
 
-/** Whether Bitbucket can merge it, from its diffstat: a file in "merge conflict" means it can't. Unknown unasked. Pure. */
+/**
+ * Whether Bitbucket can merge it, from its diffstat: a file in "merge conflict" means it can't; anything else, unknown,
+ * never mergeable. Bitbucket Cloud no longer reports conflicts: a pull request's diffstat redirects to its topic diff
+ * (`…/diffstat/<ws>/<repo>:<spec>?from_pullrequest_id=<n>&topic=true`, the three-dot diff), which never names one, its
+ * preview merge (`merge=true`) answers 410 ("CHANGE-3407 … deprecated"), and it has no merge check to ask. Pure.
+ */
 export function mergeStatesOf(diffstat?: any[]): { mergeable: string; mergeStateStatus: string } {
-  if (!diffstat) return { mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' };
-  if (diffstat.some((d) => String(d?.status ?? '') === 'merge conflict')) return { mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' };
-  return { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' };
+  if (diffstat?.some((d) => String(d?.status ?? '') === 'merge conflict')) return { mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' };
+  return { mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' };
 }
 
 /** A pull request in `gh pr list --json`'s words, with what details() found. Pure. */

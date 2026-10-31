@@ -68,7 +68,7 @@ export function ownerFirst(pr: Pick<PrInfo, 'labels' | 'files'>): string | null 
   return files.length ? `it changes ${files.slice(0, 3).join(', ')}${files.length > 3 ? ', …' : ''}, which may need the owner first` : null;
 }
 
-/** What holds a PR next in line, as GitHub has it; 'author' when nothing does but its author vouching and merging. Pure. */
+/** What holds a PR next in line, as its host has it; 'author' when nothing does but its author vouching and merging. Pure. */
 export function holdOf(pr: Pick<PrInfo, 'labels' | 'files' | 'draft' | 'mergeable' | 'mergeState' | 'checks' | 'base'>): Hold {
   const owner = ownerFirst(pr);
   if (owner) return { kind: 'owner', why: owner };
@@ -76,7 +76,7 @@ export function holdOf(pr: Pick<PrInfo, 'labels' | 'files' | 'draft' | 'mergeabl
   if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return { kind: 'conflict', why: `it conflicts with ${pr.base}` };
   if (pr.checks === 'failing') return { kind: 'failing', why: 'its checks fail' };
   if (pr.checks === 'pending') return { kind: 'pending', why: "its checks haven't finished" };
-  if (pr.mergeable === 'UNKNOWN') return { kind: 'unknown', why: "GitHub hasn't said whether it merges" };
+  if (pr.mergeable === 'UNKNOWN') return { kind: 'unknown', why: "its host hasn't said whether it merges" };
   return { kind: 'author', why: 'it waits for its author to vouch for it and merge it' };
 }
 
