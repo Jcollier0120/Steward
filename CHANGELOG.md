@@ -2,6 +2,15 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.274
+
+**`claim-version` no longer hands out a version an open PR already sets: it reads the version a kit PR's title gives after the kit's, and the version each open PR's head sets in its version files.**
+
+### What changed
+
+- **A kit PR's title** names the kit's version first: "Kit 2.146.7 and Steward 0.36.272: …". `claim-version steward` read a version only from a title that began with the name, so it missed 0.36.272 there and handed it to #471 too. `claim-version kit` saw that PR's kit version, as it reads "kit <version>" anywhere in a title. Now the name counts at the start of a title's lead (before its first ": ") or after another part of it ("and ", ", ", "(", "+ ", "& "). Titles are read the same way where an old claim is kept while an open PR's title sets its version, where a PR passed over is given its next version, and where catch-up reads a PR's version from its title because its files don't say.
+- **Each open PR's head** is read as well: the open PRs' branches on the repository itself are fetched in one go, and the version its version files set at each head counts (kit/VERSION for `claim-version kit`). A PR whose title doesn't name its version holds it all the same. A fork's branch, which isn't on the repository, counts by its title only.
+
 ## 0.36.273
 
 **What the Steward and every agent on kit 2.146.8 say of Manor's Developer options matches Manor: they can be on with no developer staff, when you turn them on.**
