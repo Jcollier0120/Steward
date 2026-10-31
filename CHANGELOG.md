@@ -13,6 +13,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - **A line that says something failed** is worded as it was, and is still a warning. So is a line that runs something again but quotes the failure's own words, such as an agent's checks run once more: those words match, so its wording was left as it was.
 - The tests read each line as the Surveyor does: `test/surveyor.ts` copies its test of a line (Surveyor `src/logs.ts`, ERROR_RE and NOT_AN_ERROR).
 
+## 0.36.277
+
+**It carries kit 2.147.0, whose pages can be laid out for a phone, a 1080p desktop and a 2K or 3K screen.**
+
+### What changed
+
+- **Kit 2.147.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): `Columns`, `Span`, `PageTabs`' `side` and `useWidth`, for an agent's page to put its sections side by side on a wide screen. The Steward's own page looks as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.275
 
 **Repositories on Azure DevOps are worked with again where the organization is one of Microsoft accounts: the Steward asks Azure DevOps through the Azure CLI's azure-devops extension, not `az rest`, which got the organization's sign-in page, never its API.**

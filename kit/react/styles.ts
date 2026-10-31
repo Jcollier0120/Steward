@@ -4,6 +4,8 @@
  * (web/themes.css), so each theme, Manor's choice among them included, applies as it does to page.ts's own. `Page`
  * puts these in the page once.
  */
+import { LAYOUT_CSS } from './layout-css.ts';
+
 export const UI_CSS = `
 .ui-icon { flex: none; vertical-align: -3px; }
 
@@ -231,4 +233,5 @@ details.release-entry:not([open]) > summary { margin: 0; }
   .ui-glance .ui-tile, .ui-kept-stat { padding: 8px 10px; }
   .ui-glance .ui-tile-value, .ui-kept-stat .ui-tile-value { font-size: 17px; }
 }
+${LAYOUT_CSS}
 `;
