@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.147.0
+
+**A page can be laid out for three widths, a phone, a 1080p desktop and a 2K or 3K screen, so a wide screen shows sections side by side rather than one long column.**
+
+### What's new
+
+- **`Columns` and `Span`** (react/layout.tsx): sections side by side, with CSS only. One column when narrow (under 1200 px); `desktop` columns from 1200 px, a 1080p screen (1 to 3, default 2); `wide` columns from 2000 px, a 2K or 3K screen (1 to 4, default 3). `weights="2 1"` makes them unequal. A `Span` takes the whole row (`cols="all"`) or two columns of three or four (`cols={2}`).
+- **`PageTabs` `side`**: from that width up (`'wide'` or `'desktop'`), a page's tabs are drawn side by side, a column each under its name, with no tab strip. Narrower, they stay tabs. Every panel is drawn as before, so nothing about the tour or what's typed in a tab changes.
+- **`useWidth()`** and `widthNow()` give `'narrow' | 'desktop' | 'wide'`, kept as the window is resized, for a page that changes more than its columns. `DESKTOP_FROM` and `WIDE_FROM` give the widths.
+- **spec/LAYOUT.md** says how to lay a page out at the three widths, and how to check it.
+
+### Before you update
+
+- Nothing: a page looks as before until it uses them.
+
 ## 2.146.6
 
 **A background fetch no longer signs you out of Bitbucket or Azure DevOps. A host that refused a good sign-in (a repository that isn't there, or isn't shared with you) had git's credential helper erase it, and you had to sign in again.**
