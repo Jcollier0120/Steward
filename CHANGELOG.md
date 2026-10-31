@@ -2,6 +2,13 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.281
+
+**A release is built again on a PC whose temp folder, or an agent's own folder, is reached through a link, such as a Dev Drive (kit 2.147.3).**
+
+### What changed
+
+- **Kit 2.147.3** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): the check that a release carries every file its code imports measured the imports from the folder's linked path, while esbuild gives their real path. Every file then counted as left out, and nothing was built. It measures from the real path now.
 ## 0.36.279
 
 **The Steward's log no longer reads as a failure where it only says an agent is tried again, no longer holds a kit back, or the PC woke. The Surveyor took each such line for one and raised a warning on Manor.**

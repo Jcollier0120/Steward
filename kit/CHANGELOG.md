@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.147.3
+
+**A release built in a folder reached through a link, such as a temp folder on a Dev Drive, is built again. Kit 2.146.5's check refused it, naming every file its code imports as left out.**
+
+### What changed
+
+- **`importsLeftOut(stage)`** (minify.ts) measures each import from the stage's real path. esbuild names every importer by its real path, so a stage behind a link (a junction, a symbolic link, or a folder mounted from another drive) was measured from the wrong place. Each file then counted as not carried, and the release wasn't built ("Not built: its code imports what the release doesn't carry"). On Windows a link to another drive gave whole paths in place of the stage's own. Found on a PC whose `%TEMP%` is a link to a Dev Drive: an agent's `npm run release` and the kit's own release tests stopped there.
+
+### Before you update
+
+- Nothing to do.
+
 ## 2.147.1
 
 **About's What's new shows only the newest 5 versions, not up to 10, and says how many older ones it leaves out, so the page stays short.**
