@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.276
+## 0.36.279
 
 **The Steward's log no longer reads as a failure where it only says an agent is tried again, no longer holds a kit back, or the PC woke. The Surveyor took each such line for one and raised a warning on Manor.**
 
