@@ -46,6 +46,7 @@ export { BusyArea, BusyButton, PageArea, useTracked, type BusyButtonProps } from
 export { holdPage, openDialog, PAGE_WAIT_MS, pageHeld, pageWait } from './page-busy.ts';
 export { UI_CSS } from './styles.ts';
 export { SettingsForm } from './settings-form.tsx';
+export { Columns, DESKTOP_FROM, Span, useWidth, WIDE_FROM, widthNow, type Width } from './layout.tsx';
 export { pageTabInHash, PageTabs, settingsTabInHash, SHOW_TAB, Tabs, usePageTab, useSettingsTab, type PageTab, type SettingsTab } from './tabs.tsx';
 export { blank, canon, same, shownNow, tidy, words, type Messages, type SettingsData, type SettingsField } from './settings-values.ts';
 export { onPage, Tour, tourFrom, tourStart } from './tour.tsx';
