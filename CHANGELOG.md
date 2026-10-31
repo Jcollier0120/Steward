@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.277
+## 0.36.278
 
 **What's new, at the top of every agent's About page, now shows just the newest 5 versions an update brought, so it stays short.**
 
