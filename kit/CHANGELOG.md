@@ -33,6 +33,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
 ## 2.147.0
 
 **A page can be laid out for three widths, a phone, a 1080p desktop and a 2K or 3K screen, so a wide screen shows sections side by side rather than one long column.**
@@ -47,6 +48,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing: a page looks as before until it uses them.
+
 ## 2.146.8
 
 **What an agent says of Manor's Developer options no longer claims they're on only while developer staff are hired. Manor lets the person turn them on with none (Manor#530), to see a general agent's developer content.**
@@ -3827,6 +3829,7 @@ Written on the Intel laptop and released first in this version.
 
 - Take the kit and release as usual.
 - Check your own scripts for `path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)`, or the `pathToFileURL(...).href === import.meta.url` form, and compare real paths instead (spec/DEV-DRIVES.md, rule 2). Started from a linked folder, such a script does nothing and exits 0.
+
 ## 2.73.0
 
 **The checks pace holds to the gentle cap, with memory caps and turns, and the pace is the owner's setting alone: viewing a page, Run now or a fast vouch no longer lifts it.**
