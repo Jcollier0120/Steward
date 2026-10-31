@@ -109,7 +109,8 @@ export function quirky(gitDir: string | null | undefined, env: NodeJS.ProcessEnv
   for (let i = 0; i < n; i++) {
     const key = String(env[`GIT_CONFIG_KEY_${i}`] ?? '').toLowerCase();
     if (/^url\./.test(key)) return true;
-    if (QUIRKS.test(`${key.slice(key.lastIndexOf('.') + 1)}=`) && !/^http\.https:\/\/[^/]+\/\.extraheader$/.test(key)) return true;
+    // The sign-in's header, for a host (http.https://host/.extraheader) or, where git asks helpers by path, a repository.
+    if (QUIRKS.test(`${key.slice(key.lastIndexOf('.') + 1)}=`) && !/^http\.https:\/\/[^/]+\/.*\.extraheader$/.test(key)) return true;
   }
   return false;
 }
@@ -119,7 +120,44 @@ export function quirky(gitDir: string | null | undefined, env: NodeJS.ProcessEnv
  * git-auth.ts reads it from git's credential helper) or none (a public repository). Null when the URL isn't plain
  * https, when git would talk to it another way (`quirky`), when KIT_SMART_HTTP=0, or on any failure.
  */
-export async function advertisedRefs(url: string, o: { authorization?: string | null; gitDir?: string | null; env?: NodeJS.ProcessEnv; timeoutMs?: number; fetch?: typeof fetch } = {}): Promise<AdvertisedRef[] | null> {
+export async function advertisedRefs(url: string, o: InfoRefsOptions = {}): Promise<AdvertisedRef[] | null> {
+  const res = await infoRefs(url, o);
+  if (!res) return null;
+  try {
+    if (!advertises(res)) return null;
+    return parseAdvertisement(Buffer.from(await res.arrayBuffer()));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How a host answers a read of a repository over https, signed in with `authorization` or with none (kit 2.146.6:
+ * git-auth.ts asks it of a sign-in a host refused, to tell a stale sign-in from a repository it won't show). 200 when
+ * it answers with the refs, else its status: 401 when it refuses the sign-in itself, 404 or 403 for a repository it
+ * won't show. Null when it can't be asked as git would ask it (not plain https, `quirky`, KIT_SMART_HTTP=0), on any
+ * failure, and for a 200 that isn't refs (a sign-in page).
+ */
+export async function readsWith(url: string, o: InfoRefsOptions = {}): Promise<number | null> {
+  const res = await infoRefs(url, o);
+  if (!res) return null;
+  const status = res.status === 200 ? (advertises(res) ? 200 : null) : res.status;
+  await res.body?.cancel().catch(() => {});
+  return status;
+}
+
+interface InfoRefsOptions {
+  authorization?: string | null;
+  gitDir?: string | null;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+  fetch?: typeof fetch;
+}
+
+const advertises = (res: Response) => res.status === 200 && /^application\/x-git-upload-pack-advertisement/i.test(res.headers.get('content-type') ?? '');
+
+/** The remote's ref advertisement asked (GET <url>/info/refs?service=git-upload-pack), or null where it isn't asked. */
+async function infoRefs(url: string, o: InfoRefsOptions): Promise<Response | null> {
   const env = o.env ?? process.env;
   if (env.KIT_SMART_HTTP === '0') return null;
   const m = /^https:\/\/([^/?#\s@]+)(\/[^?#\s]*)$/i.exec(url.trim());
@@ -127,13 +165,11 @@ export async function advertisedRefs(url: string, o: { authorization?: string | 
   const headers: Record<string, string> = { 'User-Agent': 'git/castellan-kit', Accept: '*/*', Pragma: 'no-cache' };
   if (o.authorization) headers.Authorization = o.authorization;
   try {
-    const res = await (o.fetch ?? fetch)(`https://${m[1].toLowerCase()}${m[2].replace(/\/+$/, '')}/info/refs?service=git-upload-pack`, {
+    return await (o.fetch ?? fetch)(`https://${m[1].toLowerCase()}${m[2].replace(/\/+$/, '')}/info/refs?service=git-upload-pack`, {
       headers,
       redirect: 'manual',
       signal: AbortSignal.timeout(o.timeoutMs ?? 30_000),
     });
-    if (res.status !== 200 || !/^application\/x-git-upload-pack-advertisement/i.test(res.headers.get('content-type') ?? '')) return null;
-    return parseAdvertisement(Buffer.from(await res.arrayBuffer()));
   } catch {
     return null;
   }

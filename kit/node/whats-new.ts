@@ -14,7 +14,7 @@ import { dataFile, readJson, writeJson } from './store.ts';
  *
  * oldest first, at most 30. About shows the entries of every version newer than the one that ran before the latest
  * update, up to the one running, and those of the other updates of the last 30 days; only the newest 5 of them (kit
- * 2.146.7), with how many older ones it leaves out, so the page carries no more than it shows. A copy with no record
+ * 2.147.1), with how many older ones it leaves out, so the page carries no more than it shows. A copy with no record
  * yet (a fresh install, or the first start on this kit) starts one with its own version, after the one in app.prev
  * when the update kept one there (safeinstall.ts's probation), whose date isn't known: it shows the versions since
  * that, or just its own.
@@ -27,7 +27,7 @@ import { dataFile, readJson, writeJson } from './store.ts';
 export const VERSIONS_FILE = 'versions.json';
 /** The record keeps the newest 30 versions started at; the older go. */
 export const MAX_KEPT = 30;
-/** About shows at most 5 versions' entries, the newest (10 before kit 2.146.7). */
+/** About shows at most 5 versions' entries, the newest (10 before kit 2.147.1). */
 export const MAX_SHOWN = 5;
 /** Besides the latest update, however old, About shows the updates of the last 30 days. */
 export const RECENT_DAYS = 30;
@@ -46,7 +46,7 @@ export interface NewVersion {
   entry: string;
 }
 
-/** What About's What's new shows, as /api/whats-new gives it (kit 2.146.7). */
+/** What About's What's new shows, as /api/whats-new gives it (kit 2.147.1). */
 export interface WhatsNewAnswer {
   /** At most MAX_SHOWN versions' entries, newest first. */
   versions: NewVersion[];

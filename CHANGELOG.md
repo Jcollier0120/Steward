@@ -2,18 +2,56 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.272
+## 0.36.277
 
 **What's new, at the top of every agent's About page, now shows just the newest 5 versions an update brought, so it stays short.**
 
 ### What changed
 
-- **Kit 2.146.7** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): an agent's About page showed every version its latest updates brought, up to 10, each in its own card. Now it shows the newest 5. When the updates brought more than that, the line above them says "The newest 5 versions that came with Watchman's latest updates, newest first.", and a short line under them says how many older ones aren't shown ("3 older versions aren't shown here."). The older versions' notes are still in Manor's What's new for each update.
+- **Kit 2.147.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): an agent's About page showed every version its latest updates brought, up to 10, each in its own card. Now it shows the newest 5. When the updates brought more than that, the line above them says "The newest 5 versions that came with Watchman's latest updates, newest first.", and a short line under them says how many older ones aren't shown ("3 older versions aren't shown here."). The older versions' notes are still in Manor's What's new for each update.
 - Each agent gets it with the kit, through the Steward, at its next update.
 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+## 0.36.275
+
+**Repositories on Azure DevOps are worked with again where the organization is one of Microsoft accounts: the Steward asks Azure DevOps through the Azure CLI's azure-devops extension, not `az rest`, which got the organization's sign-in page, never its API.**
+
+### What changed
+
+- **Pull requests** are listed, shown, opened, changed, completed and abandoned with `az repos pr`. A pull request's iterations, statuses and comments, a commit's statuses, refs and annotated tags (releases) are asked with `az devops invoke`, in the repository's own route. Found live on WEASELDEV03 (AMD), 2026-10-31: `az rest` to an organization of Microsoft accounts answered with "Azure DevOps Services | Sign In", and az then stopped printing it ("'charmap' codec can't encode '∞'"), so every Azure DevOps call failed. The extension, signed in the same way (`az login`), is let in.
+- **A pull request asked by its number** is worked with only when it is the repository's: Azure DevOps numbers them across the organization, and `az repos pr` shows and updates one by its number alone.
+- **Completing one** checks its head just before (`az repos pr update` completes it at the head it reads itself) and again once it is completed, so one pushed to in between is said. Squashing works as before; az can't rebase one or change its base, and the Steward says so rather than doing either.
+- **Who you are** is the account `az account show` names. Azure DevOps may write the same name in another case on a pull request; the Steward already compares them ignoring case.
+- **What az says** when Azure DevOps doesn't let its sign-in in (a 401, TF400813, an expired Entra sign-in, or a page where JSON was asked) is one sentence naming the organization and `az login`. Without the azure-devops extension, it says `az extension add --name azure-devops`: the Steward never installs it (`AZURE_EXTENSION_USE_DYNAMIC_INSTALL=no`).
+- **az's text is UTF-8**: on Windows its own Python starts with `-X utf8`, as `-I` leaves out `PYTHONUTF8` and `PYTHONIOENCODING`; elsewhere those two are set. Titles, descriptions and request bodies go to az in files, never on its command line, where az would read a leading `@` as a file to load.
+
+## 0.36.274
+
+**`claim-version` no longer hands out a version an open PR already sets: it reads the version a kit PR's title gives after the kit's, and the version each open PR's head sets in its version files.**
+
+### What changed
+
+- **A kit PR's title** names the kit's version first: "Kit 2.146.7 and Steward 0.36.272: …". `claim-version steward` read a version only from a title that began with the name, so it missed 0.36.272 there and handed it to #471 too. `claim-version kit` saw that PR's kit version, as it reads "kit <version>" anywhere in a title. Now the name counts at the start of a title's lead (before its first ": ") or after another part of it ("and ", ", ", "(", "+ ", "& "). Titles are read the same way where an old claim is kept while an open PR's title sets its version, where a PR passed over is given its next version, and where catch-up reads a PR's version from its title because its files don't say.
+- **Each open PR's head** is read as well: the open PRs' branches on the repository itself are fetched in one go, and the version its version files set at each head counts (kit/VERSION for `claim-version kit`). A PR whose title doesn't name its version holds it all the same. A fork's branch, which isn't on the repository, counts by its title only.
+
+## 0.36.273
+
+**What the Steward and every agent on kit 2.146.8 say of Manor's Developer options matches Manor: they can be on with no developer staff, when you turn them on.**
+
+### What changed
+
+- **Kit 2.146.8** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): an agent's page, where Manor sets its Developer options, says "Developer options are set in <manor>: on while developer staff are employed there, or when you turn them on", with "Change it in <manor>" linking to Manor's Settings, Employees. A developer-only settings form refused while they're off says "These settings can be changed only while Developer options are on." Both said developer content showed only while developer staff were hired, which hasn't been so since Manor let you switch them on with none (Manor#530). What shows and what doesn't is unchanged.
+
+## 0.36.271
+
+**A background fetch of a repository that isn't there, or isn't shared with you, no longer signs you out of Bitbucket or Azure DevOps (kit 2.146.6).**
+
+### What changed
+
+- **Kit 2.146.6** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): when a host refused the sign-in the Steward handed git, the command ran once more git's own way, and git had Git Credential Manager erase the sign-in. Bitbucket and Azure DevOps refuse a missing or unshared repository as if the sign-in were wrong, so one such fetch signed you out of the whole host until you signed in again in a window. Now a refused command runs once more only with a sign-in the helper renewed, and the helper is told to forget its sign-in only when the host is shown to refuse it elsewhere too. Only the hosts a command is handed a sign-in for have their helpers switched off.
+- **Azure DevOps (`dev.azure.com`)**, where Git Credential Manager keeps a sign-in per repository, is signed in per repository too. A URL with its own user is signed in as that user, and a clone's push URLs are signed in as well.
 
 ## 0.36.270
 

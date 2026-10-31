@@ -65,6 +65,20 @@ export function remoteOf(repo: string): 'origin' | '.' {
 /** Fetches one branch from origin (or a local-only clone's own: remoteOf), so origin/<branch> is fresh. */
 export const fetchBranch = (run: Runner, repo: string, branch: string) => git(run, repo, 'fetch', '--quiet', remoteOf(repo), `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
 
+/**
+ * Fetches several branches in one go, as fetchBranch does one; when that fails (one of them gone since it was listed),
+ * each on its own. The branches fetched.
+ */
+export async function fetchBranches(run: Runner, repo: string, branches: string[]): Promise<string[]> {
+  const spec = (b: string) => `+refs/heads/${b}:refs/remotes/origin/${b}`;
+  if (!branches.length) return [];
+  const from = remoteOf(repo);
+  if ((await gitMaybe(run, repo, 'fetch', '--quiet', from, ...branches.map(spec))) !== null) return branches;
+  const got: string[] = [];
+  for (const b of branches) if ((await gitMaybe(run, repo, 'fetch', '--quiet', from, spec(b))) !== null) got.push(b);
+  return got;
+}
+
 /** One read waiting for its repository's batch. */
 interface Ask {
   spec: string;

@@ -254,7 +254,7 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     // (over Manor's link: GET /agents/<id>/result). Read only.
     '/api/peer/result': ({ query }) => peerResult(query),
     // What's new (whats-new.ts, kit 2.143.0): its changelog's entries for its latest updates, newest first, which the
-    // About view asks for as it opens: the newest 5, and how many older ones are left out (kit 2.146.7). The changelog
+    // About view asks for as it opens: the newest 5, and how many older ones are left out (kit 2.147.1). The changelog
     // is read at the first ask, and kept.
     '/api/whats-new': () => ({ json: whatsNewAnswer() }),
     ...opts.get,

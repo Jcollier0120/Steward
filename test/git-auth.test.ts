@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { headerOf, httpsOrigin, originsOf, refused, remoteOrigins, signedIn, signInEnv, subcommand } from '../src/git-auth.ts';
+import { headerOf, httpsOrigin, originsOf, refused, remoteOrigins, signedIn, signInEnv, signInOf, subcommand } from '../src/git-auth.ts';
 import { fetchFor, hasObject } from '../src/git.ts';
 import type { Ran, Runner, RunOptions } from '../src/run.ts';
 import { gitExe } from '../src/kit/git-exe.ts';
@@ -23,17 +23,56 @@ function repoWith(name: string, url: string): string {
 
 const FILL = 'protocol=https\nhost=github.com\nusername=someone\npassword=s3cret\n';
 const HEADER = `Authorization: Basic ${Buffer.from('someone:s3cret').toString('base64')}`;
+const FILL2 = 'protocol=https\nhost=github.com\nusername=someone\npassword=renewed\n';
+const HEADER2 = `Authorization: Basic ${Buffer.from('someone:renewed').toString('base64')}`;
+const REFUSED: Ran = { code: 128, out: '', err: "remote: Repository not found.\nfatal: Authentication failed for 'https://github.com/a/b.git/'" };
 
-/** A runner that answers `git credential fill` with `fill` and everything else with `answer`, noting each call. */
-function fake(o: { fill?: Ran; answer?: (args: string[], opts: RunOptions, n: number) => Ran } = {}) {
+/**
+ * A runner that answers `git credential fill` with `fill` (or `fill(input, n)`), `git config --get-urlmatch` with
+ * `config`, and everything else with `answer`, noting each call.
+ */
+function fake(o: { fill?: Ran | ((input: string, n: number) => Ran); config?: Ran; answer?: (args: string[], opts: RunOptions, n: number) => Ran } = {}) {
   const calls: { args: string[]; opts: RunOptions }[] = [];
   let n = 0;
+  let f = 0;
   const inner: Runner = async (_cmd, args, opts = {}) => {
     calls.push({ args, opts });
-    if (args[0] === 'credential') return o.fill ?? { code: 0, out: FILL, err: '' };
+    if (args[0] === 'credential' && args[1] === 'fill') return typeof o.fill === 'function' ? o.fill(opts.input ?? '', f++) : (o.fill ?? { code: 0, out: FILL, err: '' });
+    if (args[0] === 'credential') return { code: 0, out: '', err: '' };
+    if (args[0] === 'config') return o.config ?? { code: 1, out: '', err: '' };
     return o.answer?.(args, opts, n++) ?? { code: 0, out: '', err: '' };
   };
-  return { inner, calls, fills: () => calls.filter((c) => c.args[0] === 'credential').length, gits: () => calls.filter((c) => c.args[0] !== 'credential') };
+  const of = (...kinds: string[]) => calls.filter((c) => kinds.includes(c.args[0] === 'credential' ? `credential ${c.args[1]}` : c.args[0]));
+  return {
+    inner,
+    calls,
+    fills: () => of('credential fill').length,
+    fillInputs: () => of('credential fill').map((c) => c.opts.input),
+    rejects: () => of('credential reject'),
+    configs: () => of('config'),
+    gits: () => calls.filter((c) => c.args[0] !== 'credential' && c.args[0] !== 'config'),
+  };
+}
+
+/** The git settings an environment hands over (GIT_CONFIG_KEY_n = GIT_CONFIG_VALUE_n), past `from`. */
+function settings(env: Record<string, string | undefined> | undefined, from = Number(process.env.GIT_CONFIG_COUNT) || 0): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (let i = from; i < Number(env?.GIT_CONFIG_COUNT ?? 0); i++) out[env![`GIT_CONFIG_KEY_${i}`]!] = env![`GIT_CONFIG_VALUE_${i}`]!;
+  return out;
+}
+
+/** A stand-in host for the kit's own requests: `answer(url, authorization)`'s status, noting each. */
+function host(answer: (url: string, auth: string | null) => number) {
+  const asked: { url: string; auth: string | null }[] = [];
+  const fetch = (async (url: string, init?: RequestInit) => {
+    const auth = new Headers(init?.headers).get('authorization');
+    asked.push({ url: String(url), auth });
+    const status = answer(String(url), auth);
+    return status === 200
+      ? new Response(Buffer.from('001e# service=git-upload-pack\n0000'), { status, headers: { 'content-type': 'application/x-git-upload-pack-advertisement' } })
+      : new Response('no', { status });
+  }) as typeof globalThis.fetch;
+  return { fetch, asked };
 }
 
 test('the git command past its global options, and the https origins a command talks to', () => {
@@ -47,6 +86,18 @@ test('the git command past its global options, and the https origins a command t
   assert.deepEqual(originsOf(['fetch', '--quiet', 'https://github.com/a/b.git', '+refs/x:refs/y'], undefined), ['https://github.com']);
   assert.equal(originsOf(['push', 'git@github.com:a/b.git', 'HEAD:refs/heads/x'], undefined), null, 'SSH: left to git');
   assert.equal(originsOf(['fetch', 'origin'], undefined), null, 'no URL and no clone: nothing to say');
+});
+
+test('where an https URL signs in (kit 2.146.6): its origin, its own user and password, its path as written and as git hands it over', () => {
+  assert.deepEqual(signInOf('https://GitHub.COM/a/b.git/'), { origin: 'https://github.com', user: null, password: false, rawPath: 'a/b.git', path: 'a/b.git' }, 'an upper-case host; a trailing slash');
+  assert.deepEqual(signInOf('https://me@bitbucket.org/ws/repo.git'), { origin: 'https://bitbucket.org', user: 'me', password: false, rawPath: 'ws/repo.git', path: 'ws/repo.git' });
+  assert.deepEqual(signInOf('https://me:t%40ken@host:8443/x'), { origin: 'https://host:8443', user: 'me', password: true, rawPath: 'x', path: 'x' }, 'its own password: never kept here');
+  assert.deepEqual(signInOf('https://dev.azure.com/org/My%20Project/_git/My%20Repo'), { origin: 'https://dev.azure.com', user: null, password: false, rawPath: 'org/My%20Project/_git/My%20Repo', path: 'org/My Project/_git/My Repo' });
+  assert.equal(signInOf('https://[::1]:8929/group/app')?.origin, 'https://[::1]:8929');
+  assert.equal(signInOf('https://host')?.rawPath, '');
+  assert.equal(signInOf('http://127.0.0.1:8929/group/app'), null, 'http: git signs in its own way');
+  assert.equal(signInOf('git@github.com:a/b.git'), null);
+  assert.equal(signInOf('ssh://git@ssh.dev.azure.com/v3/org/p/r'), null);
 });
 
 test("a clone's remotes from its config file, a worktree's from its main clone's", () => {
@@ -63,18 +114,23 @@ test("a clone's remotes from its config file, a worktree's from its main clone's
   assert.equal(originsOf(['fetch', 'origin'], ssh), null);
 });
 
-test("the helper's answer as a header; the environment switches the helpers off first and keeps entries already there", () => {
+test("the helper's answer as a header; the environment switches that host's helpers off and keeps entries already there", () => {
   assert.equal(headerOf(FILL), HEADER);
   assert.equal(headerOf('protocol=https\r\nhost=x\r\nusername=u\r\npassword=p\r\n'), `Authorization: Basic ${Buffer.from('u:p').toString('base64')}`);
   assert.equal(headerOf('protocol=https\nhost=x\n'), null);
   const env = signInEnv(new Map([['https://github.com', HEADER]]), { GIT_CONFIG_COUNT: '1' });
   assert.equal(env.GIT_CONFIG_COUNT, '3');
-  assert.equal(env.GIT_CONFIG_KEY_1, 'credential.helper');
+  assert.equal(env.GIT_CONFIG_KEY_1, 'credential.https://github.com.helper', "that host's helpers, not every host's (kit 2.146.6)");
   assert.equal(env.GIT_CONFIG_VALUE_1, '');
   assert.equal(env.GIT_CONFIG_KEY_2, 'http.https://github.com/.extraHeader');
   assert.equal(env.GIT_CONFIG_VALUE_2, HEADER);
   assert.equal(env.GIT_TERMINAL_PROMPT, '0');
   assert.equal(env.GCM_INTERACTIVE, 'never');
+  assert.deepEqual(
+    settings(signInEnv(new Map([['https://dev.azure.com/org/p/_git/r', HEADER]]), {}, ['https://host/own']), 0),
+    { 'credential.https://host/own.helper': '', 'credential.https://dev.azure.com/org/p/_git/r.helper': '', 'http.https://dev.azure.com/org/p/_git/r.extraHeader': HEADER },
+    "a repository's own, where git asks helpers by path; a URL with its own password: its helpers off, no header",
+  );
   assert.ok(refused({ code: 128, out: '', err: "remote: Repository not found.\nfatal: Authentication failed for 'https://github.com/a/b.git/'" }));
   assert.ok(refused({ code: 128, out: '', err: 'fatal: unable to access ...: The requested URL returned error: 403' }));
   assert.ok(!refused({ code: 128, out: '', err: "fatal: couldn't find remote ref refs/pull/401/head" }), 'a PR numbered 401 is no refusal');
@@ -93,9 +149,10 @@ test('a fetch over https carries the sign-in in its environment, asked of the he
   assert.equal(fill.opts.env?.GCM_INTERACTIVE, 'never');
   // After the settings the environment already gives (the test run's own, kit/node/test-git.ts).
   const n = Number(process.env.GIT_CONFIG_COUNT) || 0;
+  assert.equal(f.configs().length, 0, 'a host that gives its sign-in: git is asked nothing more');
   for (const c of f.gits()) {
     assert.equal(c.opts.env?.[`GIT_CONFIG_VALUE_${n + 1}`], HEADER);
-    assert.equal(c.opts.env?.[`GIT_CONFIG_KEY_${n}`], 'credential.helper');
+    assert.equal(c.opts.env?.[`GIT_CONFIG_KEY_${n}`], 'credential.https://github.com.helper');
     assert.ok(!c.args.join(' ').includes('s3cret') && !c.args.join(' ').includes(HEADER.slice(-10)), 'nothing secret in argv');
   }
   assert.deepEqual(f.gits()[0].args, args, 'the command itself unchanged');
@@ -115,6 +172,7 @@ test('everything else goes as given: other commands, git that stays local, SSH, 
   await run('git', ['fetch', 'origin'], opts);
   await run('git', ['fetch', 'origin'], opts);
   assert.equal(f.fills(), 1, 'none kept: not asked again for a while');
+  assert.equal(f.configs().length, 1, 'whether git asks helpers by path, asked once, when the host gave none');
   for (const c of f.gits()) assert.equal(c.opts.env?.GIT_CONFIG_COUNT, undefined, "git's own way");
   assert.deepEqual(f.gits().at(-1)!.opts, opts);
   t += 11 * 60_000;
@@ -122,25 +180,183 @@ test('everything else goes as given: other commands, git that stays local, SSH, 
   assert.equal(f.fills(), 2, 'asked again later');
 });
 
-test('a sign-in the host refuses: the command runs once more as before, and the sign-in is asked again later', async () => {
-  const repo = repoWith('stale', 'https://github.com/a/b.git');
-  let t = 0;
-  const f = fake({ answer: (_a, opts) => (opts.env?.GIT_CONFIG_COUNT ? { code: 128, out: '', err: "remote: Repository not found.\nfatal: Authentication failed for 'https://github.com/a/b.git/'" } : { code: 0, out: 'ok', err: '' }) });
-  const run = signedIn(f.inner, () => t);
-  const r = await run('git', ['fetch', 'origin'], { cwd: repo });
-  assert.deepEqual(r, { code: 0, out: 'ok', err: '' });
+test("a sign-in the host refuses is never handed back to git's own way, whose helper would erase it (kit 2.146.6)", async () => {
+  const repo = repoWith('refused', 'https://github.com/a/b.git');
+  // The host refuses this repository whatever the sign-in: it isn't there, or isn't shared with you (Bitbucket, Azure DevOps).
+  const f = fake({ answer: () => REFUSED });
+  const run = signedIn(f.inner);
+  assert.deepEqual(await run('git', ['fetch', 'origin'], { cwd: repo }), REFUSED, 'the refusal, as it is');
+  assert.equal(f.gits().length, 1, "not run again: never git's own way");
+  assert.equal(f.fills(), 2, 'the helper asked once more, in case it renews its sign-in');
+  assert.equal(f.rejects().length, 0, 'nothing forgotten: nothing shows the sign-in stale');
+  await run('git', ['fetch', 'origin'], { cwd: repo });
+  assert.equal(settings(f.gits()[1].opts.env)['http.https://github.com/.extraHeader'], HEADER, 'the sign-in kept, still handed over');
   assert.equal(f.gits().length, 2);
-  assert.equal(f.gits()[1].opts.env?.GIT_CONFIG_COUNT, undefined, "the second time git's own way");
-  await run('git', ['fetch', 'origin'], { cwd: repo });
-  assert.equal(f.gits()[2].opts.env?.GIT_CONFIG_COUNT, undefined, 'not handed over again at once');
-  assert.equal(f.fills(), 1);
-  t += 11 * 60_000;
-  await run('git', ['fetch', 'origin'], { cwd: repo });
-  assert.equal(f.fills(), 2);
-  // A failure that isn't a refusal is the command's own: not run twice.
+
+  // A helper that renews its sign-in when asked again (Bitbucket's and Azure DevOps' check theirs): run once more with it.
+  const renews = fake({ fill: (_input, n) => ({ code: 0, out: n === 0 ? FILL : FILL2, err: '' }), answer: (_a, opts) => (settings(opts.env)['http.https://github.com/.extraHeader'] === HEADER2 ? { code: 0, out: 'ok', err: '' } : REFUSED) });
+  const r = await signedIn(renews.inner)('git', ['fetch', 'origin'], { cwd: repo });
+  assert.deepEqual(r, { code: 0, out: 'ok', err: '' });
+  assert.deepEqual(
+    renews.gits().map((c) => settings(c.opts.env)['http.https://github.com/.extraHeader']),
+    [HEADER, HEADER2],
+    'twice, both with a sign-in: the second the renewed one',
+  );
+  assert.equal(renews.rejects().length, 0);
+
+  // A failure that isn't a refusal is the command's own: not run twice, the helper not asked again.
   const other = fake({ answer: () => ({ code: 128, out: '', err: "fatal: couldn't find remote ref refs/pull/9/head" }) });
   assert.equal((await signedIn(other.inner)('git', ['fetch', 'origin', 'refs/pull/9/head'], { cwd: repo })).code, 128);
   assert.equal(other.gits().length, 1);
+  assert.equal(other.fills(), 1);
+});
+
+test('a refused sign-in is forgotten only when shown stale: the host refuses it on a repository it read, or on a public one it reads with none', async () => {
+  const read = repoWith('was-read', 'https://github.com/a/read.git');
+  const missing = repoWith('missing', 'https://github.com/a/missing.git');
+  const READ = 'https://github.com/a/read.git/info/refs?service=git-upload-pack';
+  const MISSING = 'https://github.com/a/missing.git/info/refs?service=git-upload-pack';
+  const auth = HEADER.replace(/^authorization:\s*/i, '');
+  const auth2 = HEADER2.replace(/^authorization:\s*/i, '');
+  /**
+   * A git that reads a/read.git with the sign-in `git.good` (and nothing of a/missing.git); a helper that renews its
+   * sign-in once told to forget it.
+   */
+  const setUp = (good: string) => {
+    let forgotten = false;
+    const git = { good };
+    const f = fake({
+      fill: () => ({ code: 0, out: forgotten ? FILL2 : FILL, err: '' }),
+      answer: (args, opts) => (args.includes('origin') && settings(opts.env)['http.https://github.com/.extraHeader'] === git.good && opts.cwd === read ? { code: 0, out: 'ok', err: '' } : REFUSED),
+    });
+    const inner: Runner = async (cmd, args, opts) => {
+      if (args[0] === 'credential' && args[1] === 'reject') forgotten = true;
+      return f.inner(cmd, args, opts);
+    };
+    return { f, inner, git };
+  };
+
+  {
+    // Stale: a/read.git read with HEADER, then a/missing.git refused, and a/read.git now refuses HEADER too.
+    const { f, inner } = setUp(HEADER);
+    let stale = false;
+    const h = host((url, a) => (url === READ && a === auth && !stale ? 200 : url === READ && a === auth2 ? 200 : 401));
+    const run = signedIn(inner, Date.now, { fetch: h.fetch });
+    assert.equal((await run('git', ['fetch', 'origin'], { cwd: read })).code, 0);
+    stale = true;
+    const r = await run('git', ['fetch', 'origin'], { cwd: missing });
+    assert.deepEqual(h.asked, [{ url: READ, auth }], 'asked of the repository it read, with it');
+    assert.equal(f.rejects().length, 1, 'shown stale: the helper told to forget it, as git would');
+    assert.equal(f.rejects()[0].opts.input, `${FILL.trimEnd()}\n\n`, "exactly the helper's own answer");
+    assert.equal(f.rejects()[0].opts.env?.GCM_INTERACTIVE, 'never');
+    assert.deepEqual(
+      f.gits().slice(1).map((c) => settings(c.opts.env)['http.https://github.com/.extraHeader']),
+      [HEADER, HEADER2],
+      'the refused command run once more, with the renewed sign-in',
+    );
+    assert.equal(r.code, 128, 'a/missing.git is still refused: it isn’t there');
+  }
+  {
+    // Not stale: the repository it read still reads with it. The refusal is a/missing.git's own: nothing forgotten.
+    const { f, inner } = setUp(HEADER);
+    const h = host((url, a) => (url === READ && a === auth ? 200 : 401));
+    const run = signedIn(inner, Date.now, { fetch: h.fetch });
+    await run('git', ['fetch', 'origin'], { cwd: read });
+    assert.equal((await run('git', ['fetch', 'origin'], { cwd: missing })).code, 128);
+    assert.equal(f.rejects().length, 0);
+    assert.deepEqual(h.asked, [{ url: READ, auth }]);
+    await run('git', ['fetch', 'origin'], { cwd: missing });
+    assert.equal(h.asked.length, 1, 'refused again: known to be its own, the host not asked again');
+    assert.equal(f.gits().length, 3, 'each command once');
+  }
+  {
+    // The refused repository is the only one it read: a repository taken away, or no longer shared, is refused as a
+    // stale sign-in would be, and the host refuses it with none too. Nothing shows the sign-in stale: nothing forgotten.
+    const { f, inner, git } = setUp(HEADER);
+    const h = host(() => 401);
+    const run = signedIn(inner, Date.now, { fetch: h.fetch });
+    await run('git', ['fetch', 'origin'], { cwd: read });
+    git.good = 'none';
+    assert.equal((await run('git', ['fetch', 'origin'], { cwd: read })).code, 128);
+    assert.deepEqual(h.asked, [{ url: READ, auth }, { url: READ, auth: null }]);
+    assert.equal(f.rejects().length, 0);
+  }
+  {
+    // Nothing it read to compare with: a public repository the host reads with no sign-in but refuses with this one.
+    const { f, inner } = setUp('none');
+    const h = host((url, a) => (url === MISSING && a === null ? 200 : a === auth2 ? 200 : 401));
+    const run = signedIn(inner, Date.now, { fetch: h.fetch });
+    await run('git', ['fetch', 'origin'], { cwd: missing });
+    assert.deepEqual(h.asked, [{ url: MISSING, auth }, { url: MISSING, auth: null }]);
+    assert.equal(f.rejects().length, 1, 'shown stale');
+  }
+  {
+    // A host that only says 403 or 404 (not shared, not there) shows nothing about the sign-in: nothing forgotten.
+    for (const status of [403, 404, 500]) {
+      const { f, inner } = setUp('none');
+      const h = host(() => status);
+      await signedIn(inner, Date.now, { fetch: h.fetch })('git', ['fetch', 'origin'], { cwd: missing });
+      assert.equal(f.rejects().length, 0, String(status));
+      assert.equal(f.gits().length, 1);
+    }
+  }
+  {
+    // Under node --test with no fetch of the test's own, no host is asked: nothing can show it stale.
+    const { f, inner } = setUp('none');
+    await signedIn(inner)('git', ['fetch', 'origin'], { cwd: missing });
+    assert.equal(f.rejects().length, 0);
+  }
+});
+
+test('a URL with its own user is asked for that user; one with its own password keeps the helpers out; two users of one host go git’s own way', async () => {
+  const f = fake();
+  const run = signedIn(f.inner);
+  await run('git', ['ls-remote', 'https://me@github.com/a/b.git']);
+  assert.deepEqual(f.fillInputs(), ['protocol=https\nhost=github.com\nusername=me\n\n']);
+  assert.equal(settings(f.gits()[0].opts.env)['http.https://github.com/.extraHeader'], HEADER);
+  assert.equal(settings(f.gits()[0].opts.env)['credential.https://github.com.helper'], '');
+
+  const own = fake();
+  await signedIn(own.inner)('git', ['push', 'https://me:t0ken@gitlab.example.test/g/p.git', 'HEAD:refs/heads/x']);
+  assert.equal(own.fills(), 0, 'its own password: no helper asked');
+  assert.deepEqual(settings(own.gits()[0].opts.env), { 'credential.https://gitlab.example.test/g/p.git.helper': '' }, 'and none told to forget the one it keeps when the host refuses it');
+  assert.ok(!JSON.stringify(own.gits()[0].opts.env).includes('t0ken'));
+
+  const two = fake({ fill: (input) => ({ code: 0, out: /username=b/.test(input) ? FILL2 : FILL, err: '' }) });
+  await signedIn(two.inner)('git', ['fetch', 'https://a@github.com/x/y.git', 'https://b@github.com/x/z.git']);
+  assert.equal(two.gits()[0].opts.env?.GIT_CONFIG_COUNT, undefined, "two sign-ins for one host can't both be handed over");
+});
+
+test("where git asks helpers by path (Azure DevOps' dev.azure.com), the repository's own sign-in, for that repository", async () => {
+  const A = 'https://dev.azure.com/org/Proj/_git/Repo';
+  const B = 'https://dev.azure.com/org/Proj/_git/Other';
+  const f = fake({ fill: (input) => ({ code: /path=/.test(input) ? 0 : 128, out: /path=/.test(input) ? FILL : '', err: '' }), config: { code: 0, out: 'true\n', err: '' } });
+  const run = signedIn(f.inner);
+  await run('git', ['ls-remote', A]);
+  await run('git', ['ls-remote', B]);
+  await run('git', ['ls-remote', A]);
+  assert.deepEqual(f.fillInputs(), [
+    'protocol=https\nhost=dev.azure.com\n\n',
+    'protocol=https\nhost=dev.azure.com\npath=org/Proj/_git/Repo\n\n',
+    'protocol=https\nhost=dev.azure.com\npath=org/Proj/_git/Other\n\n',
+  ], "the host's own asked once; then each repository's, each kept");
+  assert.deepEqual(f.configs().map((c) => c.args), [['config', '--type=bool', '--get-urlmatch', 'credential.useHttpPath', A]], 'git asked once whether it asks by path');
+  assert.deepEqual(settings(f.gits()[0].opts.env), { 'credential.https://dev.azure.com/org/Proj/_git/Repo.helper': '', 'http.https://dev.azure.com/org/Proj/_git/Repo.extraHeader': HEADER });
+  assert.deepEqual(Object.keys(settings(f.gits()[1].opts.env)), ['credential.https://dev.azure.com/org/Proj/_git/Other.helper', 'http.https://dev.azure.com/org/Proj/_git/Other.extraHeader']);
+});
+
+test("a clone's every remote is signed in, push URLs too; one that isn't https is left to git with its host's helpers on", async () => {
+  const repo = repoWith('mixed', 'https://github.com/a/b.git');
+  g(repo, 'remote', 'set-url', '--push', 'origin', 'https://gitlab.example.test/a/b.git');
+  g(repo, 'remote', 'add', 'ssh', 'git@github.com:a/c.git');
+  const f = fake({ fill: (input) => ({ code: 0, out: input.includes('gitlab') ? FILL2 : FILL, err: '' }) });
+  await signedIn(f.inner)('git', ['push', 'origin', 'HEAD:refs/heads/x'], { cwd: repo });
+  assert.deepEqual(settings(f.gits()[0].opts.env), {
+    'credential.https://github.com.helper': '',
+    'http.https://github.com/.extraHeader': HEADER,
+    'credential.https://gitlab.example.test.helper': '',
+    'http.https://gitlab.example.test/.extraHeader': HEADER2,
+  });
 });
 
 test("a commit in the clone, loose or packed, from its files; a PR's head fetched only when it isn't", async () => {
