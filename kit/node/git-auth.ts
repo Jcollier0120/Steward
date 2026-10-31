@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { advertisedRefs, lsRemoteText, readsWith } from './smart-http.ts';
+import { advertisedRefs, answerTo, lsRemoteText } from './smart-http.ts';
 
 /**
  * git's sign-in given to git up front, for a fetch, push or ls-remote over https (the Steward's since 0.35.31, the kit's
@@ -26,9 +26,11 @@ import { advertisedRefs, lsRemoteText, readsWith } from './smart-http.ts';
  * - Git Credential Manager hands back an OAuth access token however old (Codeberg's last an hour), and makes a new one
  *   from its refresh token only once it keeps none. So since kit 2.147.2, a sign-in the host refuses (401) on a private
  *   repository, with nothing else to show why, is forgotten where Windows Credential Manager names its refresh token
- *   (`git:https://refresh_token.<host>`): once a while for each sign-in, the refresh token kept. The helper then makes a
- *   new access token, and the command runs once more with it. Elsewhere (no refresh token, GCM keeping its sign-ins
- *   in another store, not Windows) such a refusal is left as it is.
+ *   (`git:https://refresh_token.<host>`): once a while for each sign-in, the refresh token kept. The helper is then
+ *   asked again with the host's WWW-Authenticate, as git asks after a 401 (GCM knows a Gitea or Forgejo host by it
+ *   alone), makes a new access token, and the command runs once more with it; taken, the new one is kept (`git
+ *   credential approve`), as git keeps one that works. Elsewhere (no refresh token, GCM keeping its sign-ins in another
+ *   store, not Windows) such a refusal is left as it is.
  * - A URL with its own user (https://me@host/…) is asked for that user's sign-in. One with its own password signs in
  *   with it, and no helper is asked or told to forget one for it. Where git asks helpers by path
  *   (credential.useHttpPath, which Git Credential Manager sets for dev.azure.com), the helper is asked with the
@@ -294,15 +296,23 @@ export function listsTarget(out: string, target: string): boolean {
   });
 }
 
-/** What git's credential helper keeps for a sign-in: the header it makes, and its answer as given (to forget it by). */
+/**
+ * What git's credential helper keeps for a sign-in: the header it makes, and its answer as given (to forget it by, or
+ * keep it by). `made`: the helper made it from its refresh token once told to forget the access token (kit 2.147.2).
+ */
 interface Fill {
   header: string;
   answer: string;
+  made?: boolean;
 }
 
-/** Asks git's credential helper for a sign-in, without asking a person: its header and answer, or null. */
-function askFill(run: GitRunner, s: SignIn, byPath: boolean, cwd: string | undefined): Promise<Fill | null> {
-  const input = `protocol=https\nhost=${s.origin.slice('https://'.length)}\n${byPath && s.path ? `path=${s.path}\n` : ''}${s.user ? `username=${s.user}\n` : ''}\n`;
+/**
+ * Asks git's credential helper for a sign-in, without asking a person: its header and answer, or null. `challenge`:
+ * the WWW-Authenticate of a host's 401, handed on as git hands it after one (`wwwauth[]`).
+ */
+function askFill(run: GitRunner, s: SignIn, byPath: boolean, cwd: string | undefined, challenge: string | null = null): Promise<Fill | null> {
+  const asks = challenge ? `wwwauth[]=${challenge.replace(/[\r\n]+/g, ' ')}\n` : '';
+  const input = `protocol=https\nhost=${s.origin.slice('https://'.length)}\n${byPath && s.path ? `path=${s.path}\n` : ''}${s.user ? `username=${s.user}\n` : ''}${asks}\n`;
   return run('git', ['credential', 'fill'], { cwd, input, env: QUIET, timeoutMs: 30_000 })
     .then((r) => {
       const header = r.code === 0 ? headerOf(r.out) : null;
@@ -314,6 +324,11 @@ function askFill(run: GitRunner, s: SignIn, byPath: boolean, cwd: string | undef
 /** Tells git's credential helpers to forget a sign-in shown to be stale, as git does when a host refuses one. */
 function forget(run: GitRunner, f: Fill, cwd: string | undefined): Promise<unknown> {
   return run('git', ['credential', 'reject'], { cwd, input: `${f.answer.replace(/\r/g, '').trimEnd()}\n\n`, env: QUIET, timeoutMs: 30_000 }).catch(() => null);
+}
+
+/** Tells git's credential helpers to keep a sign-in a host just took, as git does when one works. */
+function remember(run: GitRunner, f: Fill, cwd: string | undefined): Promise<unknown> {
+  return run('git', ['credential', 'approve'], { cwd, input: `${f.answer.replace(/\r/g, '').trimEnd()}\n\n`, env: QUIET, timeoutMs: 30_000 }).catch(() => null);
 }
 
 /** Whether git asks credential helpers by path for this URL (credential.useHttpPath, set for dev.azure.com by GCM). */
@@ -406,19 +421,21 @@ export function signedIn<O extends GitRunOptions, R extends GitRan>(inner: GitRu
   /**
    * Whether the host refuses this sign-in itself (true), takes it (false: the refusal was the repository's), refuses
    * it (401) with nothing to show whether the sign-in or the repository is why ('unsure': a private repository, the
-   * only one asked), or can't say (null).
+   * only one asked), or can't say (null); and the WWW-Authenticate of its 401, as git would hand it to the helper.
    */
-  const stale = async (probe: string, u: Used, cwd: string | undefined, env: NodeJS.ProcessEnv): Promise<boolean | 'unsure' | null> => {
-    if (!net) return null;
-    const reads = (url: string, authorization: string | null) => readsWith(url, { authorization, gitDir: gitDirAt(cwd), env, fetch: net, timeoutMs: 15_000 });
+  const stale = async (probe: string, u: Used, cwd: string | undefined, env: NodeJS.ProcessEnv): Promise<{ is: boolean | 'unsure' | null; challenge: string | null }> => {
+    if (!net) return { is: null, challenge: null };
+    const reads = (url: string, authorization: string | null) => answerTo(url, { authorization, gitDir: gitDirAt(cwd), env, fetch: net, timeoutMs: 15_000 });
     const before = read.get(u.key);
     const other = before && before.until > now() && before.url !== probe ? before.url : null;
     const withIt = await reads(other ?? probe, u.fill.header.replace(/^authorization:\s*/i, ''));
-    if (withIt === 200) return false;
-    if (withIt !== 401) return null;
-    if (other) return true;
-    // No repository it read to ask: a public one that a host reads with no sign-in but refuses with this one shows it stale.
-    return (await reads(probe, null)) === 200 ? true : 'unsure';
+    if (withIt.status === 200) return { is: false, challenge: null };
+    if (withIt.status !== 401) return { is: null, challenge: null };
+    if (other) return { is: true, challenge: withIt.challenge };
+    // No repository it read to ask: a public one that a host reads with no sign-in but refuses with this one shows it
+    // stale. git's own first ask carries no sign-in, so it's that 401's WWW-Authenticate git would hand the helper.
+    const without = await reads(probe, null);
+    return { is: without.status === 200 ? true : 'unsure', challenge: without.challenge ?? withIt.challenge };
   };
 
   /**
@@ -448,19 +465,22 @@ export function signedIn<O extends GitRunOptions, R extends GitRan>(inner: GitRu
         }
         if (!probe || (ownRefusal.get(probe) ?? 0) > now()) return null;
         const verdict = await stale(probe, u, cwd, env);
-        if (verdict === false) ownRefusal.set(probe, now() + KEEP_MS);
-        if (verdict === false || verdict === null) return null;
+        if (verdict.is === false) ownRefusal.set(probe, now() + KEEP_MS);
+        if (verdict.is === false || verdict.is === null) return null;
         // Refused where nothing shows why. Git Credential Manager hands back an OAuth access token however old (Codeberg's
         // last an hour), and makes a new one from its refresh token only once it keeps none: so where it keeps a refresh
         // token, it is told to forget the access token, once a while for each sign-in. Without one, nothing is forgotten.
-        if (verdict === 'unsure') {
+        if (verdict.is === 'unsure') {
           if ((refreshed.get(u.key) ?? 0) > now() || !(await refreshable(u, cwd))) return null;
           refreshed.set(u.key, now() + KEEP_MS);
         }
         await forget(ask, u.fill, cwd);
-        const renewed = await askFill(ask, u.s, u.byPath, cwd);
+        // With the host's WWW-Authenticate, as git asks after a 401: GCM 2.9 knows a Gitea or Forgejo host (Codeberg)
+        // only by its `Basic realm="Gitea"`, and without it has no OAuth to make a token by (it would ask for a password,
+        // and asks no one). Live, 2026-10-31: without it the refusal stood; git's own way made the new token.
+        const renewed = await askFill(ask, u.s, u.byPath, cwd, verdict.challenge);
         keep(u.key, renewed);
-        return renewed && renewed.header !== u.fill.header ? renewed : null;
+        return renewed && renewed.header !== u.fill.header ? { ...renewed, made: true } : null;
       })().finally(() => recovering.delete(u.key));
       recovering.set(u.key, p);
     }
@@ -521,18 +541,21 @@ export function signedIn<O extends GitRunOptions, R extends GitRan>(inner: GitRu
     if (r.code === 0) wasRead();
     if (r.code === 0 || !mine.length || !refused(r)) return r;
     // Refused: never run again git's own way, whose helper would erase the sign-in (see the top of this file).
-    let renewed = false;
+    const renewed: Fill[] = [];
     for (const u of mine) {
       const probe = namedFor(u) ?? (u.urls.length === 1 ? u.urls[0] : null);
       const f = await recover(u, probe, opts.cwd, { ...process.env, ...opts.env });
       if (f) {
         headers.set(u.at, f.header);
-        renewed = true;
+        renewed.push(f);
       }
     }
-    if (!renewed) return r;
+    if (!renewed.length) return r;
     const again = await inner(cmd, args, withSignIn());
-    if (again.code === 0) wasRead();
+    if (again.code !== 0) return again;
+    wasRead();
+    // A token the helper made, taken: kept as git keeps one that works (GCM stores an access token only when told).
+    for (const f of renewed) if (f.made) await remember(ask, f, opts.cwd);
     return again;
   };
 }

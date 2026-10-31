@@ -49,6 +49,7 @@ function fake(o: { fill?: Ran | ((input: string, n: number) => Ran); config?: Ra
     fills: () => of('credential fill').length,
     fillInputs: () => of('credential fill').map((c) => c.opts.input),
     rejects: () => of('credential reject'),
+    approves: () => of('credential approve'),
     configs: () => of('config'),
     gits: () => calls.filter((c) => c.args[0] !== 'credential' && c.args[0] !== 'config'),
   };
@@ -61,8 +62,8 @@ function settings(env: Record<string, string | undefined> | undefined, from = Nu
   return out;
 }
 
-/** A stand-in host for the kit's own requests: `answer(url, authorization)`'s status, noting each. */
-function host(answer: (url: string, auth: string | null) => number) {
+/** A stand-in host for the kit's own requests: `answer(url, authorization)`'s status, noting each; `challenge` its 401s' WWW-Authenticate. */
+function host(answer: (url: string, auth: string | null) => number, challenge: string | null = null) {
   const asked: { url: string; auth: string | null }[] = [];
   const fetch = (async (url: string, init?: RequestInit) => {
     const auth = new Headers(init?.headers).get('authorization');
@@ -70,7 +71,7 @@ function host(answer: (url: string, auth: string | null) => number) {
     const status = answer(String(url), auth);
     return status === 200
       ? new Response(Buffer.from('001e# service=git-upload-pack\n0000'), { status, headers: { 'content-type': 'application/x-git-upload-pack-advertisement' } })
-      : new Response('no', { status });
+      : new Response('no', { status, headers: status === 401 && challenge ? { 'www-authenticate': challenge } : {} });
   }) as typeof globalThis.fetch;
   return { fetch, asked };
 }
@@ -328,20 +329,24 @@ test('an access token Git Credential Manager hands back stale is forgotten where
   const REFRESH = 'git:https://refresh_token.forge.example.test';
   const auth = HEADER.replace(/^authorization:\s*/i, '');
   const ok: Ran = { code: 0, out: 'ok', err: '' };
+  const GITEA = 'Basic realm="Gitea"';
   /**
-   * Git Credential Manager on Windows, its OAuth access token (FILL) past its hour: it hands that back however old, and
-   * once told to forget it (erasing the access token alone), makes a new one (FILL2) from its refresh token, unless
-   * `refreshes` is false. cmdkey lists the names it keeps. The host takes `good` sign-ins, and refuses (401) the rest
-   * and anyone without one: the repository is private.
+   * Git Credential Manager 2.9 on Windows, its OAuth access token (FILL) past its hour: it hands that back however old,
+   * and once told to forget it (erasing the access token alone), makes a new one (FILL2) from its refresh token, unless
+   * `refreshes` is false: only when asked with the host's `wwwauth[]=Basic realm="Gitea"`, its one way of knowing the
+   * host, as live on 2026-10-31 (without it: "Cannot prompt because user interactivity has been disabled"). It keeps the
+   * new one only when told to (`credential approve`). cmdkey lists the names it keeps. The host takes `good` sign-ins,
+   * and refuses (401, with `challenge`) the rest and anyone without one: the repository is private.
    */
-  const gcm = (o: { refresh?: boolean; refreshes?: boolean; good?: string[] } = {}) => {
+  const gcm = (o: { refresh?: boolean; refreshes?: boolean; good?: string[]; challenge?: string | null } = {}) => {
     const store = new Map<string, string>([[ACCESS, FILL]]);
     if (o.refresh !== false) store.set(REFRESH, 'a refresh token');
     const cmdkeys: string[][] = [];
     const f = fake({
-      fill: () => {
-        if (!store.has(ACCESS) && store.has(REFRESH) && o.refreshes !== false) store.set(ACCESS, FILL2);
-        return store.has(ACCESS) ? { code: 0, out: store.get(ACCESS)!, err: '' } : { code: 1, out: '', err: 'fatal: no sign-in' };
+      fill: (input) => {
+        if (store.has(ACCESS)) return { code: 0, out: store.get(ACCESS)!, err: '' };
+        if (store.has(REFRESH) && o.refreshes !== false && input.includes(`wwwauth[]=${GITEA}\n`)) return { code: 0, out: FILL2, err: '' };
+        return { code: 128, out: '', err: 'fatal: Cannot prompt because user interactivity has been disabled.' };
       },
       answer: (_a, opts) => ((o.good ?? [HEADER2]).includes(settings(opts.env)['http.https://forge.example.test/.extraHeader']) ? ok : REFUSED),
     });
@@ -353,9 +358,10 @@ test('an access token Git Credential Manager hands back stale is forgotten where
         return { code: 0, out: `\r\nCurrently stored credentials for ${asked}:\r\n\r\n${name ? `    Target: ${name}\r\n    Type: Generic \r\n    User: someone\r\n` : '* NONE *\r\n'}`, err: '' };
       }
       if (args[0] === 'credential' && args[1] === 'reject') store.delete(ACCESS);
+      if (args[0] === 'credential' && args[1] === 'approve') store.set(ACCESS, opts?.input ?? '');
       return f.inner(cmd, args, opts);
     };
-    return { f, inner, store, cmdkeys, h: host(() => 401) };
+    return { f, inner, store, cmdkeys, h: host(() => 401, o.challenge === undefined ? GITEA : o.challenge) };
   };
   const headers = (f: ReturnType<typeof fake>) => f.gits().map((c) => settings(c.opts.env)['http.https://forge.example.test/.extraHeader']);
 
@@ -369,8 +375,25 @@ test('an access token Git Credential Manager hands back stale is forgotten where
     assert.equal(f.rejects().length, 1);
     assert.equal(f.rejects()[0].opts.input, `${FILL.trimEnd()}\n\n`, "the access token's own answer, nothing of the refresh token's");
     assert.equal(f.rejects()[0].opts.env?.GCM_INTERACTIVE, 'never');
+    const plain = 'protocol=https\nhost=forge.example.test\n\n';
+    assert.deepEqual(f.fillInputs(), [plain, plain, `protocol=https\nhost=forge.example.test\nwwwauth[]=${GITEA}\n\n`], "asked for a new one with the host's WWW-Authenticate, as git asks after a 401");
     assert.deepEqual(headers(f), [HEADER, HEADER2]);
+    assert.deepEqual(f.approves().map((c) => [c.opts.input, c.opts.env?.GCM_INTERACTIVE]), [[`${FILL2.trimEnd()}\n\n`, 'never']], 'the new one kept once the host took it');
+    assert.ok(f.calls.indexOf(f.rejects()[0]) < f.calls.indexOf(f.approves()[0]));
     assert.ok(store.has(REFRESH), 'the refresh token kept');
+    // The next process asks Credential Manager as before, and is handed the new one.
+    const next = gcm();
+    next.store.set(ACCESS, store.get(ACCESS)!);
+    assert.deepEqual(await signedIn(next.inner, Date.now, { fetch: next.h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo }), ok);
+    assert.deepEqual([headers(next.f), next.f.rejects().length, next.f.approves().length, next.h.asked.length], [[HEADER2], 0, 0, 0]);
+  }
+  {
+    // A 401 that names no way to sign in (or GCM's own asking stays silent): no new one made, the refusal stands, nothing kept.
+    const { f, inner, store, h } = gcm({ challenge: null });
+    assert.deepEqual(await signedIn(inner, Date.now, { fetch: h.fetch, windows: true })('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
+    assert.equal(f.fillInputs().at(-1), 'protocol=https\nhost=forge.example.test\n\n', 'asked as before, with nothing to hand on');
+    assert.deepEqual([f.rejects().length, f.approves().length, f.gits().length], [1, 0, 1]);
+    assert.ok(store.has(REFRESH) && !store.has(ACCESS));
   }
   {
     // No refresh token: a 401 on a private repository may be the repository's own. Nothing forgotten, run once.
@@ -403,13 +426,18 @@ test('an access token Git Credential Manager hands back stale is forgotten where
     const run = signedIn(inner, () => t, { fetch: h.fetch, windows: true });
     assert.deepEqual(await run('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
     assert.deepEqual(headers(f), [HEADER, HEADER2], 'run once more with the new one');
+    assert.equal(f.approves().length, 0, 'refused: not kept');
     assert.deepEqual(await run('git', ['fetch', 'origin'], { cwd: repo }), REFUSED);
     assert.deepEqual([f.rejects().length, cmdkeys.length], [1, 1], 'refused again: nothing more forgotten, cmdkey not asked again');
     assert.equal(f.gits().length, 3);
     assert.ok(store.has(REFRESH), 'the refresh token kept');
     t += 31 * 60_000;
     await run('git', ['fetch', 'origin'], { cwd: repo });
-    assert.equal(f.rejects().length, 2, 'half an hour on: forgotten once more');
+    assert.deepEqual([headers(f).at(-1), f.rejects().length], [undefined, 1], 'half an hour on, the refused one never kept: Credential Manager hands over none, so git signs in its own way');
+    store.set(ACCESS, FILL);
+    t += 11 * 60_000;
+    await run('git', ['fetch', 'origin'], { cwd: repo });
+    assert.equal(f.rejects().length, 2, 'handed one again, past the time a missing one is remembered: forgotten once more');
     assert.ok(store.has(REFRESH));
   }
   {

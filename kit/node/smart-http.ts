@@ -139,11 +139,21 @@ export async function advertisedRefs(url: string, o: InfoRefsOptions = {}): Prom
  * failure, and for a 200 that isn't refs (a sign-in page).
  */
 export async function readsWith(url: string, o: InfoRefsOptions = {}): Promise<number | null> {
+  return (await answerTo(url, o)).status;
+}
+
+/**
+ * readsWith's status, and on a 401 what the host asks a sign-in by: its WWW-Authenticate (several as fetch joins them,
+ * with ", "), or null. kit 2.147.2: git hands it to its credential helper after a 401 (`wwwauth[]`), and Git Credential
+ * Manager knows a Gitea or Forgejo host (Codeberg) by it alone, so git-auth.ts hands it on when it asks for a new sign-in.
+ */
+export async function answerTo(url: string, o: InfoRefsOptions = {}): Promise<{ status: number | null; challenge: string | null }> {
   const res = await infoRefs(url, o);
-  if (!res) return null;
+  if (!res) return { status: null, challenge: null };
   const status = res.status === 200 ? (advertises(res) ? 200 : null) : res.status;
+  const challenge = res.status === 401 ? res.headers.get('www-authenticate') : null;
   await res.body?.cancel().catch(() => {});
-  return status;
+  return { status, challenge };
 }
 
 interface InfoRefsOptions {
