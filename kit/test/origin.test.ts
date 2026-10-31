@@ -13,11 +13,11 @@ process.env[`${String(pkg.name).toUpperCase().replace(/-/g, '_')}_HOME`] = path.
 process.env.MANOR_HOME = path.join(tmp, 'no-manor');
 process.env.STEWARD_HOME = path.join(tmp, 'no-steward');
 
-const { HOST_KINDS, githubRepo, kindOfHost, manorOwn, manorProjects, originName, originOf, originOfName, originRepo, parseOrigin, projectOrigin, projectsFrom, repoNameOk } = await import('./fixture/src/kit/manor.ts');
+const { HOST_KINDS, githubRepo, kindOfHost, manorOwn, manorProjects, originName, originOf, originOfName, originRepo, parseOrigin, projectOrigin, projectsFrom, repoNameOk, sameRepoName } = await import('./fixture/src/kit/manor.ts');
 
 const NO_OWN = { repos: [], checkouts: [] };
 
-type Row = [url: string, kind: string, hostName: string, path: string, webUrl: string | null];
+type Row = [url: string, kind: string, hostName: string, path: string, webUrl: string | null, port?: number];
 
 /** Every host and every way a remote's URL is written: what each one reads as. */
 const MATRIX: Row[] = [
@@ -32,7 +32,7 @@ const MATRIX: Row[] = [
   ['https://github.com/Owner/App/tree/main', 'github', 'github.com', 'Owner/App', 'https://github.com/Owner/App'],
   // GitHub Enterprise Server and ghe.com
   ['https://github.acme.com/team/app.git', 'github', 'github.acme.com', 'team/app', 'https://github.acme.com/team/app'],
-  ['https://github.acme.com:8443/team/app.git', 'github', 'github.acme.com', 'team/app', 'https://github.acme.com:8443/team/app'],
+  ['https://github.acme.com:8443/team/app.git', 'github', 'github.acme.com', 'team/app', 'https://github.acme.com:8443/team/app', 8443],
   ['git@github.acme.com:team/app.git', 'github', 'github.acme.com', 'team/app', 'https://github.acme.com/team/app'],
   ['ssh://git@github-eu.acme.com/team/app.git', 'github', 'github-eu.acme.com', 'team/app', 'https://github-eu.acme.com/team/app'],
   ['https://acme.ghe.com/team/app.git', 'github', 'acme.ghe.com', 'team/app', 'https://acme.ghe.com/team/app'],
@@ -44,7 +44,7 @@ const MATRIX: Row[] = [
   ['https://oauth2@gitlab.com/group/app.git', 'gitlab', 'gitlab.com', 'group/app', 'https://gitlab.com/group/app'],
   ['https://gitlab.com/group/app/-/tree/main', 'gitlab', 'gitlab.com', 'group/app', 'https://gitlab.com/group/app'],
   ['https://gitlab.acme.io/platform/tools/app.git', 'gitlab', 'gitlab.acme.io', 'platform/tools/app', 'https://gitlab.acme.io/platform/tools/app'],
-  ['http://gitlab.lan:8080/platform/tools/app.git', 'gitlab', 'gitlab.lan', 'platform/tools/app', 'http://gitlab.lan:8080/platform/tools/app'],
+  ['http://gitlab.lan:8080/platform/tools/app.git', 'gitlab', 'gitlab.lan', 'platform/tools/app', 'http://gitlab.lan:8080/platform/tools/app', 8080],
   ['git@code-gitlab.acme.io:platform/app.git', 'gitlab', 'code-gitlab.acme.io', 'platform/app', 'https://code-gitlab.acme.io/platform/app'],
   // Bitbucket Cloud, and Bitbucket Data Center
   ['https://bitbucket.org/team/app.git', 'bitbucket', 'bitbucket.org', 'team/app', 'https://bitbucket.org/team/app'],
@@ -71,7 +71,7 @@ const MATRIX: Row[] = [
   ['git@codeberg.org:me/app.git', 'gitea', 'codeberg.org', 'me/app', 'https://codeberg.org/me/app'],
   ['https://next.forgejo.org/me/app', 'gitea', 'next.forgejo.org', 'me/app', 'https://next.forgejo.org/me/app'],
   ['ssh://git@git.forgejo.example:2222/me/app.git', 'gitea', 'git.forgejo.example', 'me/app', 'https://git.forgejo.example/me/app'],
-  ['http://gitea.acme.local:3000/me/app.git', 'gitea', 'gitea.acme.local', 'me/app', 'http://gitea.acme.local:3000/me/app'],
+  ['http://gitea.acme.local:3000/me/app.git', 'gitea', 'gitea.acme.local', 'me/app', 'http://gitea.acme.local:3000/me/app', 3000],
   // Any other server: plain ssh, scp-style, git://, a host whose name says nothing
   ['ssh://git@server.example/srv/git/app.git', 'other', 'server.example', 'srv/git/app', null],
   ['ssh://server.example:2200/~/app.git', 'other', 'server.example', '~/app', null],
@@ -102,10 +102,12 @@ function variants(url: string): string[] {
 }
 
 test('the host matrix: every host, every way of writing its URL, with and without .git', () => {
-  for (const [url, kind, hostName, p, webUrl] of MATRIX) {
+  for (const [url, kind, hostName, p, webUrl, port] of MATRIX) {
+    // An http(s) site's own port, alone: no other origin has the key at all.
+    const want = { kind, hostName, path: p, webUrl, ...(port ? { port } : {}) };
     for (const v of variants(url)) {
-      assert.deepEqual(parseOrigin(v), { kind, hostName, path: p, webUrl }, v);
-      assert.deepEqual(parseOrigin(`  ${v}\n`), { kind, hostName, path: p, webUrl }, `${v}, with space around it`);
+      assert.deepEqual(parseOrigin(v), want, v);
+      assert.deepEqual(parseOrigin(`  ${v}\n`), want, `${v}, with space around it`);
     }
   }
   // The kinds cover the brief's hosts: each one is somewhere in the matrix.
@@ -184,11 +186,87 @@ test("a repository's name as the manor gives it: owner/name on github.com as alw
   for (const bad of ['', 'no-slash', 'C:\\x', 'https://github.com/a/b', '../a/b']) assert.equal(originOfName(bad), null, bad);
 });
 
+test("a name keeps its site's own port, as host:port/path, and reads back to it: never as http, and nothing else's port", () => {
+  const names: [url: string, hint: string | undefined, name: string, port: number | undefined][] = [
+    ['http://127.0.0.1:8929/group/app.git', 'gitlab', '127.0.0.1:8929/group/app', 8929],
+    ['http://127.0.0.1:8929/group/sub/app.git', undefined, '127.0.0.1:8929/group/sub/app', 8929],
+    ['https://gitlab.acme.com:8443/team/app', undefined, 'gitlab.acme.com:8443/team/app', 8443],
+    ['http://gitea.acme.local:3000/me/app.git', undefined, 'gitea.acme.local:3000/me/app', 3000],
+    ['http://git.acme.com:3000/me/app.git', 'gitea', 'git.acme.com:3000/me/app', 3000],
+    ['https://github.acme.com:8443/team/app.git', undefined, 'github.acme.com:8443/team/app', 8443],
+    ['https://bitbucket.acme.com:7990/scm/plat/app.git', undefined, 'bitbucket.acme.com:7990/plat/app', 7990],
+    ['https://tfs.acme.com:8080/tfs/DefaultCollection/Platform/_git/app', 'azure', 'tfs.acme.com:8080/tfs/DefaultCollection/Platform/_git/app', 8080],
+    ['http://localhost:65535/me/app.git', 'gitea', 'localhost:65535/me/app', 65535],
+    ['http://gitea.acme.local:1/me/app.git', undefined, 'gitea.acme.local:1/me/app', 1],
+    // The scheme's own port, an ssh remote's port, a public host's, or one that isn't a port: the name as it always was.
+    ['https://gitlab.acme.com:443/team/app', undefined, 'gitlab.acme.com/team/app', undefined],
+    ['http://gitlab.acme.com:80/team/app', undefined, 'gitlab.acme.com/team/app', undefined],
+    ['ssh://git@gitlab.acme.com:2222/team/app.git', undefined, 'gitlab.acme.com/team/app', undefined],
+    ['ssh://git@bitbucket.acme.com:7999/plat/app.git', undefined, 'bitbucket.acme.com/plat/app', undefined],
+    ['https://gitlab.com:8443/group/app.git', undefined, 'gitlab.com/group/app', undefined],
+    ['https://github.com:8443/Owner/App.git', undefined, 'Owner/App', undefined],
+    ['https://gitlab.acme.com:0/team/app', undefined, 'gitlab.acme.com/team/app', undefined],
+    ['https://gitlab.acme.com:65536/team/app', undefined, 'gitlab.acme.com/team/app', undefined],
+    ['https://gitlab.acme.com:/team/app', undefined, 'gitlab.acme.com/team/app', undefined],
+  ];
+  for (const [url, hint, name, port] of names) {
+    const o = parseOrigin(url, hint as never)!;
+    assert.equal(o.port, port, url);
+    assert.equal('port' in o, port !== undefined, `${url}: the key is there only with a port`);
+    assert.equal(originName(o), name, url);
+    assert.equal(repoNameOk(name), true, name);
+    // Back from its name, with its hint: the same place on the same port, its page at https whatever the clone's is.
+    const back = originOfName(name, hint as never)!;
+    assert.deepEqual({ kind: back.kind, hostName: back.hostName, path: back.path, port: back.port }, { kind: o.kind, hostName: o.hostName, path: o.path, port: o.port }, name);
+    assert.equal(originName(back), name, `${name}, named again`);
+    if (back.webUrl) assert.match(back.webUrl, /^https:\/\//, `${name}: never http from a name`);
+  }
+  // The CE's own page from its clone keeps its http; from its name, https on its port.
+  assert.deepEqual(parseOrigin('http://127.0.0.1:8929/group/app.git', 'gitlab'), { kind: 'gitlab', hostName: '127.0.0.1', path: 'group/app', webUrl: 'http://127.0.0.1:8929/group/app', port: 8929 });
+  assert.deepEqual(originOfName('127.0.0.1:8929/group/app', 'gitlab'), { kind: 'gitlab', hostName: '127.0.0.1', path: 'group/app', webUrl: 'https://127.0.0.1:8929/group/app', port: 8929 });
+  assert.deepEqual(originOfName('gitlab.acme.com:8443/team/app'), { kind: 'gitlab', hostName: 'gitlab.acme.com', path: 'team/app', webUrl: 'https://gitlab.acme.com:8443/team/app', port: 8443 });
+  // A name with a port that isn't one is no name; an Origin made by hand with one gets none.
+  for (const bad of ['gitlab.acme.com:0/team/app', 'gitlab.acme.com:65536/team/app', 'gitlab.acme.com:99999/team/app', 'gitlab.acme.com:/team/app', 'gitlab.acme.com:123456/team/app', 'gitlab.acme.com/team:80/app']) assert.equal(originOfName(bad), null, bad);
+  assert.equal(originName({ kind: 'gitlab', hostName: 'gitlab.acme.com', path: 'team/app', webUrl: null, port: 0 }), 'gitlab.acme.com/team/app');
+  assert.equal(originName({ kind: 'gitlab', hostName: 'gitlab.acme.com', path: 'team/app', webUrl: null, port: 70000 }), 'gitlab.acme.com/team/app');
+});
+
 test('a name an agent is asked about is owner/name or host/path, plain, with no "." or ".." part', () => {
   const ok = ['Owner/App', 'me/app.js', 'gitlab.com/group/sub/app', 'dev.azure.com/acme/Platform/_git/app', 'dev.azure.com/acme/My%20Project/_git/app', 'bitbucket.acme.com/~jo/app', 'local/app'];
   const bad = ['', 'app', '../app', 'a/..', 'a/./b', '-x/app', 'gitlab.com/-x', 'a/b/--upload-pack=x', 'a/b c', 'a\\b', `a/${'b'.repeat(101)}`, `${'a/'.repeat(10)}b`, 'a/b?x', 'a/b#x'];
   for (const n of ok) assert.equal(repoNameOk(n), true, n);
   for (const n of bad) assert.equal(repoNameOk(n), false, n);
+});
+
+test("a name's host may end in its port, 1 to 65535, and no other part may", () => {
+  const ok = ['127.0.0.1:8929/group/app', 'gitlab.acme.com:1/team/app', 'gitlab.acme.com:65535/team/app', 'gitlab.acme.com:443/team/app', 'localhost:3000/me/app', 'gitea.acme.local:3000/me/app', 'bitbucket.acme.com:7990/~jo/app'];
+  const bad = [
+    'gitlab.acme.com:0/team/app', 'gitlab.acme.com:65536/team/app', 'gitlab.acme.com:99999/team/app', 'gitlab.acme.com:123456/team/app',
+    'gitlab.acme.com:/team/app', 'gitlab.acme.com:08929/team/app', 'gitlab.acme.com:-1/team/app', 'gitlab.acme.com:8a/team/app', 'gitlab.acme.com:80:81/team/app',
+    'gitlab.acme.com/team:80/app', 'gitlab.acme.com/team/app:80', 'gitlab.acme.com:8929', ':8929/team/app', '..:8929/team/app', '.:8929/team/app', '-x:8929/team/app',
+  ];
+  for (const n of ok) assert.equal(repoNameOk(n), true, n);
+  for (const n of bad) assert.equal(repoNameOk(n), false, n);
+});
+
+test('a name with its port is the same repository as the name stored before without it, and no other', () => {
+  const same: [string, string][] = [
+    ['127.0.0.1:8929/group/app', '127.0.0.1/group/app'],
+    ['127.0.0.1/group/app', '127.0.0.1:8929/group/app'],
+    ['GitLab.acme.com:8443/Team/App', 'gitlab.acme.com/team/app'],
+    ['gitlab.acme.com:8443/team/app', ' gitlab.acme.com:8443/team/app '],
+    ['Owner/App', 'owner/app'],
+    ['gitlab.com/group/app', 'gitlab.com/group/app'],
+  ];
+  const other: [string, string][] = [
+    ['127.0.0.1:8929/group/app', '127.0.0.1:8930/group/app'],
+    ['127.0.0.1:8929/group/app', '127.0.0.1/group/other'],
+    ['127.0.0.1:8929/group/app', '127.0.0.2/group/app'],
+    ['gitlab.acme.com/team/app', 'gitlab.acme.com/team/app2'],
+    ['a/b:80/c', 'a/b/c'],
+  ];
+  for (const [a, b] of same) assert.equal(sameRepoName(a, b), true, `${a} = ${b}`);
+  for (const [a, b] of other) assert.equal(sameRepoName(a, b), false, `${a} != ${b}`);
 });
 
 /** A clone on disk: its .git/config with this origin (none for null), or a worktree of it (`worktreeOf`). */
@@ -290,6 +368,38 @@ test('a project on any host: its repo as host/path or a clone URL, its "host" fo
   assert.deepEqual(projectOrigin({ repo: null, checkout: local }), { kind: 'local', hostName: '', path: local, webUrl: null }, 'a clone with no origin is local');
   const selfHosted = cloneAt('project-self', 'git@code.acme.com:group/app.git');
   assert.deepEqual(projectOrigin({ repo: null, checkout: selfHosted, host: 'gitlab' }), { kind: 'gitlab', hostName: 'code.acme.com', path: 'group/app', webUrl: 'https://code.acme.com/group/app' }, 'its clone, with its host');
+});
+
+test("a project on a server of your own on another port keeps the port, from its clone URL, its name, or its clone", () => {
+  const problems: string[] = [];
+  const projects = projectsFrom([
+    { name: 'CE URL', checkout: 'C:\\code\\ce-url', repo: 'http://127.0.0.1:8929/group/app.git', host: 'gitlab' },
+    { name: 'CE name', checkout: 'C:\\code\\ce-name', repo: '127.0.0.1:8929/group/other', host: 'gitlab' },
+    { name: 'Lab', checkout: 'C:\\code\\lab', repo: 'https://gitlab.acme.com:8443/team/app.git' },
+    { name: 'Tea', checkout: 'C:\\code\\tea', repo: 'gitea.acme.local:3000/me/app' },
+    { name: 'Own port', checkout: 'C:\\code\\https', repo: 'https://gitlab.acme.com:443/team/plain.git' },
+  ], NO_OWN, problems);
+  assert.deepEqual(problems, []);
+  assert.deepEqual(projects.map((p) => [p.name, p.repo]), [
+    ['CE URL', '127.0.0.1:8929/group/app'],
+    ['CE name', '127.0.0.1:8929/group/other'],
+    ['Lab', 'gitlab.acme.com:8443/team/app'],
+    ['Tea', 'gitea.acme.local:3000/me/app'],
+    ['Own port', 'gitlab.acme.com/team/plain'],
+  ]);
+  // Where it is, from its name: https on its port, never http, which only its clone's origin says.
+  assert.deepEqual(projectOrigin(projects[0]), { kind: 'gitlab', hostName: '127.0.0.1', path: 'group/app', webUrl: 'https://127.0.0.1:8929/group/app', port: 8929 });
+  // A clone whose origin is on the port: named with it, its http kept for its page.
+  const ce = cloneAt('project-ce', 'http://127.0.0.1:8929/group/app.git');
+  const o = projectOrigin({ repo: null, checkout: ce, host: 'gitlab' })!;
+  assert.deepEqual(o, { kind: 'gitlab', hostName: '127.0.0.1', path: 'group/app', webUrl: 'http://127.0.0.1:8929/group/app', port: 8929 });
+  assert.equal(originName(o), '127.0.0.1:8929/group/app');
+  // One whose port isn't one is no name: said in a sentence, the rest stand.
+  for (const repo of ['gitlab.acme.com:0/team/app', 'gitlab.acme.com:65536/team/app']) {
+    const said: string[] = [];
+    assert.deepEqual(projectsFrom([{ name: 'Bad', checkout: 'C:\\bad', repo }, { name: 'Fine', checkout: 'C:\\fine' }], NO_OWN, said).map((p) => p.name), ['Fine'], repo);
+    assert.match(said[0] ?? '', /should give its "repo" as owner\/name on GitHub, host\/path anywhere else/, repo);
+  }
 });
 
 test("a project's repo or host that can't be one is said in a sentence, and the rest stand", () => {

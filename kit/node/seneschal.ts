@@ -620,9 +620,10 @@ const CHECK_KINDS: readonly SeneschalKind[] = ['pr-check', 'kit-trial', 'full-su
 const LANES: readonly SeneschalLane[] = ['person', 'blocking', 'normal', 'background'];
 /**
  * A repository as manor.ts' originName names it (kit 2.146.0): owner/name on GitHub, host/path on any other host
- * (gitlab.com/group/sub/app, dev.azure.com/org/project/_git/app), none of its parts "." or "..".
+ * (gitlab.com/group/sub/app, dev.azure.com/org/project/_git/app), none of its parts "." or "..", its host with its port
+ * where it has one of its own (127.0.0.1:8929/group/app, kit 2.146.4). The same as manor.ts' repoNameOk.
  */
-const REPO = /^(?=.{3,300}$)(?!(?:.*\/)?\.\.?(?:\/|$))(?!(?:.*\/)?-)[A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.~%+@-]{1,100}){1,8}$/;
+const REPO = /^(?=.{3,300}$)(?!(?:.*\/)?\.\.?(?:[:/]|$))(?!(?:.*\/)?-)[A-Za-z0-9_.-]{1,100}(?::(?:[1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5]))?(?:\/[A-Za-z0-9_.~%+@-]{1,100}){1,8}$/;
 const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 /** A remote's path: plain characters, never a ".." segment. */

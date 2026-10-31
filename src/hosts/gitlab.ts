@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { releaseUrl } from '../links.ts';
+import { releaseUrl, serverOf } from '../links.ts';
 import type { Runner } from '../run.ts';
 import type { Answer, PrState, SourceHost } from './host.ts';
 
@@ -208,35 +208,49 @@ export function whereIs(repo: string): { hostname: string; project: string } {
 }
 
 /** A GitLab of your own's address (its pipeline's host baseUrl) taken apart, or null for one that isn't an http(s) URL. Pure. */
-function siteOf(site: string | null): { hostname: string; host: string; origin: string; plain: boolean } | null {
+function siteOf(site: string | null): { hostname: string; host: string; port: string; origin: string; plain: boolean } | null {
   if (!site) return null;
   try {
     const u = new URL(site);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-    return { hostname: u.hostname.toLowerCase(), host: u.host.toLowerCase(), origin: u.origin, plain: u.protocol === 'https:' && !u.port };
+    return { hostname: u.hostname.toLowerCase(), host: u.host.toLowerCase(), port: u.port, origin: u.origin, plain: u.protocol === 'https:' && !u.port };
   } catch {
     return null;
   }
 }
 
 /**
+ * The address of the GitLab a repository's name is on, where glab can't be told it by --hostname: its pipeline's baseUrl
+ * on the same host (and the same port, where the name says one) that isn't plain https; else, for a name with its port
+ * (127.0.0.1:8929, kit 2.146.4), https on that port, as a name says nothing of http. Null for a plain host. Pure.
+ */
+function siteFor(server: string, site: string | null): string | null {
+  const s = siteOf(site);
+  const { hostname, port } = serverOf(server);
+  if (s && !s.plain && s.hostname === hostname && (!port || s.port === port)) return s.origin;
+  return port ? `https://${hostname}:${port}` : null;
+}
+
+/**
  * How glab is told which GitLab a request goes to: `--hostname <host>`, as before; for a GitLab of your own on another
- * port or on http (its pipeline's baseUrl), GITLAB_HOST set to its address instead. glab 1.126's api refuses a port in
- * --hostname ("invalid hostname"), and without one asks https on port 443 (Steward 0.36.268, found live on a GitLab CE
- * at http://127.0.0.1:8929). Pure.
+ * port or on http (its pipeline's baseUrl, or its name's port), GITLAB_HOST set to its address instead. glab 1.126's api
+ * refuses a port in --hostname ("invalid hostname"), and without one asks https on port 443 (Steward 0.36.268, found
+ * live on a GitLab CE at http://127.0.0.1:8929). Pure.
  */
 export function glabHost(hostname: string, site: string | null): { args: string[]; env?: Record<string, string> } {
-  const s = siteOf(site);
-  if (s && !s.plain && s.hostname === hostname.toLowerCase()) return { args: [], env: { GITLAB_HOST: s.origin } };
+  const at = siteFor(hostname, site);
+  if (at) return { args: [], env: { GITLAB_HOST: at } };
   return { args: ['--hostname', hostname] };
 }
 
 /**
  * How to sign glab in to a repository's GitLab, said in a hint: `glab auth login`, with the server of your own named by
- * its pipeline's baseUrl, its port and its http kept. Pure.
+ * its pipeline's baseUrl, its port and its http kept; with none, by the port its name keeps (`repo`, kit 2.146.4). Pure.
  */
-export function glabLogin(site: string | null | undefined): string {
+export function glabLogin(site: string | null | undefined, repo?: string): string {
   const s = siteOf(site ?? null);
+  const port = repo ? serverOf(repo).port : '';
+  if (!s && port) return `glab auth login --hostname ${serverOf(repo!).hostname}:${port}`;
   if (!s) return 'glab auth login';
   return `glab auth login --hostname ${s.host}${s.origin.startsWith('http:') ? ' --api-protocol http --git-protocol http' : ''}`;
 }
@@ -244,12 +258,13 @@ export function glabLogin(site: string | null | undefined): string {
 /**
  * The repository a "glab mr merge" is told (--repo): its host/path name, or for a GitLab of your own on another port or
  * on http, its address and path (http://127.0.0.1:8929/group/app), which glab takes; the name alone, its port gone,
- * glab answers "404 Not Found" (found live). Pure.
+ * glab answers "404 Not Found" (found live). A name with its port is taken at https on that port, unless its baseUrl
+ * says http there. Pure.
  */
 export function glabRepo(repo: string, site: string | null | undefined): string {
-  const s = siteOf(site ?? null);
   const { hostname, project } = whereIs(repo);
-  return s && !s.plain && s.hostname === hostname.toLowerCase() ? `${s.origin}/${project}` : repo;
+  const at = siteFor(hostname, site ?? null);
+  return at ? `${at}/${project}` : repo;
 }
 
 const parsed = <T>(text: string): T | null => {

@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { releaseUrl } from '../links.ts';
+import { releaseUrl, serverOf } from '../links.ts';
 import type { Runner } from '../run.ts';
 import type { Answer, PrState, SourceHost } from './host.ts';
 
@@ -246,7 +246,8 @@ const logins = new WeakMap<Runner, { at: number; byHost: Map<string, string> }>(
 
 /**
  * The tea login for a server: the one whose URL is on its host (the default one first, when there are two). Its name is
- * what tea's own commands take with --login (stages/vouch.ts' MERGE_IT_YOURSELF).
+ * what tea's own commands take with --login (stages/vouch.ts' MERGE_IT_YOURSELF). A server named with its port
+ * (127.0.0.1:3000, kit 2.146.4) is looked for on its host, as tea's logins are listed.
  */
 export async function teaLogin(run: Runner, cwd: string, hostname: string): Promise<string | null> {
   let known = logins.get(run);
@@ -255,7 +256,7 @@ export async function teaLogin(run: Runner, cwd: string, hostname: string): Prom
     known = { at: Date.now(), byHost: r?.code === 0 ? teaLogins(r.out) : new Map() };
     if (r?.code === 0) logins.set(run, known);
   }
-  return known.byHost.get(hostname.toLowerCase()) ?? null;
+  return known.byHost.get(serverOf(hostname).hostname) ?? null;
 }
 
 /** `tea logins list --output json` as each server's login name, the default login first. Pure. */

@@ -95,6 +95,39 @@ test("a server of your own on another port or on http: its pages at its pipeline
   assert.equal(gitlab.releaseUrl('code.acme.com/team/app', 'v1'), 'http://code.acme.com:8080/team/app/-/releases/v1');
 });
 
+test("a repository named with its port (kit 2.146.4): its pages, glab and tea all reach it there, and http only from its baseUrl", async () => {
+  assert.deepEqual(L.serverOf('127.0.0.1:8929/group/app'), { hostname: '127.0.0.1', port: '8929' });
+  assert.deepEqual(L.serverOf('GitLab.acme.com/team/app'), { hostname: 'gitlab.acme.com', port: '' });
+  // Its pages: at https on its port, or at its baseUrl where that says the same host and port (its http with it).
+  assert.equal(L.repoUrl('127.0.0.1:8929/group/app'), 'https://127.0.0.1:8929/group/app');
+  assert.equal(L.repoUrl('127.0.0.1:8929/group/app', 'http://127.0.0.1:8929'), 'http://127.0.0.1:8929/group/app');
+  assert.equal(L.repoUrl('127.0.0.1:8929/group/app', 'http://127.0.0.1:9000'), 'https://127.0.0.1:8929/group/app', 'another port: its own');
+  assert.equal(L.releaseUrl('gitea.acme.local:3000/me/app', 'gitea', 'v1'), 'https://gitea.acme.local:3000/me/app/releases/tag/v1');
+  assert.equal(L.kindOf('gitlab.acme.com:8443/team/app', 'git'), 'gitlab');
+  // glab: never --hostname with a port, which it refuses; GITLAB_HOST at https on it, or at its baseUrl's http.
+  assert.deepEqual(glabHost('127.0.0.1:8929', null), { args: [], env: { GITLAB_HOST: 'https://127.0.0.1:8929' } });
+  assert.deepEqual(glabHost('127.0.0.1:8929', 'http://127.0.0.1:8929'), { args: [], env: { GITLAB_HOST: 'http://127.0.0.1:8929' } });
+  assert.deepEqual(glabHost('gitlab.acme.com:8443', 'https://gitlab.acme.com'), { args: [], env: { GITLAB_HOST: 'https://gitlab.acme.com:8443' } }, "its baseUrl on another port: the name's");
+  assert.equal(glabRepo('127.0.0.1:8929/g/sub/app', null), 'https://127.0.0.1:8929/g/sub/app');
+  assert.equal(glabRepo('127.0.0.1:8929/g/sub/app', 'http://127.0.0.1:8929'), 'http://127.0.0.1:8929/g/sub/app');
+  assert.equal(glabLogin(null, '127.0.0.1:8929/g/app'), 'glab auth login --hostname 127.0.0.1:8929');
+  assert.equal(glabLogin('http://127.0.0.1:8929', '127.0.0.1:8929/g/app'), 'glab auth login --hostname 127.0.0.1:8929 --api-protocol http --git-protocol http');
+  assert.equal(glabLogin(null, 'gitlab.com/g/app'), 'glab auth login');
+  const ran: { args: string[]; env?: Record<string, string> }[] = [];
+  const o = { run: async (_cmd: string, args: string[], opts: { env?: Record<string, string> }) => (ran.push({ args, env: opts.env }), { code: 0, out: '[]', err: '' }), neutralDir: home, host: () => 'gitlab' as const };
+  await hostFor(o as any, { repo: '127.0.0.1:8929/g/app' }).listPrs('127.0.0.1:8929/g/app', { state: 'open', fields: 'number' });
+  assert.deepEqual(ran.map((r) => [r.args.includes('--hostname'), r.env?.GITLAB_HOST, r.args[1]]), [[false, 'https://127.0.0.1:8929', 'projects/g%2Fapp/merge_requests?state=opened&per_page=30']]);
+  // tea's logins are by host: a name with its port is worked with Gitea's way where tea has a login on its host.
+  const tea: import('../src/scm.ts').ScmLook = { at: new Date().toISOString(), tools: [{ cmd: 'git', name: 'Git', version: 'git version 2.55.0', supported: true }, { cmd: 'tea', name: 'Gitea CLI', version: '0.11.0', signedIn: true, supported: true, hosts: ['127.0.0.1'] }] };
+  const s = { sourceControl: 'auto' as const, releasesCastellan: false };
+  assert.equal(S.hostOf({ repo: '127.0.0.1:3000/me/app', hostHint: 'gitea' }, s, tea), 'gitea');
+  assert.equal(S.isGiteaRepo('127.0.0.1:3000/me/app', tea), true);
+  // Manor's project named with its port is the Steward's employee by that name.
+  const e = employeeOfProject({ name: 'CE', checkout: 'C:\\code\\ce', repo: '127.0.0.1:8929/group/app', branch: 'main', test: null, versionFiles: [], cleanBranches: true, host: 'gitlab' });
+  assert.equal(e?.repo, '127.0.0.1:8929/group/app');
+  assert.equal(e?.hostHint, 'gitlab');
+});
+
 test("a GitLab of your own on another port or on http: glab told it by GITLAB_HOST, its vouches seen, its merge and sign-in said with its port (found live)", async () => {
   // glab 1.126's api refuses --hostname 127.0.0.1:8929 ("invalid hostname"), and --hostname 127.0.0.1 asks https on 443.
   const ce = 'http://127.0.0.1:8929';

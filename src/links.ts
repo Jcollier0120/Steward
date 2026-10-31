@@ -11,6 +11,16 @@ type Kind = Exclude<Host, 'git'>;
 
 const OWNER_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
+/**
+ * A host/path name's server, its host and its port apart: 127.0.0.1:8929/group/app is 127.0.0.1 on 8929, as the kit's
+ * originName names a server of your own on its own port (kit 2.146.4); gitlab.com/group/app is gitlab.com on none ('').
+ * Pure.
+ */
+export function serverOf(repo: string): { hostname: string; port: string } {
+  const [hostname, port = ''] = repo.split('/')[0].toLowerCase().split(':');
+  return { hostname, port };
+}
+
 /** The kind of host a repository is on: the one it's worked with, else (plain git) the one its name says, if any. */
 export function kindOf(repo: string, host: Host | null | undefined): Kind | null {
   if (host && host !== 'git') return host;
@@ -28,17 +38,19 @@ export function kindOf(repo: string, host: Host | null | undefined): Kind | null
  * A repository's own page. A host/path one is at https on its host, whatever its host is; a local one has none. `site`,
  * its pipeline's host baseUrl (repoconfig.ts), is its host's address where that is on the same host: a server of your
  * own on another port or on http (Steward 0.36.267, found live: a Gitea at http://127.0.0.1:51412 named 127.0.0.1/me/app).
+ * A name with its port (127.0.0.1:51412/me/app) is at that port: at `site` where that says the same port, else https.
  */
 export function repoUrl(repo: string, site?: string | null): string | null {
   if (!repo || /^local\//i.test(repo)) return null;
   if (OWNER_NAME.test(repo) && !/\./.test(repo.split('/')[0])) return `https://github.com/${repo}`;
   if (!/^[^/\s]+\.[^/\s]+\/\S+/.test(repo)) return null;
   const host = repo.split('/')[0];
-  const at = site ? /^https?:\/\/([^/:]+)(?::\d+)?(\/[^?#]*)?$/i.exec(site.replace(/\/+$/, '')) : null;
-  if (!at || at[1].toLowerCase() !== host.toLowerCase()) return `https://${repo}`;
+  const server = serverOf(repo);
+  const at = site ? /^https?:\/\/([^/:]+)(?::(\d+))?(\/[^?#]*)?$/i.exec(site.replace(/\/+$/, '')) : null;
+  if (!at || at[1].toLowerCase() !== server.hostname || (server.port && server.port !== (at[2] ?? ''))) return `https://${repo}`;
   // A server under a path (https://acme.com/git) is named with it (acme.com/git/me/app): the path is said once.
   const rest = repo.slice(host.length);
-  const under = at[2] ?? '';
+  const under = at[3] ?? '';
   return `${site!.replace(/\/+$/, '')}${under && rest.toLowerCase().startsWith(`${under.toLowerCase()}/`) ? rest.slice(under.length) : rest}`;
 }
 

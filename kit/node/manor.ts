@@ -381,6 +381,12 @@ export interface Origin {
   /** The host's name, lower case and without a port (github.com, gitlab.acme.com, dev.azure.com); '' for a local one. */
   hostName: string;
   /**
+   * Its site's port, where its http or https address gives one other than the scheme's own 80 or 443 (8929, for
+   * http://127.0.0.1:8929/group/app.git), and its host isn't a public one (kit 2.146.4). Only there then, so every other
+   * origin reads as it always did. An ssh remote's port is ssh's, not its site's, and isn't kept.
+   */
+  port?: number;
+  /**
    * The repository on its host, without .git: owner/name (GitHub, Gitea, Bitbucket Cloud), group/sub/name (GitLab),
    * org/project/_git/name (Azure DevOps; project/_git/name on org.visualstudio.com), KEY/name (Bitbucket Data Center), as
    * the server has it (other). For a local one, the folder its origin is, or the clone's own when it has no origin.
@@ -468,6 +474,16 @@ function azurePath(host: string, segs: string[]): { hostName: string; path: stri
 /** The hosts whose name is certain: a hint never makes them another kind. */
 const PUBLIC_HOST = /^(?:www\.|ssh\.)?(?:github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|gitea\.com)$|^(?:ssh\.)?dev\.azure\.com$|\.visualstudio\.com$/;
 
+/** A port a name may keep: a whole number from 1 to 65535. */
+const portOk = (n: number) => Number.isInteger(n) && n >= 1 && n <= 65535;
+
+/** An http(s) remote's port where it isn't its scheme's own (80, 443): what its name keeps (kit 2.146.4). Undefined for any other. */
+function sitePort(scheme: string, port: string): number | undefined {
+  if ((scheme !== 'http' && scheme !== 'https') || !/^\d{1,5}$/.test(port)) return undefined;
+  const n = Number(port);
+  return portOk(n) && n !== (scheme === 'http' ? 80 : 443) ? n : undefined;
+}
+
 /**
  * A remote's URL read host-neutrally (kit 2.146.0): its kind, host, path and web page. Takes every form git does: https
  * (with or without .git, a user or a port), ssh:// and scp-style user@host:path, git://, file:// and a folder (a drive,
@@ -475,8 +491,8 @@ const PUBLIC_HOST = /^(?:www\.|ssh\.)?(?:github\.com|gitlab\.com|bitbucket\.org|
  * its ssh form (ssh.dev.azure.com:v3/org/project/name) and the older org.visualstudio.com, each as one path; Bitbucket
  * Data Center drops its scm/. A host is known by its name (kindOfHost), or by `hint` where the person said (a
  * self-hosted GitLab at code.acme.com, an Azure DevOps Server); a hint never changes github.com, gitlab.com,
- * bitbucket.org, Azure DevOps, codeberg.org or gitea.com. Null for what isn't a remote at all (an empty or broken
- * string). Pure.
+ * bitbucket.org, Azure DevOps, codeberg.org or gitea.com. An http(s) remote's port other than its scheme's own is kept
+ * as `port` (kit 2.146.4). Null for what isn't a remote at all (an empty or broken string). Pure.
  */
 export function parseOrigin(url: string, hint?: OriginHint): Origin | null {
   const parts = remoteParts(url);
@@ -489,25 +505,29 @@ export function parseOrigin(url: string, hint?: OriginHint): Origin | null {
   const segs = trimPath(parts.path).split('/').filter(Boolean);
   // An http(s) remote's page is at its own scheme and port; an ssh one's at https on the host.
   const site = (h: string) => (parts.scheme === 'http' || parts.scheme === 'https' ? `${parts.scheme}://${h}${parts.port ? `:${parts.port}` : ''}` : `https://${h}`);
-  const other = (): Origin => ({ kind: 'other', hostName: host, path: segs.join('/'), webUrl: null });
+  // Its site's port, where it has one of its own: last, and only then, so an origin without one is as it always was.
+  const port = PUBLIC_HOST.test(host) ? undefined : sitePort(parts.scheme, parts.port);
+  const on = port ? { port } : {};
+  const other = (): Origin => ({ kind: 'other', hostName: host, path: segs.join('/'), webUrl: null, ...on });
   if (!segs.length) return other();
   if (kind === 'github') {
     if (segs.length < 2) return other();
     const hostName = host === 'www.github.com' || host === 'ssh.github.com' ? 'github.com' : host;
     const p = `${segs[0]}/${segs[1].replace(/\.git$/i, '')}`;
-    return { kind, hostName, path: p, webUrl: `${hostName === 'github.com' ? 'https://github.com' : site(hostName)}/${p}` };
+    return { kind, hostName, path: p, webUrl: `${hostName === 'github.com' ? 'https://github.com' : site(hostName)}/${p}`, ...on };
   }
   if (kind === 'gitlab') {
     // A page's address pasted in (group/name/-/tree/main) is its repository's.
     const dash = segs.indexOf('-');
     const p = (dash > 0 ? segs.slice(0, dash) : segs).join('/');
     if (!p.includes('/')) return other();
-    return { kind, hostName: host, path: p, webUrl: `${site(host)}/${p}` };
+    return { kind, hostName: host, path: p, webUrl: `${site(host)}/${p}`, ...on };
   }
   if (kind === 'azure') {
     const a = azurePath(host, segs);
     if (!a) return other();
-    return { kind, hostName: a.hostName, path: a.path, webUrl: `https://${a.hostName}/${a.path}` };
+    // An Azure DevOps Server of your own on another port is at that port; Azure DevOps itself has none.
+    return { kind, hostName: a.hostName, path: a.path, webUrl: `https://${a.hostName}${port ? `:${port}` : ''}/${a.path}`, ...on };
   }
   if (kind === 'bitbucket') {
     if (host === 'bitbucket.org' || host === 'www.bitbucket.org' || host === 'altssh.bitbucket.org') {
@@ -520,12 +540,12 @@ export function parseOrigin(url: string, hint?: OriginHint): Origin | null {
     if (dc.length !== 2) return other();
     const [key, slug] = dc;
     const page = key.startsWith('~') ? `users/${key.slice(1)}/repos/${slug}` : `projects/${key.toUpperCase()}/repos/${slug}`;
-    return { kind, hostName: host, path: `${key}/${slug}`, webUrl: `${site(host)}/${page}` };
+    return { kind, hostName: host, path: `${key}/${slug}`, webUrl: `${site(host)}/${page}`, ...on };
   }
   if (kind === 'gitea') {
     if (segs.length < 2) return other();
     const p = segs.join('/');
-    return { kind, hostName: host, path: p, webUrl: `${site(host)}/${p}` };
+    return { kind, hostName: host, path: p, webUrl: `${site(host)}/${p}`, ...on };
   }
   return other();
 }
@@ -533,30 +553,53 @@ export function parseOrigin(url: string, hint?: OriginHint): Origin | null {
 /**
  * A repository's name as the manor's settings and the Steward give it: owner/name for one on github.com, as always;
  * host/path for one anywhere else (gitlab.com/group/sub/name, dev.azure.com/org/project/_git/name,
- * github.acme.com/owner/name); local/<folder> for a local one. Pure.
+ * github.acme.com/owner/name), with its site's port where it has one of its own (127.0.0.1:8929/group/name, kit
+ * 2.146.4); local/<folder> for a local one. A name says nothing of http: that comes only from a clone's own origin.
+ * Pure.
  */
 export function originName(o: Origin): string {
   if (o.kind === 'github' && o.hostName === 'github.com') return o.path;
   if (o.kind === 'local') return `local/${o.path.split(/[\\/]/).filter(Boolean).pop()?.replace(/\.git$/i, '') || 'repository'}`;
-  return `${o.hostName}/${o.path}`;
+  return `${o.hostName}${o.port !== undefined && portOk(o.port) ? `:${o.port}` : ''}/${o.path}`;
 }
 
 /**
  * A name originName gives, back as its origin: owner/name is GitHub's (as a project's "repo" always was), host/path is
- * read as https://host/path, with `hint` for a host whose name doesn't say. Null for one that isn't a name. Pure.
+ * read as https://host/path, and host:port/path as https://host:port/path (kit 2.146.4: never http, which a name
+ * doesn't say), with `hint` for a host whose name doesn't say. Null for one that isn't a name, or whose port isn't one
+ * (0, or past 65535). Pure.
  */
 export function originOfName(name: string, hint?: OriginHint): Origin | null {
   const n = name.trim();
   if (REPO.test(n)) return { kind: 'github', hostName: 'github.com', path: n, webUrl: `https://github.com/${n}` };
   if (!HOST_NAME.test(n)) return null;
+  const port = /^[^/]*:(\d+)\//.exec(n)?.[1];
+  if (port !== undefined && !portOk(Number(port))) return null;
   return parseOrigin(`https://${n}`, hint);
 }
 
+/** The pattern repoNameOk checks (seneschal.ts keeps a copy, as it imports nothing of the manor's). */
+const REPO_NAME = /^(?!(?:.*\/)?\.\.?(?:[:/]|$))(?!(?:.*\/)?-)[A-Za-z0-9_.-]{1,100}(?::(?:[1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5]))?(?:\/[A-Za-z0-9_.~%+@-]{1,100}){1,8}$/;
+
 /**
  * A repository's name as originName gives it, for what an agent is asked about one (kit 2.146.0): owner/name on GitHub,
- * host/path on any other host, up to nine parts of plain characters, none of them "." or "..". Pure.
+ * host/path on any other host, up to nine parts of plain characters, none of them "." or "..". Its first part, the
+ * host, may end in a port from 1 to 65535 (127.0.0.1:8929/group/app, kit 2.146.4); no other part may. Pure.
  */
-export const repoNameOk = (s: string) => s.length <= 300 && /^(?!(?:.*\/)?\.\.?(?:\/|$))(?!(?:.*\/)?-)[A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.~%+@-]{1,100}){1,8}$/.test(s);
+export const repoNameOk = (s: string) => s.length <= 300 && REPO_NAME.test(s);
+
+/**
+ * Whether two names are the same repository's (kit 2.146.4): the same but for case, or the same once the port one of
+ * them keeps is taken off where the other keeps none, as a name stored before 2.146.4 was (127.0.0.1/group/app for
+ * 127.0.0.1:8929/group/app). Two names whose ports differ are two servers'. Pure.
+ */
+export function sameRepoName(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (x === y) return true;
+  const bare = (n: string) => n.replace(/^([^/:]+):\d+\//, '$1/');
+  return (bare(x) !== x) !== (bare(y) !== y) && bare(x) === bare(y);
+}
 
 /** A name for a repository on a host: the host (with a dot in it, or localhost; a port allowed), then its path. */
 const HOST_NAME = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9-]+(?::\d{1,5})?\/[A-Za-z0-9._~%+@-]+(?:\/[A-Za-z0-9._~%+@-]+)*$|^localhost(?::\d{1,5})?\/[A-Za-z0-9._~%+@-]+(?:\/[A-Za-z0-9._~%+@-]+)*$/i;

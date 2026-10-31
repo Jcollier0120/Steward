@@ -2,6 +2,29 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.146.4
+
+**A repository's name keeps its server's own port: a GitLab or Gitea of your own at `http://127.0.0.1:8929` is named `127.0.0.1:8929/group/app`, so anything keyed by its name reaches it there.**
+
+### What changed
+
+- **manor.ts' `Origin` has a `port`** where an http or https remote gives one other than its scheme's own (80, 443), on a host that isn't a public one (github.com, gitlab.com, bitbucket.org, Azure DevOps, codeberg.org, gitea.com). It's a number, and the key is there only then: every other origin is as it was. An ssh remote's port is ssh's, not its site's, and isn't kept.
+- **`originName`** gives such a repository as `host:port/path`. A name without a port is exactly as it was, so no stored name changes.
+- **`originOfName`** reads `host:port/path` back as `https://host:port/path`, its `port` kept. A name never says http: an http server's page, and the way to reach it, come only from its clone's own origin. A name whose port isn't one (0, past 65535) is null.
+- **`repoNameOk`**, and the Seneschal's own check of a task's repository, take a port from 1 to 65535 on a name's first part only: not `:0`, `:65536`, an empty port, a leading 0, or a port on a later part.
+- **An Azure DevOps Server of your own** on another port has its page at that port.
+
+### What's new
+
+- **`sameRepoName(a, b)`**: whether two names are one repository's. They match if they're the same but for case, or the same once one's port is taken off and the other has none. A name stored before 2.146.4 (`127.0.0.1/group/app`) still matches the one its clone gives now (`127.0.0.1:8929/group/app`). Two different ports are two servers.
+
+### Before you update
+
+- **Code that compares a name from `originName` with a name stored before** (settings, a project's `repo`, a record) should compare them with `sameRepoName`. For a server on its own port, the two now differ by the port.
+- **A regex of your own that checks a repository's name** should take `:port` on its first part, or use `repoNameOk`. Otherwise a name with a port is refused.
+- **Code that cuts a name's host off its path** (`name.split('/')[0]`, `slice(hostName.length + 1)`) gets `host:port`. `--hostname` (glab) refuses that; take the port apart from the host, or reach the server at its address (`GITLAB_HOST`).
+- **Tests** that `deepEqual` a `parseOrigin` of an http(s) URL with a port of its own see `port` now, and a name from one has the port.
+
 ## 2.146.3
 
 **assistants.ts, tried with the real assistants: Copilot CLI is the eleventh, each assistant says the names it connects by, Claude Desktop from the Store and Cline 4 are connected where they read their settings now, claude runs in the home it was given, and CODEX_HOME and GEMINI_CLI_HOME are followed.**

@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.269
+
+**A GitLab or Gitea of your own on another port now works when its name comes from the clone: kit 2.146.4 keeps the port in a repository's name.**
+
+### What changed
+
+- **A repository on a server of your own on another port** is named with that port (`127.0.0.1:8929/group/app`) wherever the kit names it from its clone (kit 2.146.4): Manor's Repositories, the staff, and the Steward's dry run of a clone it doesn't look after. You no longer need to type the port in its name. A name without a port is as it always was. One the Steward takes on itself (Look after, `employ`) is still named without its port, and is reached at its pipeline's `baseUrl`, as before.
+- **GitLab:** a name with a port reaches glab through `GITLAB_HOST`, at https on that port, or at its pipeline's `baseUrl` where that gives the same host and port (its http with it). glab refuses a port in `--hostname`. Its merge command (`glab mr merge 7 --repo https://127.0.0.1:8929/group/app`) and the sign-in the dry run suggests (`glab auth login --hostname 127.0.0.1:8929`) keep the port too.
+- **Gitea:** a name with a port is matched with tea's login for its host, as tea lists them, so it's worked with Gitea's way.
+- **Its pages** are at its port: at https, or at its pipeline's `baseUrl` where that says the same host and port.
+- A name never says http. Plain http comes only from the pipeline's `baseUrl` or the clone's own origin.
+
 ## 0.36.268
 
 **GitLab's way on a GitLab of your own, tried on a real GitLab CE, and the Rust sample built by cargo: two more opt-in live tests, and what they found fixed.**
