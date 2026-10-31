@@ -70,10 +70,12 @@ test("the styles: one column by default, each count inside its width's query, a 
   const base = LAYOUT_CSS.slice(0, LAYOUT_CSS.indexOf('@media'));
   assert.match(base, /\.ui-cols \{ display: grid; grid-template-columns: minmax\(0, 1fr\);/);
   assert.ok(!/span 2/.test(base), 'one column: a span of 2 would make a second');
-  assert.match(at(1200), /\.ui-cols\.ui-d2 \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/);
+  assert.match(at(1200), /\.ui-cols\.ui-d2, \.ui-cols\.ui-weighted\.ui-d2 \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/);
   assert.match(at(1200), /\.ui-cols\.ui-d3 > \.ui-span-2 \{ grid-column: span 2; \}/);
-  assert.match(at(2000), /\.ui-cols\.ui-w4 \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/);
+  assert.match(at(2000), /\.ui-cols\.ui-w4, \.ui-cols\.ui-weighted\.ui-w4 \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/);
   assert.match(at(2000), /\.ui-cols\.ui-w1 > \.ui-span-2 \{ grid-column: auto; \}/);
+  assert.match(at(2000), /\.ui-cols\.ui-weighted\.ui-w1 \{ grid-template-columns: repeat\(1, minmax\(0, 1fr\)\); \}/, "a weighted grid's one column when wide outranks its desktop weights");
+  assert.ok(at(2000).indexOf('.ui-weighted.ui-w2 {') < at(2000).indexOf('.ui-cols.ui-weighted:is(.ui-w2'), 'and its weights when wide come after the counts, so they win there');
   assert.match(LAYOUT_CSS, /@media \(min-width: 2000px\) \{\n  \.ui-tabs-side-wide > \.tabs \{ display: none; \}/);
   assert.match(LAYOUT_CSS, /\.ui-tabs-side-wide > \.ui-side-panels > \.tab-panel\[hidden\] \{ display: block; \}/);
   assert.match(LAYOUT_CSS, /\.ui-side-title \{ display: none;/, 'narrower, the tab names the panel, not a title');

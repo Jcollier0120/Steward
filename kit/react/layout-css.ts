@@ -10,8 +10,12 @@ export const WIDE_FROM = 2000;
 
 const query = (px: number) => `(min-width: ${px}px)`;
 
-/** The rule for each count of columns, inside a width's media query. */
-const counts = (prefix: 'd' | 'w', n: number[]) => n.map((k) => `.ui-cols.ui-${prefix}${k} { grid-template-columns: repeat(${k}, minmax(0, 1fr)); }`).join('\n  ');
+/**
+ * The rule for each count of columns, inside a width's media query. Each is also as specific as the weights at the
+ * width before (.ui-cols.ui-weighted:is(…)), so a weighted grid with one column when wide (wide={1}) is one column
+ * there, not its desktop weights.
+ */
+const counts = (prefix: 'd' | 'w', n: number[]) => n.map((k) => `.ui-cols.ui-${prefix}${k}, .ui-cols.ui-weighted.ui-${prefix}${k} { grid-template-columns: repeat(${k}, minmax(0, 1fr)); }`).join('\n  ');
 
 /** Columns' and Span's styles, and PageTabs' `side`: part of UI_CSS. */
 export const LAYOUT_CSS = `
