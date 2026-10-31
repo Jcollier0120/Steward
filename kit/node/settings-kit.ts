@@ -493,7 +493,7 @@ export const PLAIN_PROBLEM = "Some of the saved settings couldn't be used as the
 /** And in place of the agent's own rules' words when a save is refused for them. */
 export const PLAIN_REFUSAL = "These settings can't be used together as they are. Check the ones you changed.";
 /** A save of a developer's form (SettingsSpec.developerOnly) with the switch off. */
-export const DEVELOPER_ONLY_FORM = 'These settings can be changed only while developer staff are hired.';
+export const DEVELOPER_ONLY_FORM = 'These settings can be changed only while Developer options are on.';
 
 // ---------------------------------------------------------------- the switch, per request
 

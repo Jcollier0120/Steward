@@ -43,10 +43,10 @@ export interface ManorLink {
    */
   theme: string;
   /**
-   * The manor's Developer options (settings.json's "developerOptions"): whether developer staff are hired here. Manor
-   * writes it from who is hired, with no switch of its own since Manor 0.16.33: true while any developer staff member
-   * (staff.json's "developer") is hired. So it says whether an agent shows developer features of its own
-   * (developerOptions(), below). Null when Manor hasn't said: no key, or not true or false.
+   * The manor's Developer options (settings.json's "developerOptions"): whether its agents show developer features
+   * (developerOptions(), below). Manor keeps it true while any developer staff member (staff.json's "developer") is
+   * employed; with none employed, the person switches it either way in Settings, Employees, so it can be on with no
+   * developer staff (Manor#530). Null when Manor hasn't said: no key, or not true or false.
    */
   developerOptions: boolean | null;
   /**
@@ -127,9 +127,9 @@ export function sharedSettingsManor(home?: string): ManorLink | null {
 }
 
 /**
- * Whether an agent's developer features are on. With Manor installed and saying (its "developerOptions": whether
- * developer staff are hired), Manor's value wins, and `setBy` is Manor: the agent shows developerOptionsNote()
- * (page.ts) in place of its own switch.
+ * Whether an agent's developer features are on. With Manor installed and saying (its "developerOptions": on while
+ * developer staff are employed, or as the person switches it), Manor's value wins, and `setBy` is Manor: the agent
+ * shows developerOptionsNote() (page.ts) in place of its own switch.
  * Otherwise it's the agent's own switch, `own`. Read afresh: call it on each page load and each round, so a change in
  * Manor shows at once.
  */
