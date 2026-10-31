@@ -3,7 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 /**
  * What's new, at the top of the About view (shell.tsx, kit 2.143.0): the agent's own changelog entries for the
  * versions its latest updates brought, newest first, each under its version (the node part's whats-new.ts chooses
- * them, and /api/whats-new gives them). With several, the newest is open and the older are folded.
+ * them, and /api/whats-new gives them). With several, the newest is open and the older are folded. Only the newest 5
+ * come (kit 2.146.7): when the updates brought older ones too, a line under them says how many aren't shown.
  *
  * An entry is drawn as text, never as HTML (spec/RELEASE-NOTES.md): its bold line, `### ` headings as small headings,
  * `- ` points as a list, `**bold**` and `` `code` ``, and a link as its words. Anything else is a plain paragraph.
@@ -75,8 +76,11 @@ function Label({ v }: { v: NewVersion }) {
   );
 }
 
-/** The section, for the versions given (none: nothing). */
-export function WhatsNewList({ versions, name }: { versions: NewVersion[]; name: string }) {
+/**
+ * The section, for the versions given (none: nothing), and `older`, how many older versions the same updates brought
+ * that aren't given: a line under the versions says so.
+ */
+export function WhatsNewList({ versions, name, older = 0 }: { versions: NewVersion[]; name: string; older?: number }) {
   if (!versions.length) return null;
   const several = versions.length > 1;
   return (
@@ -84,7 +88,7 @@ export function WhatsNewList({ versions, name }: { versions: NewVersion[]; name:
       <h3 id="whats-new-title">What's new</h3>
       {several && (
         <p className="muted whats-new-note">
-          {versions.length} versions came with {name}'s latest updates, newest first.
+          {older > 0 ? `The newest ${versions.length} versions that came with ${name}'s latest updates, newest first.` : `${versions.length} versions came with ${name}'s latest updates, newest first.`}
         </p>
       )}
       {several ? (
@@ -104,6 +108,11 @@ export function WhatsNewList({ versions, name }: { versions: NewVersion[]; name:
           <EntryText text={versions[0].entry} />
         </div>
       )}
+      {older > 0 && (
+        <p className="muted whats-new-note whats-new-older">
+          {older === 1 ? "1 older version isn't shown here." : `${older} older versions aren't shown here.`}
+        </p>
+      )}
     </section>
   );
 }
@@ -117,23 +126,29 @@ export function versionsOf(json: unknown): NewVersion[] {
   );
 }
 
+/** How many older versions /api/whats-new says it left out (kit 2.146.7): 0 for anything but a whole number above 0. */
+export function olderOf(json: unknown): number {
+  const n = json && typeof json === 'object' ? (json as { older?: unknown }).older : null;
+  return typeof n === 'number' && Number.isInteger(n) && n > 0 ? n : 0;
+}
+
 /**
  * The section as the About view has it: asked for the first time About opens (`open`), and kept. Until the answer, or
  * when there is none (an older page server, a failed look), nothing: About shows the rest as before.
  */
 export function WhatsNew({ open, name }: { open: boolean; name: string }) {
-  const [versions, setVersions] = useState<NewVersion[] | null>(null);
+  const [answer, setAnswer] = useState<{ versions: NewVersion[]; older: number } | null>(null);
   const asked = useRef(false);
   useEffect(() => {
     if (!open || asked.current) return;
     asked.current = true;
     fetch('/api/whats-new', { headers: { accept: 'application/json' } })
       .then((r) => (r.ok ? r.json() : null))
-      .then((json) => setVersions(versionsOf(json)))
+      .then((json) => setAnswer({ versions: versionsOf(json), older: olderOf(json) }))
       .catch(() => {
         // The page is restarting: About shows the rest, and opening it again asks again.
         asked.current = false;
       });
   }, [open]);
-  return versions ? <WhatsNewList versions={versions} name={name} /> : null;
+  return answer ? <WhatsNewList versions={answer.versions} name={name} older={answer.older} /> : null;
 }

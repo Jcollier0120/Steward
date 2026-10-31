@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.146.7
+
+**About's What's new shows only the newest 5 versions, not up to 10, and says how many older ones it leaves out, so the page stays short.**
+
+### What changed
+
+- **whats-new.ts sends About at most 5 versions' entries** (`MAX_SHOWN`, 10 before), the newest of those the latest updates brought. The older ones' entries aren't sent at all, only how many there are, so the page carries no more than it shows. Which versions the updates brought is worked out as before (the latest update, and every other of the last 30 days).
+- **`/api/whats-new` answers `{ versions, older }`**: `older` is how many older versions with an entry the same updates brought besides the 5, 0 when none was left out.
+- **The section (react/whats-new.tsx)**: with older ones left out, its line reads "The newest 5 versions that came with Watchman's latest updates, newest first.", and a line under the versions says "3 older versions aren't shown here." ("1 older version isn't shown here."). With none left out it reads as before, "4 versions came with Watchman's latest updates, newest first.", and has no line under them.
+- A release still carries its changelog's newest 20 entries (notes.ts' `RELEASE_ENTRIES`), so About can count the older versions up to 15 of them.
+
+### What's new
+
+- **`chooseWhatsNew(entries, record, version, now)`** and **`whatsNewAnswer(now)`** in whats-new.ts give `{ versions, older }` (`WhatsNewAnswer`). `chooseVersions` and `whatsNew` still give the versions alone.
+- **`olderOf(json)`** in react/whats-new.tsx reads `older` from `/api/whats-new`'s answer, and `WhatsNewList` takes `older`.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.146.5
 
 **A release whose code imports a file the release leaves out isn't built. Reeve 0.19.10 and 0.19.11 started on no PC: their server imported a file in `src/web`, which a release doesn't carry.**

@@ -103,7 +103,10 @@ export function entriesOf(changelog: string): { version: string; entry: string }
   return out;
 }
 
-/** The entries a release's own CHANGELOG.md keeps (releaseChangelog): twice what About shows (whats-new.ts), for versions skipped or gone back over. */
+/**
+ * The entries a release's own CHANGELOG.md keeps (releaseChangelog): more than About shows (whats-new.ts' MAX_SHOWN, 5),
+ * so About can say how many older versions its latest updates brought besides those.
+ */
 export const RELEASE_ENTRIES = 20;
 
 /**

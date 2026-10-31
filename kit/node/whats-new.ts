@@ -13,7 +13,8 @@ import { dataFile, readJson, writeJson } from './store.ts';
  *   { "versions": [{ "version": "0.4.28", "since": "2026-10-20T14:02:11.000Z" }, { "version": "0.4.31", "since": "2026-10-27T14:01:56.000Z" }] }
  *
  * oldest first, at most 30. About shows the entries of every version newer than the one that ran before the latest
- * update, up to the one running, and those of the other updates of the last 30 days; at most 10. A copy with no record
+ * update, up to the one running, and those of the other updates of the last 30 days; only the newest 5 of them (kit
+ * 2.146.7), with how many older ones it leaves out, so the page carries no more than it shows. A copy with no record
  * yet (a fresh install, or the first start on this kit) starts one with its own version, after the one in app.prev
  * when the update kept one there (safeinstall.ts's probation), whose date isn't known: it shows the versions since
  * that, or just its own.
@@ -26,8 +27,8 @@ import { dataFile, readJson, writeJson } from './store.ts';
 export const VERSIONS_FILE = 'versions.json';
 /** The record keeps the newest 30 versions started at; the older go. */
 export const MAX_KEPT = 30;
-/** About shows at most 10 versions' entries. */
-export const MAX_SHOWN = 10;
+/** About shows at most 5 versions' entries, the newest (10 before kit 2.146.7). */
+export const MAX_SHOWN = 5;
 /** Besides the latest update, however old, About shows the updates of the last 30 days. */
 export const RECENT_DAYS = 30;
 const DAY_MS = 86_400_000;
@@ -43,6 +44,14 @@ export interface NewVersion {
   version: string;
   since: string | null;
   entry: string;
+}
+
+/** What About's What's new shows, as /api/whats-new gives it (kit 2.146.7). */
+export interface WhatsNewAnswer {
+  /** At most MAX_SHOWN versions' entries, newest first. */
+  versions: NewVersion[];
+  /** How many older versions with an entry the same updates brought, past those: 0 when none was left out. */
+  older: number;
 }
 
 const isVersion = (v: unknown): v is string => typeof v === 'string' && /^\d+\.\d+\.\d+/.test(v);
@@ -107,21 +116,27 @@ function lowestFrom(record: Started[], version: string, now: Date): string | nul
 }
 
 /**
- * The versions whose entries About shows, as `entries` (the changelog's, entriesOf) has them, newest first: those
- * after the lowest version the updates shown came from, up to `version`. The updates shown are the latest (into the
- * record's newest, which must be `version`) and every other of the last RECENT_DAYS days. With nothing to go by (no
- * record, or one that doesn't end at `version`), or nothing in between (a step back), `version`'s own.
+ * What About shows, from `entries` (the changelog's, entriesOf): the entries of the versions after the lowest version
+ * the updates shown came from, up to `version`, newest first, the newest MAX_SHOWN of them, and how many older ones
+ * that leaves out. The updates shown are the latest (into the record's newest, which must be `version`) and every
+ * other of the last RECENT_DAYS days. With nothing to go by (no record, or one that doesn't end at `version`), or
+ * nothing in between (a step back), `version`'s own.
  */
-export function chooseVersions(entries: { version: string; entry: string }[], record: Started[], version: string, now: Date): NewVersion[] {
+export function chooseWhatsNew(entries: { version: string; entry: string }[], record: Started[], version: string, now: Date): WhatsNewAnswer {
   const from = lowestFrom(record, version, now);
   const since = (v: string) => [...record].reverse().find((s) => s.version === v)?.since ?? null;
   const own = (x: { version: string }) => compareVersions(x.version, version) <= 0;
   const after = from ? entries.filter((x) => own(x) && compareVersions(x.version, from) > 0) : [];
-  const shown = after.length ? after : entries.filter((x) => x.version === version);
-  return shown
-    .sort((a, b) => compareVersions(b.version, a.version))
-    .slice(0, MAX_SHOWN)
-    .map((x) => ({ version: x.version, since: since(x.version), entry: x.entry }));
+  const brought = (after.length ? after : entries.filter((x) => x.version === version)).sort((a, b) => compareVersions(b.version, a.version));
+  return {
+    versions: brought.slice(0, MAX_SHOWN).map((x) => ({ version: x.version, since: since(x.version), entry: x.entry })),
+    older: Math.max(0, brought.length - MAX_SHOWN),
+  };
+}
+
+/** The versions whose entries About shows (chooseWhatsNew's), newest first: at most MAX_SHOWN. */
+export function chooseVersions(entries: { version: string; entry: string }[], record: Started[], version: string, now: Date): NewVersion[] {
+  return chooseWhatsNew(entries, record, version, now).versions;
 }
 
 let entries: { version: string; entry: string }[] | null = null;
@@ -139,10 +154,15 @@ function changelogEntries(): { version: string; entry: string }[] {
   return entries;
 }
 
-/** What's new now, for /api/whats-new and the page's frame (react-page.ts): empty when there's nothing to show. */
-export function whatsNew(now = new Date()): NewVersion[] {
+/** What's new now, for /api/whats-new: no versions when there's nothing to show. */
+export function whatsNewAnswer(now = new Date()): WhatsNewAnswer {
   const list = changelogEntries();
-  if (!list.length) return [];
+  if (!list.length) return { versions: [], older: 0 };
   record ??= readVersions();
-  return chooseVersions(list, record, APP.version, now);
+  return chooseWhatsNew(list, record, APP.version, now);
+}
+
+/** The versions What's new shows now, for the page's frame (react-page.ts): empty when there's nothing to show. */
+export function whatsNew(now = new Date()): NewVersion[] {
+  return whatsNewAnswer(now).versions;
 }

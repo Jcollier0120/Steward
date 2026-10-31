@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.272
+
+**What's new, at the top of every agent's About page, now shows just the newest 5 versions an update brought, so it stays short.**
+
+### What changed
+
+- **Kit 2.146.7** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): an agent's About page showed every version its latest updates brought, up to 10, each in its own card. Now it shows the newest 5. When the updates brought more than that, the line above them says "The newest 5 versions that came with Watchman's latest updates, newest first.", and a short line under them says how many older ones aren't shown ("3 older versions aren't shown here."). The older versions' notes are still in Manor's What's new for each update.
+- Each agent gets it with the kit, through the Steward, at its next update.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.270
 
 **Kit 2.146.5 won't build a release whose code imports a file the release leaves out, as Reeve 0.19.10 and 0.19.11 did. A kit PR's vouch on a PC with no agents to try it on now says it wasn't tried, not "passed 0 of 0".**

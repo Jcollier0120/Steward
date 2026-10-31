@@ -56,7 +56,7 @@ The release carries the changelog too, cut to its newest 20 entries (kit 2.143.0
 
 ## What's new on About
 
-From kit 2.143.0 every agent's **About** view (`#/about`, react/shell.tsx) opens with **What's new**: its own changelog's entries for the versions its latest updates brought, newest first, each under its version; with several, the newest is open and the older are folded. They're drawn as text, never as HTML: the bold line, `###` headings, `- ` points, `**bold**` and `` `code` `` (a link shows its words).
+From kit 2.143.0 every agent's **About** view (`#/about`, react/shell.tsx) opens with **What's new**: its own changelog's entries for the versions its latest updates brought, newest first, each under its version; with several, the newest is open and the older are folded. From kit 2.146.7 it shows only the newest 5 of them: when the updates brought more, its first line says "The newest 5 versions that came with Watchman's latest updates, newest first." and a line under them how many older ones aren't shown ("3 older versions aren't shown here."). They're drawn as text, never as HTML: the bold line, `###` headings, `- ` points, `**bold**` and `` `code` `` (a link shows its words).
 
 Which versions (`node/whats-new.ts`): the agent keeps `versions.json` in its data folder, each version it first started at and when, oldest first, at most 30:
 
@@ -64,7 +64,7 @@ Which versions (`node/whats-new.ts`): the agent keeps `versions.json` in its dat
 { "versions": [{ "version": "0.4.28", "since": "2026-10-20T14:02:11.000Z" }, { "version": "0.4.31", "since": "2026-10-27T14:01:56.000Z" }] }
 ```
 
-Its page writes it as it starts, only when the version changed. About shows the entries of every version newer than the one that ran before the latest update, up to the one running, and those of its other updates in the last 30 days; at most 10. A copy with no record yet starts one after the version its update kept in `app.prev`, when there is one (with no date), or shows just its own version's entry. A version with no entry is passed over, and a missing or odd `CHANGELOG.md` or `versions.json` means no section. The page asks `/api/whats-new` for the entries as About first opens; the changelog is read at the first ask and kept.
+Its page writes it as it starts, only when the version changed. About shows the entries of every version newer than the one that ran before the latest update, up to the one running, and those of its other updates in the last 30 days; the newest 5 of them (10 before kit 2.146.7). A copy with no record yet starts one after the version its update kept in `app.prev`, when there is one (with no date), or shows just its own version's entry. A version with no entry is passed over, and a missing or odd `CHANGELOG.md` or `versions.json` means no section. The page asks `/api/whats-new` for the entries as About first opens, and it answers `{ "versions": [...], "older": 3 }`: at most 5 versions' entries, and how many older versions with an entry it leaves out, whose entries it doesn't send. The changelog is read at the first ask and kept.
 
 So an entry is read twice: in Manor, as the update's notes, and on the agent's own About afterwards. Write it for the person using the agent.
 
