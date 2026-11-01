@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.285
+
+**On Bitbucket, a pull request's files and line counts are read again, and none reads as mergeable when Bitbucket can't say. Its diffstat answers with a redirect, which the Steward took for an empty answer: every pull request read as mergeable, with no files. It also hands kit 2.147.5 out, and runs on it: a refused sign-in on gitlab.com no longer takes the whole GitLab sign-in with it.**
+
+### What changed
+
+- **A Bitbucket read (GET) follows a redirect**: https only, five at most. Found live on Bitbucket Cloud, 2026-10-31:
+  - `GET …/pullrequests/<n>/diffstat` answers 302 with an empty body, a documented redirect to the repository's diffstat for the pull request;
+  - followed, it gives 200 and the files.
+  - So every Bitbucket pull request read as MERGEABLE and CLEAN with no files and 0 lines.
+- **A redirect is never an empty success.** One the Steward ends on fails, as "HTTP 302: a redirect, not an answer". A POST, PUT or DELETE never follows one, as curl would send that method again to wherever it points.
+- **A Bitbucket pull request's mergeability now shows as unknown, because Bitbucket Cloud no longer says.** Its diffstat redirects to the topic diff, which never names a "merge conflict", its preview merge answers 410 (CHANGE-3407), and it has no merge check. Found live by AMD on castellan-ai/castellan, 2026-10-31: a pull request with an add/add conflict read MERGEABLE and CLEAN. It is never shown as mergeable now; a file in "merge conflict" still shows it conflicting. A pull request next in line is held as "its host hasn't said whether it merges", where that said "GitHub".
+- The API token still goes only to api.bitbucket.org, in curl's config file. It is never handed on to where a redirect points.
+- **Kit 2.147.5** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a refused sign-in on gitlab.com no longer takes the whole GitLab sign-in with it. Git Credential Manager keeps GitLab's refresh token as `git:https://oauth-refresh-token.gitlab.com` and renews it itself, and its erase deletes that too. A sign-in the host shows stale was forgotten anywhere. Now it is forgotten only where GCM keeps `git:https://refresh_token.<host>` beside it, as since 2.147.4 for a 401 with nothing to show why. Elsewhere the refusal stands, git's own message as it is.
+
 ## 0.36.284
 
 **The Steward's fetches and pushes to Codeberg work again once Git Credential Manager's sign-in there is an hour old: it hands kit 2.147.4 out, and runs on it.**
