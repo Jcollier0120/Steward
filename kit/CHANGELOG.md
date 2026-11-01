@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.148.2
+
+**"Where its work runs" names the staff's own text reader, the kit's model on the NPU where it runs there, else on the processor, where the Clerk's and the Warrener's lines still said Windows' own OCR, on the processor (the owner, 2026-11-01).**
+
+### What changed
+
+- **node/work.ts:** the Clerk's and the Warrener's reading lines say the kit's text-reading model reads, on the NPU where it runs there (Qualcomm's, Intel's NPU 3720, AMD's XDNA 2), else on the processor; in plain words, "a text reader of its own, on the AI chip where it can, else on the processor". The Clerk's line says when it reads as it does now: about a minute after new files arrive, and in a round every 30 minutes (Settings), where it said every 15 minutes.
+- The Clerk's note that "Windows offers it only to packaged apps, so OCR runs on the processor for now" is gone. In its place: the reader reads more exactly than Windows' own OCR, which is used only until the model has been fetched, where it can't start, and to read again a line in another alphabet.
+- spec/OCR.md says where the model reads today (every NPU it runs on, else the processor), where it said Snapdragon's only, for now.
+
+### Before you update
+
+- **A test that spells out the old line fails**: "Windows' own OCR" or "only to packaged apps" in the Clerk's or the Warrener's section. Nothing else changes.
+
 ## 2.148.1
 
 **A note's label names the staff member who wrote it, in its own word for its notes or for what it did: "summary from the Herald", "explained by the Surveyor", where it said "note from the local AI, unverified" (the owner, 2026-10-31).**
