@@ -11,7 +11,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **node/notes.ts**: a release's first line ends "…, with kit 2.148.4.", where it said "…, with the Steward's kit 2.148.4.".
 - **spec/RELEASE-NOTES.md, The kit bump**: what Steward 0.36.291's bump writes in a staff member's entry for the kit it now carries:
   - its headline: "It carries kit X: the parts all the staff share.", said once when the Steward's build joins several bumps, and not at all beside the release's own changes (but for an urgent kit);
-  - under What changed, a line for each kit version: the first sentence of its headline, without who asked and when or a pull request it names;
+  - under What changed, a line for each kit version, oldest first: the first sentence of its headline, without who asked and when or a pull request it names;
   - under Before you update, only the kit's points that start `Everyone:` (`- Everyone: …`, or `- **Everyone:** …`), without the word.
 - So a kit entry's headline opens with what a person using the staff would notice, and its Before you update is for the staff's makers but for a point marked `Everyone:` (a download after the update, a setting that moved, a page to reload).
 

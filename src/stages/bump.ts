@@ -112,7 +112,8 @@ export function kitBumpEntry(o: { version: string; from: string; kit: string; ch
  */
 export function kitBumpBody(o: { from: string; kit: string; changelog: string | null }): string {
   const back = compareVersions(o.kit, o.from) < 0;
-  const sections = !back && o.changelog ? changelogBetween(o.changelog, o.from, o.kit).split(/^(?=## )/m).filter((s) => s.startsWith('## ')) : [];
+  // Oldest first, as the kit came out: the build joins several bumps' lines one after the other (entries.ts composeEntry).
+  const sections = !back && o.changelog ? changelogBetween(o.changelog, o.from, o.kit).split(/^(?=## )/m).filter((s) => s.startsWith('## ')).reverse() : [];
   const changed: string[] = [];
   const care: string[] = [];
   const urgent: string[] = [];
@@ -122,7 +123,7 @@ export function kitBumpBody(o: { from: string; kit: string; changelog: string | 
     const body = rest.join('\n');
     const headline = kitPoint(headlineOf(body) ?? '');
     if (v) changed.push(`- Kit ${v}${headline ? `: ${headline}` : ''}`);
-    if (v && urgentIn(s, v)) urgent.unshift(v);
+    if (v && urgentIn(s, v)) urgent.push(v);
     care.push(...everyonePoints(sectionOf(body, HEADINGS.care) ?? ''));
   }
   // Without the kit's changelog, a line of its own: never a repository's name, which the agent's notes would ship

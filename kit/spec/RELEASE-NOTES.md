@@ -85,7 +85,7 @@ The Steward's kit bump (`steward bump`, a round's rollout) writes the agent's en
 - Nothing: it updates itself as usual.
 ```
 
-- **What changed** has a line for each kit version since the one it pinned: the first sentence of that kit entry's headline (its opening bold line), without an aside naming who asked and when ("(the owner, 2026-11-01)") or a pull request ("(Manor#530)").
+- **What changed** has a line for each kit version since the one it pinned, oldest first: the first sentence of that kit entry's headline (its opening bold line), without an aside naming who asked and when ("(the owner, 2026-11-01)") or a pull request ("(Manor#530)").
 - **Before you update** has only the kit entries' points marked for everyone (below), or "Nothing: it updates itself as usual." when none has one.
 - When the Steward's build joins several kit bumps into one release, its headline says the newest kit once, and when the release brings changes of its own, their headlines alone (its What changed still lists the kits). A kit bump that brings an urgent kit keeps its headline, so the release says so.
 

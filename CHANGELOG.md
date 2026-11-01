@@ -9,7 +9,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - **A kit bump's notes** (the entry it writes for the kit a staff member now carries) say "kit" where they said "the Steward's kit", and "the parts all the staff share" where they said "the parts every agent of the manor shares".
-  - Under What changed, a line for each kit version is the first sentence of its headline, without who asked and when ("(the owner, 2026-11-01)") or a pull request it names.
+  - Under What changed, a line for each kit version, oldest first, is the first sentence of its headline, without who asked and when ("(the owner, 2026-11-01)") or a pull request it names.
   - Under Before you update, only the kit's points marked `Everyone:`. The rest ("A test that spells out the old label fails", "Nothing to do. A test that compared…") were for the staff's makers, and showed on every staff member's About.
 - **The build joins several kit bumps into one headline**, the newest kit's, and leaves it out when the release brings changes of its own: their headlines alone, with the kits still listed under What changed. A kit with an urgent fix stays in the headline. An entry written before this version is read the same way.
 - **Kit 2.148.4** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a release's notes say "with kit X", and the spec says how a kit entry reaches the staff's notes.
