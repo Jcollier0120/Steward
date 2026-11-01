@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.288
+
+**A staff member's "Where its work runs" now says the text in screenshots and scans is read by its own text reader, on the AI chip where it can, not by Windows' own text recognition: the Steward hands kit 2.148.2 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.148.2** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): the Clerk's and the Warrener's "Where its work runs" name the reader they use, on the AI chip where it can, else on the processor. The Clerk's also says it reads new files about a minute after they arrive. The old note that the AI chip's text recognition wasn't offered yet is gone.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member shows the new lines once it takes kit 2.148.2.
+
 ## 0.36.287
 
 **Text the local AI writes on a staff member's page now says which staff member wrote it: "summary from the Herald", where it said "note from the local AI, unverified". The Steward hands kit 2.148.1 out, and runs on it.**

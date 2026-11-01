@@ -11,7 +11,7 @@ The staff that read text in pictures read it through one reader, the kit's, sinc
 | Reeve | screenshots, word by word with their boxes, for its screens' checks | `ocrImages` |
 | The Warrener | a peek at a picture or a PDF's first page | `ocrFiles`, with `pdfMaxPages: 1` and `scale: 'auto'` |
 
-From kit 2.114.0 the engine is [our own text-reading model](#our-own-model) on the NPU, where the PC has one it runs on (Snapdragon's, for now). Windows' own OCR (Windows.Media.Ocr, on the processor) reads everywhere else, and until the model is in place. The staff never name the engine, so this changes no staff code.
+From kit 2.114.0 the engine is [our own text-reading model](#our-own-model) on the NPU, where the PC has one it runs on (Qualcomm's, Intel's NPU 3720, and AMD's XDNA 2 since kit 2.137.0), and since kit 2.124.0 on the processor everywhere else ([On the processor](#on-the-processor)). Windows' own OCR (Windows.Media.Ocr, on the processor) reads only until the model has been fetched, where its program can't start, and again for a line in another alphabet ([Other alphabets](#other-alphabets)). The staff never name the engine, so this changes no staff code. Their "Where its work runs" lines (`work.ts`) say where it reads: the model on the NPU where it runs there, else on the processor (since kit 2.148.2).
 
 ## The API
 

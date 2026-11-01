@@ -54,6 +54,11 @@ const VISION = "Reeve's vision model (below)";
 const PLAIN_WHERE: Record<string, string> = { [MODEL]: 'the local AI (below)', [VISION]: 'the local AI (below)' };
 /** The NPU in plain words. */
 const AI_CHIP = 'the AI chip';
+/** The kit's text reader (ocr.ts, spec/OCR.md): our own model, on the NPU where it runs there, else on the processor. */
+const READER = "the kit's text-reading model on the NPU, where it runs there (Qualcomm's, Intel's NPU 3720, AMD's XDNA 2), else on the processor";
+const PLAIN_READER = `a text reader of its own, on ${AI_CHIP} where it can, else on the processor`;
+const READER_NOTE = "The text reader is the kit's own model, which reads more exactly than Windows' own OCR. Windows OCR is used only until the model has been fetched, or where it can't start, and to read again a line in another alphabet, where Windows has that language.";
+const PLAIN_READER_NOTE = "It reads text with a reader of its own, which reads more exactly than Windows' own text recognition. Windows' is used only until that reader is set up, or where it can't start, and to read again words in another alphabet, where Windows has that language.";
 
 export const WORK: Record<string, AgentWork> = {
   porter: {
@@ -76,12 +81,12 @@ export const WORK: Record<string, AgentWork> = {
   clerk: {
     model: true,
     lines: [
-      { what: "Reading the text in new screenshots and scans (Windows' own OCR), and in the first 5 pages of a PDF", where: 'the processor', when: 'every 15 minutes, while there are new files; a big batch can keep it busy for a minute or two', plain: { what: "Reading the text in new screenshots and scans (Windows' own text recognition), and in the first 5 pages of a PDF" } },
+      { what: 'Reading the text in new screenshots and scans, and in the first 5 pages of a PDF', where: READER, when: 'about a minute after new files arrive, and in a round every 30 minutes (Settings) for any it missed; a big batch can keep it busy for a minute or two', plain: { where: PLAIN_READER } },
       { what: 'A caption for a picture with almost no text (a photo, a diagram)', where: VISION, when: 'in the same round, once per picture' },
       { what: 'Re-ranking a search by meaning, when that is on', where: "Reeve's embedding model, only when its server is already running", when: 'when you search', plain: { where: 'the local AI, only when it is already running' } },
     ],
-    notes: ["The NPU's own text recognizer would be faster, but Windows offers it only to packaged apps, so OCR runs on the processor for now."],
-    plainNotes: ["The AI chip's own text recognition would be faster, but Windows doesn't offer it to the Clerk yet, so reading text runs on the processor for now."],
+    notes: [READER_NOTE],
+    plainNotes: [PLAIN_READER_NOTE],
   },
   herald: {
     model: true,
@@ -101,7 +106,7 @@ export const WORK: Record<string, AgentWork> = {
   warrener: {
     model: true,
     lines: [
-      { what: "Looking at the loose files in Downloads and on the Desktop, reading a PDF's first page and pictures of documents (Windows' own OCR)", where: 'the processor', when: 'every hour; at most 40 PDFs, Office files and pictures a round', plain: { what: "Looking at the loose files in Downloads and on the Desktop, reading a PDF's first page and pictures of documents (Windows' own text recognition)" } },
+      { what: "Looking at the loose files in Downloads and on the Desktop, reading a PDF's first page and pictures of documents", where: `the processor; the text in a picture, ${READER}`, when: 'every hour; at most 40 PDFs, Office files and pictures a round', plain: { where: `the processor; the text in a picture, ${PLAIN_READER}` } },
       { what: 'A name and a folder for each document', where: MODEL, when: 'at most 15 a round' },
       { what: 'Moving the files you tick', where: 'the disk', when: 'only when you press File the ticked ones' },
     ],
