@@ -196,7 +196,7 @@ test('a .NET employee on master, through every stage: bump, push and its merge, 
   assert.equal(stamped?.done, true, `${stamped?.note}\n${ctx.lines.join('\n')}`);
   assert.equal(stamped?.version, '1.7.1');
   assert.equal(execFileSync(gitExe(), ['show', 'master:HEI.Agent/HEI.Agent.csproj'], { cwd: f.origin, encoding: 'utf8' }), CSPROJ('1.7.1'), 'only the version changed, CRLF and all');
-  assert.match(sh(f.origin, 'show', 'master:CHANGELOG.md').replace(/\r\n/g, '\n'), /\n## 1\.7\.1\n\n\*\*It carries the Steward's kit 1\.0\.1: /);
+  assert.match(sh(f.origin, 'show', 'master:CHANGELOG.md').replace(/\r\n/g, '\n'), /\n## 1\.7\.1\n\n\*\*It carries kit 1\.0\.1: /);
   assert.deepEqual(sh(f.origin, 'ls-tree', '--name-only', 'master', 'changes/').split('\n'), ['changes/README.md']);
   const stampPr = st.gh.find((a) => a[1] === 'create')!;
   assert.equal(stampPr[stampPr.indexOf('--title') + 1], 'Heiward 1.7.1: version and changelog, stamped by the Steward');

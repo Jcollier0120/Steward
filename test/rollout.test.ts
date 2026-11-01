@@ -168,7 +168,7 @@ test("a round's rollout folds the new kit onto the open kit PR on the build pipe
   assert.equal(sh(fk.origin, 'rev-parse', 'steward/kit-1.0.1^'), prHead);
   assert.deepEqual(sh(fk.origin, 'diff', '--name-only', 'main', 'steward/kit-1.0.1').split('\n').sort(), ['changes/README.md', 'changes/steward-kit-1-0-1.md', 'kit.json']);
   const entry = sh(fk.origin, 'show', 'steward/kit-1.0.1:changes/steward-kit-1-0-1.md').replace(/\r\n/g, '\n');
-  assert.match(entry, /^\*\*It carries the Steward's kit 1\.0\.2: [\s\S]*- The Steward's kit 1\.0\.2, after 1\.0\.0: /);
+  assert.match(entry, /^\*\*It carries kit 1\.0\.2: [\s\S]*- Kit 1\.0\.2, after 1\.0\.0: /);
   assert.doesNotMatch(entry, /kit 1\.0\.1/, "the PR's old entry is gone");
   assert.deepEqual(loadClaims().filter((c) => c.repo === e.repo), [], 'nothing claimed');
   const edit = r.gh.find((a) => a[1] === 'edit' && a[2] === '30')!;
@@ -194,7 +194,7 @@ test("a round's rollout folds the new kit onto a kit PR opened the old way, befo
   assert.match(sh(fk.origin, 'show', 'steward/kit-1.0.1:src/app.ts'), /version: '0\.4\.1'/);
   const log = sh(fk.origin, 'show', 'steward/kit-1.0.1:CHANGELOG.md').replace(/\r\n/g, '\n');
   assert.equal(log.match(/^## 0\.4\.1$/gm)?.length, 1, 'one entry for its version');
-  assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.2: [\s\S]*- The Steward's kit 1\.0\.2, after 1\.0\.0: /);
+  assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries kit 1\.0\.2: [\s\S]*- Kit 1\.0\.2, after 1\.0\.0: /);
   assert.doesNotMatch(log, /kit 1\.0\.1/, "the PR's old entry is gone");
   assert.equal(sh(fk.origin, 'log', '-1', '--format=%s', 'steward/kit-1.0.1'), "Fake 0.4.1: the Steward's kit 1.0.2");
   assert.equal(sh(fk.origin, 'ls-tree', '--name-only', 'steward/kit-1.0.1', 'changes/'), '', 'the way its PR took: nothing in changes/');
@@ -385,7 +385,7 @@ test('a round rolls a new kit out by itself: bumped with its entry in changes/, 
   assert.deepEqual(out.results.filter((x) => x.message.startsWith('stamp: ')).map((x) => [x.outcome, x.version]), [['done', '0.4.1']]);
   assert.equal(sh(f.origin, 'show', 'main:kit.json'), '{\n  "kit": "1.0.1",\n  "parts": ["node"]\n}');
   assert.match(sh(f.origin, 'show', 'main:src/app.ts'), /version: '0\.4\.1'/);
-  assert.match(sh(f.origin, 'show', 'main:CHANGELOG.md').replace(/\r\n/g, '\n'), /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.1: /);
+  assert.match(sh(f.origin, 'show', 'main:CHANGELOG.md').replace(/\r\n/g, '\n'), /\n## 0\.4\.1\n\n\*\*It carries kit 1\.0\.1: /);
   assert.deepEqual(sh(f.origin, 'ls-tree', '--name-only', 'main', 'changes/').split('\n'), ['changes/README.md']);
   // And released in the same round, main's head tested first (no vouch covers it).
   assert.deepEqual(out.results.filter((x) => x.message.startsWith('release: ')).map((x) => x.message.replace(/\(.{7}\)/, '(…)')), ['release: released v0.4.1 from origin/main (…), with kit 1.0.1']);

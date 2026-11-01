@@ -193,8 +193,8 @@ test("the urgent fix's build of the Steward's own, its kit urgent: the kit is tr
   assert.doesNotMatch(log, /the newest kit waits for the next build/);
   // Other's entry is an urgent fix, as the Steward's urgent rule reads one (the kit's exchequer.ts isUrgent).
   const entry = otherTopEntry();
-  assert.match(entry, /^## 0\.4\.1\n\n\*\*Urgent fix: it carries the Steward's kit 1\.0\.2, with an urgent fix to the parts every agent of the manor shares\.\*\*\n/, entry);
-  assert.match(entry, /^- The Steward's kit 1\.0\.2: Urgent fix: the PowerShell worker starts in a signed release\.$/m);
+  assert.match(entry, /^## 0\.4\.1\n\n\*\*Urgent fix: it carries kit 1\.0\.2, with an urgent fix to the parts all the staff share\.\*\*\n/, entry);
+  assert.match(entry, /^- Kit 1\.0\.2: Urgent fix: the PowerShell worker starts in a signed release\.$/m);
   assert.equal(isUrgent(entry), true);
   // The build is the Steward's alone: it closes, Other not released in it, and the next round comes sooner, to build it.
   assert.equal(out.build?.closed, true, log);

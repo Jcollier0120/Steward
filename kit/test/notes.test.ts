@@ -74,7 +74,7 @@ test('the notes: the first line Manor reads, the entry without its heading, then
   assert.equal(n.from, 'changelog');
   assert.deepEqual(n.warnings, []);
   const lines = n.notes.split('\n');
-  assert.equal(lines[0], "Fake 0.4.2, built from abc1234, with the Steward's kit 2.19.0.");
+  assert.equal(lines[0], 'Fake 0.4.2, built from abc1234, with kit 2.19.0.');
   assert.match(lines[0], /\bbuilt from ([0-9a-f]{7,40})\b/, "Manor's releases.ts reads the commit from it");
   assert.equal(lines[2], '**Scans twice as fast.** More below.');
   assert.doesNotMatch(n.notes, /## 0\.4\.2|\r/);

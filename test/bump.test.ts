@@ -12,7 +12,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 
 const { bumpBranch } = await import('../src/stages/common.ts');
-const { bumpOne, kitBumpEntry, onlyFlaky, repin, replacingEntry, wholeTestSteps } = await import('../src/stages/bump.ts');
+const { bumpOne, everyonePoints, kitBumpEntry, kitPoint, onlyFlaky, repin, replacingEntry, wholeTestSteps } = await import('../src/stages/bump.ts');
 const { prBody, push, pushOne } = await import('../src/stages/push.ts');
 const { claimsFile, loadClaims } = await import('../src/claims.ts');
 const { isUrgent } = await import('../src/kit/exchequer.ts');
@@ -57,8 +57,8 @@ test('a bump: a worktree of origin/main on steward/kit-<version>, kit.json chang
   assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['changes/README.md', 'changes/steward-kit-1-0-1.md', 'kit.json']);
   assert.equal(sh(s.checkout, 'show', `${branch}:changes/README.md`), changesReadme('Fake').trimEnd());
   const entry = sh(s.checkout, 'show', `${branch}:changes/steward-kit-1-0-1.md`).replace(/\r\n/g, '\n');
-  assert.match(entry, /^\*\*It carries the Steward's kit 1\.0\.1: /, 'no heading: the stamp gives it its version');
-  assert.match(entry, /### What changed\n\n- The Steward's kit 1\.0\.1, after 1\.0\.0: the parts every agent of the manor shares\./);
+  assert.match(entry, /^\*\*It carries kit 1\.0\.1: /, 'no heading: the stamp gives it its version');
+  assert.match(entry, /### What changed\n\n- Kit 1\.0\.1, after 1\.0\.0: the parts all the staff share\./);
   assert.doesNotMatch(entry, /Jcollier0120|Steward\.git|github\.com/i, "no repository's name in notes the agent ships");
   assert.match(entry, /### Before you update\n\nNothing: it updates itself as usual\.$/);
   assert.equal(sh(s.checkout, 'show', `${branch}:kit.json`), '{\n  "kit": "1.0.1",\n  "parts": ["node"]\n}');
@@ -94,7 +94,7 @@ test('worked with plain git, a bump sets its version the old way: kit.json and t
   assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['CHANGELOG.md', 'kit.json', 'package-lock.json', 'package.json', 'src/app.ts']);
   const log = sh(s.checkout, 'show', `${branch}:CHANGELOG.md`).replace(/\r\n/g, '\n');
   assert.match(log, /^# Fake's changelog\n/);
-  assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.1: /);
+  assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries kit 1\.0\.1: /);
   assert.match(log, /### Before you update\n\nNothing: it updates itself as usual\.$/);
   assert.match(sh(s.checkout, 'show', `${branch}:src/app.ts`), /version: '0\.4\.1'/);
   assert.equal(JSON.parse(sh(s.checkout, 'show', `${branch}:package-lock.json`)).packages[''].version, '0.4.1');
@@ -403,7 +403,7 @@ test('kit.json keeps its parts and anything else when its pin moves; the PR body
   assert.match(body, /See the Steward's kit\/CHANGELOG\.md for 1\.1\.0/);
 });
 
-test("a bump's changelog entry: each kit version's headline since the one it pinned, and their Before you update", () => {
+test("a bump's changelog entry: each kit version's headline since the one it pinned, and their Before you update points marked for everyone", () => {
   const kitLog = [
     '## 1.0.3',
     '',
@@ -415,7 +415,9 @@ test("a bump's changelog entry: each kit version's headline since the one it pin
     '',
     '### Before you update',
     '',
-    '- Close its page first.',
+    '- **Everyone:** close its page first.',
+    '- A test that spells out the old words fails.',
+    '  It finds the new ones.',
     '',
     '## 1.0.1',
     '',
@@ -428,12 +430,12 @@ test("a bump's changelog entry: each kit version's headline since the one it pin
     [
       '## 0.4.7',
       '',
-      "**It carries the Steward's kit 1.0.3: the parts every agent of the manor shares.**",
+      "**It carries kit 1.0.3: the parts all the staff share.**",
       '',
       '### What changed',
       '',
-      "- The Steward's kit 1.0.3: Pages use the whole window.",
-      "- The Steward's kit 1.0.2: Offline is waited out.",
+      "- Kit 1.0.2: Offline is waited out.",
+      "- Kit 1.0.3: Pages use the whole window.",
       '',
       '### Before you update',
       '',
@@ -442,7 +444,39 @@ test("a bump's changelog entry: each kit version's headline since the one it pin
   );
   // A kit entry whose Before you update is "Nothing" adds nothing to it.
   assert.match(kitBumpEntry({ version: '0.4.7', from: '1.0.2', kit: '1.0.3', changelog: kitLog.replace('**Pages use the whole window.** More.', '**Pages.**\n\n### Before you update\n\nNothing: it updates itself as usual.') }), /### Before you update\n\nNothing: it updates itself as usual\.$/);
-  assert.match(kitBumpEntry({ version: '0.4.7', from: '1.0.3', kit: '1.0.1', changelog: kitLog }), /a step back[\s\S]*- A step back to the Steward's kit 1\.0\.1, from 1\.0\.3\./);
+  assert.match(kitBumpEntry({ version: '0.4.7', from: '1.0.3', kit: '1.0.1', changelog: kitLog }), /a step back[\s\S]*- A step back to kit 1\.0\.1, from 1\.0\.3\./);
+});
+
+test("a kit's point in a bump's notes is its headline's first sentence, without who asked or a pull request; only Before you update points marked for everyone come along", () => {
+  // Kit 2.147.5's, 2.148.3's and 2.146.8's headlines (2026-11-01).
+  assert.equal(
+    kitPoint('A refused sign-in on gitlab.com no longer takes the whole GitLab sign-in with it. The kit forgets a sign-in only where Git Credential Manager keeps its refresh token as `refresh_token.<host>`, shown stale or not.'),
+    'A refused sign-in on gitlab.com no longer takes the whole GitLab sign-in with it.',
+  );
+  assert.equal(
+    kitPoint('Connect your AI splits what the staff member connects by itself from the rest, under a heading each (the owner, 2026-11-01).'),
+    'Connect your AI splits what the staff member connects by itself from the rest, under a heading each.',
+  );
+  assert.equal(kitPoint("What an agent says of Manor's Developer options no longer claims they're on only while developer staff are hired (Manor#530), as before."), "What an agent says of Manor's Developer options no longer claims they're on only while developer staff are hired, as before.");
+  assert.equal(kitPoint('Kit 2.146.5\'s check is gone. "Quoted" words follow.'), "Kit 2.146.5's check is gone.");
+  assert.equal(kitPoint('Urgent fix: the PowerShell worker starts in a signed release.'), 'Urgent fix: the PowerShell worker starts in a signed release.');
+  assert.equal(kitPoint('One sentence, no full stop'), 'One sentence, no full stop');
+
+  assert.deepEqual(
+    everyonePoints(
+      [
+        '- **A test that spells out the old label fails**, plain or a developer\'s.',
+        '  - **Porter**, `test/notes-view.test.ts:241`.',
+        '- Everyone: after the update the PC fetches 52 MB once, in the background.',
+        '- **Everyone:** reload an open page.',
+        '  It shows the new tabs then.',
+        '- Nothing to do. A test that compared the old sentences finds the new ones.',
+        'Nothing: it updates itself as usual.',
+      ].join('\n'),
+    ),
+    ['- After the update the PC fetches 52 MB once, in the background.', '- Reload an open page.\n  It shows the new tabs then.'],
+  );
+  assert.deepEqual(everyonePoints(''), []);
 });
 
 test("a kit bump that brings an urgent kit is an urgent fix itself: its bold line starts \"**Urgent fix:\", naming the kits when a newer one came after; a plain kit's isn't", () => {
@@ -471,16 +505,16 @@ test("a kit bump that brings an urgent kit is an urgent fix itself: its bold lin
   const bold = (entry: string) => entry.split('\n')[2];
   // The urgent kit alone: the entry is the urgent fix the Steward's rule reads (the kit's exchequer.ts isUrgent).
   const one = kitBumpEntry({ version: '0.5.84', from: '1.0.2', kit: '1.0.3', changelog: kitLog });
-  assert.equal(bold(one), "**Urgent fix: it carries the Steward's kit 1.0.3, with an urgent fix to the parts every agent of the manor shares.**");
-  assert.match(one, /^- The Steward's kit 1\.0\.3: Urgent fix: the PowerShell worker starts in a signed release\.$/m);
-  assert.match(one, /### Before you update\n\n- Nothing in an agent's code: take the kit and release\.$/);
+  assert.equal(bold(one), "**Urgent fix: it carries kit 1.0.3, with an urgent fix to the parts all the staff share.**");
+  assert.match(one, /^- Kit 1\.0\.3: Urgent fix: the PowerShell worker starts in a signed release\.$/m);
+  assert.match(one, /### Before you update\n\nNothing: it updates itself as usual\.$/, "the kit's point for the staff's makers stays in the kit's changelog");
   assert.equal(isUrgent(one), true);
   // A newer plain kit came out before it was released (the kit's whole changelog read, rollout.ts): urgent still, naming it.
-  assert.equal(bold(kitBumpEntry({ version: '0.5.84', from: '1.0.2', kit: '1.0.4', changelog: kitLog })), "**Urgent fix: it carries the Steward's kit 1.0.4, with an urgent fix to the parts every agent of the manor shares (kit 1.0.3).**");
-  assert.equal(bold(kitBumpEntry({ version: '0.5.84', from: '1.0.1', kit: '1.0.4', changelog: kitLog })), "**Urgent fix: it carries the Steward's kit 1.0.4, with urgent fixes to the parts every agent of the manor shares (kits 1.0.2 and 1.0.3).**");
+  assert.equal(bold(kitBumpEntry({ version: '0.5.84', from: '1.0.2', kit: '1.0.4', changelog: kitLog })), "**Urgent fix: it carries kit 1.0.4, with an urgent fix to the parts all the staff share (kit 1.0.3).**");
+  assert.equal(bold(kitBumpEntry({ version: '0.5.84', from: '1.0.1', kit: '1.0.4', changelog: kitLog })), "**Urgent fix: it carries kit 1.0.4, with urgent fixes to the parts all the staff share (kits 1.0.2 and 1.0.3).**");
   // A later plain kit, the urgent one pinned already: as before.
   const plain = kitBumpEntry({ version: '0.5.85', from: '1.0.3', kit: '1.0.4', changelog: kitLog });
-  assert.equal(bold(plain), "**It carries the Steward's kit 1.0.4: the parts every agent of the manor shares.**");
+  assert.equal(bold(plain), "**It carries kit 1.0.4: the parts all the staff share.**");
   assert.equal(isUrgent(plain), false);
   // Nor a step back past an urgent kit, nor a bump with no changelog to read.
   assert.equal(isUrgent(kitBumpEntry({ version: '0.5.85', from: '1.0.4', kit: '1.0.2', changelog: kitLog })), false);
