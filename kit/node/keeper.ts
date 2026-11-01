@@ -1290,8 +1290,11 @@ export interface AcceleratorStatus {
   servers: { kind: EndpointKind; baseUrl: string; model: string; state: ServerState }[];
   failed: { since: string; reason: string; by: string } | null;
   game: { busy: boolean; percent: number; by: string[] } | null;
-  /** What the Watchman is doing to its driver now (driver-work.json, kit 2.148.0): no model work goes there meanwhile. */
-  driver: DriverCard | null;
+  /**
+   * What the Watchman is doing to its driver now (driver-work.json, kit 2.148.0): no model work goes there meanwhile.
+   * Optional, so a status an agent builds itself (a test's) without it still type-checks.
+   */
+  driver?: DriverCard | null;
   holders: ({ pid: number; since: number } | null)[];
   waiting: { pid: number; lane: string; since: number; who?: string }[];
 }

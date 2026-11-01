@@ -23,7 +23,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - **core**: `driverWorkOf(text)`, `driverHolds(rules, work, accs, nowMs)` (by id: the card the name gives, a second card of that name, or "Graphics card"; never the NPU or the processor), `candidates`' `driver`, `Skipped.why` `'driver'`, `say.skippedDriver(acc, work)`, `say.driverWaiting(work)`. Types `DriverCard`, `DriverWork`.
 - **accelerators.ts**: `driverWorkFile(env)` (`WATCHMAN_DRIVER_WORK` names another; under `node --test` only that counts), `readDriverWork()`, `driverHoldsNow(accs, now)`, `driverHoldOf(acc, now)`, `DriverChanging`, `ensureServer`'s `card`, `candidates`' `driver`.
-- **keeper.ts**: `watchDriverWork(reaper, { file, servers, everyMs })`, started by the PC keeper's first look; `ReaperDeps.driverOn`; the outcome `stopped-for-driver`; `ReaperOptions.driverGraceMs`; `AcceleratorStatus.driver`.
+- **keeper.ts**: `watchDriverWork(reaper, { file, servers, everyMs })`, started by the PC keeper's first look; `ReaperDeps.driverOn`; the outcome `stopped-for-driver`; `ReaperOptions.driverGraceMs`; `AcceleratorStatus.driver` (optional, so a status an agent's own tests build without it still type-checks).
 
 ### Before you update
 
