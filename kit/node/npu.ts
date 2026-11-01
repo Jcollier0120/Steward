@@ -7,6 +7,7 @@ import {
   chatBody,
   clearFailure,
   currentGames,
+  driverHoldsNow,
   embeddedAt,
   ensureServer,
   expandEnv,
@@ -400,7 +401,7 @@ export class Npu {
     if (!serving.length) return 0;
     const games = readGames();
     const workOrder = 'error' in this.cfg ? null : this.cfg.workOrder;
-    const { list } = candidates(serving, { work, tokens: 0, lane: 'background' }, { failure: readFailure, games: gamesStale(games) ? null : games, call: npuCallNow(), deferredMs, workOrder });
+    const { list } = candidates(serving, { work, tokens: 0, lane: 'background' }, { failure: readFailure, games: gamesStale(games) ? null : games, call: npuCallNow(), driver: driverHoldsNow(serving), deferredMs, workOrder });
     return Math.max(...(list.length ? list : serving).map((a) => core.capFor(a, work))) - maxTokens;
   }
 
@@ -520,6 +521,8 @@ export class Npu {
     const games = lane === 'background' && serving.some((a) => a.kind === 'gpu') ? await currentGames(cfg.accelerators) : null;
     // A call captioned on the NPU (npu-call.json, Envoy's): background work leaves the NPU to it (kit 2.143.1).
     const call = lane === 'background' && serving.some((a) => a.kind === 'npu') ? npuCallNow() : null;
+    // A card whose driver the Watchman is changing (driver-work.json): no request goes there, a person's neither (kit 2.148.0).
+    const driver = serving.some((a) => a.kind === 'gpu') ? driverHoldsNow(serving) : {};
     // The work's own order, where its NPU's generation has one (config.json's workOrder): by whose servers are up, when it
     // goes by that (its runningFirst: AMD's pictures until kit 2.135.1; they go to the Radeon whoever's is up now).
     const running = await this.serversUp(serving, work, cfg.workOrder);
@@ -540,12 +543,16 @@ export class Npu {
     /** One of them wasn't started because the manor is stopped (Manor's Settings): said, so nobody waits for it. */
     let manorWasStopped = false;
     let loadingOn: { acc: Accelerator; reason: string } | null = null;
+    /** Tried, and its card's driver turned out to be changing (its server wasn't started, or it went in the middle). */
+    const changing: Skipped[] = [];
     for (;;) {
-      const { list, skipped, npuFirst } = candidates(
+      const found = candidates(
         serving.filter((a) => !tried.has(a.id)),
         { work, tokens, lane },
-        { failure: readFailure, games, call, deferredMs: lane === 'background' ? (id) => deferredMs(turnIdOf(id)) : undefined, workOrder: cfg.workOrder, running, waiting },
+        { failure: readFailure, games, call, driver, deferredMs: lane === 'background' ? (id) => deferredMs(turnIdOf(id)) : undefined, workOrder: cfg.workOrder, running, waiting },
       );
+      const { list, npuFirst } = found;
+      const skipped = [...changing, ...found.skipped];
       if (!list.length) {
         if (loadingOn && !first) {
           const deferred = lane === 'background' ? core.say.deferredFor(BACK_OFF_MS / 60_000) : '';
@@ -580,7 +587,7 @@ export class Npu {
             const onWaking = opts.onWaking;
             const timeouts = core.timeoutsFor(acc, work);
             // Background work steps back when there's no room to load its model (memory-guard.ts); a person's starts it anyway.
-            const server = await ensureServer(ep, { start: opts.start, readyMs: Math.max(READY_WAIT_MS, timeouts?.coldLoadMs ?? 0), whenShort: lane === 'background' ? 'defer' : 'start', ...(onWaking ? { onWaking: (how) => onWaking(wakingOf(acc, work, ep, how)) } : {}) });
+            const server = await ensureServer(ep, { start: opts.start, readyMs: Math.max(READY_WAIT_MS, timeouts?.coldLoadMs ?? 0), whenShort: lane === 'background' ? 'defer' : 'start', card: turn.id === acc.id ? acc : { id: turn.id, kind: core.kindOfId(turn.id) ?? acc.kind, name: turn.name }, ...(onWaking ? { onWaking: (how) => onWaking(wakingOf(acc, work, ep, how)) } : {}) });
             // No warm-up when the server, already up, answered this same model within its keepalive: it has it loaded.
             const fresh = server.started || server.waited;
             const warmed = warmsUp(acc, work) && (fresh || !servedRecently(acc.id, ep));
@@ -608,6 +615,13 @@ export class Npu {
         return { value, acc, ...(first ? { fellBackFrom: { ...refOf(first.acc), reason: first.reason } } : {}) };
       } catch (e) {
         if (e instanceof NpuError) throw e;
+        // Its card's driver changing (driver-work.json): its server wasn't started, or it went down as the Watchman
+        // began. Nothing is marked: the next candidate, or the work waits for it to be done (kit 2.148.0).
+        const held = turn.id === acc.id ? driverHoldsNow([acc])[acc.id] : driverHoldsNow([{ id: turn.id, kind: core.kindOfId(turn.id) ?? acc.kind }])[turn.id];
+        if (held && (e instanceof ServerNotRunning || e instanceof AcceleratorDown)) {
+          changing.push({ acc, why: 'driver', detail: core.say.skippedDriver(turn.id === acc.id ? acc : turn, held) });
+          continue;
+        }
         // Not running, and not to be started: the next candidate, with nothing marked.
         if (e instanceof ServerNotRunning) {
           notRunning.push(acc);

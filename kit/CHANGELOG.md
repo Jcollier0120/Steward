@@ -2,6 +2,35 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.148.0
+
+**While the Watchman rolls back a graphics card's driver, or a new driver is being installed on it, no model work goes to that card until it's done. The other cards and the processor go on.**
+
+### What changed
+
+- **The Watchman's word** (spec/ACCELERATORS.md, Driver work): its driver guard names each card whose driver is changing in `%ProgramData%\Watchman\lamplighter\driver-work.json`:
+  - a rollback, from before it changes anything until it's done, through a crash until the start-up that finishes it;
+  - a driver being installed (Windows Update, the maker's installer, Windows).
+  Each entry holds until its `until`, which the guard moves on at each look, so one the guard no longer renews lets go by itself.
+  - Found on GAMING-010 (RTX 4080 SUPER), 2026-10-31: the manor started `llama-server.exe` on the card 89 s into the guard's rollback of NVIDIA's 621.01, while pnputil was still removing it. Windows stopped with bug check 0x7E in nvlddmkm.sys about 14 s later, the third bug check during a rollback on that PC.
+- **No request goes there** (core `candidates`, `driver`): a held card is skipped for every request, a person's too ("the Watchman is rolling back the driver of the …"), and the work goes to another card or the processor. With none left it waits, as for a busy accelerator, and a request whose server fails there meanwhile marks nothing failed.
+- **No server starts there** (`ensureServer`): `DriverChanging`, a `ServerNotRunning`, for a server on a held card. The keeper doesn't set a held card up again meanwhile.
+- **The keeper stops its servers there**: in their turn when that's had at once, else once the requests under way end, within `driverGraceMs` (10 s), and then all the same; never restarted. It watches the file, so this comes within seconds of the guard writing it, not at the next minute's look. The guard waits 20 s for them before pnputil runs.
+- **The card says why**: `acceleratorStatus` has `driver`, and `describeStatus` says it. `say.driverWaiting` gives a card's words in place of "Failed": "Waiting: the Watchman is rolling back its driver".
+- **rules.json**: `accelerators.driverWorkMaxMs` (2 hours; an entry held further ahead, from a clock moved back, counts as none) and `keeper.driverGraceMs` (10 s).
+
+### What's new
+
+- **core**: `driverWorkOf(text)`, `driverHolds(rules, work, accs, nowMs)` (by id: the card the name gives, a second card of that name, or "Graphics card"; never the NPU or the processor), `candidates`' `driver`, `Skipped.why` `'driver'`, `say.skippedDriver(acc, work)`, `say.driverWaiting(work)`. Types `DriverCard`, `DriverWork`.
+- **accelerators.ts**: `driverWorkFile(env)` (`WATCHMAN_DRIVER_WORK` names another; under `node --test` only that counts), `readDriverWork()`, `driverHoldsNow(accs, now)`, `driverHoldOf(acc, now)`, `DriverChanging`, `ensureServer`'s `card`, `candidates`' `driver`.
+- **keeper.ts**: `watchDriverWork(reaper, { file, servers, everyMs })`, started by the PC keeper's first look; `ReaperDeps.driverOn`; the outcome `stopped-for-driver`; `ReaperOptions.driverGraceMs`; `AcceleratorStatus.driver` (optional, so a status an agent's own tests build without it still type-checks).
+
+### Before you update
+
+- Nothing for an agent that routes through the kit (`Npu`) and keeps its servers with the kit's keeper (the Smith, Reeve): the change comes with the kit.
+- An agent that shows its accelerators' state can show `driver` (`say.driverWaiting`) where it shows a failure. Manor's accelerator card does, in a release of its own.
+- Not covered: a program that runs its model on a card in its own process (Heiward's DirectML). The guard's own 20-second wait, and its stopping the manor's servers on the card, still apply to a server an older kit started.
+
 ## 2.147.5
 
 **A refused sign-in on gitlab.com no longer takes the whole GitLab sign-in with it. The kit forgets a sign-in only where Git Credential Manager keeps its refresh token as `refresh_token.<host>`, shown stale or not.**

@@ -175,7 +175,7 @@ export type Need = {
 };
 export type Skipped = {
     acc: Accelerator;
-    why: 'failed' | 'game' | 'call' | 'deferred';
+    why: 'failed' | 'game' | 'call' | 'driver' | 'deferred';
     detail: string;
 };
 export type Look = {
@@ -298,7 +298,7 @@ export type Look = {
 /**
  * @typedef {object} Skipped
  * @property {Accelerator} acc
- * @property {'failed' | 'game' | 'call' | 'deferred'} why
+ * @property {'failed' | 'game' | 'call' | 'driver' | 'deferred'} why
  * @property {string} detail
  */
 /**
@@ -671,6 +671,83 @@ export declare function callOf(text: string | null): NpuCall | null;
  * @returns {NpuCall | null}
  */
 export declare function callNow(rules: Rules, call: NpuCall | null, nowMs: number): NpuCall | null;
+export type DriverCard = {
+    /**
+     * The card as Windows names it ("NVIDIA GeForce RTX 4080 SUPER"): the name its id comes from.
+     */
+    name: string;
+    /**
+     * Its device as Windows knows it.
+     */
+    instanceId?: string;
+    /**
+     * A rollback of its driver, or a driver being installed on it.
+     */
+    why: 'rollback' | 'install';
+    /**
+     * A rollback's: under way, waiting for Windows to restart, or
+     * being finished at a start-up after the PC went down in the middle of it.
+     */
+    stage?: 'rolling' | 'restart' | 'finishing';
+    /**
+     * An install's: who installs it ("Windows Update", "NVIDIA's installer", "Windows").
+     */
+    by?: string;
+    /**
+     * When the work began.
+     */
+    since: string;
+    /**
+     * It holds until then, unless the guard writes it again.
+     */
+    until: string;
+};
+export type DriverWork = {
+    by: string;
+    /**
+     * When the guard last wrote it.
+     */
+    at: string;
+    cards: DriverCard[];
+};
+/**
+ * @typedef {object} DriverCard A graphics card the Watchman's driver guard names in driver-work.json: its driver is
+ * changing now, so no model work goes there until it's done (ACCELERATORS.md, "Driver work").
+ * @property {string} name The card as Windows names it ("NVIDIA GeForce RTX 4080 SUPER"): the name its id comes from.
+ * @property {string} [instanceId] Its device as Windows knows it.
+ * @property {'rollback' | 'install'} why A rollback of its driver, or a driver being installed on it.
+ * @property {'rolling' | 'restart' | 'finishing'} [stage] A rollback's: under way, waiting for Windows to restart, or
+ * being finished at a start-up after the PC went down in the middle of it.
+ * @property {string} [by] An install's: who installs it ("Windows Update", "NVIDIA's installer", "Windows").
+ * @property {string} since When the work began.
+ * @property {string} until It holds until then, unless the guard writes it again.
+ */
+/**
+ * @typedef {object} DriverWork driver-work.json: the guard's, in its own folder, which every user may read.
+ * @property {string} by
+ * @property {string} at When the guard last wrote it.
+ * @property {DriverCard[]} cards
+ */
+/**
+ * driver-work.json's contents, or null when it's absent or unreadable (which count the same: no driver changing).
+ * Only entries that name a card, why, and until when are kept. A single entry where a list belongs (as Windows
+ * PowerShell can write one) is read as a list of one.
+ * @param {string | null} text
+ * @returns {DriverWork | null}
+ */
+export declare function driverWorkOf(text: string | null): DriverWork | null;
+/**
+ * The configured graphics cards whose driver is changing now, by id: each one a live entry names, by the id its name
+ * gives (acceleratorId), or a second card's of that name (`…-2`); "Graphics card" (several cards, which one not known)
+ * whenever any is named. An entry is live until its `until`, and not when that is more than driverWorkMaxMs ahead (a
+ * clock moved back): so one the guard no longer renews lets go by itself. The NPU and the processor are never held.
+ * @param {Rules} rules
+ * @param {DriverWork | null} work
+ * @param {Pick<Accelerator, 'id' | 'kind'>[]} accs
+ * @param {number} nowMs
+ * @returns {Record<string, DriverCard>}
+ */
+export declare function driverHolds(rules: Rules, work: DriverWork | null, accs: Pick<Accelerator, 'id' | 'kind'>[], nowMs: number): Record<string, DriverCard>;
 /**
  * What doesn't count as a game: the desktop's compositor, and the manor's own model servers (their
  * startCommands', and the usual ones).
@@ -697,7 +774,8 @@ export declare function gameCards(rules: Rules, load: GpuLoad, accs: Accelerator
  * The candidates for a request, in order: they serve its kind, its size fits their cap, they haven't
  * failed in the last failedForMs (unless every one that would do has: then they all may, as a last
  * resort), a game isn't using them (background work only), the NPU isn't captioning a call (`call`, callNow's:
- * background work only, kit 2.143.1), and the agent isn't leaving them alone after a line that was too long
+ * background work only, kit 2.143.1), the Watchman isn't changing their driver (`driver`, driverHolds': every lane,
+ * a request someone waits on too, kit 2.148.0), and the agent isn't leaving them alone after a line that was too long
  * (`deferredMs`). Skipped for a call, the NPU first leaves background work no candidate: it waits for the call's end
  * (whyNone's busy), and goes to no graphics card or processor meanwhile (the owner's ruling, 2026-10-27).
  *
@@ -720,13 +798,14 @@ export declare function gameCards(rules: Rules, load: GpuLoad, accs: Accelerator
  * @param {Rules} rules
  * @param {Accelerator[]} accs
  * @param {Need} need
- * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, call?: NpuCall | null, deferredMs?: Record<string, number>, nowMs?: number, workOrder?: WorkOrder | null, running?: Record<string, boolean>, waiting?: number }} [state]
+ * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, call?: NpuCall | null, driver?: Record<string, DriverCard>, deferredMs?: Record<string, number>, nowMs?: number, workOrder?: WorkOrder | null, running?: Record<string, boolean>, waiting?: number }} [state]
  * @returns {{ list: Accelerator[], skipped: Skipped[], npuFirst: boolean }}
  */
 export declare function candidates(rules: Rules, accs: Accelerator[], need: Need, state?: {
     failures?: Record<string, Failure | null>;
     games?: Games | null;
     call?: NpuCall | null;
+    driver?: Record<string, DriverCard>;
     deferredMs?: Record<string, number>;
     nowMs?: number;
     workOrder?: WorkOrder | null;

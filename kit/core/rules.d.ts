@@ -77,6 +77,10 @@ export type AcceleratorRules = {
      */
     callFreshMs: number;
     /**
+     * A driver-work.json entry holding further ahead than this (a clock moved back) doesn't count.
+     */
+    driverWorkMaxMs: number;
+    /**
      * A background request doesn't join a line with this many already waiting.
      */
     maxAhead: number;
@@ -153,6 +157,10 @@ export type KeeperRules = {
      * The NPU nobody has used this long has its servers stopped while a call that doesn't need them is on.
      */
     callGraceMs: number;
+    /**
+     * A card the Watchman is changing the driver of has its servers stopped once its requests under way end, or after this long.
+     */
+    driverGraceMs: number;
     /**
      * A server that hasn't answered this long, while nobody uses its accelerator, is restarted.
      */
