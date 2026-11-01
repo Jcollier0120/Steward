@@ -13,8 +13,8 @@ export declare const LOCAL_AI = "the local AI";
  * starts with "the" is left as it is. None (a note kept from before accelerators, or one that didn't say) is
  * "a local model": it may have been a graphics card, so it is never guessed to be the NPU.
  *
- * It names the hardware, so it's for developers' views, logs and the messages below. What a customer reads says
- * LOCAL_AI instead (noteLabel without `developer`): no NPU, graphics card or processor by name.
+ * It names the hardware, so it's for developers' views, logs and the messages below. What a customer reads names the
+ * staff member who wrote it instead (noteLabel without `developer`): no NPU, graphics card or processor by name.
  * @param {AcceleratorRef | { name: string } | null | undefined} a
  * @returns {string}
  */
@@ -22,17 +22,35 @@ export declare function theAccelerator(a: AcceleratorRef | {
     name: string;
 } | null | undefined): string;
 /**
- * A note's label, on every agent's page: "note from the local AI, unverified", whatever ran it, since what a customer
- * reads never names the hardware (kit 2.97.1; before, it named it to everyone). `developer` (the manor's developer
- * view, a log): where it was written, "note from the NVIDIA GeForce RTX 4090, unverified", or "note from a local
- * model, unverified" for a note that doesn't say.
+ * A staff member's name in a sentence (kit 2.148.1): "the Herald", but Reeve and Heiward, who are called by name. The
+ * same rule as Manor's staff settings.
+ * @param {string} name The staff member's name, as its APP.name says it ("Herald", "Reeve").
+ * @returns {string}
+ */
+export declare function theName(name: string): string;
+/**
+ * A note's label, on every staff member's page (kit 2.148.1): who wrote it and what it is, or what it did, whatever
+ * ran it, since what a customer reads never names the hardware (kit 2.97.1; before, it named it to everyone).
+ * - `o.what`, a noun: the staff member's own word for its notes, "summary from the Herald" ("summary", the default;
+ *   "caption", "explanation").
+ * - `o.did`, a past-tense action, instead: what the staff member did to the message or messages, "summarized by the
+ *   Herald", "explained by the Surveyor", "de-duplicated by the Clerk". Given both, `did` is said.
+ * - `o.by`: who wrote it, in a sentence (theName; LOCAL_AI for a caller that names nobody).
+ * `developer` (the manor's developer view, a log) adds where it was written to either: "summary from the Herald,
+ * written on the NVIDIA GeForce RTX 4090", or "…, written by a local model" for a note that doesn't say (never guessed
+ * to be the NPU). Until 2.148.1 it was "note from the local AI, unverified".
  * @param {AcceleratorRef | { name: string } | null | undefined} a
  * @param {boolean} [developer]
+ * @param {{ what?: string, did?: string, by?: string }} [o]
  * @returns {string}
  */
 export declare function noteLabel(a: AcceleratorRef | {
     name: string;
-} | null | undefined, developer?: boolean): string;
+} | null | undefined, developer?: boolean, o?: {
+    what?: string;
+    did?: string;
+    by?: string;
+}): string;
 /**
  * What an agent says when no model server is set up here: no accelerators' config.json, an empty list (setup
  * dropped the install's `npu` entry), or a list where nothing serves anything. The same words in each case. Since

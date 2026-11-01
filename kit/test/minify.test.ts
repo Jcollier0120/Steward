@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // A release's code, built (minify.ts): each .ts minified to a .js where it was, the entry kept as a stub.
 const steward = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -96,6 +96,21 @@ test('a release built: a minified .js beside each .ts, the entry a stub, .d.ts g
   const r = spawnSync(process.execPath, [path.join(stage, 'src', 'cli.ts')], { encoding: 'utf8', windowsHide: true });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), "hello, manor found Keeper 1000 later side import '../src/kit/agent-checks.ts';", 'runs from the stub; finds what is beside it; keeps names');
+});
+
+test("a released agent's notes name it: the kit reads its app.js, as it reads app.ts in a checkout", async () => {
+  const esbuild = await loadEsbuild(steward);
+  assert.ok(!('error' in esbuild));
+  const stage = path.join(tmp, 'fixture');
+  cpSync(path.join(steward, 'kit', 'test', 'fixture'), stage, { recursive: true, filter: (f) => !f.includes('node_modules') });
+  await minifyRelease(stage, esbuild as never);
+  assert.ok(!existsSync(path.join(stage, 'src', 'app.ts')) && existsSync(path.join(stage, 'src', 'app.js')));
+  const kit = pathToFileURL(path.join(stage, 'src', 'kit', 'accelerators.js')).href;
+  const script = `const A = await import(${JSON.stringify(kit)}); console.log([A.noteLabel(null), A.noteLabel({ id: 'npu', name: 'Snapdragon X2 Elite NPU' }, true, 'caption')].join(' | '))`;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', windowsHide: true });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), 'summary from the Fixture | caption from the Fixture, written on the Snapdragon X2 Elite NPU');
+  assert.equal(r.stderr, '', 'no warning for loading app.js');
 });
 
 test("a file esbuild can't read stops the build, naming it", async () => {

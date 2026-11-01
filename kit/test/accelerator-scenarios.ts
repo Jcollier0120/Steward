@@ -384,6 +384,17 @@ export function makeAcceleratorVectors() {
       { case: 'a name that says "the"', ref: { id: 'cpu', name: 'The Oryon CPU' } },
       { case: 'none: a note that says nothing of where (from before the accelerators) is from a local model, never guessed to be the NPU', ref: null },
     ].map((m) => ({ ...m, theAccelerator: core.theAccelerator(m.ref), noteLabel: core.noteLabel(m.ref), developerNoteLabel: core.noteLabel(m.ref, true) })),
+    // A staff member's label (kit 2.148.1): a noun ("<what> from <by>") or a past-tense action ("<did> by <by>"),
+    // with where it was written for a developer.
+    noteLabels: [
+      { case: 'the default: a summary, from a caller that names nobody', ref: { id: 'npu', name: 'Snapdragon X2 Elite NPU' }, developer: false, o: {} },
+      { case: 'a noun of its own', ref: { id: 'gpu-nvidia-geforce-rtx-4090', name: 'NVIDIA GeForce RTX 4090' }, developer: false, o: { what: 'caption', by: 'the Clerk' } },
+      { case: 'an action', ref: { id: 'npu', name: 'Snapdragon X2 Elite NPU' }, developer: false, o: { did: 'summarized', by: 'the Herald' } },
+      { case: "an action, in a developer's view", ref: { id: 'gpu-nvidia-geforce-rtx-4090', name: 'NVIDIA GeForce RTX 4090' }, developer: true, o: { did: 'explained', by: 'the Surveyor' } },
+      { case: "an action that doesn't say where, in a developer's view: by a local model", ref: null, developer: true, o: { did: 'de-duplicated', by: 'the Clerk' } },
+      { case: "a summary in a developer's view, by a staff member called by name", ref: { id: 'cpu', name: 'Processor' }, developer: true, o: { by: 'Heiward' } },
+      { case: 'both a noun and an action: the action', ref: { id: 'npu', name: 'Snapdragon X2 Elite NPU' }, developer: false, o: { what: 'summary', did: 'summarized', by: 'Reeve' } },
+    ].map((n) => ({ ...n, expect: core.noteLabel(n.ref, n.developer, n.o) })),
     tokens: [
       { text: 'x'.repeat(9000), estimate: core.estimateTokens(RULES, 'x'.repeat(9000)) },
       { text: 'Hi', estimate: core.estimateTokens(RULES, 'Hi') },

@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.287
+
+**Text the local AI writes on a staff member's page now says which staff member wrote it: "summary from the Herald", where it said "note from the local AI, unverified". The Steward hands kit 2.148.1 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.148.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a note's label names the staff member who wrote it, in its own word for its notes or for what it did: "summary from the Herald", "summary from Heiward", "explained by the Surveyor". Holding the pointer over it still says to check it against the facts beside it. Developers still see where it was written: "summary from the Herald, written on the NVIDIA GeForce RTX 4090".
+- The Plain-words notes setting's help says the notes are there to check against the facts beside them. It used to say they're labelled unverified.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member shows the new label once it takes kit 2.148.1.
+
 ## 0.36.286
 
 **While the Watchman rolls back a graphics card's driver, or a new driver is being installed on it, no model work goes to that card until it's done: the Steward hands kit 2.148.0 out, and runs on it.**

@@ -5147,8 +5147,8 @@
     "name": "Snapdragon X2 Elite NPU"
    },
    "theAccelerator": "the Snapdragon X2 Elite NPU",
-   "noteLabel": "note from the local AI, unverified",
-   "developerNoteLabel": "note from the Snapdragon X2 Elite NPU, unverified"
+   "noteLabel": "summary from the local AI",
+   "developerNoteLabel": "summary from the local AI, written on the Snapdragon X2 Elite NPU"
   },
   {
    "case": "an older config's card",
@@ -5157,8 +5157,8 @@
     "name": "Graphics card"
    },
    "theAccelerator": "the graphics card",
-   "noteLabel": "note from the local AI, unverified",
-   "developerNoteLabel": "note from the graphics card, unverified"
+   "noteLabel": "summary from the local AI",
+   "developerNoteLabel": "summary from the local AI, written on the graphics card"
   },
   {
    "case": "the processor",
@@ -5167,8 +5167,8 @@
     "name": "Processor"
    },
    "theAccelerator": "the processor",
-   "noteLabel": "note from the local AI, unverified",
-   "developerNoteLabel": "note from the processor, unverified"
+   "noteLabel": "summary from the local AI",
+   "developerNoteLabel": "summary from the local AI, written on the processor"
   },
   {
    "case": "a name that says \"the\"",
@@ -5177,15 +5177,102 @@
     "name": "The Oryon CPU"
    },
    "theAccelerator": "The Oryon CPU",
-   "noteLabel": "note from the local AI, unverified",
-   "developerNoteLabel": "note from The Oryon CPU, unverified"
+   "noteLabel": "summary from the local AI",
+   "developerNoteLabel": "summary from the local AI, written on The Oryon CPU"
   },
   {
    "case": "none: a note that says nothing of where (from before the accelerators) is from a local model, never guessed to be the NPU",
    "ref": null,
    "theAccelerator": "a local model",
-   "noteLabel": "note from the local AI, unverified",
-   "developerNoteLabel": "note from a local model, unverified"
+   "noteLabel": "summary from the local AI",
+   "developerNoteLabel": "summary from the local AI, written by a local model"
+  }
+ ],
+ "noteLabels": [
+  {
+   "case": "the default: a summary, from a caller that names nobody",
+   "ref": {
+    "id": "npu",
+    "name": "Snapdragon X2 Elite NPU"
+   },
+   "developer": false,
+   "o": {},
+   "expect": "summary from the local AI"
+  },
+  {
+   "case": "a noun of its own",
+   "ref": {
+    "id": "gpu-nvidia-geforce-rtx-4090",
+    "name": "NVIDIA GeForce RTX 4090"
+   },
+   "developer": false,
+   "o": {
+    "what": "caption",
+    "by": "the Clerk"
+   },
+   "expect": "caption from the Clerk"
+  },
+  {
+   "case": "an action",
+   "ref": {
+    "id": "npu",
+    "name": "Snapdragon X2 Elite NPU"
+   },
+   "developer": false,
+   "o": {
+    "did": "summarized",
+    "by": "the Herald"
+   },
+   "expect": "summarized by the Herald"
+  },
+  {
+   "case": "an action, in a developer's view",
+   "ref": {
+    "id": "gpu-nvidia-geforce-rtx-4090",
+    "name": "NVIDIA GeForce RTX 4090"
+   },
+   "developer": true,
+   "o": {
+    "did": "explained",
+    "by": "the Surveyor"
+   },
+   "expect": "explained by the Surveyor, written on the NVIDIA GeForce RTX 4090"
+  },
+  {
+   "case": "an action that doesn't say where, in a developer's view: by a local model",
+   "ref": null,
+   "developer": true,
+   "o": {
+    "did": "de-duplicated",
+    "by": "the Clerk"
+   },
+   "expect": "de-duplicated by the Clerk, written by a local model"
+  },
+  {
+   "case": "a summary in a developer's view, by a staff member called by name",
+   "ref": {
+    "id": "cpu",
+    "name": "Processor"
+   },
+   "developer": true,
+   "o": {
+    "by": "Heiward"
+   },
+   "expect": "summary from Heiward, written on the processor"
+  },
+  {
+   "case": "both a noun and an action: the action",
+   "ref": {
+    "id": "npu",
+    "name": "Snapdragon X2 Elite NPU"
+   },
+   "developer": false,
+   "o": {
+    "what": "summary",
+    "did": "summarized",
+    "by": "Reeve"
+   },
+   "expect": "summarized by Reeve"
   }
  ],
  "tokens": [

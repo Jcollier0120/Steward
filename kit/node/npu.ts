@@ -57,7 +57,7 @@ import { RULES } from './rules.ts';
 import { coldStartMsOf, routeOfServer, smallPc } from './npu-vendors.ts';
 
 export { npuLockDir };
-export { noteLabel, reeveHome, theAccelerator, type Accelerator, type AcceleratorConfig, type AcceleratorRef, type ChatMessage } from './accelerators.ts';
+export { noteLabel, reeveHome, theAccelerator, theName, type NoteKind, type Accelerator, type AcceleratorConfig, type AcceleratorRef, type ChatMessage } from './accelerators.ts';
 
 /**
  * The manor's models, wherever they run: the NPU, a graphics card or the processor (Manor's

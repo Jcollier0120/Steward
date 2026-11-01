@@ -264,6 +264,8 @@ public sealed class VectorTests {
 			Assert.Equal(m["noteLabel"]!.GetValue<string>(), Json(Core.Call("noteLabel", m["ref"]?.DeepClone()))!.GetValue<string>());
 			if (m["ref"] is JsonNode r) Assert.Equal(m["theAccelerator"]!.GetValue<string>(), Core.TheAccelerator(r["id"]!.GetValue<string>(), r["name"]!.GetValue<string>()));
 		}
+		foreach (JsonNode n in Each(Accel, "noteLabels"))
+			Assert.Equal(n["expect"]!.GetValue<string>(), Json(Core.Call("noteLabel", n["ref"]?.DeepClone(), n["developer"]!.DeepClone(), n["o"]!.DeepClone()))!.GetValue<string>());
 		foreach (JsonNode t in Each(Accel, "tokens")) {
 			JsonNode? got = t["text"] != null ? Json(Core.CallWithRules("estimateTokens", t["text"]!.DeepClone()))
 				: t["chat"] != null ? Json(Core.CallWithRules("chatTokens", t["chat"]!.DeepClone()))

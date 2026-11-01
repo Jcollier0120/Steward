@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { alive, startApart } from './apart.ts';
@@ -63,11 +64,43 @@ export const LEGACY_NPU: AcceleratorRef = { ...core.LEGACY_NPU };
 /** "the NPU", "the NVIDIA GeForce RTX 4090", "the graphics card": an accelerator in a sentence, for developers' views and logs. */
 export const theAccelerator = (a: AcceleratorRef | null | undefined) => core.theAccelerator(a);
 
+/** A staff member's name in a sentence: "the Herald", but Reeve and Heiward, who are called by name. */
+export const theName = (name: string) => core.theName(name);
+
+let notesBy: string | undefined;
+let notesByLoading = false;
+
 /**
- * A note's label: "note from the local AI, unverified" for everyone; with `developer` (isDeveloper(), a log), where
- * it was written: "note from the NVIDIA GeForce RTX 4090, unverified".
+ * Who writes this agent's notes, in a sentence ("the Herald"): its APP.name, read from its app.ts (app.js in a release)
+ * at the first label, never imported at the top. An agent's app.ts reads its config, whose kit imports reach this file
+ * (accelerator-config.ts), so a static import would close the loop kit 2.76.0's first try did (work-status.test.ts).
+ * It's required, since a label is drawn at once. An app.ts that can't be required yet (it awaits as it loads, or is
+ * still loading) is imported instead, and named from then on. Until then, or with no app beside the kit: LOCAL_AI.
  */
-export const noteLabel = (a: AcceleratorRef | null | undefined, developer = false) => core.noteLabel(a, developer);
+function notesWriter(): string {
+  if (notesBy) return notesBy;
+  const file = ['../app.ts', '../app.js'].find((f) => existsSync(new URL(f, import.meta.url)));
+  if (!file) return core.LOCAL_AI;
+  const named = (m: { APP?: { name?: string } }) => (m.APP?.name ? (notesBy = core.theName(m.APP.name)) : core.LOCAL_AI);
+  try {
+    return named(createRequire(import.meta.url)(file));
+  } catch {
+    if (!notesByLoading) (notesByLoading = true), void import(new URL(file, import.meta.url).href).then(named, () => {});
+    return core.LOCAL_AI;
+  }
+}
+
+/** What a note is (a noun: "caption"), or what the staff member did ({ did: 'summarized' }). */
+export type NoteKind = string | { did: string };
+
+/**
+ * A note's label: what it is and which staff member wrote it, "summary from the Herald", for everyone; with
+ * `developer` (isDeveloper(), a log), where it was written too: "summary from the Herald, written on the NVIDIA
+ * GeForce RTX 4090". `what` is the staff member's own word for its notes ("caption", "explanation", "report"), or
+ * what it did to the message or messages, past tense: `{ did: 'summarized' }` is "summarized by the Herald".
+ */
+export const noteLabel = (a: AcceleratorRef | null | undefined, developer = false, what: NoteKind = 'summary') =>
+  core.noteLabel(a, developer, { ...(typeof what === 'string' ? { what } : { did: what.did }), by: notesWriter() });
 
 /** Whether it serves this kind of request. */
 export const serves = (a: Accelerator, work: Work) => core.serves(a, work);
