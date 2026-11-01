@@ -605,6 +605,48 @@ export function releaseNpuForCall(by: string): void {
   rmSync(npuCallFile(), { force: true });
 }
 
+// ---------------------------------------------------------------- driver work (kit 2.148.0)
+
+export type DriverCard = core.DriverCard;
+export type DriverWork = core.DriverWork;
+
+/**
+ * The Watchman's driver-work.json: the graphics cards whose driver its guard is changing now (a rollback, from before
+ * it changes anything until it's done, a start-up's finish of one cut short included; or a driver being installed),
+ * in the guard's own folder, %ProgramData%\Watchman\lamplighter, which every user may read and only SYSTEM and
+ * Administrators write. While a card is named there, no request goes to it and no model server starts on it, and the
+ * keeper stops the servers it has there (spec/ACCELERATORS.md, "Driver work"). WATCHMAN_DRIVER_WORK names another
+ * file; under node --test only that counts, so the PC's own never decides a test.
+ */
+export function driverWorkFile(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (env.WATCHMAN_DRIVER_WORK) return env.WATCHMAN_DRIVER_WORK;
+  if (env.NODE_TEST_CONTEXT) return null;
+  return path.join(env.ProgramData || env.PROGRAMDATA || 'C:\\ProgramData', 'Watchman', 'lamplighter', 'driver-work.json');
+}
+
+/** driver-work.json as the guard wrote it, or null when there's none (no driver changing) or it can't be read. */
+export function readDriverWork(): DriverWork | null {
+  const file = driverWorkFile();
+  return file ? core.driverWorkOf(readText(file)) : null;
+}
+
+/**
+ * The cards among `accs` whose driver is changing now (the core's driverHolds: driver-work.json's live entries), by id;
+ * empty when none is. Never throws.
+ */
+export function driverHoldsNow(accs: ReadonlyArray<Pick<Accelerator, 'id' | 'kind'>>, now = Date.now()): Record<string, DriverCard> {
+  try {
+    return core.driverHolds(RULES, readDriverWork(), [...accs], now);
+  } catch {
+    return {};
+  }
+}
+
+/** What the Watchman is doing to this card's driver now, or null (never the NPU's or the processor's). */
+export function driverHoldOf(acc: Pick<Accelerator, 'id' | 'kind'>, now = Date.now()): DriverCard | null {
+  return acc.kind === 'gpu' ? (driverHoldsNow([acc], now)[acc.id] ?? null) : null;
+}
+
 // ---------------------------------------------------------------- choosing
 
 /** A background request doesn't join a line with this many already waiting. */
@@ -618,7 +660,8 @@ export type WorkOrder = core.WorkOrder;
  * The candidates for a request, in order: they serve its kind, its size fits their cap, they haven't
  * failed in the last 10 minutes (unless every one that would do has: then they all may, as a last
  * resort), a game isn't using them (background work only), the NPU isn't captioning a call (`call`, npuCallNow's:
- * background work only), and this agent isn't leaving them alone
+ * background work only), the Watchman isn't changing their driver (`driver`, driverHoldsNow's: every lane, kit
+ * 2.148.0), and this agent isn't leaving them alone
  * after a line that was too long (`deferredMs`). The config's `workOrder` for its kind, when it has one, orders them
  * first, with `running` (serversUp) for its runningFirst, and `waiting` (how many of the work wait, this one included)
  * for its batchAt.
@@ -626,13 +669,14 @@ export type WorkOrder = core.WorkOrder;
 export function candidates(
   accs: Accelerator[],
   need: Need,
-  state: { failure?: (id: string) => Failure | null; games?: Games | null; call?: NpuCall | null; deferredMs?: (id: string) => number; now?: number; workOrder?: WorkOrder | null; running?: (id: string) => boolean; waiting?: number } = {},
+  state: { failure?: (id: string) => Failure | null; games?: Games | null; call?: NpuCall | null; driver?: Record<string, DriverCard>; deferredMs?: (id: string) => number; now?: number; workOrder?: WorkOrder | null; running?: (id: string) => boolean; waiting?: number } = {},
 ): { list: Accelerator[]; skipped: Skipped[]; npuFirst: boolean } {
   const asked = accs.filter((a) => core.serves(a, need.work));
   return core.candidates(RULES, accs, need, {
     failures: state.failure ? Object.fromEntries(asked.map((a) => [a.id, state.failure!(a.id)])) : undefined,
     games: state.games ?? null,
     call: state.call ?? null,
+    ...(state.driver ? { driver: state.driver } : {}),
     deferredMs: state.deferredMs ? Object.fromEntries(asked.map((a) => [a.id, state.deferredMs!(a.id)])) : undefined,
     nowMs: state.now ?? Date.now(),
     ...(state.workOrder ? { workOrder: state.workOrder } : {}),
@@ -740,6 +784,13 @@ export class NoRoomToLoad extends Error {}
  * until it's started again (kit 2.99.1). A server already running still serves. Not a failure: nothing is marked.
  */
 export class ManorStopped extends ServerNotRunning {}
+
+/**
+ * The server isn't running, and its graphics card's driver is changing (the Watchman's driver-work.json: a rollback, or
+ * a driver being installed, kit 2.148.0): no model server starts on that card until it's done. Not a failure: nothing
+ * is marked, and the request goes to another accelerator, or waits.
+ */
+export class DriverChanging extends ServerNotRunning {}
 
 /**
  * The server's program isn't where its startCommand says (kit 2.113.5): its setup removed, or never seen by the staff
@@ -939,8 +990,11 @@ export interface ServerReady {
  * when nobody used it) or is busy loading: the request will wait for its model to load. A throw from it is ignored.
  * Before a start, the memory guard looks for room for its model (memory-guard.ts, kit 2.138.0): with none, it starts
  * anyway, or with `whenShort: 'defer'` (background work) throws NoRoomToLoad and starts nothing.
+ * Nothing starts on a graphics card whose driver the Watchman is changing (driver-work.json, kit 2.148.0): DriverChanging.
+ * `card` is the accelerator the server runs on; without it, the configured accelerator that has this endpoint's
+ * address is looked up, when driver-work.json names any card.
  */
-export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv; onWaking?: (how: 'starting' | 'loading') => void; readBlocks?: ReadLog; whenShort?: 'start' | 'defer'; room?: StartOptions['room'] } = {}): Promise<ServerReady> {
+export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv; onWaking?: (how: 'starting' | 'loading') => void; readBlocks?: ReadLog; whenShort?: 'start' | 'defer'; room?: StartOptions['room']; card?: Pick<Accelerator, 'id' | 'kind' | 'name'> } = {}): Promise<ServerReady> {
   const readyMs = opts.readyMs ?? READY_WAIT_MS;
   const lists = { listsWhenLoaded: listsWhenLoaded(ep.startCommand) };
   const state = await probe(ep.baseUrl, PROBE_MS, lists);
@@ -958,6 +1012,9 @@ export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs
   if (opts.start === false) throw new ServerNotRunning(core.say.serverNotRunning(ep.baseUrl));
   // Stopped from Manor's Settings: the owner wants the PC quiet (a benchmark, a game) until they start the manor again.
   if (manorStopped()) throw new ManorStopped(`${core.say.serverNotRunning(ep.baseUrl)}, and ${core.say.manorStopped()}`);
+  // Its card's driver changing (a rollback, a driver going in): it would start in the middle of it (kit 2.148.0).
+  const changing = changingUnder(ep, opts.card);
+  if (changing) throw new DriverChanging(`${core.say.serverNotRunning(ep.baseUrl)}: ${core.say.skippedDriver(changing.acc, changing.work)}, and nothing starts there until it's done`);
   if (!ep.startCommand?.length) throw new AcceleratorDown(core.say.noStartCommand(ep.baseUrl));
   waking('starting');
   let pending = starting.get(ep.baseUrl);
@@ -966,6 +1023,26 @@ export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs
     starting.set(ep.baseUrl, pending);
   }
   return pending;
+}
+
+/**
+ * The card an endpoint's server would start on, when the Watchman is changing its driver now (driver-work.json): `card`,
+ * or the configured graphics card that has this address (its own endpoints', or those whose `turn` it is). Null when no
+ * card is named there, which is read first: a start reads config.json only while one is.
+ */
+function changingUnder(ep: Endpoint, card?: Pick<Accelerator, 'id' | 'kind' | 'name'>): { acc: Pick<Accelerator, 'id' | 'name'>; work: DriverCard } | null {
+  const work = readDriverWork();
+  if (!work?.cards.length) return null;
+  let accs: Pick<Accelerator, 'id' | 'kind' | 'name'>[] = card ? [card] : [];
+  if (!card) {
+    try {
+      const cfg = loadAccelerators();
+      if (!('error' in cfg)) accs = cfg.accelerators.filter((a) => a.kind === 'gpu' && ['chat', 'vision', 'embed', 'rerank'].some((k) => (a as any)[k]?.baseUrl === ep.baseUrl));
+    } catch {}
+  }
+  const holds = core.driverHolds(RULES, work, accs, Date.now());
+  const acc = accs.find((a) => holds[a.id]);
+  return acc ? { acc, work: holds[acc.id] } : null;
 }
 
 /** Waits until a busy server answers /v1/models; AcceleratorDown when it stops answering, or is still busy after `ms`. */

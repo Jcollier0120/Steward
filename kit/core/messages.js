@@ -117,6 +117,31 @@ export const say = Object.freeze({
   skippedGame: (acc, by) => `${theAccelerator(acc)} is in use by ${by.join(', ') || 'a game'}`,
   /** @param {AcceleratorRef} acc @param {string} by The agent captioning the call ("envoy"). */
   skippedCall: (acc, by) => `${by.charAt(0).toUpperCase()}${by.slice(1)} is captioning a call on ${theAccelerator(acc)}`,
+  /**
+   * A card whose driver the Watchman is changing (driver-work.json, kit 2.148.0): what it's doing there.
+   * @param {AcceleratorRef} acc
+   * @param {{ why: string, stage?: string, by?: string }} work
+   */
+  skippedDriver: (acc, work) =>
+    work.why === 'install'
+      ? `${work.by || 'Windows'} is installing a graphics driver on ${theAccelerator(acc)}`
+      : work.stage === 'restart'
+        ? `the Watchman rolled back the driver of ${theAccelerator(acc)}, and Windows needs a restart to finish`
+        : work.stage === 'finishing'
+          ? `the Watchman is finishing the rollback of the driver of ${theAccelerator(acc)}`
+          : `the Watchman is rolling back the driver of ${theAccelerator(acc)}`,
+  /**
+   * The same on the card itself, its status (Manor's accelerator card): "Waiting: the Watchman is rolling back its driver".
+   * @param {{ why: string, stage?: string, by?: string }} work
+   */
+  driverWaiting: (work) =>
+    work.why === 'install'
+      ? `Waiting: ${work.by || 'Windows'} is installing its driver`
+      : work.stage === 'restart'
+        ? 'Waiting: the Watchman rolled back its driver, and Windows needs a restart to finish'
+        : work.stage === 'finishing'
+          ? 'Waiting: the Watchman is finishing the rollback of its driver'
+          : 'Waiting: the Watchman is rolling back its driver',
   /** @param {AcceleratorRef} acc @param {number} min */
   skippedDeferred: (acc, min) => `work on ${theAccelerator(acc)} resumes in ${min} min`,
   /** @param {AcceleratorRef} acc @param {number} waiting */
