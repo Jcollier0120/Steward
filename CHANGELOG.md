@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.290
+
+**On the staff's Your AI tab, the AI assistants they connect for you and the other assistants each have a heading of their own: the Steward hands kit 2.148.3 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.148.3** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): the Connect your AI card puts the assistants a staff member connects with a press under one heading, and the setups for any other assistant under "Other assistants".
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.288
 
 **A staff member's "Where its work runs" now says the text in screenshots and scans is read by its own text reader, on the AI chip where it can, not by Windows' own text recognition: the Steward hands kit 2.148.2 out, and runs on it.**

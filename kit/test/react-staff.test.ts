@@ -75,6 +75,10 @@ test('Connect your AI is open until an AI is connected: the action, each tool as
   assert.match(c, /<summary><strong>Connect your AI to the Assayer<\/strong><span class="muted small"> Not connected\.<\/span><\/summary>/);
   assert.match(c, /The Assayer is an MCP server/, 'its name capitalised to start the sentence');
   assert.match(c, /<div class="ui-connect-action"><button type="button">Connect Claude Code<\/button><\/div>/);
+  // What it connects with a press, and the setups for the rest, each under its heading.
+  assert.match(c, /<h4 class="ui-connect-head">Assistants the Assayer connects for you<\/h4><div class="ui-connect-action">/);
+  assert.match(c, /<h4 class="ui-connect-head">Other assistants<\/h4><p class="small muted">Not in the list above: set it up yourself, once\.<\/p><div class="ui-connect-tools"/);
+  assert.doesNotMatch(h.assistants(), /ui-connect-head/, 'only the rows, no setups: no headings');
   assert.match(c, /<button type="button" role="tab" aria-selected="true" class="small">Claude Code<\/button><button type="button" role="tab" aria-selected="false" class="small quiet">Claude Desktop, Cursor<\/button>/);
   assert.match(c, /<pre aria-label="Claude Code setup">claude mcp add --scope user assayer -- node cli\.ts mcp<\/pre>/);
   assert.match(c, /<pre aria-label="The line for its instructions">Run tests through the Assayer\.<\/pre>/);

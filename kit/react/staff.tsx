@@ -398,6 +398,10 @@ function ConnectCard({ agent, connected, clients = [], status, about, action, se
   const lastUse = clients.map((c) => c.lastUsed).filter((x): x is string => !!x).sort().pop() ?? null;
   const line = status ?? (connected && names.length ? `${names.join(', ')}, ${lastUse ? `last used ${ago(lastUse)}` : 'not used yet'}` : null);
   const Agent = agent.charAt(0).toUpperCase() + agent.slice(1);
+  // What it connects with a press (its own action, the assistants' rows) and the setups for the rest: under a heading
+  // each when there are both (kit 2.148.3).
+  const listed = !!assistants && assistants.length > 0;
+  const both = (!!action || listed) && !!setup;
   return (
     <details className={cx('card', 'ui-connect', !connected && 'ui-connect-todo')} data-tour={tour} open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>
@@ -414,10 +418,17 @@ function ConnectCard({ agent, connected, clients = [], status, about, action, se
         {connected && <span className="muted small"> · open it to connect another AI tool</span>}
       </summary>
       <p className="small">{about ?? `${Agent} is an MCP server: Claude Code, Codex, Cursor or any AI tool that speaks MCP can use its tools. Add it once; the tool starts it when it needs it.`}</p>
+      {both && <h4 className="ui-connect-head">Assistants {agent} connects for you</h4>}
       {action && <div className="ui-connect-action">{action}</div>}
-      {assistants && assistants.length > 0 && <AssistantList agent={agent} rows={assistants} onConnect={onConnect} onDisconnect={onDisconnect} />}
+      {assistants && listed && <AssistantList agent={agent} rows={assistants} onConnect={onConnect} onDisconnect={onDisconnect} />}
       {setup && (
         <>
+          {both && (
+            <>
+              <h4 className="ui-connect-head">Other assistants</h4>
+              <p className="small muted">Not in the list above: set it up yourself, once.</p>
+            </>
+          )}
           <div className="ui-connect-tools" role="tablist" aria-label="Your AI tool">
             {setups.map((x) => (
               <button key={x.id} type="button" role="tab" aria-selected={x.id === setup.id} className={cx('small', x.id !== setup.id && 'quiet')} onClick={() => setPick(x.id)}>

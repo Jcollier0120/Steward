@@ -170,6 +170,7 @@ details.ui-connect[open] > summary { margin-bottom: 8px; }
 details.ui-connect.ui-connect-todo { border-left: 4px solid var(--accent); }
 .ui-connect-action { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
 .ui-connect-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+.ui-connect-head { font-size: 14px; font-weight: 600; margin: 14px 0 4px; }
 .ui-assistants { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .ui-assistant { padding: 6px 10px; background: var(--bg); border-radius: 6px; min-width: 0; }
 .ui-assistant-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
