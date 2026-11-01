@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.148.3
+
+**Connect your AI splits what the staff member connects by itself from the rest, under a heading each (the owner, 2026-11-01).**
+
+### What changed
+
+- **react/staff.tsx, ConnectAI:** when a card has both its one-press part (the page's own action, the assistants' rows) and setups to paste, "Assistants <the staff member> connects for you" heads the first and "Other assistants" the second, with a line under it: not in the list above, set it up yourself, once. A card with only one of them draws as before, with no heading. New style: `.ui-connect-head`.
+
+### Before you update
+
+- **A test that spells out the Connect card's markup** between its action and its setup tabs now finds the two headings there. Nothing else changes.
+
 ## 2.148.2
 
 **"Where its work runs" names the staff's own text reader, the kit's model on the NPU where it runs there, else on the processor, where the Clerk's and the Warrener's lines still said Windows' own OCR, on the processor (the owner, 2026-11-01).**
