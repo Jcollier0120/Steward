@@ -140,19 +140,48 @@ const BRINGS = /^Brings (\d+) changes: (.*)$/i;
 /** An urgent fix's headline begins so (the kit's exchequer.ts isUrgent reads a line starting "**Urgent fix:"). */
 const URGENT = /^Urgent fix:\s*/i;
 
+/** A kit bump's headline (bump.ts kitBumpBody), before 2026-11-01's words too ("It carries the Steward's kit …"). */
+const KIT_CARRY = /^(?:urgent fix: )?it carries (?:the Steward's )?kit \d+\.\d+\.\d+/i;
+/** A kit bump's headline that brings an urgent kit: "…, with an urgent fix to …" or "…, with urgent fixes to …". */
+const KIT_URGENT = /, with (?:an )?urgent fix/i;
+
+/** A headline's changes: "Brings N changes: a; b" as N and its parts, else one change. Counted from N, since a headline may hold a "; ". */
+function changesOf(words: string): { n: number; parts: string[] } {
+  const many = BRINGS.exec(words.replace(URGENT, ''));
+  return many ? { n: Number(many[1]), parts: many[2].split('; ') } : { n: 1, parts: [words.replace(URGENT, '')] };
+}
+
 /**
- * Two entries made one (the first, then the second): headline "Brings N changes: <each headline>", each section's
- * bullets one after the other, and "Before you update" saying "Nothing: it updates itself as usual." only when neither
- * says anything else. When either is an urgent fix (a kit bump's that brings one: bump.ts kitBumpBody), so is the one
- * they make: "Urgent fix: brings N changes: …", so the release still goes out at once. Pure.
+ * The headline of entries made one: "Brings N changes: <each headline>". A kit bump's headline (a release that took a
+ * new kit) is said once, the newest kit's: none when the release brings changes of its own, whose What changed says the
+ * kit, but for one that brings an urgent kit, which the release's headline must say.
+ */
+function composedHead(xh: string, yh: string): string {
+  const urgent = URGENT.test(xh) || URGENT.test(yh);
+  const [x, y] = [changesOf(xh), changesOf(yh)];
+  const all = [...x.parts, ...y.parts];
+  const kit = (i: number) => KIT_CARRY.test(all[i]);
+  const at = all.map((_, i) => i).filter(kit);
+  // The newest kit's, or the newest that brings an urgent kit.
+  const kept = [...at].reverse().find((i) => KIT_URGENT.test(all[i])) ?? at.at(-1);
+  const alone = at.length === all.length;
+  const parts = all.filter((p, i) => !kit(i) || (i === kept && (alone || KIT_URGENT.test(p))));
+  const n = x.n + y.n - (all.length - parts.length);
+  if (n <= 1) return `**${urgent ? 'Urgent fix: ' : ''}${parts.join('; ')}.**`;
+  return `**${urgent ? 'Urgent fix: brings' : 'Brings'} ${n} changes: ${parts.join('; ')}.**`;
+}
+
+/**
+ * Two entries made one (the first, then the second): headline "Brings N changes: <each headline>" (composedHead: a kit
+ * bump's is said once), each section's bullets one after the other, and "Before you update" saying "Nothing: it updates
+ * itself as usual." only when neither says anything else. When either is an urgent fix (a kit bump's that brings one:
+ * bump.ts kitBumpBody), so is the one they make: "Urgent fix: brings N changes: …", so the release still goes out at
+ * once. Pure.
  */
 export function composeEntry(a: string, b: string): string {
   const x = parts(a);
   const y = parts(b);
-  const [xh, yh] = [headWords(x.head), headWords(y.head)];
-  const urgent = URGENT.test(xh) || URGENT.test(yh);
-  const was = BRINGS.exec(xh.replace(URGENT, ''));
-  const head = `**${urgent ? 'Urgent fix: brings' : 'Brings'} ${was ? Number(was[1]) + 1 : 2} changes: ${was ? was[2] : xh.replace(URGENT, '')}; ${yh.replace(URGENT, '')}.**`;
+  const head = composedHead(headWords(x.head), headWords(y.head));
   const sections = new Map<string, { title: string; lines: string[] }>();
   for (const [title, lines] of [...x.sections, ...y.sections]) {
     const key = title.toLowerCase();

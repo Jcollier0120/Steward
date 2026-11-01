@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.291
+
+**A staff member's release that brings a new kit says so in plain words, once: "It carries kit 2.148.4: the parts all the staff share.", where it said "Brings 4 changes: It carries the Steward's kit …; It carries the Steward's kit …", and the kit's notes for the staff's makers stay out of it. The Steward hands kit 2.148.4 out, and runs on it.**
+
+### What changed
+
+- **A kit bump's notes** (the entry it writes for the kit a staff member now carries) say "kit" where they said "the Steward's kit", and "the parts all the staff share" where they said "the parts every agent of the manor shares".
+  - Under What changed, a line for each kit version is the first sentence of its headline, without who asked and when ("(the owner, 2026-11-01)") or a pull request it names.
+  - Under Before you update, only the kit's points marked `Everyone:`. The rest ("A test that spells out the old label fails", "Nothing to do. A test that compared…") were for the staff's makers, and showed on every staff member's About.
+- **The build joins several kit bumps into one headline**, the newest kit's, and leaves it out when the release brings changes of its own: their headlines alone, with the kits still listed under What changed. A kit with an urgent fix stays in the headline. An entry written before this version is read the same way.
+- **Kit 2.148.4** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a release's notes say "with kit X", and the spec says how a kit entry reaches the staff's notes.
+
+### Before you update
+
+- Update Manor too: until its next update, Manor's What's new shows a staff member's notes in the new words in full, where it showed one line, "Updated the Steward's kit to X".
+
 ## 0.36.290
 
 **On the staff's Your AI tab, the AI assistants they connect for you and the other assistants each have a heading of their own: the Steward hands kit 2.148.3 out, and runs on it.**

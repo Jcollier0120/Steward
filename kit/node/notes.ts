@@ -261,7 +261,7 @@ export function releaseNotes(o: NotesInput): Notes {
     ].join('\n');
   }
   // "built from <commit>": Manor reads the commit from it (its releases.ts), since the releases repository's tag is its own.
-  const first = `${o.name} ${o.version}, built from ${o.commit}${o.kit ? `, with the Steward's kit ${o.kit}` : ''}.`;
+  const first = `${o.name} ${o.version}, built from ${o.commit}${o.kit ? `, with kit ${o.kit}` : ''}.`;
   return { notes: [first, '', body, '', '### Installing', '', o.install.trim(), ''].join('\n'), from: entry ? 'changelog' : 'commits', warnings };
 }
 

@@ -105,7 +105,10 @@ export function kitBumpEntry(o: { version: string; from: string; kit: string; ch
 
 /**
  * kitBumpEntry without its `## ` heading: a kit bump's entry on the build pipeline, changes/<its branch>.md (entries.ts),
- * which the build's stamp gives the next release's version (stamp.ts).
+ * which the build's stamp gives the next release's version (stamp.ts). It's read by the person using the staff (Manor's
+ * What's new, the staff member's About, the published notes), so it says "kit", one line for each kit version (its
+ * headline's first sentence: kitPoint), and under Before you update only the kit's points marked for everyone
+ * (everyonePoints): the rest of a kit entry's Before you update is for the people who make the staff.
  */
 export function kitBumpBody(o: { from: string; kit: string; changelog: string | null }): string {
   const back = compareVersions(o.kit, o.from) < 0;
@@ -117,21 +120,20 @@ export function kitBumpBody(o: { from: string; kit: string; changelog: string | 
     const [heading, ...rest] = lf(s).split('\n');
     const v = headingVersion(heading);
     const body = rest.join('\n');
-    const headline = headlineOf(body);
-    if (v) changed.push(`- The Steward's kit ${v}${headline ? `: ${headline}` : ''}`);
+    const headline = kitPoint(headlineOf(body) ?? '');
+    if (v) changed.push(`- Kit ${v}${headline ? `: ${headline}` : ''}`);
     if (v && urgentIn(s, v)) urgent.unshift(v);
-    const c = sectionOf(body, HEADINGS.care);
-    if (c && !/^nothing\b/i.test(c)) care.push(c);
+    care.push(...everyonePoints(sectionOf(body, HEADINGS.care) ?? ''));
   }
   // Without the kit's changelog, a line of its own: never a repository's name, which the agent's notes would ship
   // (they're published, and an agent's tests refuse the owner's account in what it ships).
-  if (!changed.length) changed.push(back ? `- A step back to the Steward's kit ${o.kit}, from ${o.from}.` : `- The Steward's kit ${o.kit}, after ${o.from}: the parts every agent of the manor shares.`);
+  if (!changed.length) changed.push(back ? `- A step back to kit ${o.kit}, from ${o.from}.` : `- Kit ${o.kit}, after ${o.from}: ${SHARED}.`);
   // The urgent kits it brings, named when the kit it carries isn't the only one ("kit 2.4.1", "kits 2.4.1 and 2.4.2").
   const named = urgent.length === 1 && urgent[0] === o.kit ? '' : ` (kit${urgent.length > 1 ? 's' : ''} ${urgent.length > 1 ? `${urgent.slice(0, -1).join(', ')} and ${urgent.at(-1)}` : urgent[0]})`;
   return [
     urgent.length
-      ? `**Urgent fix: it carries the Steward's kit ${o.kit}, with ${urgent.length > 1 ? 'urgent fixes' : 'an urgent fix'} to the parts every agent of the manor shares${named}.**`
-      : `**It carries the Steward's kit ${o.kit}${back ? ', a step back' : ''}: the parts every agent of the manor shares.**`,
+      ? `**Urgent fix: it carries kit ${o.kit}, with ${urgent.length > 1 ? 'urgent fixes' : 'an urgent fix'} to ${SHARED}${named}.**`
+      : `**It carries kit ${o.kit}${back ? ', a step back' : ''}: ${SHARED}.**`,
     '',
     `### ${HEADINGS.changed}`,
     '',
@@ -141,6 +143,45 @@ export function kitBumpBody(o: { from: string; kit: string; changelog: string | 
     '',
     care.length ? care.join('\n') : NOTHING_TO_DO,
   ].join('\n');
+}
+
+/** What the kit is, in a kit bump's notes (Manor's src/web/kit-notes.ts and the site's scripts/kit-notes.mts read it). */
+const SHARED = 'the parts all the staff share';
+
+/**
+ * A kit entry's headline as its point in a kit bump's notes: its first sentence, without the asides that are for the
+ * kit's makers: who asked and when ("(the owner, 2026-11-01)") and a pull request it names ("(Manor#530)").
+ */
+export function kitPoint(headline: string): string {
+  const first = /^.+?[.!?](?=\s+["“(`]?[A-Z])/.exec(headline)?.[0] ?? headline;
+  return first
+    .replace(/\s*\([^()]*(?:\b\d{4}-\d{2}-\d{2}\b|[A-Za-z][\w-]*#\d+)[^()]*\)/g, '')
+    .trim();
+}
+
+/** The marker on a kit entry's Before you update point that the people using the staff must know too. */
+const EVERYONE = /^(?:\*\*Everyone:\*\*|\*\*Everyone\*\*:|Everyone:)\s*/i;
+
+/**
+ * A kit entry's Before you update points for everyone (`- Everyone: …`, or `- **Everyone:** …`), each without its
+ * marker and with the lines under it. The kit's other points are for the people who make the staff (a test that spells
+ * out old words, code to change): they stay in the kit's changelog, and never reach a staff member's published notes.
+ */
+export function everyonePoints(care: string): string[] {
+  const out: string[] = [];
+  let keep = false;
+  for (const line of lf(care).split('\n')) {
+    const point = /^[-*] +(.*)$/.exec(line);
+    if (point) {
+      keep = EVERYONE.test(point[1]);
+      if (keep) {
+        const rest = point[1].replace(EVERYONE, '');
+        out.push(`- ${rest.charAt(0).toUpperCase()}${rest.slice(1)}`);
+      }
+    } else if (keep && /^\s+\S/.test(line)) out[out.length - 1] += `\n${line}`;
+    else if (line.trim() && !/^\s/.test(line)) keep = false;
+  }
+  return out;
 }
 
 /**

@@ -133,8 +133,9 @@ function stampedTogether(p: ReturnType<typeof repo>) {
   assert.match(p.at(main, 'src/app.ts'), /version: '0\.4\.1'/);
   const changelog = p.at(main, 'CHANGELOG.md');
   assert.deepEqual(headings(changelog), ['## 0.4.1', '## 0.4.0'], 'one entry for the one version');
-  assert.match(changelog, /## 0\.4\.1\n\n\*\*Brings 3 changes: Before the switch; /);
-  for (const line of ['- Before the switch.', '- After the switch.', "- The Steward's kit 1.0.1, after 1.0.0"]) assert.ok(changelog.includes(line), `${line} in\n${changelog}`);
+  // The kit bump's headline isn't said beside changes of their own: What changed says the kit.
+  assert.match(changelog, /## 0\.4\.1\n\n\*\*Brings 2 changes: Before the switch; After the switch\.\*\*\n/);
+  for (const line of ['- Before the switch.', '- After the switch.', '- Kit 1.0.1, after 1.0.0']) assert.ok(changelog.includes(line), `${line} in\n${changelog}`);
   assert.equal(sh(p.origin, 'ls-tree', '-r', '--name-only', main, 'changes/'), CHANGES_README, 'the entries gone, the README kept');
   for (const file of ['src/before.ts', 'src/after.ts']) assert.ok(p.at(main, file));
   assert.equal(JSON.parse(p.at(main, 'kit.json')).kit, '1.0.1');

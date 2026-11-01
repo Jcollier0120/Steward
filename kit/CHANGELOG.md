@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.148.4
+
+**A release's notes say "kit" where they said "the Steward's kit". The spec says how a kit entry reaches the staff's notes from Steward 0.36.291 on (the owner, 2026-11-01).**
+
+### What changed
+
+- **node/notes.ts**: a release's first line ends "…, with kit 2.148.4.", where it said "…, with the Steward's kit 2.148.4.".
+- **spec/RELEASE-NOTES.md, The kit bump**: what Steward 0.36.291's bump writes in a staff member's entry for the kit it now carries:
+  - its headline: "It carries kit X: the parts all the staff share.", said once when the Steward's build joins several bumps, and not at all beside the release's own changes (but for an urgent kit);
+  - under What changed, a line for each kit version: the first sentence of its headline, without who asked and when or a pull request it names;
+  - under Before you update, only the kit's points that start `Everyone:` (`- Everyone: …`, or `- **Everyone:** …`), without the word.
+- So a kit entry's headline opens with what a person using the staff would notice, and its Before you update is for the staff's makers but for a point marked `Everyone:` (a download after the update, a setting that moved, a page to reload).
+
+### Before you update
+
+- Nothing to do. A test that spells out a release's first line finds "…, with kit X." now.
+
 ## 2.148.3
 
 **Connect your AI splits what the staff member connects by itself from the rest, under a heading each (the owner, 2026-11-01).**

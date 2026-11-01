@@ -70,18 +70,38 @@ So an entry is read twice: in Manor, as the update's notes, and on the agent's o
 
 ## The kit bump
 
-The Steward's kit bump (`steward bump`, a round's rollout) writes the agent's entry for the kit it now carries: a **What changed** line for each kit version since the one it pinned (that entry's headline, its opening bold sentence), and a **Before you update** made of those kit entries' own **Before you update** sections, or "Nothing: it updates itself as usual." when none has one.
+The Steward's kit bump (`steward bump`, a round's rollout) writes the agent's entry for the kit it now carries, for the person using the staff (Steward 0.36.291 on):
+
+```markdown
+**It carries kit 2.148.1: the parts all the staff share.**
+
+### What changed
+
+- Kit 2.148.0: While the Watchman rolls back a graphics card's driver, or a new driver is being installed on it, no model work goes to that card until it's done.
+- Kit 2.148.1: A note's label names the staff member who wrote it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+```
+
+- **What changed** has a line for each kit version since the one it pinned: the first sentence of that kit entry's headline (its opening bold line), without an aside naming who asked and when ("(the owner, 2026-11-01)") or a pull request ("(Manor#530)").
+- **Before you update** has only the kit entries' points marked for everyone (below), or "Nothing: it updates itself as usual." when none has one.
+- When the Steward's build joins several kit bumps into one release, its headline says the newest kit once, and when the release brings changes of its own, their headlines alone (its What changed still lists the kits). A kit bump that brings an urgent kit keeps its headline, so the release says so.
 
 It writes it as any work on the build pipeline does: in `changes/steward-kit-<kit, dots as dashes>.md`, setting no version and leaving `CHANGELOG.md` alone, so an agent's own pull request open beside it never meets it in the same lines. One without `changes/README.md` gets that file in the same bump, which puts it on the pipeline. Only an agent worked with plain git, where the Steward opens no pull requests and so has nothing to stamp through, is bumped the old way: its version raised, and the entry at the top of its `CHANGELOG.md` under that version.
 
-So a kit entry in `kit/CHANGELOG.md` that needs something of the people updating says so under its own `### Before you update`: it reaches every agent's notes.
+So a kit entry in `kit/CHANGELOG.md` is read by two kinds of people:
+
+- **Its headline's first sentence reaches every staff member's notes**, so say there what a person using the staff would notice, in their words. Put what the staff's makers need after it.
+- **Its `### Before you update` is for the staff's makers**: a test that spells out old words, code to change. It stays in the kit's changelog. A point the people using the staff must know too (a download after the update, a setting that moved, a page that must be reloaded) starts with **`Everyone:`** (`- Everyone: …`, or `- **Everyone:** …`): only those points reach every staff member's notes, without the word.
 
 A kit entry marked urgent (its bold line starts with `Urgent fix:`) makes every agent's bump entry urgent too: its bold line starts `**Urgent fix:`, naming the kit. The Steward then rolls that kit out at once rather than at its next build, builds each agent as soon as its bump merges, and each release goes out to customers at once, as any urgent fix does.
 
 ```markdown
 ## 0.5.84
 
-**Urgent fix: it carries the Steward's kit 2.136.1, with an urgent fix to the parts every agent of the manor shares.**
+**Urgent fix: it carries kit 2.136.1, with an urgent fix to the parts all the staff share.**
 ```
 
 ## Merging

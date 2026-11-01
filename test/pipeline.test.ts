@@ -15,6 +15,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const { boardedUrgent, BUILD_BUSY_MS, buildUnderWay, DEFAULT_PIPELINE, endRound, kitRides, kitStep, lastBuildTime, lateLine, loadPipeline, nextBuildTime, normalizePipeline, pipelineMode, pipelineView, savePipeline, urgentKey } = await import('../src/pipeline.ts');
 const { addToEntry, composeEntry, CHANGES_README, changesReadme, fragmentBody, fragmentFiles, fragmentFor } = await import('../src/entries.ts');
 const { stampBranch, stampMain } = await import('../src/stages/stamp.ts');
+const bump = await import('../src/stages/bump.ts');
 const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
 const { runStage } = await import('../src/steward.ts');
 const { ctxFor, employee, fakeEmployee, mergesOf, ok, runner, sh } = await import('./helpers.ts');
@@ -274,6 +275,31 @@ test('several fragments make one entry: their headlines, their bullets, and "Bef
   const three = composeEntry(two, ENTRY('Moves a setting.', 'The setting moved to Pages.'));
   assert.match(three, /^\*\*Brings 3 changes: Faster pages; Fixes a crash; Moves a setting\.\*\*/);
   assert.match(three, /### Before you update\n\n- The setting moved to Pages\.$/);
+});
+
+test("kit bumps joined in one release say the kit once in its headline, and none when it brings changes of its own, but for an urgent kit", () => {
+  const { kitBumpBody } = bump;
+  const kitLog = (...vs: string[]) => vs.map((v) => `## ${v}\n\n**${v === '1.0.3' ? 'Urgent fix: s' : 'S'}omething in ${v}.**\n`).reverse().join('\n');
+  const log = kitLog('1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5');
+  const kit = (from: string, to: string) => kitBumpBody({ from, kit: to, changelog: log });
+  // Chamberlain 0.9.4 (2026-11-01) said "Brings 4 changes: It carries the Steward's kit 2.147.3: …; It carries …".
+  const kits = [kit('1.0.0', '1.0.1'), kit('1.0.1', '1.0.2')].reduce(composeEntry);
+  assert.equal(
+    kits,
+    "**It carries kit 1.0.2: the parts all the staff share.**\n\n### What changed\n\n- Kit 1.0.1: Something in 1.0.1.\n- Kit 1.0.2: Something in 1.0.2.\n\n### Before you update\n\n- Nothing: it updates itself as usual.",
+  );
+  // An entry the Steward wrote before 2026-11-01 is one too.
+  const old = "**It carries the Steward's kit 1.0.0: the parts every agent of the manor shares.**\n\n### What changed\n\n- The Steward's kit 1.0.0: Older.\n\n### Before you update\n\n- Nothing: it updates itself as usual.";
+  assert.match(composeEntry(old, kit('1.0.0', '1.0.1')), /^\*\*It carries kit 1\.0\.1: the parts all the staff share\.\*\*\n/);
+  // With a change of its own, its headline alone; What changed still says the kits.
+  const own = [kit('1.0.0', '1.0.1'), ENTRY('Faster pages.'), kit('1.0.1', '1.0.2')].reduce(composeEntry);
+  assert.match(own, /^\*\*Faster pages\.\*\*\n/);
+  assert.match(own, /### What changed\n\n- Kit 1\.0\.1: Something in 1\.0\.1\.\n- Faster pages\.\n- Kit 1\.0\.2: Something in 1\.0\.2\.\n/);
+  assert.match([ENTRY('Faster pages.'), ENTRY('Fixes a crash.'), kit('1.0.1', '1.0.2')].reduce(composeEntry), /^\*\*Brings 2 changes: Faster pages; Fixes a crash\.\*\*/);
+  // An urgent kit stays in the headline, so the release says what's urgent.
+  const urgent = [ENTRY('Faster pages.'), kit('1.0.2', '1.0.3'), kit('1.0.3', '1.0.4')].reduce(composeEntry);
+  assert.match(urgent, /^\*\*Urgent fix: brings 2 changes: Faster pages; it carries kit 1\.0\.3, with an urgent fix to the parts all the staff share\.\*\*\n/);
+  assert.match([kit('1.0.2', '1.0.3'), kit('1.0.3', '1.0.4')].reduce(composeEntry), /^\*\*Urgent fix: it carries kit 1\.0\.3, with an urgent fix to the parts all the staff share\.\*\*\n/);
 });
 
 test("a fragment joins the waiting version's entry, or starts the next one; a minor step renames the waiting one", () => {
