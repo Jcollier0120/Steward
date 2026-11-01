@@ -18,8 +18,9 @@ export const TOKEN_HOST = 'api.bitbucket.org';
  * repository is named as scm.ts's repoFromUrl names it, bitbucket.org/<workspace>/<repo>.
  *
  * Its answers are said in GitHub's words (host.ts). Bitbucket names a pull request's head commit by a short hash, so the
- * full one is asked; whether it merges, its files and its line counts come from its diffstat (a file "merge conflict"
- * means it can't); its checks are its head's build statuses. Bitbucket keeps no ref for a pull request's head: its
+ * full one is asked; its files and its line counts come from its diffstat, and whether it merges is unknown (Bitbucket
+ * Cloud no longer says: mergeStatesOf), unless a file there is in "merge conflict"; its checks are its head's build
+ * statuses. Bitbucket keeps no ref for a pull request's head: its
  * branch is fetched (a fork's isn't worked with). It merges with no head to match, so the head is checked just before.
  * A build status doesn't say who set it, so the vouch's own says so in its name ("steward/tested by <nickname>"); setting
  * one needs write access to the repository. Bitbucket has no releases: a release is a v<version> tag, its message the
@@ -39,7 +40,10 @@ export class Bitbucket implements SourceHost {
 
   /**
    * One request: curl with the token from a config file of its own (deleted after), a body as JSON from a file, the
-   * HTTP status written after the body; an HTTP error is a failure. `out` is set: the response written there.
+   * HTTP status written after the body; an HTTP error is a failure. A GET follows Bitbucket's redirects (https only, five
+   * at most), as its diffstat answers with one; any other method doesn't, curl sending its method again to wherever one
+   * points, so a redirect there is a failure. The token goes only to the first host (curl's `user`, never
+   * --location-trusted). `out` is set: the response written there.
    */
   private async api(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, body?: unknown, o: { timeoutMs?: number; out?: string } = {}): Promise<Answer> {
     const what = `curl ${method} ${url}`;
@@ -54,7 +58,8 @@ export class Bitbucket implements SourceHost {
         writeFileSync(path.join(dir, 'body.json'), JSON.stringify(body));
         args.push('--header', 'Content-Type: application/json', '--data-binary', `@${path.join(dir, 'body.json')}`);
       }
-      if (o.out) args.push('--location', '--output', o.out);
+      if (method === 'GET') args.push('--location', '--proto-redir', '=https', '--max-redirs', '5');
+      if (o.out) args.push('--output', o.out);
       return { ...answered(await this.run('curl', args, { cwd: this.cwd, timeoutMs: o.timeoutMs ?? 2 * MINUTE })), what };
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -295,14 +300,16 @@ export const curlQuoted = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, 
 
 /**
  * What curl answered, as a command's answer: the body, then the HTTP status on its own last line (--write-out); a 4xx
- * or 5xx is a failure, its message Bitbucket's error. Pure.
+ * or 5xx is a failure, its message Bitbucket's error. So is a redirect (3xx) it ended on: its body is empty, never an
+ * empty answer. Pure.
  */
 export function answered(r: { code: number; out: string; err: string }): { code: number; out: string; err: string } {
   if (r.code !== 0) return r;
   const i = r.out.lastIndexOf('\n');
   const status = Number(r.out.slice(i + 1).trim());
   const body = i >= 0 ? r.out.slice(0, i) : '';
-  if (!status || status < 400) return { code: 0, out: body, err: '' };
+  if (!status || status < 300) return { code: 0, out: body, err: '' };
+  if (status < 400) return { code: 1, out: '', err: `HTTP ${status}: a redirect, not an answer` };
   const e = parsed<any>(body)?.error;
   const message = [e?.message, e?.detail].filter((x) => typeof x === 'string' && x).join(': ');
   return { code: 1, out: '', err: `HTTP ${status}${message ? `: ${message}` : body.trim() ? `: ${body.trim().slice(0, 300)}` : ''}` };
@@ -335,11 +342,15 @@ function checkState(state: string): string {
   return 'FAILURE';
 }
 
-/** Whether Bitbucket can merge it, from its diffstat: a file in "merge conflict" means it can't. Unknown unasked. Pure. */
+/**
+ * Whether Bitbucket can merge it, from its diffstat: a file in "merge conflict" means it can't; anything else, unknown,
+ * never mergeable. Bitbucket Cloud no longer reports conflicts: a pull request's diffstat redirects to its topic diff
+ * (`…/diffstat/<ws>/<repo>:<spec>?from_pullrequest_id=<n>&topic=true`, the three-dot diff), which never names one, its
+ * preview merge (`merge=true`) answers 410 ("CHANGE-3407 … deprecated"), and it has no merge check to ask. Pure.
+ */
 export function mergeStatesOf(diffstat?: any[]): { mergeable: string; mergeStateStatus: string } {
-  if (!diffstat) return { mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' };
-  if (diffstat.some((d) => String(d?.status ?? '') === 'merge conflict')) return { mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' };
-  return { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' };
+  if (diffstat?.some((d) => String(d?.status ?? '') === 'merge conflict')) return { mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' };
+  return { mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' };
 }
 
 /** A pull request in `gh pr list --json`'s words, with what details() found. Pure. */

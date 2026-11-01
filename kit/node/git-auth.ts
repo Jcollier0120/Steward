@@ -18,19 +18,20 @@ import { advertisedRefs, answerTo, lsRemoteText } from './smart-http.ts';
  *   they are). When a host refuses a sign-in git has the helper erase it, and hosts refuse a good one too: Bitbucket and
  *   Azure DevOps for a repository that isn't there or isn't shared with you. So since kit 2.146.6 a refused command is
  *   never run again git's own way. The helper is asked once more, and the command runs once more only with a sign-in
- *   it renewed (Bitbucket's and Azure DevOps' helpers check theirs when asked). The helper is told to forget the one it
- *   keeps (`git credential reject`) only when it is shown to be stale: the host refuses it on a repository it read in
- *   this process, or on a public one it reads with no sign-in. A refusal of a sign-in the host takes is the
- *   repository's own, and is left as it is. A host whose sign-in can't be read (none kept, a public repository, SSH,
- *   http) is left to git as before.
+ *   it renewed (Bitbucket's and Azure DevOps' helpers check theirs when asked). A refusal of a sign-in the host takes
+ *   is the repository's own, and is left as it is. A host whose sign-in can't be read (none kept, a public repository,
+ *   SSH, http) is left to git as before.
  * - Git Credential Manager hands back an OAuth access token however old (Codeberg's last an hour), and makes a new one
- *   from its refresh token only once it keeps none. So since kit 2.147.4, a sign-in the host refuses (401) on a private
- *   repository, with nothing else to show why, is forgotten where Windows Credential Manager names its refresh token
- *   (`git:https://refresh_token.<host>`): once a while for each sign-in, the refresh token kept. The helper is then
- *   asked again with the host's WWW-Authenticate, as git asks after a 401 (GCM knows a Gitea or Forgejo host by it
- *   alone), makes a new access token, and the command runs once more with it; taken, the new one is kept (`git
- *   credential approve`), as git keeps one that works. Elsewhere (no refresh token, GCM keeping its sign-ins in another
- *   store, not Windows) such a refusal is left as it is.
+ *   from its refresh token only once it keeps none. So a sign-in the host refuses is forgotten (`git credential
+ *   reject`) only where Windows Credential Manager names its refresh token (`git:https://refresh_token.<host>`): once a
+ *   while for each sign-in, the refresh token kept. That is when it is shown stale (the host refuses it on a repository
+ *   it read in this process, or on a public one it reads with no sign-in), or, since kit 2.147.4, refused (401) on a
+ *   private repository with nothing else to show why. The helper is then asked again with the host's WWW-Authenticate,
+ *   as git asks after a 401 (GCM knows a Gitea or Forgejo host by it alone), makes a new access token, and the command
+ *   runs once more with it; taken, the new one is kept (`git credential approve`), as git keeps one that works.
+ *   Elsewhere (no refresh token by that name, GCM keeping its sign-ins in another store, not Windows) nothing is
+ *   forgotten, shown stale or not (kit 2.147.5), and the refusal stands: GCM's GitLab provider keeps its refresh token
+ *   as `oauth-refresh-token.<host>`, and its erase would take that too.
  * - A URL with its own user (https://me@host/…) is asked for that user's sign-in. One with its own password signs in
  *   with it, and no helper is asked or told to forget one for it. Where git asks helpers by path
  *   (credential.useHttpPath, which Git Credential Manager sets for dev.azure.com), the helper is asked with the
@@ -467,13 +468,14 @@ export function signedIn<O extends GitRunOptions, R extends GitRan>(inner: GitRu
         const verdict = await stale(probe, u, cwd, env);
         if (verdict.is === false) ownRefusal.set(probe, now() + KEEP_MS);
         if (verdict.is === false || verdict.is === null) return null;
-        // Refused where nothing shows why. Git Credential Manager hands back an OAuth access token however old (Codeberg's
-        // last an hour), and makes a new one from its refresh token only once it keeps none: so where it keeps a refresh
-        // token, it is told to forget the access token, once a while for each sign-in. Without one, nothing is forgotten.
-        if (verdict.is === 'unsure') {
-          if ((refreshed.get(u.key) ?? 0) > now() || !(await refreshable(u, cwd))) return null;
-          refreshed.set(u.key, now() + KEEP_MS);
-        }
+        // Shown stale, or refused where nothing shows why. Git Credential Manager hands back an OAuth access token however
+        // old (Codeberg's last an hour), and makes a new one from its refresh token only once it keeps none: so where it
+        // keeps its refresh token as `refresh_token.<host>`, it is told to forget the access token, once a while for each
+        // sign-in. Only that, its generic provider's, erase leaves the refresh token. Anywhere else nothing is forgotten
+        // (kit 2.147.5), and the refusal stands: GCM's GitLab provider keeps its refresh token as
+        // `oauth-refresh-token.<host>` and its erase takes that too, so the whole sign-in would go.
+        if ((refreshed.get(u.key) ?? 0) > now() || !(await refreshable(u, cwd))) return null;
+        refreshed.set(u.key, now() + KEEP_MS);
         await forget(ask, u.fill, cwd);
         // With the host's WWW-Authenticate, as git asks after a 401: GCM 2.9 knows a Gitea or Forgejo host (Codeberg)
         // only by its `Basic realm="Gitea"`, and without it has no OAuth to make a token by (it would ask for a password,

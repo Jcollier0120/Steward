@@ -31,6 +31,23 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - An agent that shows its accelerators' state can show `driver` (`say.driverWaiting`) where it shows a failure. Manor's accelerator card does, in a release of its own.
 - Not covered: a program that runs its model on a card in its own process (Heiward's DirectML). The guard's own 20-second wait, and its stopping the manor's servers on the card, still apply to a server an older kit started.
 
+## 2.147.5
+
+**A refused sign-in on gitlab.com no longer takes the whole GitLab sign-in with it. The kit forgets a sign-in only where Git Credential Manager keeps its refresh token as `refresh_token.<host>`, shown stale or not.**
+
+### What changed
+
+- **A sign-in shown stale is forgotten only where GCM keeps a refresh token beside it** (git-auth.ts' `signedIn`):
+  - Since 2.146.6, a sign-in the host showed stale was always forgotten (`git credential reject`). It is shown stale when the host refuses it on a repository read with it in this process, or on a public one it reads with no sign-in.
+  - GCM's GitLab provider keeps its refresh token as `git:https://oauth-refresh-token.<host>`, not `refresh_token.<host>`, and renews its access token itself. Its erase deletes that refresh token too, so a forget on gitlab.com took the person's whole GitLab sign-in.
+  - Only GCM's generic provider (Codeberg's, Gitea's and Forgejo's hosts) keeps `git:https://refresh_token.<host>`, and only its erase leaves the refresh token.
+  - Now a stale verdict goes the same way as 2.147.4's 401 with nothing to show why. cmdkey is asked for `git:https://refresh_token.<host>`, and only where it is there is the access token forgotten, at most once every 30 minutes for each sign-in. A new one is then made from the refresh token, as in 2.147.4.
+  - Anywhere else nothing is forgotten, and the refusal stands, git's own message as it is. That covers GitLab, a host with no refresh token, GCM keeping its sign-ins elsewhere than Windows Credential Manager, and every PC that isn't Windows.
+
+### Before you update
+
+- Nothing to do. A sign-in shown stale with no `refresh_token.<host>` beside it, or off Windows, is no longer forgotten. The refusal stands until the person signs git in again, and nothing in the kit says so beyond git's own message.
+
 ## 2.147.4
 
 **A fetch or push to Codeberg, or another host Git Credential Manager signs in to by OAuth, works again once its sign-in is an hour old. GCM handed back its expired access token, the host refused it, and since 2.146.6 nothing told GCM to make a new one.**
