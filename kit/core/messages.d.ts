@@ -29,22 +29,26 @@ export declare function theAccelerator(a: AcceleratorRef | {
  */
 export declare function theName(name: string): string;
 /**
- * A note's label, on every staff member's page (kit 2.148.1): what it is and who wrote it, "summary from the
- * Herald", whatever ran it, since what a customer reads never names the hardware (kit 2.97.1; before, it named it to
- * everyone). `o.what` is the staff member's own word for its notes ("summary", the default; "caption",
- * "explanation"), and `o.by` is who wrote it, in a sentence (theName; LOCAL_AI for a caller that names nobody).
- * `developer` (the manor's developer view, a log) adds where it was written: "summary from the Herald, written on the
- * NVIDIA GeForce RTX 4090", or "…, written by a local model" for a note that doesn't say (never guessed to be the
- * NPU). Until 2.148.1 it was "note from the local AI, unverified".
+ * A note's label, on every staff member's page (kit 2.148.1): who wrote it and what it is, or what it did, whatever
+ * ran it, since what a customer reads never names the hardware (kit 2.97.1; before, it named it to everyone).
+ * - `o.what`, a noun: the staff member's own word for its notes, "summary from the Herald" ("summary", the default;
+ *   "caption", "explanation").
+ * - `o.did`, a past-tense action, instead: what the staff member did to the message or messages, "summarized by the
+ *   Herald", "explained by the Surveyor", "de-duplicated by the Clerk". Given both, `did` is said.
+ * - `o.by`: who wrote it, in a sentence (theName; LOCAL_AI for a caller that names nobody).
+ * `developer` (the manor's developer view, a log) adds where it was written to either: "summary from the Herald,
+ * written on the NVIDIA GeForce RTX 4090", or "…, written by a local model" for a note that doesn't say (never guessed
+ * to be the NPU). Until 2.148.1 it was "note from the local AI, unverified".
  * @param {AcceleratorRef | { name: string } | null | undefined} a
  * @param {boolean} [developer]
- * @param {{ what?: string, by?: string }} [o]
+ * @param {{ what?: string, did?: string, by?: string }} [o]
  * @returns {string}
  */
 export declare function noteLabel(a: AcceleratorRef | {
     name: string;
 } | null | undefined, developer?: boolean, o?: {
     what?: string;
+    did?: string;
     by?: string;
 }): string;
 /**

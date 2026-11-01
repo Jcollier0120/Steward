@@ -279,6 +279,13 @@ test('accelerator vectors: why none could take a request, the messages, and the 
     assert.equal(A.noteLabel(m.ref), m.noteLabel.replace(core.LOCAL_AI, 'the Fixture'), m.case);
     assert.equal(A.noteLabel(m.ref, true), m.developerNoteLabel.replace(core.LOCAL_AI, 'the Fixture'), m.case);
   }
+  assert.ok(accel.noteLabels.some((n: any) => n.o.did) && accel.noteLabels.some((n: any) => n.o.what), 'both forms');
+  for (const n of accel.noteLabels) {
+    assert.equal(core.noteLabel(n.ref, n.developer, n.o), n.expect, n.case);
+    // The node part, by the fixture: a noun as a string, an action as { did }.
+    const kind = n.o.did ? { did: n.o.did } : (n.o.what ?? 'summary');
+    assert.equal(A.noteLabel(n.ref, n.developer, kind), core.noteLabel(n.ref, n.developer, { ...n.o, by: 'the Fixture' }), n.case);
+  }
   for (const t of accel.tokens) {
     if (t.text !== undefined) assert.equal(N.estimateTokens(t.text), t.estimate);
     if (t.chat) assert.equal(core.chatTokens(RULES, t.chat), t.estimate);

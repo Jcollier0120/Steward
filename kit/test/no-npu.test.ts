@@ -86,6 +86,7 @@ test('a note that says nothing of where is "from a local model", never "the NPU"
   assert.equal(core.theAccelerator(null), 'a local model');
   assert.equal(core.noteLabel(undefined, true), 'summary from the local AI, written by a local model');
   assert.equal(core.noteLabel(undefined, true, { by: 'the Herald' }), 'summary from the Herald, written by a local model');
+  assert.equal(core.noteLabel(undefined, true, { did: 'summarized', by: 'the Herald' }), 'summarized by the Herald, written by a local model');
   assert.equal(core.theAccelerator({ id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }), 'the NVIDIA GeForce RTX 4080 SUPER');
   assert.match(unverified('hi', undefined, true), /title="Written by a local model\. /);
   assert.match(unverified('hi', { id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }, true), /Written by a local model on the NVIDIA GeForce RTX 4080 SUPER\./);
@@ -95,6 +96,8 @@ test('what a customer reads names no hardware: every note is from the staff memb
   for (const ref of [undefined, null, { id: 'npu', name: 'Snapdragon X2 Elite NPU' }, { id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }, { id: 'cpu', name: 'Processor' }]) {
     assert.equal(core.noteLabel(ref), 'summary from the local AI', 'a caller that names nobody');
     assert.equal(core.noteLabel(ref, false, { what: 'caption', by: 'the Clerk' }), 'caption from the Clerk');
+    assert.equal(core.noteLabel(ref, false, { did: 'explained', by: 'the Surveyor' }), 'explained by the Surveyor');
+    assert.equal(kit.noteLabel(ref, false, { did: 'summarized' }), 'summarized by the Fixture');
     assert.equal(kit.noteLabel(ref), 'summary from the Fixture');
     const html = unverified('hi', ref, false);
     assert.match(html, /title="Written by the local AI\. Check it against the facts beside it\.">summary from the Fixture</);

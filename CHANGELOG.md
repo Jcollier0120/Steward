@@ -8,7 +8,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What changed
 
-- **Kit 2.148.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a note's label names the staff member who wrote it, in its own word for its notes: "summary from the Herald", "summary from Heiward". Holding the pointer over it still says to check it against the facts beside it. Developers still see where it was written: "summary from the Herald, written on the NVIDIA GeForce RTX 4090".
+- **Kit 2.148.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a note's label names the staff member who wrote it, in its own word for its notes or for what it did: "summary from the Herald", "summary from Heiward", "explained by the Surveyor". Holding the pointer over it still says to check it against the facts beside it. Developers still see where it was written: "summary from the Herald, written on the NVIDIA GeForce RTX 4090".
 - The Plain-words notes setting's help says the notes are there to check against the facts beside them. It used to say they're labelled unverified.
 
 ### Before you update

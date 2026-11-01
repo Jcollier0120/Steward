@@ -735,6 +735,9 @@ test('every answer says where it ran, and a background request goes around a car
     assert.equal(A.noteLabel(b.accelerator, true), 'summary from the Fixture, written on the NVIDIA GeForce RTX 4090');
     assert.equal(A.noteLabel(b.accelerator), 'summary from the Fixture');
     assert.equal(A.noteLabel(b.accelerator, false, 'caption'), 'caption from the Fixture', "a staff member's own word for its notes");
+    assert.equal(A.noteLabel(b.accelerator, false, { did: 'summarized' }), 'summarized by the Fixture', 'or what it did');
+    assert.equal(A.noteLabel(b.accelerator, true, { did: 'de-duplicated' }), 'de-duplicated by the Fixture, written on the NVIDIA GeForce RTX 4090');
+    assert.match(unverified('<b>', b.accelerator, false, { did: 'explained' }), /title="Written by the local AI\. Check it against the facts beside it\.">explained by the Fixture<\/span>/);
     assert.match(unverified('<b>', b.accelerator, true), /summary from the Fixture, written on the NVIDIA GeForce RTX 4090<\/span> &lt;b&gt;/);
     assert.match(unverified('<b>', b.accelerator, false), /title="Written by the local AI\. Check it against the facts beside it\.">summary from the Fixture<\/span> &lt;b&gt;/);
     assert.match(unverified('<b>', b.accelerator, false, 'explanation'), />explanation from the Fixture<\/span>/);
