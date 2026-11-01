@@ -84,20 +84,32 @@ test(`several cards: "the graphics card", which one unknown; none: the processor
 
 test('a note that says nothing of where is "from a local model", never "the NPU"', () => {
   assert.equal(core.theAccelerator(null), 'a local model');
-  assert.equal(core.noteLabel(undefined, true), 'note from a local model, unverified');
+  assert.equal(core.noteLabel(undefined, true), 'summary from the local AI, written by a local model');
+  assert.equal(core.noteLabel(undefined, true, { by: 'the Herald' }), 'summary from the Herald, written by a local model');
   assert.equal(core.theAccelerator({ id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }), 'the NVIDIA GeForce RTX 4080 SUPER');
   assert.match(unverified('hi', undefined, true), /title="Written by a local model\. /);
   assert.match(unverified('hi', { id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }, true), /Written by a local model on the NVIDIA GeForce RTX 4080 SUPER\./);
 });
 
-test('what a customer reads names no hardware: every note is "from the local AI", wherever it ran', () => {
+test('what a customer reads names no hardware: every note is from the staff member who wrote it, wherever it ran', () => {
   for (const ref of [undefined, null, { id: 'npu', name: 'Snapdragon X2 Elite NPU' }, { id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }, { id: 'cpu', name: 'Processor' }]) {
-    assert.equal(core.noteLabel(ref), 'note from the local AI, unverified');
+    assert.equal(core.noteLabel(ref), 'summary from the local AI', 'a caller that names nobody');
+    assert.equal(core.noteLabel(ref, false, { what: 'caption', by: 'the Clerk' }), 'caption from the Clerk');
+    assert.equal(kit.noteLabel(ref), 'summary from the Fixture');
     const html = unverified('hi', ref, false);
-    assert.match(html, /title="Written by the local AI\. Check it against the facts beside it\.">note from the local AI, unverified</);
+    assert.match(html, /title="Written by the local AI\. Check it against the facts beside it\.">summary from the Fixture</);
     assert.doesNotMatch(html, /NPU|NVIDIA|Processor|processor|graphics card/);
   }
   assert.equal(core.LOCAL_AI, 'the local AI');
+});
+
+test('a staff member in a sentence: "the Herald", but Reeve and Heiward by name', () => {
+  assert.equal(core.theName('Herald'), 'the Herald');
+  assert.equal(core.theName('Developer Herald'), 'the Developer Herald');
+  assert.equal(core.theName('Reeve'), 'Reeve');
+  assert.equal(core.theName('Heiward'), 'Heiward');
+  assert.equal(kit.theName('Smith'), 'the Smith');
+  assert.equal(core.noteLabel({ id: 'npu', name: 'Snapdragon X2 Elite NPU' }, true, { by: core.theName('Heiward') }), 'summary from Heiward, written on the Snapdragon X2 Elite NPU');
 });
 
 test("hardware.json: written only when detection could tell, read by the agents' loader and the keeper's reader", () => {

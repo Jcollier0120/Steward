@@ -42,13 +42,14 @@ export function until(at: number | string | null | undefined, now = Date.now()):
 }
 
 /**
- * The label every model answer carries: a 4B model's words, for a person to check ("note from the local AI,
- * unverified"). Only a developer (`developer`, the manor's developer view now unless given) is told where they were
- * written ("note from the NVIDIA GeForce RTX 4090, unverified"); a note that says nothing of where (one kept from
- * before the accelerators) is "from a local model" then: it is never guessed to be the NPU's.
+ * The label every model answer carries: a 4B model's words, for a person to check ("summary from the Herald"; `what`
+ * is the staff member's own word, "caption", "explanation"), and the hover says to check it against the facts beside
+ * it. Only a developer (`developer`, the manor's developer view now unless given) is told where they were written
+ * ("summary from the Herald, written on the NVIDIA GeForce RTX 4090"); a note that says nothing of where (one kept
+ * from before the accelerators) is "written by a local model" then: it is never guessed to be the NPU's.
  */
-export const unverified = (text: string, from?: AcceleratorRef | null, developer = isDeveloper()) =>
-  `<span class="note"><span class="badge npu" title="${developer ? `Written by a local model${from?.name ? ` on ${esc(theAccelerator(from))}` : ''}` : 'Written by the local AI'}. Check it against the facts beside it.">${esc(noteLabel(from, developer))}</span> ${esc(text)}</span>`;
+export const unverified = (text: string, from?: AcceleratorRef | null, developer = isDeveloper(), what = 'summary') =>
+  `<span class="note"><span class="badge npu" title="${developer ? `Written by a local model${from?.name ? ` on ${esc(theAccelerator(from))}` : ''}` : 'Written by the local AI'}. Check it against the facts beside it.">${esc(noteLabel(from, developer, what))}</span> ${esc(text)}</span>`;
 
 /**
  * Where the Settings panel goes on an agent's page. The kit's web part draws it: settings-panel.js

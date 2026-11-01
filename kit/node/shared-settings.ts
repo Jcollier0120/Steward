@@ -79,7 +79,7 @@ export function roundEveryMs(settings: () => unknown, r: RoundEvery): () => numb
 
 /** The plain-words notes switch: on the page (not Advanced), and one an onboarding may offer. */
 export function plainNotesField(o: { help?: string } = {}): Field {
-  return { key: 'plainNotes', kind: 'switch', label: 'Plain-words notes', help: o.help ?? 'A short note in plain words by the local AI on this PC, labelled unverified. Off: none is asked for.', inManor: 'shared' };
+  return { key: 'plainNotes', kind: 'switch', label: 'Plain-words notes', help: o.help ?? 'A short note in plain words by the local AI on this PC, to check against the facts beside it. Off: none is asked for.', inManor: 'shared' };
 }
 
 /** A manor-wide switch's value: Manor's (`home` for tests), when it says true or false. */

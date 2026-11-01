@@ -2,6 +2,32 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.148.1
+
+**A note's label names the staff member who wrote it, in its own word for its notes: "summary from the Herald", where it said "note from the local AI, unverified" (the owner, 2026-10-31).**
+
+### What changed
+
+- **core/messages.js: `noteLabel(a, developer = false, o = {})`.**
+  - `o.what` is the word (default `'summary'`). `o.by` is who wrote it, in a sentence (default `LOCAL_AI`, for a caller that names nobody).
+  - Plain: `${what} from ${by}`, "summary from the Herald". It no longer says "unverified": the hover says to check it.
+  - With `developer`, where it was written follows: "summary from the Herald, written on the NVIDIA GeForce RTX 4090". A note that doesn't say where is "…, written by a local model", never guessed to be the NPU.
+- **core/messages.js: `theName(name)`**: a staff member's name in a sentence, "the Herald", but Reeve and Heiward by name (the same rule as Manor's staff settings). The node part exports it too, from accelerators.ts and npu.ts.
+- **node/accelerators.ts: `noteLabel(a, developer = false, what = 'summary')`** passes `by` = `theName(APP.name)`, the agent's own name from its `src/app.ts`.
+  - The kit reads app.ts (a release's app.js) with `require` at the first label, never by an import at the top. An agent's app.ts reads its config, whose kit imports reach accelerators.ts, so such an import would close the loop kit 2.76.0's first try did (work-status.test.ts). An app.ts that awaits as it loads can't be required: it's imported then, and its labels name it from then on.
+  - Every call as it was, `noteLabel(from)` and `noteLabel(from, developer)`, keeps working, and now names the agent.
+  - A staff member whose notes aren't summaries passes its own word: `noteLabel(from, developer, 'caption')`.
+- **node/page.ts: `unverified(text, from, developer, what = 'summary')`** draws the label with that word. Its hover is as before: "Written by the local AI. Check it against the facts beside it.", and a developer's says where it was written.
+- **accelerator-vectors.json:** each message case's `noteLabel` and `developerNoteLabel` are the new words by `LOCAL_AI`, since the vectors name no staff member: "summary from the local AI", "summary from the local AI, written on the graphics card". A driver that draws a staff member's notes passes `o.by` itself.
+- **shared-settings.ts:** the Plain-words notes switch's help says "to check against the facts beside it", where it said "labelled unverified".
+- spec/DEVELOPER-OPTIONS.md and spec/ACCELERATORS.md give the new label.
+
+### Before you update
+
+- **A test that spells out the old label fails**, plain ("note from the local AI, unverified") or a developer's ("note from the NVIDIA GeForce RTX 4090, unverified", `/unverified/`). A test that compares with `noteLabel(from)` itself passes. A note kept with its label (`label: 'note from the NPU, unverified'` in a fixture) is data, and still passes. The staff tests that spell out the old words: Bridgeward, Marshal, Miller, Pinder, Smith, Surveyor, Thatcher, Manor and Reeve (kit 2.148.1's trial names each one).
+- A staff member whose notes aren't summaries passes its own word, in its own release: the Clerk's captions (`'caption'`), the Surveyor's and the Watchman's explanations (`'explanation'`), the Bridgeward's reports (`'report'`).
+- A label drawn by the agent's own code, not through `noteLabel`, says what it said: bring it to `noteLabel(from, developer, what)`.
+
 ## 2.147.5
 
 **A refused sign-in on gitlab.com no longer takes the whole GitLab sign-in with it. The kit forgets a sign-in only where Git Credential Manager keeps its refresh token as `refresh_token.<host>`, shown stale or not.**
