@@ -752,6 +752,17 @@ body.on-about main > :not(#about-view), body:not(.on-about) #about-view { displa
 #settings-view > h2:first-of-type, #about-view > h2:first-of-type { font-size: 20px; color: var(--fg); margin: 8px 0 12px; letter-spacing: 0; }
 .work-runs .work-table td:first-child { width: 42%; }
 .work-runs p { margin: 8px 0; }
+/* Where its model work goes: a card per accelerator, an arrow to the next, in the order a request tries them. */
+.work-path { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px 34px; list-style: none; margin: 10px 0; padding: 0 0 0 2px; }
+.work-acc { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 170px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.work-path > .work-acc + .work-acc::before { content: '\\2192'; position: absolute; left: -26px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 18px; line-height: 1; }
+.work-acc-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.work-acc-head .badge:not(.npu) { color: var(--muted); background: var(--quiet-bg); }
+/* A narrow window stacks the cards, the arrow pointing down to the next. */
+@media (max-width: 900px) {
+  .work-path { flex-direction: column; align-items: flex-start; gap: 26px; }
+  .work-path > .work-acc + .work-acc::before { content: '\\2193'; left: 24px; top: -22px; transform: none; }
+}
 
 @media (max-width: 640px) {
   :root { --titlebar-h: 109px; }

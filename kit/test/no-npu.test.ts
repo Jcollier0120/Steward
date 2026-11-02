@@ -172,12 +172,13 @@ test('Settings\' "Where its work runs" on a PC without an NPU names no NPU', () 
   // A developer's view, with the accelerators' details: said, not left to this PC's Developer options.
   const html = workSection({ id: 'herald', name: 'Herald', config: cfg, developer: true });
   assert.doesNotMatch(html, /NPU/);
-  assert.match(html, /Graphics cards with 2 GB or more of their own memory come first/);
-  assert.match(html, /the NVIDIA GeForce RTX 4080 SUPER \(chat\)/);
+  assert.match(html, /<span class="badge">GPU<\/span> <strong>NVIDIA GeForce RTX 4080 SUPER<\/strong><\/span><span class="chips"><span class="chip">Chat<\/span>/);
+  assert.match(html, /16 GB of its own memory/);
+  assert.match(html, /as the graphics card&#39;s \(Performance, then GPU\)|as the graphics card's \(Performance, then GPU\)/);
   // Everyone else's, in plain words: no NPU either.
   const plain = workSection({ id: 'herald', name: 'Herald', config: cfg, developer: false });
   assert.doesNotMatch(plain, /NPU/);
-  assert.match(plain, /the local AI uses the NVIDIA GeForce RTX 4080 SUPER/);
+  assert.match(plain, /<strong>NVIDIA GeForce RTX 4080 SUPER<\/strong><span class="muted small">Graphics card<\/span>/);
 });
 
 test('every page watches its ping, so a round that starts or ends after it was drawn shows without a reload by hand', async () => {

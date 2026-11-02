@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.149.1
+
+**"Where its work runs" draws where the model work goes: a card for each accelerator, with an arrow to the next, in the order a request tries them, in place of a long paragraph (the owner, 2026-11-02).**
+
+### What changed
+
+- **node/work.ts' `workSection`**: the model work is one line, then an ordered list (`ol.work-path`) with a card (`li.work-acc`) for each accelerator that is on and does some of the work, in Reeve's order, then a line on when a request moves on to the next.
+  - A developer's card shows the accelerator's kind (an NPU, GPU or CPU badge), its name from the PC, the work it does (Chat, Pictures, Search), and how many requests it takes at once, with its own memory or "shares the PC's memory".
+  - Without developer staff, a card shows a plain name ("AI chip", "Graphics card") and what it is; two of the same plain name show once.
+  - An agent whose work runs on the NPU only (`npuOnly`) shows the NPU's card alone, or says the PC has none.
+  - When Reeve's accelerators can't be read, the section says so in words, as before (`thisPc`, still exported).
+- **node/page.ts**: styles for `.work-path`, `.work-acc` and `.work-acc-head`. A GPU or CPU badge on a card is grey; the NPU's keeps its colour. A window narrower than 900 pixels stacks the cards, the arrow pointing down.
+
+### Before you update
+
+- **A test that asserts the old paragraph's words fails**: "The NPU comes first", "Graphics cards with 2 GB or more of their own memory come first", "The AI chip comes first", or this PC's accelerators in a sentence. Assert a card instead: the accelerator's name, or `class="work-acc"`.
+
 ## 2.149.0
 
 **A note's label says only who wrote it, for developers too: "summary from the Herald", without ", written on the NPU" (the owner, 2026-11-02).**

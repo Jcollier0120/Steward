@@ -85,6 +85,29 @@ test("the Lamplighter's model work: the NPU only, never a graphics card or the p
   assert.doesNotMatch(workSection({ id: 'surveyor', name: 'Surveyor', config: both, developer: true }), /NPU only/, 'only an agent that says so');
 });
 
+test("the model work as a path: a card per accelerator, in the order a request tries them, with its work in Reeve's words", () => {
+  const both = parseAccelerators({
+    accelerators: [
+      { id: 'npu', kind: 'npu', maxContextTokens: 2400, chat: { baseUrl: 'http://127.0.0.1:18181', model: 'q' }, vision: { baseUrl: 'http://127.0.0.1:18181', model: 'v' } },
+      { id: 'gpu-nvidia-geforce-rtx-4090', kind: 'gpu', memoryGb: 24, slots: 2, maxContextTokens: 8192, embed: { baseUrl: 'http://127.0.0.1:18192', model: 'e' } },
+      { id: 'cpu', kind: 'cpu', slots: 1, maxContextTokens: 4096, chat: { baseUrl: 'http://127.0.0.1:18193', model: 'c' }, enabled: false },
+    ],
+  }, { npu: true, npuName: 'Snapdragon X2 Elite NPU', cards: [{ name: 'NVIDIA GeForce RTX 4090', memoryGb: 24 }] });
+  assert.ok(!('error' in both));
+  const html = workSection({ id: 'clerk', name: 'Clerk', config: both, developer: true });
+  const cards = [...html.matchAll(/<li class="work-acc">(.*?)<\/li>/g)].map((m) => m[1]);
+  assert.equal(cards.length, 2, 'the processor is turned off: no card');
+  assert.match(cards[0], /^<span class="work-acc-head"><span class="badge npu">NPU<\/span> <strong>Snapdragon X2 Elite<\/strong><\/span>/);
+  assert.match(cards[0], /<span class="chip">Chat<\/span><span class="chip">Pictures<\/span><\/span><span class="muted small">One request at a time<\/span>$/);
+  assert.match(cards[1], /<span class="badge">GPU<\/span> <strong>NVIDIA GeForce RTX 4090<\/strong>/);
+  assert.match(cards[1], /<span class="chip">Search<\/span><\/span><span class="muted small">2 requests at once, 24 GB of its own memory<\/span>$/);
+  assert.match(html, /Each request goes to the first of these that does its work, and waits its turn there:<\/p>\s*<ol class="work-path" aria-label="In this order">/);
+  assert.match(html, /It moves on to the next only when the one before can&#39;t take it|It moves on to the next only when the one before can't take it/);
+  assert.match(html, /a graph of its own \(Performance, then NPU\)/);
+  // Not set up: one line, no path.
+  assert.doesNotMatch(workSection({ id: 'clerk', name: 'Clerk', config: { error: REEVE_NOT_SET_UP }, developer: true }), /work-path/);
+});
+
 test('the page carries the section, which the script moves into Settings after the agent\'s own', () => {
   const html = page({ token: 'tok', body: '<h2>Settings</h2><div data-settings-panel></div><p>Version 1</p>' });
   assert.match(html, /<section class="work-runs" data-settings-extra>/);
@@ -111,11 +134,12 @@ test('with Developer options off, the section is in plain words: the local AI, n
   }
   const clerk = workSection({ id: 'clerk', name: 'Clerk', config: legacyNpu, developer: false });
   assert.match(clerk, /Its AI work<\/strong> goes to the local AI/);
-  assert.match(clerk, /On this PC, the local AI uses the AI chip\. So its AI work runs on the AI chip only/);
+  assert.match(clerk, /<li class="work-acc"><strong>AI chip<\/strong><span class="muted small">Built for AI work<\/span><\/li><\/ol>/, 'the AI chip alone, a card');
+  assert.match(clerk, /So its AI work runs on the AI chip only/);
   assert.doesNotMatch(clerk, /vision/, 'the vision model is the local AI too');
   assert.match(clerk, /a text reader of its own, on the AI chip where it can, else on the processor/);
   assert.doesNotMatch(clerk, /doesn&#39;t offer it/, "the reader is our own, not Windows' held back");
-  assert.match(workSection({ id: 'clerk', name: 'Clerk', config: both, developer: false }), /the local AI uses the AI chip, then the graphics card\./, 'the NPU by what it is, not its maker');
+  assert.match(workSection({ id: 'clerk', name: 'Clerk', config: both, developer: false }), /<strong>AI chip<\/strong>.*<\/li><li class="work-acc"><strong>Graphics card<\/strong><\/li>/, 'the NPU by what it is, not its maker, then the card');
   assert.match(workSection({ id: 'miller', name: 'Miller', config: both, developer: false }), /Windows may count the video encoding as graphics use/);
   assert.match(workSection({ id: 'lamplighter', name: 'Lamplighter', config: both, developer: false }), /the local AI on the AI chip only/);
   // A developer role's work doesn't run with the switch off, so its page has no section then; with it on, all of it.
