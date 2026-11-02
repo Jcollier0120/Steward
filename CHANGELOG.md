@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.293
+
+**Text the local AI writes on a staff member's page says only which staff member wrote it, for developers too: "summary from the Herald", without ", written on the NPU". The Steward hands kit 2.149.0 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.149.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): with developer staff hired, a note's label no longer adds where it was written ("…, written on the NPU"), on the pages and in the Herald's and the Developer Herald's run reports. It added little, and for a note kept from an earlier run it wasn't always true. Holding the pointer over the label still tells a developer where it was written.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member shows the shorter label once it takes kit 2.149.0.
+
 ## 0.36.292
 
 **The Steward's page is laid out for a wide screen: the page at a glance, then tabs, with a card for each staff member, and the build schedule drawn as a chart on the Release tab, where it's changed too. Settings read more easily, and no longer list staff Manor has retired.**

@@ -13,8 +13,8 @@ export declare const LOCAL_AI = "the local AI";
  * starts with "the" is left as it is. None (a note kept from before accelerators, or one that didn't say) is
  * "a local model": it may have been a graphics card, so it is never guessed to be the NPU.
  *
- * It names the hardware, so it's for developers' views, logs and the messages below. What a customer reads names the
- * staff member who wrote it instead (noteLabel without `developer`): no NPU, graphics card or processor by name.
+ * It names the hardware, so it's for developers' views, logs and the messages below. A note's label names the staff
+ * member who wrote it instead (noteLabel), for everyone: no NPU, graphics card or processor by name.
  * @param {AcceleratorRef | { name: string } | null | undefined} a
  * @returns {string}
  */
@@ -36,9 +36,11 @@ export declare function theName(name: string): string;
  * - `o.did`, a past-tense action, instead: what the staff member did to the message or messages, "summarized by the
  *   Herald", "explained by the Surveyor", "de-duplicated by the Clerk". Given both, `did` is said.
  * - `o.by`: who wrote it, in a sentence (theName; LOCAL_AI for a caller that names nobody).
- * `developer` (the manor's developer view, a log) adds where it was written to either: "summary from the Herald,
- * written on the NVIDIA GeForce RTX 4090", or "…, written by a local model" for a note that doesn't say (never guessed
- * to be the NPU). Until 2.148.1 it was "note from the local AI, unverified".
+ * `a` and `developer` change nothing (kit 2.149.0): the label never says where the note was written, not even in the
+ * manor's developer view or a log. That added little, and a note kept from an earlier run may not have been written
+ * where its record says. A developer's hover may say it (page.ts' unverified does). From 2.148.1 to 2.148.5 a
+ * developer's label added ", written on the NVIDIA GeForce RTX 4090"; until 2.148.1 it was "note from the local AI,
+ * unverified".
  * @param {AcceleratorRef | { name: string } | null | undefined} a
  * @param {boolean} [developer]
  * @param {{ what?: string, did?: string, by?: string }} [o]

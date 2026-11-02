@@ -94,9 +94,9 @@ function notesWriter(): string {
 export type NoteKind = string | { did: string };
 
 /**
- * A note's label: what it is and which staff member wrote it, "summary from the Herald", for everyone; with
- * `developer` (isDeveloper(), a log), where it was written too: "summary from the Herald, written on the NVIDIA
- * GeForce RTX 4090". `what` is the staff member's own word for its notes ("caption", "explanation", "report"), or
+ * A note's label: what it is and which staff member wrote it, "summary from the Herald", for everyone, developers
+ * and logs too (kit 2.149.0: `a` and `developer` change nothing, and only a developer's hover says where it was
+ * written). `what` is the staff member's own word for its notes ("caption", "explanation", "report"), or
  * what it did to the message or messages, past tense: `{ did: 'summarized' }` is "summarized by the Herald".
  */
 export const noteLabel = (a: AcceleratorRef | null | undefined, developer = false, what: NoteKind = 'summary') =>

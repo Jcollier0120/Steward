@@ -5148,7 +5148,7 @@
    },
    "theAccelerator": "the Snapdragon X2 Elite NPU",
    "noteLabel": "summary from the local AI",
-   "developerNoteLabel": "summary from the local AI, written on the Snapdragon X2 Elite NPU"
+   "developerNoteLabel": "summary from the local AI"
   },
   {
    "case": "an older config's card",
@@ -5158,7 +5158,7 @@
    },
    "theAccelerator": "the graphics card",
    "noteLabel": "summary from the local AI",
-   "developerNoteLabel": "summary from the local AI, written on the graphics card"
+   "developerNoteLabel": "summary from the local AI"
   },
   {
    "case": "the processor",
@@ -5168,7 +5168,7 @@
    },
    "theAccelerator": "the processor",
    "noteLabel": "summary from the local AI",
-   "developerNoteLabel": "summary from the local AI, written on the processor"
+   "developerNoteLabel": "summary from the local AI"
   },
   {
    "case": "a name that says \"the\"",
@@ -5178,14 +5178,14 @@
    },
    "theAccelerator": "The Oryon CPU",
    "noteLabel": "summary from the local AI",
-   "developerNoteLabel": "summary from the local AI, written on The Oryon CPU"
+   "developerNoteLabel": "summary from the local AI"
   },
   {
    "case": "none: a note that says nothing of where (from before the accelerators) is from a local model, never guessed to be the NPU",
    "ref": null,
    "theAccelerator": "a local model",
    "noteLabel": "summary from the local AI",
-   "developerNoteLabel": "summary from the local AI, written by a local model"
+   "developerNoteLabel": "summary from the local AI"
   }
  ],
  "noteLabels": [
@@ -5236,7 +5236,7 @@
     "did": "explained",
     "by": "the Surveyor"
    },
-   "expect": "explained by the Surveyor, written on the NVIDIA GeForce RTX 4090"
+   "expect": "explained by the Surveyor"
   },
   {
    "case": "an action that doesn't say where, in a developer's view: by a local model",
@@ -5246,7 +5246,7 @@
     "did": "de-duplicated",
     "by": "the Clerk"
    },
-   "expect": "de-duplicated by the Clerk, written by a local model"
+   "expect": "de-duplicated by the Clerk"
   },
   {
    "case": "a summary in a developer's view, by a staff member called by name",
@@ -5258,7 +5258,7 @@
    "o": {
     "by": "Heiward"
    },
-   "expect": "summary from Heiward, written on the processor"
+   "expect": "summary from Heiward"
   },
   {
    "case": "both a noun and an action: the action",
