@@ -228,6 +228,9 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.equal(tiles(unreleased).find(([label]) => label === 'Staff')?.[2], '2 updates not yet released');
   const one = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [waits(1), rows[0]] }, round: { ...body.round, repos: true } });
   assert.equal(tiles(one).find(([label]) => label === 'Staff')?.[2], '1 update not yet released');
+  // No tile for the last stage: nearly always a round, it said nothing. Its tab stays.
+  assert.deepEqual(tiles(one).map(([label]) => label), ['Needs you', 'Staff', 'Next build', 'Pull requests']);
+  assert.match(one, /role="tab"[^>]*>Last stage</);
   const ping = await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');

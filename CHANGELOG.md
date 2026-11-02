@@ -8,7 +8,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What's new
 
-- **At a glance**, above the tabs: what needs you, the staff (how many are behind, and how many updates are not yet released), the next build and what it brings, the open pull requests and how many fail, and the last stage. Each tile opens the tab it's about.
+- **At a glance**, above the tabs: what needs you, the staff (how many are behind, and how many updates are not yet released), the next build and what it brings, and the open pull requests and how many fail. Each tile opens the tab it's about.
 - **Tabs**: the staff, the last stage, Release, and the repositories found on this PC.
   - **The staff**: a card each, side by side as the window allows, all the same height with room for a note. Each card shows its kit (or whether the Steward releases it), its latest release, and its branch and clone, then its release PC, what its next build brings (folded) and its open pull requests.
   - **What holds a release** (a pull request passed over, a version claimed on two PCs) is above the cards, not under them.

@@ -1138,7 +1138,8 @@ export function WholeSuiteCard({ w, now }: { w: WholeJob | null | undefined; now
 
 /**
  * The page at a glance: what needs you, the staff (or your repositories) and how many are behind, the next build and
- * what it brings, the open PRs and how many fail, and the last stage. Each opens the tab it is about.
+ * what it brings, and the open PRs and how many fail. Each opens the tab it is about. No tile for the last stage: it is
+ * nearly always a round, which says nothing; its tab does.
  */
 export function tilesOf(v: StewardView, now: number): GlanceTile[] {
   const castellan = v.castellan !== false;
@@ -1173,8 +1174,6 @@ export function tilesOf(v: StewardView, now: number): GlanceTile[] {
     const failing = prs.filter((p) => p.checks === 'failing' || p.mergeable === 'CONFLICTING').length;
     tiles.push({ label: 'Pull requests', value: prs.length, note: !prs.length ? 'none open' : failing ? `${failing} failing or in conflict` : 'none failing', tone: failing ? 'caution' : 'neutral', to: 'staff' });
   }
-  const l = v.last;
-  tiles.push(l ? { label: 'Last stage', value: l.stage, note: l.error ? `stopped ${ago(l.finished, now)}` : ago(l.finished, now), tone: l.error ? 'danger' : 'neutral', to: 'last' } : { label: 'Last stage', value: 'None yet', note: 'no stage has run', to: 'last' });
   return tiles;
 }
 
