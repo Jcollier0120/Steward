@@ -84,17 +84,20 @@ test(`several cards: "the graphics card", which one unknown; none: the processor
 
 test('a note that says nothing of where is "from a local model", never "the NPU"', () => {
   assert.equal(core.theAccelerator(null), 'a local model');
-  assert.equal(core.noteLabel(undefined, true), 'summary from the local AI, written by a local model');
-  assert.equal(core.noteLabel(undefined, true, { by: 'the Herald' }), 'summary from the Herald, written by a local model');
-  assert.equal(core.noteLabel(undefined, true, { did: 'summarized', by: 'the Herald' }), 'summarized by the Herald, written by a local model');
+  // The label never says where, not even a developer's (kit 2.149.0): only the hover does.
+  assert.equal(core.noteLabel(undefined, true), 'summary from the local AI');
+  assert.equal(core.noteLabel(undefined, true, { by: 'the Herald' }), 'summary from the Herald');
+  assert.equal(core.noteLabel(undefined, true, { did: 'summarized', by: 'the Herald' }), 'summarized by the Herald');
   assert.equal(core.theAccelerator({ id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }), 'the NVIDIA GeForce RTX 4080 SUPER');
   assert.match(unverified('hi', undefined, true), /title="Written by a local model\. /);
   assert.match(unverified('hi', { id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }, true), /Written by a local model on the NVIDIA GeForce RTX 4080 SUPER\./);
 });
 
-test('what a customer reads names no hardware: every note is from the staff member who wrote it, wherever it ran', () => {
+test('a note label names no hardware: every note is from the staff member who wrote it, wherever it ran', () => {
   for (const ref of [undefined, null, { id: 'npu', name: 'Snapdragon X2 Elite NPU' }, { id: 'gpu-x', name: 'NVIDIA GeForce RTX 4080 SUPER' }, { id: 'cpu', name: 'Processor' }]) {
     assert.equal(core.noteLabel(ref), 'summary from the local AI', 'a caller that names nobody');
+    assert.equal(core.noteLabel(ref, true), 'summary from the local AI', "a developer's too (kit 2.149.0)");
+    assert.equal(kit.noteLabel(ref, true, 'caption'), 'caption from the Fixture');
     assert.equal(core.noteLabel(ref, false, { what: 'caption', by: 'the Clerk' }), 'caption from the Clerk');
     assert.equal(core.noteLabel(ref, false, { did: 'explained', by: 'the Surveyor' }), 'explained by the Surveyor');
     assert.equal(kit.noteLabel(ref, false, { did: 'summarized' }), 'summarized by the Fixture');
@@ -112,7 +115,7 @@ test('a staff member in a sentence: "the Herald", but Reeve and Heiward by name'
   assert.equal(core.theName('Reeve'), 'Reeve');
   assert.equal(core.theName('Heiward'), 'Heiward');
   assert.equal(kit.theName('Smith'), 'the Smith');
-  assert.equal(core.noteLabel({ id: 'npu', name: 'Snapdragon X2 Elite NPU' }, true, { by: core.theName('Heiward') }), 'summary from Heiward, written on the Snapdragon X2 Elite NPU');
+  assert.equal(core.noteLabel({ id: 'npu', name: 'Snapdragon X2 Elite NPU' }, true, { by: core.theName('Heiward') }), 'summary from Heiward');
 });
 
 test("hardware.json: written only when detection could tell, read by the agents' loader and the keeper's reader", () => {

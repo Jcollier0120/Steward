@@ -2,6 +2,22 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.149.0
+
+**A note's label says only who wrote it, for developers too: "summary from the Herald", without ", written on the NPU" (the owner, 2026-11-02).**
+
+### What changed
+
+- **core/messages.js: `noteLabel(a, developer, o)`** gives the same label whatever `a` and `developer` are: "summary from the Herald", "explained by the Surveyor". From 2.148.1 to 2.148.5 a developer's label (the manor's developer view, and the run reports the Herald and the Developer Herald log) added ", written on the NVIDIA GeForce RTX 4090", or ", written by a local model". That added little, and for a note kept from an earlier run it wasn't always true. Both arguments stay, so every call keeps working.
+- **node/accelerators.ts' `noteLabel`** and **node/page.ts' `unverified`** draw that label. A developer's hover still says where the note was written: "Written by a local model on the NVIDIA GeForce RTX 4090. Check it against the facts beside it."
+- **accelerator-vectors.json:** each message case's `developerNoteLabel` is its `noteLabel` now, and the `noteLabels` cases expect no "written on". A driver checks the same fields as before.
+- spec/DEVELOPER-OPTIONS.md and spec/ACCELERATORS.md say where a developer finds where a note was written: its hover.
+
+### Before you update
+
+- **A test that asserts a developer's label names the hardware fails** (`label.includes(theAccelerator(from))`, or "written on" spelled out). A test that compares a label with `noteLabel(from, developer)` itself passes on both kits. The staff tests kit 2.149.0's trial found asserting it were brought up first (2026-11-02): the Chamberlain, the Developer Herald, the Herald, the Lamplighter, the Marshal, the Porter, the Reckoner, the Thatcher, the Warrener and the Watchman.
+- A developer's hover is the place to show where a note was written: `unverified` does it, and so should a staff member's own hover.
+
 ## 2.148.5
 
 **Settings read more easily: a long help can be laid out as points, and in a narrow window a repository's or record's line keeps its padding when it wraps (the owner, 2026-11-02).**

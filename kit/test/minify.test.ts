@@ -109,7 +109,7 @@ test("a released agent's notes name it: the kit reads its app.js, as it reads ap
   const script = `const A = await import(${JSON.stringify(kit)}); console.log([A.noteLabel(null), A.noteLabel({ id: 'npu', name: 'Snapdragon X2 Elite NPU' }, true, 'caption')].join(' | '))`;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', windowsHide: true });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trim(), 'summary from the Fixture | caption from the Fixture, written on the Snapdragon X2 Elite NPU');
+  assert.equal(r.stdout.trim(), 'summary from the Fixture | caption from the Fixture');
   assert.equal(r.stderr, '', 'no warning for loading app.js');
 });
 
