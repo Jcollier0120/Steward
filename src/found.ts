@@ -417,10 +417,13 @@ export function anyRepo(who: string, o: { found?: FoundState; cwd?: string } = {
 
 /** The page's view of it: what Reeve found that could be looked after, and why nothing can when nothing can. */
 export function foundView(s: FoundState, settings: Pick<Settings, 'employees' | 'releasesCastellan' | 'stewardRepo' | 'stewardCheckout'>, home = manorHome()): { at: string | null; error: string | null; from: FoundState['from']; offered: FoundRepo[]; found: number; into: 'manor' | 'steward' } {
-  const own = normalizeSettings(readJson<unknown>(settingsFile(), {})).settings.employees;
-  const into = !settings.releasesCastellan && manorTakesOver(own, home) ? 'manor' : 'steward';
-  // One Manor has retired is in the file still, though no longer looked after (settings.ts's inEffect): not offered again.
   const retired = retiredStaff(home);
+  // The file as it is, with any agent Manor has retired that it names still (normalizeSettings leaves those out).
+  const own = normalizeSettings(readJson<unknown>(settingsFile(), {}), new Set()).settings.employees;
+  const into = !settings.releasesCastellan && manorTakesOver(own, home) ? 'manor' : 'steward';
+  // One Manor has retired is no longer looked after (settings.ts's inEffect): not offered again, whether the file still
+  // names it or a save has dropped it. Only Castellan's own are retired, so by its folder's name only where it's released.
   const held = [...settings.employees, ...own.filter((e) => retired.has(e.id.toLowerCase()))];
-  return { at: s.at, error: s.error, from: s.from, offered: candidates(s, held, undefined, settings), found: s.repos.length, into };
+  const offered = candidates(s, held, undefined, settings).filter((r) => !(settings.releasesCastellan && retired.has(r.name)));
+  return { at: s.at, error: s.error, from: s.from, offered, found: s.repos.length, into };
 }

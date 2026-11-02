@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.148.5
+
+**Settings read more easily: a long help can be laid out as points, and in a narrow window a repository's or record's line keeps its padding when it wraps (the owner, 2026-11-02).**
+
+### What changed
+
+- **react/settings-form.tsx, a setting's help** (`Help`): a help of one line is a paragraph, as before. A help of several lines (`
+` between them) is a paragraph per line, and each run of lines starting `- ` is a bulleted list. Text in backticks is marked as code. It renders as `div.sf-help.sf-help-lines`, with the same id, so the field's `aria-describedby` still finds it.
+- **web/settings-panel.css**: the chips and switch on a record's line (`.sf-record-line`) have 6 px above and below. When the line wraps in a narrow window, they no longer sit on the record's bottom edge. A line that doesn't wrap stays 40 px tall.
+
+### Before you update
+
+- Nothing. To break up a long help, write it as several lines.
+
 ## 2.148.4
 
 **A release's notes say "kit" where they said "the Steward's kit". The spec says how a kit entry reaches the staff's notes from Steward 0.36.291 on (the owner, 2026-11-01).**

@@ -7,6 +7,7 @@ import { hasTour, pageShell, reactPage } from './kit/react-page.ts';
 import { every } from './kit/schedule.ts';
 import { updateHold } from './kit/update-hold.ts';
 import { serve, type Handler } from './kit/server.ts';
+import { saveSettingsReply } from './kit/settings-kit.ts';
 import { currentWork, inWork, startWork, workTasks } from './kit/work-tasks.ts';
 import { afterWords } from './after.ts';
 import { gate, loadBudget } from './budget.ts';
@@ -447,7 +448,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const s = loadSettings();
     const busy = runs.length > 0 || refreshing !== null;
     const pv = pipelineView(s.buildPipeline, loadPipeline());
-    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: { times: pv.times, next: pv.next, building: pv.building, took: pv.last ? buildTimeLine(pv.last) : null, late: lateLine(pv.open ?? pv.last, new Date()), wakes: wakesPc() }, asleep: saverSlept ? saverSleepLine(saverSlept.saver, saverSlept.sleeps, Date.now()) : null };
+    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: { times: pv.times, days: s.buildPipeline.days, next: pv.next, building: pv.building, took: pv.last ? buildTimeLine(pv.last) : null, late: lateLine(pv.open ?? pv.last, new Date()), wakes: wakesPc() }, asleep: saverSlept ? saverSleepLine(saverSlept.saver, saverSlept.sleeps, Date.now()) : null };
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known), and
     // the accounts on other hosts as the stages last asked them.
     const team = teamOf(s.team, o.owner, hostLogins());
@@ -633,6 +634,20 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         if (!r.ok) return { json: { error: r.message }, status: 409 };
         if (!rounding() && !slotsFull() && pin === undefined) void roundJob(true).catch((err) => console.error(`${new Date().toISOString()} round: ${(err as Error).message}`));
         return { json: { ok: true, message: r.message } };
+      },
+      // The build schedule, set on the page's Release tab ({ times, days }): saved as Settings would save its Build
+      // pipeline (the kit's saveSettingsReply, its checks and all), with the rest of the pipeline as it was.
+      '/api/schedule': async ({ body }) => {
+        const p = loadSettings().buildPipeline;
+        const strings = (v: unknown, max: number) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, max) : null);
+        const times = strings(body?.times, 12);
+        const days = strings(body?.days, 7);
+        if (!times && !days) return { json: { error: 'Send { "times": ["13:00", …], "days": ["mon", …] }.' }, status: 400 };
+        const r = await saveSettingsReply(SETTINGS_SPEC, { values: { buildPipeline: { ...p, times: times ?? p.times, days: days ?? p.days } } });
+        const j = r.json as { ok?: boolean; error?: string; errors?: Record<string, string> };
+        // A refusal by field, said in one go: the page has no form to put each beside.
+        if (j.ok === false) return { json: { error: [...new Set(Object.values(j.errors ?? {}))].join(' ') || j.error }, status: r.status ?? 400 };
+        return r;
       },
       '/api/repos/refresh': () => {
         void find();

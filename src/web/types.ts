@@ -32,7 +32,7 @@ export interface RoundView {
    * under way; `late`, the line for the last build when the PC slept through its time (pipeline.ts' lateLine); `wakes`,
    * the PC is woken for each, plugged in (build-hold.ts); `took`, where the last build's time went (buildtimes.ts).
    */
-  build?: { times: string[]; next: string | null; building: boolean; took?: string | null; late?: string | null; wakes?: boolean } | null;
+  build?: { times: string[]; days?: string[]; next: string | null; building: boolean; took?: string | null; late?: string | null; wakes?: boolean } | null;
   /** A vendor's screen saver has been putting the PC to sleep, and which setting turns it off (the kit's sleep-cause.ts' line). */
   asleep?: string | null;
 }

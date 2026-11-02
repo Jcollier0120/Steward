@@ -391,7 +391,7 @@ const SOURCE_CONTROL: Field = {
   key: 'sourceControl',
   kind: 'choice',
   label: 'Source control',
-  help: "GitHub: pull requests listed and vouched for (you merge your own), GitHub releases (the GitHub CLI, signed in). Git: any host with plain git, a release a v<version> tag: what you land on the branch is released at the next build. Automatic: chosen for each repository from what this PC has.",
+  help: "How the Steward works with each repository.\n- GitHub: pull requests listed and vouched for (you merge your own), and GitHub releases, through the GitHub CLI, signed in.\n- Git: any host with plain git. A release is a v<version> tag, and what you land on the branch is released at the next build.\n- Automatic: chosen for each repository from what this PC has.",
   options: [
     { value: 'auto', label: 'Automatic' },
     { value: 'github', label: 'GitHub, for every repository' },
@@ -414,7 +414,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     unique: 'id',
     label: 'Repositories',
     tab: 'Repositories',
-    help: "The repositories the Steward looks after, on any host or on this PC alone. They arrive by Hire, or by Look after or Add a clone by its folder on the Steward's page, with all of it found from their clones: here you choose how each is released, and a .steward.json in each says the rest (Pipelines, below). Whoever writes a PR merges it once vouched; each build releases what is on the branch.",
+    help: "The repositories the Steward looks after: on GitHub, on another host, or on this PC alone.\n- Add one on the Steward's page, under Found on this PC: Look after, or Add a clone by its folder. What it needs is read from its clone.\n- Here you choose how each is released. A `.steward.json` in its clone says the rest (Pipelines, below).\n- Whoever writes a PR merges it once it is vouched for. Each build releases what is on the branch.",
     maxItems: 50,
     noAdd: true,
     line: ['repo', 'branch', 'note'],
@@ -433,7 +433,7 @@ export const SETTINGS_SCHEMA: Field[] = [
         key: 'release',
         kind: 'text',
         label: 'Release it',
-        help: "A command run in a fresh worktree of its branch that makes the release v<version> (npm run release, say), or tag for a release the Steward makes itself. Released whenever its branch carries a version with no release.",
+        help: "How a new version on its branch is released, once the branch carries a version with no release.\n- A command, run in a fresh worktree of its branch, that makes the release v<version>: `npm run release`, say.\n- Or `tag`: the Steward tags the version and makes the release itself.",
         empty: 'Never released by the Steward',
         chip: 'releases',
         chipOff: 'not released',
@@ -461,7 +461,7 @@ export const SETTINGS_SCHEMA: Field[] = [
         shownWhen: { key: 'sourceControl', is: ['git'] },
         ...command,
       },
-      { key: 'note', kind: 'text', label: 'Note', help: "A word on its line, here and on the Steward's page: why its PRs are left to you, say.", empty: 'None', optional: true, maxLength: 200 },
+      { key: 'note', kind: 'text', label: 'Note', help: "A word on its line, here and on the Steward's page.", empty: 'None', optional: true, maxLength: 200 },
       // What Look after finds in its clone, and the Steward keeps up: folded, there to fix if it found something wrong.
       {
         key: 'repo',
@@ -483,7 +483,8 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'Fills its kit at the version kit.json pins.', empty: 'None: it has no kit', chip: 'kit', ...command, ...CASTELLAN, hidden: true },
       { key: 'install', kind: 'text', label: 'Install it', help: 'No longer run: steps a merged PR asks for are not run since 0.36.124.', empty: 'Not installed by the Steward', ...command, ...CASTELLAN, hidden: true },
       { key: 'approve', kind: 'text', label: 'Approve a job', help: "Approves one of its jobs, with {job} its name and {sha256} the hash of the script merged on its branch.", empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command, ...CASTELLAN, hidden: true },
-      { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true }, ...CASTELLAN, hidden: true },
+      // Missing where it isn't hired on this PC, with no jobs to approve: kept quietly (Hire makes it), never "needs a look".
+      { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'made', env: true }, ...CASTELLAN, hidden: true },
       {
         key: 'refresh',
         kind: 'text',
@@ -501,7 +502,14 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'map',
     label: 'Pipelines',
     tab: 'Repositories',
-    help: `How each repository is built, tested, versioned and released, by its own instructions: its repository (owner/name, or host/path) or id, and the options as JSON, like {"build": ["cargo build --release"], "test": ["cargo test"], "versionFiles": ["Cargo.toml"], "releaseTo": "tag"}. A ${PIPELINE_FILE} committed in its clone says the same, and wins option by option. Options: ${PIPELINE_KEYS.join(', ')}; docs/PIPELINE.md says each. None: each is built and released as its fields above say. steward build --dry-run <id> prints the steps without running them.`,
+    help: [
+      "How a repository is built, tested, versioned and released, where its fields above aren't enough.",
+      '- Repository or id: owner/name, host/path, or its id.',
+      '- Pipeline: the options as JSON, like `{"test": ["cargo test"], "versionFiles": ["Cargo.toml"], "releaseTo": "tag"}`.',
+      `- A \`${PIPELINE_FILE}\` committed in its clone says the same, and wins option by option.`,
+      `Options: ${PIPELINE_KEYS.map((k) => `\`${k}\``).join(', ')}.`,
+      'None: each is built and released as its fields above say. `steward build --dry-run <id>` shows the steps without running them.',
+    ].join('\n'),
     keyLabel: 'Repository or id',
     valueLabel: 'Pipeline (JSON)',
     keyRules: { maxLength: 200, pattern: '[A-Za-z0-9_.-]+(/[A-Za-z0-9_.~@-]+)*', patternHint: 'owner/name, host/path, or an id like my-app' },
@@ -514,7 +522,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'list',
     label: 'Team',
     tab: 'How it works',
-    help: "GitHub accounts whose vouches the Steward trusts, and whose work it files for the Wright. Empty: the account gh is signed in as, which covers Claude Code's PRs. Named here, they are the whole team, so name yours too.",
+    help: "GitHub accounts whose vouches the Steward trusts.\n- Empty: the account the GitHub CLI is signed in as.\n- Named here, they are the whole team, so name your own account too.",
     item: { label: 'GitHub account', maxLength: 60, pattern: '(app/)?[A-Za-z0-9][A-Za-z0-9-]*', patternHint: 'a GitHub account, like octocat, or app/<name> for a GitHub App' },
     maxItems: 20,
   },
@@ -551,7 +559,9 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'group',
     tab: 'Build pipeline',
     label: 'Build pipeline',
-    help: "At set times a day, a build: each repository's main tested once at its newest commit (unless a vouch covers it) and released once, main's new kit tried on the agents and rolled out, and Manor told once. Whoever writes a PR merges it once vouched, and it waits on main for the next build, except an urgent fix (its changelog entry starting \"**Urgent fix:\"), which builds at once for its repository. An urgent kit goes out to every agent in that build, and each is built at once after it.",
+    help: "At set times a day, a build: each repository's main is tested once at its newest commit (unless a vouch covers it) and released once.\n- Whoever writes a PR merges it once vouched, and it waits on main for the next build.\n- An urgent fix (its changelog entry starts \"**Urgent fix:\") builds at once, for its repository alone.",
+    // Set on the page's Release tab, beside its chart (POST /api/schedule, saved through this field): not drawn here.
+    hidden: true,
     fields: [
       // The switch it had (0.36.40 to 0.36.62), never drawn: a Manor that still sends it saves this group as before, and
       // whatever it says is left out (pipeline.ts' normalizePipeline).
@@ -624,14 +634,14 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Hands failures to the Wright',
     tab: 'How it works',
     ...WRIGHT,
-    help: "A bump or release that fails, or one of Reeve's alerts that is code work, is filed for the Wright to fix. Its alarm is raised only if the Wright can't. Off: an alarm at once.",
+    help: "A release that fails, or one of Reeve's alerts that is code work, is filed for the Wright to fix, as the Team's work.\n- Its alarm is raised only if the Wright can't fix it.\n- Off: an alarm at once.",
   },
   {
     key: 'tend',
     kind: 'switch',
     label: "Keeps the staff's pages up",
     tab: 'How it works',
-    help: "An agent on duty whose page doesn't answer is opened again through Manor: three tries, then one an hour and an alarm. One you stopped stays stopped. And an update rolled back only because the PC was offline for a moment is allowed again and installed, once.",
+    help: "A staff member on duty whose page doesn't answer is opened again through Manor.\n- Three tries, then one an hour, and an alarm.\n- One you stopped stays stopped.\n- An update rolled back only because the PC was offline for a moment is installed again, once.",
   },
   {
     key: 'afterRelease',
@@ -687,7 +697,9 @@ export const SETTINGS_SCHEMA: Field[] = [
     fields: [
       { key: 'on', kind: 'switch', label: 'Raise alarms' },
       { key: 'toast', kind: 'switch', label: 'A Windows notification for each', help: 'Clicking it opens this page.' },
-      { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'Something waiting for', help: "A new kit waiting for the Steward to carry it; work filed for the Wright that hasn't landed; a release the Exchequer couldn't be reached for." },
+      // Work filed for the Wright, and on Castellan's own PC (where the Wright is too) a kit to carry or a release the
+      // Exchequer couldn't be reached for: shown where the Wright is.
+      { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'Something waiting for', help: "Work handed to the Wright that hasn't landed yet.", ...WRIGHT },
       { key: 'blockingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR holding others up for', help: 'No longer used: there are no version queues (0.36.124).', hidden: true },
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
       { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Assayer's release check holds for" },
@@ -712,7 +724,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'list',
     tab: 'How it works',
     label: 'Install scripts allowed',
-    help: "Packages whose install scripts may run where the Steward installs packages: every install runs with --ignore-scripts, then these alone run theirs. Any other package with one holds the work, with an alarm naming it and its script. Add a package only once you trust it.",
+    help: "npm packages whose install scripts may run when the Steward installs a repository's packages.\n- Every install runs with `--ignore-scripts`, then these alone run theirs.\n- Any other package with an install script holds the work, with an alarm naming it and its script.\nAdd a package only once you trust it.",
     item: { label: 'npm package', maxLength: 214 },
     maxItems: 40,
   },
@@ -827,8 +839,12 @@ function normalizeReview(raw: unknown): WrightReviewSettings {
   };
 }
 
-/** settings.json over the defaults, each value checked: a bad one falls back to its default. */
-export function normalizeSettings(raw: unknown): { settings: Settings; problems: string[] } {
+/**
+ * settings.json over the defaults, each value checked: a bad one falls back to its default. An agent Manor has retired
+ * (retired.ts) is left out quietly, as it's no employee (inEffect): Settings' Repositories don't list it, and the next
+ * save drops it from the file (found.ts doesn't offer its clone again).
+ */
+export function normalizeSettings(raw: unknown, retired: ReadonlySet<string> = retiredStaff()): { settings: Settings; problems: string[] } {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_SETTINGS;
   const problems: string[] = [];
@@ -836,6 +852,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
   if (Array.isArray(r.employees)) {
     employees = r.employees.map(normalizeEmployee).filter((e): e is Employee => e !== null);
     if (employees.length < r.employees.length) problems.push(`${r.employees.length - employees.length} employee(s) without a usable id were left out.`);
+    employees = employees.filter((e) => !retired.has(e.id.toLowerCase()));
   }
   // Read from the PC, never from the file: only the maker's laptop releases Castellan, whatever settings.json says.
   const makers = makersPc();

@@ -456,6 +456,42 @@ function FieldMeta({ f, value, def, top, onChange }: { f: SettingsField; value: 
   return meta.length ? <p className="sf-meta">{meta}</p> : null;
 }
 
+/** `code` in a help line, marked as code. */
+const helpLine = (s: string) => s.split(/`([^`]+)`/).map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
+
+/**
+ * A setting's help: one line, a paragraph as always. Several lines (kit 2.148.5): a paragraph each, a run of lines
+ * starting "- " a bulleted list, and `code` marked, so a long help reads as points rather than a wall of text.
+ */
+function Help({ text, id }: { text: string; id: string }) {
+  if (!text.includes('\n')) {
+    return (
+      <p className="sf-help" id={id}>
+        {text}
+      </p>
+    );
+  }
+  const blocks: ReactNode[] = [];
+  let items: string[] = [];
+  const endList = () => {
+    if (items.length) blocks.push(<ul key={blocks.length}>{items.map((x, i) => <li key={i}>{helpLine(x)}</li>)}</ul>);
+    items = [];
+  };
+  for (const line of text.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    if (line.startsWith('- ')) items.push(line.slice(2));
+    else {
+      endList();
+      blocks.push(<p key={blocks.length}>{helpLine(line)}</p>);
+    }
+  }
+  endList();
+  return (
+    <div className="sf-help sf-help-lines" id={id}>
+      {blocks}
+    </div>
+  );
+}
+
 /**
  * One setting: its label, control, help, default with Reset to default, "changed" until saved, and its message.
  * `def` shows the default (settings and a group's fields; a record's fields don't), `tracked` marks it changed, and
@@ -464,11 +500,7 @@ function FieldMeta({ f, value, def, top, onChange }: { f: SettingsField; value: 
 function FieldBlock({ f, value, onChange, path, def, saved, tracked = false, top = false, fold }: EdProps & { def?: unknown; saved?: unknown; tracked?: boolean; top?: boolean; fold?: { open: boolean; onToggle: (open: boolean) => void } }) {
   const id = useId();
   const cls = cx('sf', !!fold && 'sf-section', tracked && !same(f, value, saved) && 'is-changed');
-  const help = f.help ? (
-    <p className="sf-help" id={`${id}-help`}>
-      {f.help}
-    </p>
-  ) : null;
+  const help = f.help ? <Help text={f.help} id={`${id}-help`} /> : null;
   const tail = (
     <>
       <FieldMeta f={f} value={value} def={def} top={top} onChange={onChange} />
