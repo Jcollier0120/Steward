@@ -15,7 +15,7 @@ const { RETIRED, retiredOf, retiredStaff } = await import('../src/retired.ts');
 const { planRollout, rollout, rolloutFailedFile } = await import('../src/stages/rollout.ts');
 const { releaseUnreleased, roundFailuresFile } = await import('../src/stages/round.ts');
 const { ctxFor, employee, runner } = await import('./helpers.ts');
-const { DEFAULT_SETTINGS, inEffect } = await import('../src/settings.ts');
+const { DEFAULT_SETTINGS, SETTINGS_SCHEMA, inEffect, normalizeSettings } = await import('../src/settings.ts');
 const { foundView } = await import('../src/found.ts');
 
 /** A Manor home whose app\staff.json lists these agents. */
@@ -121,4 +121,28 @@ test("a retired agent's clone isn't offered to look after again, though Settings
   // The settings in effect, without it (inEffect), and the file, with it.
   const view = foundView(found, { ...DEFAULT_SETTINGS, releasesCastellan: true, employees: [mine] }, manor);
   assert.deepEqual(view.offered.map((r) => r.repo), ['me/new']);
+  // Nor once a save has dropped it from the file (normalizeSettings).
+  writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [mine] }));
+  assert.deepEqual(foundView(found, { ...DEFAULT_SETTINGS, releasesCastellan: true, employees: [mine] }, manor).offered.map((r) => r.repo), ['me/new']);
+  // Off the PC that releases Castellan, nothing of the person's own is passed over for a retired agent's name.
+  assert.deepEqual(foundView(found, { ...DEFAULT_SETTINGS, employees: [mine] }, manor).offered.map((r) => r.repo), ['me/aletaster', 'me/new']);
+});
+
+test("Settings' Repositories don't list an agent Manor has retired, and the next save leaves it out of the file", () => {
+  const raw = { employees: [aletaster, seneschal, porter] };
+  const ids = (x: { settings: { employees: { id: string }[] }; problems: string[] }) => [x.settings.employees.map((e) => e.id), x.problems];
+  assert.deepEqual(ids(normalizeSettings(raw, new Set(['aletaster']))), [['seneschal', 'porter'], []], 'left out quietly: no problem to say');
+  assert.deepEqual(ids(normalizeSettings(raw, new Set())), [['aletaster', 'seneschal', 'porter'], []], 'none retired: as before');
+  const before = process.env.MANOR_HOME;
+  process.env.MANOR_HOME = manorWith([{ id: 'Aletaster', heldBack: true, retired: true }, { id: 'seneschal', heldBack: true }]);
+  try {
+    assert.deepEqual(ids(normalizeSettings(raw)), [['seneschal', 'porter'], []], "not given: Manor's staff.json");
+  } finally {
+    process.env.MANOR_HOME = before;
+  }
+});
+
+test("an employee's installed copy that isn't on this PC (not hired here) is no warning in Settings", () => {
+  const employees = SETTINGS_SCHEMA.find((f) => f.key === 'employees') as unknown as { fields: { key: string; path?: { missing: string } }[] };
+  assert.equal(employees.fields.find((f) => f.key === 'installed')?.path?.missing, 'made');
 });

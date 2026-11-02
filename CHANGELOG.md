@@ -2,6 +2,31 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.292
+
+**The Steward's page is laid out for a wide screen: the page at a glance, then tabs, with a card for each staff member. Settings' Repositories no longer list staff Manor has retired.**
+
+### What's new
+
+- **At a glance**, above the tabs: what needs you, the staff and how many are behind, the next build and what it brings, the open pull requests and how many fail, and the last stage. Each tile opens the tab it's about.
+- **Tabs**: the staff, the last stage, the stages, and the repositories found on this PC.
+  - **The staff**: a card each, side by side as the window allows. Each card shows its kit (or whether the Steward releases it), its latest release, and its branch and clone, then its release PC, what its next build brings (folded) and its open pull requests.
+  - **The last stage**: its results beside its log, which scrolls in a box of its own.
+  - **The stages**: the stages beside a list of what the rounds do and when.
+
+### What changed
+
+- **Needs you** shows the open alarms, each with its buttons. The ones dismissed or lately cleared are folded under them, or in the Last stage tab when none is open.
+- **Run now** shows only while "Builds and releases by itself" is off. When it's on, the rounds run anyway.
+- **Found on this PC** is a list.
+- The page stops widening at 1680 pixels.
+- **Settings' Repositories leave out staff Manor has retired** (the Auditor, the Aletaster, the Reckoner and others). The rounds already passed them over. The next save drops them from the Steward's settings, and their clones aren't offered again under Found on this PC.
+- **A staff member not hired on this PC is no longer marked "needs a look"** in Settings' Repositories just because it has no installed copy here.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.291
 
 **A staff member's release that brings a new kit says so in plain words, once: "It carries kit 2.148.4: the parts all the staff share.", where it said "Brings 4 changes: It carries the Steward's kit …; It carries the Steward's kit …", and the kit's notes for the staff's makers stay out of it. The Steward hands kit 2.148.4 out, and runs on it.**

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ago, Badge, Card, Input, Notes, Output, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
+import { ago, Badge, Card, Glance, Input, NeedsYou, Notes, Output, PageTabs, PostButton, Section, Text, useNow, type BadgeTone, type GlanceTile, type Need, type PageTab } from '../kit/react/index.ts';
 import type { Alarm, AlarmState } from '../alarms.ts';
 import type { TendState } from '../tend.ts';
 import type { TurnRow, TurnsView } from '../lease.ts';
@@ -10,7 +10,10 @@ import type { FoundView, PrView, RoundView, StaffRowView, StaffView, StewardView
 import { askedWords } from './asked.ts';
 import { commitUrl, compareUrl, kindOf, releaseUrl, repoUrl } from '../links.ts';
 
-/** The Steward's page: the kit, the staff's table, the stages, the last stage. (Settings is the kit's: shell.tsx.) */
+/**
+ * The Steward's page: what needs you, the page at a glance, then its tabs: the staff (a card each), the last stage beside
+ * its log, the stages, and the repositories found on this PC. (Settings is the kit's: shell.tsx.)
+ */
 
 /** A link to a page on a repository's host (links.ts); its words alone where it has none (a local one, plain git). */
 const Link = ({ url, children }: { url: string | null; children: ReactNode }) =>
@@ -32,113 +35,74 @@ function KitCell({ r, kit }: { r: StaffRowView; kit: string | null }) {
   );
 }
 
+/** A repository's latest release, linked, with the kit it carries; "no release yet" before its first. */
 function ReleaseCell({ r }: { r: StaffRowView }) {
   const rel = r.release;
   const kit = !rel ? '' : rel.kit === 'unknown' ? '' : rel.kit ? `, kit ${rel.kit}` : ', no kit';
-  return (
+  return rel ? (
     <>
-      {rel ? (
-        <>
-          <Link url={releaseUrl(r.repo, r.host, rel.tag, r.site)}>{rel.tag}</Link>
-          <Text variant="muted">{kit}</Text>
-        </>
-      ) : (
-        <Text variant="muted">none</Text>
-      )}
-      {r.releaseNeeded && r.main?.version && (
-        <>
-          <br />
-          <Badge tone="caution" label={<>{r.main.version} not released</>} />
-        </>
-      )}
+      <Link url={releaseUrl(r.repo, r.host, rel.tag, r.site)}>{rel.tag}</Link>
+      <Text variant="muted">{kit}</Text>
     </>
+  ) : (
+    <Text variant="muted">no release yet</Text>
   );
 }
 
-/** One of the Steward's PRs or the team's, as a line of its repository's PR table: a team member's says whose. */
+/**
+ * One of the Steward's PRs or the team's, in its repository's card: its number and title with how it stands (checks,
+ * mergeable, draft) on a line, its branch (and whose, for a team member's) and what it asks for once merged under it.
+ */
 function Pr({ p, branch }: { p: PrView; branch: string }) {
   const team = p.whose === 'team';
   return (
-    <tr>
-      <td className="pr-num">
+    <li className="sw-pr">
+      <div className="sw-line">
         <Link url={p.url}>#{p.number}</Link>
-        {team && (
-          <>
-            {' '}
-            <Badge title={`Opened by ${p.author}: whoever opened it merges it once it is vouched`} label="team" />
-          </>
-        )}
-      </td>
-      <td>
-        {p.title}
-        <br />
-        <Text variant="muted">
-          {p.head}
-          {team ? `, ${p.author}'s` : ''}
-        </Text>
-        {/* What it asks for once merged (its steward block), or why that can't be read. */}
-        {p.afterError ? (
-          <>
-            {' '}
-            <Badge tone="danger" title={p.afterError} label="steward block" />
-          </>
-        ) : p.afterText ? (
-          <>
-            <br />
-            <Text variant="muted">then: {p.afterText}</Text>
-          </>
-        ) : null}
-      </td>
-      <td className="pr-state">
-        <Badge tone={p.checks === 'failing' ? 'danger' : p.checks === 'pending' ? 'caution' : 'success'} label={<>checks {p.checks}</>} />{' '}
+        <span className="sw-pr-title">{p.title}</span>
+        {team && <Badge title={`Opened by ${p.author}: whoever opened it merges it once it is vouched`} label="team" />}
+        <Badge tone={p.checks === 'failing' ? 'danger' : p.checks === 'pending' ? 'caution' : 'success'} label={<>checks {p.checks}</>} />
         <Badge tone={p.mergeable === 'MERGEABLE' ? 'success' : p.mergeable === 'CONFLICTING' ? 'danger' : 'caution'} label={p.mergeable.toLowerCase()} />
-        {p.draft && (
-          <>
-            {' '}
-            <Badge tone="caution" label="draft" />
-          </>
-        )}
-        {p.base && p.base !== branch && (
-          <>
-            {' '}
-            <Badge tone="caution" title={`Merge only takes a PR into ${branch}`} label={<>into {p.base}</>} />
-          </>
-        )}
-      </td>
-    </tr>
+        {p.draft && <Badge tone="caution" label="draft" />}
+        {p.base && p.base !== branch && <Badge tone="caution" title={`Merge only takes a PR into ${branch}`} label={<>into {p.base}</>} />}
+        {/* Why what it asks for once merged (its steward block) can't be read. */}
+        {p.afterError && <Badge tone="danger" title={p.afterError} label="steward block" />}
+      </div>
+      <Text variant="muted" className="sw-sub">
+        {p.head}
+        {team ? `, ${p.author}'s` : ''}
+        {p.afterText ? ` · then: ${p.afterText}` : ''}
+      </Text>
+    </li>
   );
 }
 
 /** What each host calls a PR, for the heading over a repository's: GitLab's are merge requests. Plain git has none. */
 const PRS_CALLED: Record<Host, string> = { github: 'Pull requests', gitlab: 'Merge requests', azure: 'Pull requests', gitea: 'Pull requests', bitbucket: 'Pull requests', git: 'Branches' };
 
-/** A repository's open PRs under a small heading in its host's words, and a branch prepared here and not pushed, as a small table under its row. */
-function PrTable({ r }: { r: StaffRowView }) {
+/** A repository's open PRs under a small heading in its host's words, and a branch prepared here and not pushed. */
+function PrList({ r }: { r: StaffRowView }) {
   return (
-    <>
-      {r.prs.length > 0 && <div className="pr-head">{PRS_CALLED[r.host ?? 'github']}</div>}
-      <table className="pr-table">
-        <tbody>
-          {r.prs.map((p) => (
-            <Pr key={p.number} p={p} branch={r.branch} />
-          ))}
-          {r.prepared && (
-            <tr>
-              <td colSpan={3}>
-                <code>{r.prepared.branch}</code> <Text variant="muted">{r.prepared.ahead} ahead, not pushed?</Text>
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </>
+    <div className="sw-part">
+      {r.prs.length > 0 && <div className="sw-head-small">{PRS_CALLED[r.host ?? 'github']}</div>}
+      <ul className="sw-list">
+        {r.prs.map((p) => (
+          <Pr key={p.number} p={p} branch={r.branch} />
+        ))}
+        {r.prepared && (
+          <li>
+            <code>{r.prepared.branch}</code> <Text variant="muted">{r.prepared.ahead} ahead, not pushed?</Text>
+          </li>
+        )}
+      </ul>
+    </div>
   );
 }
 
 /**
- * What a repository's next build releases (StaffRow.nextBuild): the commits on its branch since its last release, newest
- * first, a merged PR as its number and title. Linked on its host (links.ts), where a compare shows them all; a PR by its
- * number on GitHub only, whose merge commits name it. Nothing when there are none.
+ * What a repository's next build releases (StaffRow.nextBuild): how many commits since its last release, folded open
+ * to them, newest first, a merged PR as its number and title. Linked on its host (links.ts), where a compare shows them
+ * all; a PR by its number on GitHub only, whose merge commits name it. Nothing when there are none.
  */
 function NextBuild({ r }: { r: StaffRowView }) {
   const n = r.nextBuild;
@@ -150,8 +114,8 @@ function NextBuild({ r }: { r: StaffRowView }) {
   const commits = `${n.count} ${n.count === 1 ? 'commit' : 'commits'} since ${n.tag}`;
   const more = n.count - n.commits.length;
   return (
-    <>
-      <div className="pr-head">
+    <details className="sw-part sw-next">
+      <summary>
         {r.releases === false ? `Not released by the Steward: ${commits}` : `Next build brings ${commits}`}
         {compare && (
           <>
@@ -159,31 +123,21 @@ function NextBuild({ r }: { r: StaffRowView }) {
             (<Link url={compare}>compare</Link>)
           </>
         )}
-      </div>
-      <table className="pr-table next-build">
-        <tbody>
-          {n.commits.map((c) => {
-            // A merged PR by its number, a commit pushed without one by its own.
-            const label = c.pr !== null ? <>#{c.pr}</> : <code>{c.sha}</code>;
-            return (
-              <tr key={c.sha}>
-                <td className="pr-num">
-                  <Link url={c.pr !== null ? (gh ? `${gh}/pull/${c.pr}` : null) : linked ? commitUrl(r.repo, r.host, c.sha, r.site) : null}>{label}</Link>
-                </td>
-                <td>{c.title}</td>
-              </tr>
-            );
-          })}
-          {more > 0 && (
-            <tr>
-              <td colSpan={2}>
-                <Text variant="muted">and {more} more</Text>
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </>
+      </summary>
+      <ul className="sw-list sw-commits">
+        {n.commits.map((c) => (
+          <li key={c.sha}>
+            {/* A merged PR by its number, a commit pushed without one by its own. */}
+            <Link url={c.pr !== null ? (gh ? `${gh}/pull/${c.pr}` : null) : linked ? commitUrl(r.repo, r.host, c.sha, r.site) : null}>{c.pr !== null ? <>#{c.pr}</> : <code>{c.sha}</code>}</Link> {c.title}
+          </li>
+        ))}
+        {more > 0 && (
+          <li>
+            <Text variant="muted">and {more} more</Text>
+          </li>
+        )}
+      </ul>
+    </details>
   );
 }
 
@@ -200,85 +154,59 @@ function Allowed({ r }: { r: StaffRowView }) {
 const shownNotes = (r: StaffRowView) => r.notes.filter((n) => n !== 'not using the kit yet');
 
 /**
- * One repository's row: its repository, checkout, branch, kit (on Castellan's own PC), release, release PC and notes
- * (`notes` false: no row has any, so no column). On a line under it, when it has them: what its next build brings, then
- * its open PRs, each in a small table.
+ * One repository, as a card: its name, its kit (on Castellan's own PC) or whether the Steward releases it, a version
+ * not released yet, and its latest release on a line; its branch's version, its parts and your checkout on the next.
+ * Then, as it has them: its release PC (lease.ts) with its buttons, its notes, what its next build brings (folded),
+ * and its open PRs.
  */
-function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRowView; kit: string | null; castellan: boolean; turn?: TurnRow | null; notes: boolean }) {
+function StaffCard({ r, kit, castellan, turn }: { r: StaffRowView; kit: string | null; castellan: boolean; turn?: TurnRow }) {
   const co = r.checkout;
   const notes = shownNotes(r);
-  const below = r.prs.length > 0 || !!r.prepared || !!r.nextBuild?.count;
-  const rest = (castellan ? 2 : 1) + (turn !== undefined ? 1 : 0) + (notesColumn ? 1 : 0);
   return (
-    <>
-      <tr className={below ? 'has-prs' : undefined}>
-        <td>
-          <strong>
-            <Link url={repoUrl(r.repo, r.site)}>{r.name}</Link>
-          </strong>
-          <br />
-          {castellan ? <Text variant="muted">{r.main?.parts?.join(', ') || 'no parts'}</Text> : <Allowed r={r} />}
-        </td>
-        <td>
+    <Card className="sw-repo">
+      <div className="sw-line">
+        <strong className="sw-name">
+          <Link url={repoUrl(r.repo, r.site)}>{r.name}</Link>
+        </strong>
+        {castellan ? <KitCell r={r} kit={kit} /> : <Allowed r={r} />}
+        {r.releaseNeeded && r.main?.version && <Badge tone="caution" label={<>{r.main.version} not released</>} />}
+        <span className="sw-end">
+          <ReleaseCell r={r} />
+        </span>
+      </div>
+      <div className="sw-facts">
+        <span>{r.main ? <>{r.branch} {r.main.version ?? '?'} <code>{r.main.commit}</code></> : `${r.branch}: unknown`}</span>
+        {castellan && <span>{r.main?.parts?.join(', ') || 'no parts'}</span>}
+        <span className="sw-path">
           {co.exists ? (
             <>
               <code>{co.path}</code>
-              <br />
-              <Text variant="muted">
-                {co.branch ?? ''}
-                {co.changes ? `, ${co.changes} changed` : ''}
-              </Text>
+              {co.branch ? ` on ${co.branch}` : ''}
+              {co.changes ? `, ${co.changes} changed` : ''}
             </>
           ) : (
             <>
-              <Text variant="muted">no checkout at</Text> <code>{co.path}</code>
+              no checkout at <code>{co.path}</code>
             </>
           )}
-        </td>
-        <td>
-          {r.main ? (
-            <>
-              {r.branch} {r.main.version ?? '?'} <Text variant="muted">{r.main.commit}</Text>
-            </>
-          ) : (
-            <Text variant="muted">unknown</Text>
-          )}
-        </td>
-        {castellan && (
-          <td>
-            <KitCell r={r} kit={kit} />
-          </td>
-        )}
-        <td>
-          <ReleaseCell r={r} />
-        </td>
-        {turn !== undefined && <td>{turn && <TurnCell x={turn} />}</td>}
-        {notesColumn && <td>{notes.length > 0 && <Notes items={notes} />}</td>}
-      </tr>
-      {below && (
-        <tr className="prs-row">
-          <td colSpan={3}>
-            <NextBuild r={r} />
-            {(r.prs.length > 0 || r.prepared) && <PrTable r={r} />}
-          </td>
-          <td colSpan={rest} />
-        </tr>
-      )}
-    </>
+        </span>
+      </div>
+      {turn && <TurnCell x={turn} />}
+      {notes.length > 0 && <Notes items={notes} />}
+      <NextBuild r={r} />
+      {(r.prs.length > 0 || r.prepared) && <PrList r={r} />}
+    </Card>
   );
 }
 
 /**
- * The staff's table, with each repository's release PC (lease.ts) in it once a turn was taken: who merges and releases
- * it, with Do it here and Keep it on this PC. Turns for no row here, claims another PC made too (claims.ts) and the PRs
- * passed over in their version lines (passover.ts), under it.
+ * The staff, a card each, side by side as the window allows. Turns for no card here, claims another PC made too
+ * (claims.ts) and the PRs passed over in their version lines (passover.ts), under them.
  */
-function StaffTable({ s, castellan, turns, clashes, passed }: { s: StaffView | null; castellan: boolean; turns: TurnsView | null | undefined; clashes?: string[]; passed?: string[] }) {
+function StaffCards({ s, castellan, turns, clashes, passed }: { s: StaffView | null; castellan: boolean; turns: TurnsView | null | undefined; clashes?: string[]; passed?: string[] }) {
   const rows = s?.rows ?? [];
   const turnOf = new Map((turns?.rows ?? []).map((x) => [x.id, x]));
   const loose = (turns?.rows ?? []).filter((x) => !rows.some((r) => r.id === x.id));
-  const showTurns = rows.some((r) => turnOf.has(r.id));
-  const showNotes = rows.some((r) => shownNotes(r).length > 0);
   const under = (loose.length > 0 || (clashes?.length ?? 0) > 0 || (passed?.length ?? 0) > 0) && (
     <div className="turns">
       {loose.map((x) => (
@@ -306,30 +234,22 @@ function StaffTable({ s, castellan, turns, clashes, passed }: { s: StaffView | n
   if (!rows.length)
     return (
       <Card className="empty" tour="staff">
-        No repositories yet. Pick the ones to look after from those Reeve found, above, or add one in Settings, under
-        Repositories: its repository (owner/name on GitHub, host/path on another host, or leave it out for one on this
-        PC alone), your clone of it, and how to test and release it; its .steward.json says the rest (docs/PIPELINE.md).
+        No repositories yet. Pick the ones to look after from those Reeve found, under Found on this PC, or add one in
+        Settings, under Repositories: its repository (owner/name on GitHub, host/path on another host, or leave it out for
+        one on this PC alone), your clone of it, and how to test and release it; its .steward.json says the rest
+        (docs/PIPELINE.md).
         {under}
       </Card>
     );
   return (
-    <Card tour="staff">
-      <table className="staff">
-        <thead>
-          <tr>
-            {[castellan ? 'Employee' : 'Repository', 'Checkout', 'Branch on origin', ...(castellan ? ['Kit'] : []), 'Latest release', ...(showTurns ? ['Release PC'] : []), ...(showNotes ? ['Notes'] : [])].map((h) => (
-              <th key={h}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <StaffRow key={r.id} r={r} kit={s.kit} castellan={castellan} turn={showTurns ? (turnOf.get(r.id) ?? null) : undefined} notes={showNotes} />
-          ))}
-        </tbody>
-      </table>
-      {under}
-    </Card>
+    <>
+      <div className="sw-cards" data-tour="staff">
+        {rows.map((r) => (
+          <StaffCard key={r.id} r={r} kit={s.kit} castellan={castellan} turn={turnOf.get(r.id)} />
+        ))}
+      </div>
+      {under && <Card>{under}</Card>}
+    </>
   );
 }
 
@@ -344,62 +264,55 @@ function StageResults({ results }: { results: StageResult['results'] }) {
   const skipped = results.filter((r) => r.outcome === 'skipped');
   return (
     <>
-      {acted.length > 0 ? <ResultTable results={acted} /> : <Text variant="muted" as="p">Nothing to do for anyone.</Text>}
+      {acted.length > 0 ? <ResultList results={acted} /> : <Text variant="muted" as="p">Nothing to do for anyone.</Text>}
       {skipped.length > 0 && (
         <details>
           <summary>
             {skipped.length} skipped, with nothing to do
           </summary>
-          <ResultTable results={skipped} />
+          <ResultList results={skipped} />
         </details>
       )}
     </>
   );
 }
 
-function ResultTable({ results }: { results: StageResult['results'] }) {
+/** Each employee's result: its name and how it went on a line, what was done (and a link to it) under it. */
+function ResultList({ results }: { results: StageResult['results'] }) {
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>Employee</th>
-          <th>Result</th>
-          <th />
-        </tr>
-      </thead>
-      <tbody>
-        {results.map((r, i) => (
-          <tr key={i}>
-            <td>{r.name}</td>
-            <td>
-              <Badge tone={OUTCOME[r.outcome]} label={r.outcome} />
-            </td>
-            <td>
-              {r.message}
-              {r.url && (
-                <>
-                  {' '}
-                  <Link url={r.url}>link</Link>
-                </>
-              )}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <ul className="sw-list sw-results">
+      {results.map((r, i) => (
+        <li key={i}>
+          <div className="sw-line">
+            <strong>{r.name}</strong>
+            <Badge tone={OUTCOME[r.outcome]} label={r.outcome} />
+          </div>
+          <Text variant="muted" className="sw-sub">
+            {r.message}
+            {r.url && (
+              <>
+                {' '}
+                <Link url={r.url}>link</Link>
+              </>
+            )}
+          </Text>
+        </li>
+      ))}
+    </ul>
   );
 }
 
+/** The last stage: what it was and when, why it stopped if it did, and each employee's result. Its log is beside it (StageLog). */
 function LastStage({ l, now }: { l: StageResult | null; now: number }) {
   if (!l)
     return (
-      <Card className="empty">
+      <Card className="empty" tour="last">
         No stage has run yet.
       </Card>
     );
   const asked = askedWords(l.asked);
   return (
-    <Card>
+    <Card tour="last">
       <p>
         <strong>{l.stage}</strong>
         {l.kit ? ` to kit ${l.kit}` : ''}, {ago(l.finished, now)}
@@ -416,11 +329,19 @@ function LastStage({ l, now }: { l: StageResult | null; now: number }) {
         </p>
       )}
       {l.results.length > 0 && <StageResults results={l.results} />}
-      <details open={!!l.error || l.results.some((r) => r.outcome === 'failed')}>
-        <summary>Log ({l.log.length} lines)</summary>
-        <Output text={l.log.join('\n')} label={`The ${l.stage} log`} />
-      </details>
     </Card>
+  );
+}
+
+/** The last stage's log, whole, in a box of its own that scrolls. */
+function StageLog({ l }: { l: StageResult | null }) {
+  if (!l) return null;
+  return (
+    <Section title={`Its log (${l.log.length} ${l.log.length === 1 ? 'line' : 'lines'})`}>
+      <div className="sw-log">
+        <Output text={l.log.join('\n')} label={`The ${l.stage} log`} />
+      </div>
+    </Section>
   );
 }
 
@@ -524,73 +445,94 @@ function TendingCard({ t, r, now }: { t: TendState | undefined; r: RoundView; no
   );
 }
 
-/** Run now, in the title bar: a round now, on duty or not, asked first. */
 /** The stages running now, side by side; a page from a Steward before that gives only `running`. */
 const runsOf = (v: StewardView) => v.runs ?? (v.running ? [v.running] : []);
 /** No stage can start now: every slot taken (Settings' Stages at once); before slots, any one running. */
 const noSlot = (v: StewardView) => v.full ?? !!v.running;
 
+/**
+ * Run now, in the title bar: a round now, on duty or not, asked first. Only while "Builds and releases by itself" is
+ * off: by itself its rounds come anyway, and a button that only jumps their queue says the person has to start them.
+ */
 export function RunNow({ v }: { v: StewardView }) {
-  if (v.off) return null;
+  if (v.off || v.round.on) return null;
   return (
     <PostButton title="Run now" variant="secondary" path="/api/run" confirm={`A round now: it ${roundWords(v.round).what}?`} disabled={noSlot(v) || runsOf(v).some((r) => r.stage === 'round')} />
   );
 }
 
-/** What needs the person (alarms.ts), at the top: each open one with its facts and a Dismiss; the dismissed and the lately cleared folded away. */
-export function AlarmsCard({ a, now }: { a: AlarmState | undefined; now: number }) {
-  if (!a) return null;
-  const showing = a.open.filter((x) => !x.dismissedAt);
-  const dismissed = a.open.filter((x) => x.dismissedAt);
-  const item = (x: Alarm, button: boolean) => (
-    <div className="alarm" key={x.id}>
-      <div className="row alarm-head">
-        <strong>{x.url ? <Link url={x.url}>{x.title}</Link> : x.title}</strong>
-        {button && x.action && <PostButton title={x.action.label} path="/api/alarms/act" body={{ id: x.id }} confirm={x.action.confirm} />}
-        {button && <PostButton title="Dismiss" variant="secondary" path="/api/alarms/dismiss" body={{ id: x.id }} />}
-      </div>
-      {x.detail.length > 0 && <Notes items={x.detail} />}
-      <Text variant="muted">
-        Since {ago(x.since, now)}
-        {x.dismissedAt ? `, dismissed ${ago(x.dismissedAt, now)}` : ''}
-      </Text>
+/** The alarms open and not dismissed (alarms.ts): what needs the person now. */
+const openAlarms = (a: AlarmState | undefined) => (a?.open ?? []).filter((x) => !x.dismissedAt);
+
+/** An alarm's facts and since when, under its title. */
+const AlarmFacts = ({ x, now }: { x: Alarm; now: number }) => (
+  <>
+    {x.detail.length > 0 && <Notes items={x.detail} />}
+    <Text variant="muted">
+      Since {ago(x.since, now)}
+      {x.dismissedAt ? `, dismissed ${ago(x.dismissedAt, now)}` : ''}
+    </Text>
+  </>
+);
+
+/** The alarms dismissed and lately cleared, folded away: under Needs you while it shows, else in the Last stage tab. */
+function AlarmHistory({ a, now }: { a: AlarmState | undefined; now: number }) {
+  const dismissed = (a?.open ?? []).filter((x) => x.dismissedAt);
+  const cleared = a?.cleared ?? [];
+  if (!dismissed.length && !cleared.length) return null;
+  return (
+    <div className="sw-history">
+      {dismissed.length > 0 && (
+        <details>
+          <summary className="muted">{dismissed.length} dismissed: back if they clear and return</summary>
+          {dismissed.map((x) => (
+            <div className="alarm" key={x.id}>
+              <strong>{x.url ? <Link url={x.url}>{x.title}</Link> : x.title}</strong>
+              <AlarmFacts x={x} now={now} />
+            </div>
+          ))}
+        </details>
+      )}
+      {cleared.length > 0 && (
+        <details>
+          <summary className="muted">Lately cleared</summary>
+          <Notes
+            items={cleared.slice(0, 10).map((x) => (
+              <>
+                {x.title} <Text variant="muted">(cleared {ago(x.clearedAt, now)})</Text>
+              </>
+            ))}
+          />
+        </details>
+      )}
     </div>
   );
-  if (!showing.length && !dismissed.length && !a.cleared.length) return null;
-  const card = (
-    <Card className={showing.length ? 'alarms' : undefined} tour="alarms">
-        {showing.length ? showing.map((x) => item(x, true)) : <Text variant="muted" as="p">Nothing needs you.</Text>}
-        {dismissed.length > 0 && (
-          <details>
-            <summary className="muted">{dismissed.length} dismissed: back if they clear and return</summary>
-            {dismissed.map((x) => item(x, false))}
-          </details>
-        )}
-        {a.cleared.length > 0 && (
-          <details>
-            <summary className="muted">Lately cleared</summary>
-            <Notes
-              items={a.cleared.slice(0, 10).map((x) => (
-                <>
-                  {x.title} <Text variant="muted">(cleared {ago(x.clearedAt, now)})</Text>
-                </>
-              ))}
-            />
-          </details>
-        )}
-    </Card>
-  );
+}
+
+/**
+ * What needs the person (alarms.ts), at the top, in the kit's Needs you: each open alarm with its facts, its action and
+ * Dismiss; the dismissed and the lately cleared folded under them. Nothing while none is open.
+ */
+export function AlarmsCard({ a, now }: { a: AlarmState | undefined; now: number }) {
+  const showing = openAlarms(a);
+  if (!showing.length) return null;
+  const items: Need[] = showing.map((x) => ({
+    id: x.id,
+    tone: 'danger',
+    label: 'alarm',
+    title: x.url ? <Link url={x.url}>{x.title}</Link> : x.title,
+    action: (
+      <span className="row sw-buttons">
+        {x.action && <PostButton title={x.action.label} path="/api/alarms/act" body={{ id: x.id }} confirm={x.action.confirm} />}
+        <PostButton title="Dismiss" variant="secondary" path="/api/alarms/dismiss" body={{ id: x.id }} />
+      </span>
+    ),
+    children: <AlarmFacts x={x} now={now} />,
+  }));
   return (
-    <>
-      <a id="alarms" />
-      {showing.length > 0 ? (
-        <Section title="Needs you" count={showing.length}>
-          {card}
-        </Section>
-      ) : (
-        card
-      )}
-    </>
+    <NeedsYou items={items}>
+      <AlarmHistory a={a} now={now} />
+    </NeedsYou>
   );
 }
 
@@ -601,14 +543,14 @@ function TurnButtons({ x }: { x: TurnRow }) {
       <span className="row turn-buttons">
         <PostButton
           title="Do it here"
-          variant="secondary"
+          variant="secondary" size="sm"
           path="/api/turns/take"
           body={{ repo: x.repo }}
           confirm={`Release ${x.name} from this PC from now on? ${x.holder} leaves it alone from its next look.`}
         />
         <PostButton
           title="Keep it on this PC"
-          variant="secondary"
+          variant="secondary" size="sm"
           path="/api/turns/take"
           body={{ repo: x.repo, pin: true }}
           confirm={`Release ${x.name} from this PC, and keep it here? Other PCs leave it alone while this PC is around.`}
@@ -617,32 +559,34 @@ function TurnButtons({ x }: { x: TurnRow }) {
     );
   if (x.status === 'here')
     return x.pinned ? (
-      <PostButton title="Unpin" variant="secondary" path="/api/turns/take" body={{ repo: x.repo, pin: false }} />
+      <PostButton title="Unpin" variant="secondary" size="sm" path="/api/turns/take" body={{ repo: x.repo, pin: false }} />
     ) : (
-      <PostButton title="Keep it on this PC" variant="secondary" path="/api/turns/take" body={{ repo: x.repo, pin: true }} confirm={`Keep ${x.name} on this PC? Other PCs leave it alone while this PC is around.`} />
+      <PostButton title="Keep it on this PC" variant="secondary" size="sm" path="/api/turns/take" body={{ repo: x.repo, pin: true }} confirm={`Keep ${x.name} on this PC? Other PCs leave it alone while this PC is around.`} />
     );
   return null;
 }
 
 const sentence = (s: string | null) => (s ? `${s[0].toUpperCase()}${s.slice(1)}.` : '');
 
-/** A repository's release PC, in its row of the staff's table: who merges and releases it, kept there or not, and the buttons. */
+/** A repository's release PC, in its card: who releases it, kept there or not, and the buttons. */
 function TurnCell({ x }: { x: TurnRow }) {
-  if (x.status === 'unreachable' || x.status === 'alone') return <Text variant="muted">{sentence(x.note)}</Text>;
+  if (x.status === 'unreachable' || x.status === 'alone')
+    return (
+      <Text variant="muted" as="div" className="turn-cell">
+        {sentence(x.note)}
+      </Text>
+    );
   return (
-    <>
-      {x.status === 'here' ? 'this PC' : <strong>{x.holder}</strong>}
-      {x.pinned ? <Text variant="muted"> (kept there)</Text> : null}
-      {x.quiet ? (
-        <>
-          <br />
-          <Text variant="muted">{`${x.holder} has gone quiet: after a day without it, another PC may take it`}</Text>
-        </>
-      ) : null}
-      <div className="turn-cell">
+    <div className="turn-cell">
+      <div className="sw-line">
+        <span>
+          Released from {x.status === 'here' ? 'this PC' : <strong>{x.holder}</strong>}
+          {x.pinned ? <Text variant="muted"> (kept there)</Text> : null}
+        </span>
         <TurnButtons x={x} />
       </div>
-    </>
+      {x.quiet ? <Text variant="muted" className="sw-sub">{`${x.holder} has gone quiet: after a day without it, another PC may take it`}</Text> : null}
+    </div>
   );
 }
 
@@ -719,11 +663,8 @@ function Stages({ v }: { v: StewardView }) {
           <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
         </div>
         <Text variant="muted" as="p">
-          Release asks first, then reports on each ticked repository below. Nothing is released until Settings say how. The Steward merges no PRs: merge your own once vouched.
+          Release asks first, then reports on each ticked repository in Last stage. Nothing is released until Settings say how. The Steward merges no PRs: merge your own once vouched.
         </Text>
-        <div className="row round">
-          <Text variant="muted">{roundWords(v.round).when}</Text>
-        </div>
       </Card>
     );
   }
@@ -744,12 +685,31 @@ function Stages({ v }: { v: StewardView }) {
         <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
       </div>
       <Text variant="muted" as="p">
-        Each stage asks first, then reports on each ticked employee below. The Steward merges only its own kit PRs, in the build that rolls them out.{offKitNote}
+        Each stage asks first, then reports on each ticked employee in Last stage. The Steward merges only its own kit PRs, in the build that rolls them out.{offKitNote}
       </Text>
-      <div className="row round">
-        <Text variant="muted">{roundWords(v.round).when}</Text>
-      </div>
     </Card>
+  );
+}
+
+/** Words in sentences, each its own: the rounds' words as bullets. A sentence ends at a full stop before a capital or a quote. */
+export const sentencesOf = (text: string): string[] =>
+  text
+    .split(/(?<=\.)\s+(?=["A-Z])/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+/** What the rounds do and when, beside the stages (or under the last stage, with none): roundWords' sentences as bullets. */
+function RoundCard({ r, now }: { r: RoundView; now: number }) {
+  return (
+    <Section title="Its rounds" tour="rounds">
+      <Card className="sw-round">
+        <ul>
+          {sentencesOf(roundWords(r, now).when).map((s) => (
+            <li key={s}>{s}</li>
+          ))}
+        </ul>
+      </Card>
+    </Section>
   );
 }
 
@@ -803,34 +763,25 @@ function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; findin
                 body={() => ({ repos: picks.map((r) => ({ repo: r.repo, ...of(r.repo) })) })}
               />
             </div>
-            <table>
-              <tbody>
-                {f.offered.map((r) => (
-                  <tr key={r.repo}>
-                    <td className="pick-cell">
-                      <input type="checkbox" checked={!!picked[r.repo]} onChange={(e) => setPicked({ ...picked, [r.repo]: e.target.checked })} aria-label={`Pick ${r.repo}`} />
-                    </td>
-                    <td>
-                      <strong>
-                        <Link url={repoUrl(r.repo)}>{r.repo}</Link>
-                      </strong>
-                      <br />
-                      <Text variant="muted">
-                        <code>{r.path}</code> {r.branch}
-                      </Text>
-                    </td>
-                    <td>
-                      <label className="pick">
-                        <input type="checkbox" checked={of(r.repo).release} onChange={(e) => set(r.repo, 'release', e.target.checked)} /> Release each new version
-                      </label>
-                    </td>
-                    <td>
-                      <PostButton title="Look after" path="/api/repos/look-after" body={() => ({ repo: r.repo, ...of(r.repo) })} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <ul className="sw-list sw-found">
+              {f.offered.map((r) => (
+                <li key={r.repo} className="sw-line">
+                  <input type="checkbox" checked={!!picked[r.repo]} onChange={(e) => setPicked({ ...picked, [r.repo]: e.target.checked })} aria-label={`Pick ${r.repo}`} />
+                  <span className="sw-found-name">
+                    <strong>
+                      <Link url={repoUrl(r.repo)}>{r.repo}</Link>
+                    </strong>
+                    <Text variant="muted" className="sw-sub">
+                      <code>{r.path}</code> {r.branch}
+                    </Text>
+                  </span>
+                  <label className="pick">
+                    <input type="checkbox" checked={of(r.repo).release} onChange={(e) => set(r.repo, 'release', e.target.checked)} /> Release each new version
+                  </label>
+                  <PostButton title="Look after" path="/api/repos/look-after" body={() => ({ repo: r.repo, ...of(r.repo) })} />
+                </li>
+              ))}
+            </ul>
           </>
         )}
         <div className="row pick-bar add-clone">
@@ -853,8 +804,36 @@ function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; findin
   );
 }
 
-/** The Steward's own styles, beside the kit's. */
+/**
+ * The Steward's own styles, beside the kit's. The page stops widening at 1680 px; a tab of two parts has them side by
+ * side (5:7) from 1100 px, one under the other below; the staff's cards side by side as the width allows.
+ */
 const STYLE = `
+.titlebar, main.view, .ui-page-area > footer { max-width: 1680px; margin-inline: auto; }
+.sw-pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 0 20px; align-items: start; }
+@media (max-width: 1099.98px) { .sw-pair { grid-template-columns: minmax(0, 1fr); } }
+.sw-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 12px; align-items: start; margin-bottom: 12px; }
+.sw-cards > .card { margin: 0; }
+.sw-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.sw-end { margin-left: auto; font-size: 13px; }
+.sw-name { font-size: 16px; }
+.sw-facts { display: flex; flex-wrap: wrap; gap: 2px 14px; color: var(--muted); font-size: 13px; margin-top: 4px; }
+.sw-path { overflow-wrap: anywhere; }
+.sw-part { margin-top: 10px; }
+.sw-head-small { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 2px; }
+ul.sw-list { list-style: none; margin: 0; padding: 0; }
+ul.sw-list > li { padding: 6px 0; border-top: 1px solid var(--line); }
+ul.sw-list > li:first-child { border-top: 0; }
+.sw-pr-title { min-width: 0; overflow-wrap: anywhere; }
+.sw-sub { display: block; font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+.sw-next > summary { cursor: pointer; font-size: 13px; }
+.sw-commits { font-size: 13px; }
+.sw-found-name { flex: 1 1 260px; min-width: 0; }
+.sw-log .ui-output { max-height: 70vh; overflow: auto; }
+.sw-round ul { margin: 0; padding-left: 18px; }
+.sw-round li + li { margin-top: 6px; }
+.sw-buttons { gap: 6px; flex-wrap: wrap; }
+.sw-history { margin-top: 8px; }
 .notes { margin: 0; padding-left: 16px; color: var(--muted); font-size: 13px; }
 .picks { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .pick { display: inline-flex; gap: 6px; align-items: center; }
@@ -862,27 +841,23 @@ const STYLE = `
 .add-clone .ui-input { flex: 1 1 260px; min-width: 0; }
 .pick-all { font-weight: 600; padding-right: 12px; border-right: 1px solid var(--line); }
 .pick-bar { gap: 12px; align-items: center; margin: 8px 0; }
-td.pick-cell { width: 1%; padding-right: 0; }
 .stages { margin-bottom: 6px; }
 .round { gap: 10px; align-items: center; justify-content: space-between; margin-top: 8px; }
-.staff tr.has-prs > td { border-bottom: 0; }
-.staff tr.prs-row > td { padding-top: 0; }
-.pr-head { font-size: 12px; font-weight: 600; color: var(--muted); margin: 2px 0; }
-.pr-table { font-size: 13px; }
-.pr-table td { padding: 3px 12px 3px 0; border-bottom: 0; }
-.pr-table .pr-num, .pr-table .pr-state { white-space: nowrap; }
-.pr-table.next-build + .pr-head { margin-top: 6px; }
 .turn-cell button { white-space: nowrap; }
-.alarms { border-left: 3px solid var(--alert, #c0392b); }
 .alarm + .alarm, .alarm + details, details + details { margin-top: 10px; }
-.alarm-head { justify-content: space-between; align-items: center; gap: 10px; }
 .turn { justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; }
-.turns { margin-top: 10px; }
-.turn-cell { margin-top: 4px; }
+.turn-cell { margin-top: 6px; font-size: 13px; }
 .turn-buttons { gap: 6px; flex-wrap: wrap; }
 .alarm .notes { margin: 4px 0; }
-td a { color: var(--accent); }
 `;
+
+/** A tab's two parts: side by side from 1100 px (5:7), one under the other below. */
+const Pair = ({ left, right }: { left: ReactNode; right: ReactNode }) => (
+  <div className="sw-pair">
+    <div>{left}</div>
+    <div>{right}</div>
+  </div>
+);
 
 /**
  * The kit the Steward hands out, and how old the staff's table is. With no one to hand it to (`handsOut` false: no
@@ -945,6 +920,48 @@ export function WholeSuiteCard({ w, now }: { w: WholeJob | null | undefined; now
   );
 }
 
+/**
+ * The page at a glance: what needs you, the staff (or your repositories) and how many are behind, the next build and
+ * what it brings, the open PRs and how many fail, and the last stage. Each opens the tab it is about.
+ */
+export function tilesOf(v: StewardView, now: number): GlanceTile[] {
+  const castellan = v.castellan !== false;
+  const rows = v.staff?.rows ?? [];
+  const tiles: GlanceTile[] = [];
+  if (v.alarms) {
+    const open = openAlarms(v.alarms).length;
+    tiles.push(open ? { label: 'Needs you', value: open, note: open === 1 ? 'an alarm is open' : 'alarms are open', tone: 'danger', to: 'needs-you' } : { label: 'Needs you', value: 'Nothing', note: 'no alarm is open', tone: 'success' });
+  }
+  if (v.staff) {
+    const kit = castellan ? v.staff.kit : null;
+    const behind = kit ? rows.filter((r) => r.usesKit && r.main?.kit && r.main.kit !== kit).length : 0;
+    const onKit = kit ? rows.filter((r) => r.main?.kit === kit).length : 0;
+    const unreleased = rows.filter((r) => r.releaseNeeded).length;
+    const note = [behind ? `${behind} behind kit ${kit}` : '', unreleased ? `${unreleased} not released` : ''].filter(Boolean).join(', ');
+    const well = !rows.length ? 'none yet' : kit ? (onKit === rows.length ? `all on kit ${kit}` : `${onKit} on kit ${kit}`) : 'every version released';
+    tiles.push({ label: castellan ? 'Staff' : 'Your repositories', value: rows.length, note: note || well, tone: behind || unreleased ? 'caution' : 'neutral', to: 'staff' });
+  }
+  const r = v.round;
+  if (r.repos !== false) {
+    const waiting = rows.filter((x) => x.releases !== false && (x.nextBuild?.count ?? 0) > 0);
+    const commits = waiting.reduce((n, x) => n + (x.nextBuild?.count ?? 0), 0);
+    const brings = waiting.length ? `${commits} ${commits === 1 ? 'commit' : 'commits'} in ${waiting.length} ${waiting.length === 1 ? 'repository' : 'repositories'}` : 'nothing new yet';
+    const to = hasEmployees(v) ? 'rounds' : undefined;
+    if (!r.on) tiles.push({ label: 'Next build', value: 'When asked', note: `"Builds and releases by itself" is off; ${brings}`, to });
+    else if (r.build?.building) tiles.push({ label: 'Next build', value: 'Building now', note: brings, tone: 'caution', to });
+    else if (r.build?.next) tiles.push({ label: 'Next build', value: buildAt(r.build.next, now), note: brings, to });
+    else tiles.push({ label: 'Next build', value: r.build ? 'None set' : `Every ${r.minutes} min`, note: brings, to });
+  }
+  if (rows.length) {
+    const prs = rows.flatMap((x) => x.prs);
+    const failing = prs.filter((p) => p.checks === 'failing' || p.mergeable === 'CONFLICTING').length;
+    tiles.push({ label: 'Pull requests', value: prs.length, note: !prs.length ? 'none open' : failing ? `${failing} failing or in conflict` : 'none failing', tone: failing ? 'caution' : 'neutral', to: 'staff' });
+  }
+  const l = v.last;
+  tiles.push(l ? { label: 'Last stage', value: l.stage, note: l.error ? `stopped ${ago(l.finished, now)}` : ago(l.finished, now), tone: l.error ? 'danger' : 'neutral', to: 'last' } : { label: 'Last stage', value: 'None yet', note: 'no stage has run', to: 'last' });
+  return tiles;
+}
+
 /** The page's body: everything above Settings. */
 export function StewardBody({ v }: { v: StewardView }) {
   const now = useNow();
@@ -957,6 +974,42 @@ export function StewardBody({ v }: { v: StewardView }) {
     );
   const s = v.staff;
   const castellan = v.castellan !== false;
+  const alarmsOpen = openAlarms(v.alarms).length > 0;
+  const tabs: PageTab[] = [
+    {
+      id: 'staff',
+      label: castellan ? 'Staff' : 'Your repositories',
+      count: s?.rows.length,
+      content: <StaffCards s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} passed={v.passedOver} />,
+    },
+    {
+      id: 'last',
+      label: 'Last stage',
+      mark: v.last?.error ? 'It stopped' : undefined,
+      content: (
+        <Pair
+          left={
+            <>
+              <LastStage l={v.last} now={now} />
+              <TendingCard t={v.tending} r={v.round} now={now} />
+              {/* With no stages to start, the rounds' words are here. */}
+              {!hasEmployees(v) && v.round.repos !== false && <RoundCard r={v.round} now={now} />}
+              {/* While an alarm is open they're under Needs you. */}
+              {!alarmsOpen && <AlarmHistory a={v.alarms} now={now} />}
+            </>
+          }
+          right={<StageLog l={v.last} />}
+        />
+      ),
+    },
+  ];
+  if (hasEmployees(v))
+    tabs.push({
+      id: 'stages',
+      label: castellan ? 'Roll out the kit' : 'Release',
+      content: <Pair left={<Stages v={v} />} right={<RoundCard r={v.round} now={now} />} />,
+    });
+  if (foundOnPage(v.found)) tabs.push({ id: 'found', label: 'Found on this PC', count: v.found!.offered.length || undefined, content: <FoundCard f={v.found} finding={!!v.finding} now={now} tour="found" /> });
   return (
     <>
       <style>{STYLE}</style>
@@ -977,20 +1030,8 @@ export function StewardBody({ v }: { v: StewardView }) {
           </Text>
         </Card>
       )}
-      {/* What it did last, first: the quickest way to see what is going on. Its log stays folded unless it stopped. */}
-      <Section title="Last stage" tour="last">
-        <LastStage l={v.last} now={now} />
-      </Section>
-      <TendingCard t={v.tending} r={v.round} now={now} />
-      {foundOnPage(v.found) && <FoundCard f={v.found} finding={!!v.finding} now={now} tour="found" />}
-      <Section title={castellan ? 'Staff' : 'Your repositories'} count={s?.rows.length}>
-        <StaffTable s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} passed={v.passedOver} />
-      </Section>
-      {hasEmployees(v) && (
-        <Section title={castellan ? 'Roll out the kit' : 'Release'}>
-          <Stages v={v} />
-        </Section>
-      )}
+      <Glance tiles={tilesOf(v, now)} label="The Steward at a glance" />
+      <PageTabs tabs={tabs} label="The Steward's page" />
     </>
   );
 }

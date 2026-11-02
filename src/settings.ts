@@ -483,7 +483,8 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'Fills its kit at the version kit.json pins.', empty: 'None: it has no kit', chip: 'kit', ...command, ...CASTELLAN, hidden: true },
       { key: 'install', kind: 'text', label: 'Install it', help: 'No longer run: steps a merged PR asks for are not run since 0.36.124.', empty: 'Not installed by the Steward', ...command, ...CASTELLAN, hidden: true },
       { key: 'approve', kind: 'text', label: 'Approve a job', help: "Approves one of its jobs, with {job} its name and {sha256} the hash of the script merged on its branch.", empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command, ...CASTELLAN, hidden: true },
-      { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true }, ...CASTELLAN, hidden: true },
+      // Missing where it isn't hired on this PC, with no jobs to approve: kept quietly (Hire makes it), never "needs a look".
+      { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'made', env: true }, ...CASTELLAN, hidden: true },
       {
         key: 'refresh',
         kind: 'text',
@@ -827,8 +828,12 @@ function normalizeReview(raw: unknown): WrightReviewSettings {
   };
 }
 
-/** settings.json over the defaults, each value checked: a bad one falls back to its default. */
-export function normalizeSettings(raw: unknown): { settings: Settings; problems: string[] } {
+/**
+ * settings.json over the defaults, each value checked: a bad one falls back to its default. An agent Manor has retired
+ * (retired.ts) is left out quietly, as it's no employee (inEffect): Settings' Repositories don't list it, and the next
+ * save drops it from the file (found.ts doesn't offer its clone again).
+ */
+export function normalizeSettings(raw: unknown, retired: ReadonlySet<string> = retiredStaff()): { settings: Settings; problems: string[] } {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_SETTINGS;
   const problems: string[] = [];
@@ -836,6 +841,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
   if (Array.isArray(r.employees)) {
     employees = r.employees.map(normalizeEmployee).filter((e): e is Employee => e !== null);
     if (employees.length < r.employees.length) problems.push(`${r.employees.length - employees.length} employee(s) without a usable id were left out.`);
+    employees = employees.filter((e) => !retired.has(e.id.toLowerCase()));
   }
   // Read from the PC, never from the file: only the maker's laptop releases Castellan, whatever settings.json says.
   const makers = makersPc();

@@ -133,11 +133,16 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.doesNotMatch(withOne, /went to sleep/);
   const asleep = "This PC went to sleep 3 times since Wednesday at 16:54, the last today at 11:10, each about 30 seconds after ASUS's OLED Care screen saver came on. The staff stop while it sleeps: to keep them working while you're away, turn off Pixel Refresh in MyASUS → OLED Care.";
   const sleeping = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true, asleep } });
-  assert.match(sleeping, /releases nothing, except for an urgent fix[^<]*This PC went to sleep 3 times since Wednesday at 16:54[^<]*turn off Pixel Refresh in MyASUS → OLED Care\./);
-  assert.match((await renderStewardBody('RunNow'))(body), /data-post="\/api\/run"[^>]*>Run now</);
+  // Its rounds' words beside the stages, a sentence a bullet: the sleep line after the rest.
+  assert.match(sleeping, /<li>Between builds, a round every 10 minutes releases nothing, except for an urgent fix[^<]*<\/li>/);
+  assert.match(sleeping, /<li>This PC went to sleep 3 times since Wednesday at 16:54[^<]*<\/li><li>The staff stop while it sleeps: [^<]*turn off Pixel Refresh in MyASUS → OLED Care\.<\/li><\/ul>/);
+  // Run now, in the title bar, only while it doesn't build and release by itself: by itself its rounds come anyway.
+  assert.equal(body.round.on, true);
+  assert.equal((await renderStewardBody('RunNow'))(body), '');
+  assert.match((await renderStewardBody('RunNow'))({ ...body, round: { ...body.round, on: false } }), /data-post="\/api\/run"[^>]*>Run now</);
   // No turn taken yet: nothing said of release PCs.
   assert.equal(body.turns, null);
-  assert.doesNotMatch(html, /Release PC/);
+  assert.doesNotMatch(html, /Released from/);
   // Who has each repository: another PC (with Do it here and Keep it on this PC), this PC kept here (Unpin), and one
   // whose remote this PC can't reach; and a claim another PC made too.
   const row = (o: object) => ({ id: 'clerk', name: 'Clerk', repo: 'octocat/clerk', status: 'elsewhere', holder: 'DESKTOP-ABC', pinned: false, quiet: false, until: '2026-10-08T12:30:00Z', note: null, ...o });
@@ -153,60 +158,66 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.match(withTurns, />Unpin</);
   assert.match(withTurns, /Releasing Away waits until this PC can reach its remote\./);
   assert.match(withTurns, /octocat\/clerk 0\.4\.13 was claimed on another PC too\./);
-  // With the staff's rows, each one's release PC is a column of the table, not a section of its own.
+  // With the staff's cards, each one's release PC is in its card, not a section of its own.
   const clerk = { ...rows[0], id: 'clerk', name: 'Clerk', repo: 'octocat/clerk' };
-  const inTable = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [clerk] }, round: { ...body.round, repos: true }, turns });
-  assert.match(inTable, /<th>Release PC<\/th>/);
-  assert.match(inTable, /<td><strong>DESKTOP-ABC<\/strong><div class="turn-cell">.*>Do it here</);
-  assert.doesNotMatch(inTable, /Releasing for Clerk/, 'a row in the table says it there');
-  assert.match(inTable, /Releasing for Porter: this PC \(kept there\)/, 'a turn with no row, under the table');
+  const inCards = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [clerk] }, round: { ...body.round, repos: true }, turns });
+  assert.match(inCards, /<div class="card sw-repo">.*<div class="turn-cell"><div class="sw-line"><span>Released from <strong>DESKTOP-ABC<\/strong><\/span><span class="row turn-buttons">.*>Do it here</);
+  assert.doesNotMatch(inCards, /Releasing for Clerk/, 'a card says it there');
+  assert.match(inCards, /Releasing for Porter: this PC \(kept there\)/, 'a turn with no card, under the cards');
   assert.doesNotMatch(html, /<h2[^>]*>Release PC/);
-  // The Steward's own repository: a row of the table, with its release PC in it, and no stage ticks it.
+  // The Steward's own repository: a card, with its release PC in it, and no stage ticks it.
   const self = { ...rows[0], id: 'steward', name: 'Steward', repo: 'octocat/steward', self: true };
   const selfTurn = row({ id: 'steward', name: 'Steward', repo: 'octocat/steward', status: 'here', holder: 'this PC' });
   const withSelf = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [rows[0], self] }, round: { ...body.round, repos: true }, turns: { at: null, rows: [selfTurn] } });
   assert.match(withSelf, /href="https:\/\/github\.com\/octocat\/steward"/);
-  assert.doesNotMatch(withSelf, /Releasing for Steward/, 'said in its row, not under the table');
+  assert.match(withSelf, /Released from this PC/);
+  assert.doesNotMatch(withSelf, /Releasing for Steward/, 'said in its card, not under the cards');
   assert.match(withSelf, /name="employees"[^>]*value="fake"/);
   assert.doesNotMatch(withSelf, /name="employees"[^>]*value="steward"/, 'its builds release it');
-  // One box ticks every repository, or none: the Steward's own row isn't counted.
+  // One box ticks every repository, or none: the Steward's own card isn't counted.
   assert.match(withSelf, /<label class="pick pick-all"><input type="checkbox"[^>]*aria-label="Tick every repository"[^>]*\/> All \(1 of 1\)<\/label>/);
-  // Open PRs are a small table under their row's first three columns, not a column; Notes only once a row has one.
-  assert.doesNotMatch(withOne, /<th>(Open PRs|Notes)<\/th>/);
+  // Cards and lists, no tables: open PRs are a list in their repository's card, under a small heading; notes only once
+  // a card has one.
+  assert.doesNotMatch(withOne, /<table|<th>/);
+  assert.doesNotMatch(withOne, /couldn/);
   const pr = { number: 7, title: 'Fix the thing', url: 'https://github.com/octocat/fake/pull/7', head: 'claude/fix', base: 'main', author: 'octocat', whose: 'team', headOid: 'abc', after: null, afterError: null, afterText: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', labels: [], changed: 3, files: [] };
   const withPr = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: ["couldn't list its releases: offline"] }] }, round: { ...body.round, repos: true } });
-  assert.match(withPr, /<th>Notes<\/th>/);
-  assert.match(withPr, /<tr class="prs-row"><td colSpan="3"><div class="pr-head">Pull requests<\/div><table class="pr-table">.*#7.*Fix the thing.*claude\/fix, octocat(&#x27;|')s/);
+  assert.match(withPr, /<ul class="notes"><li>couldn(&#x27;|')t list its releases: offline<\/li><\/ul>/);
+  assert.match(withPr, /<div class="sw-head-small">Pull requests<\/div><ul class="sw-list"><li class="sw-pr"><div class="sw-line"><a href="https:\/\/github\.com\/octocat\/fake\/pull\/7"[^>]*>#7<\/a><span class="sw-pr-title">Fix the thing<\/span>.*claude\/fix, octocat(&#x27;|')s/);
   assert.match(withPr, /title="Opened by octocat: whoever opened it merges it once it is vouched"/, 'a team PR is merged by whoever opened it');
-  // What the next build brings (Steward 0.36.135): under the row, above its open PRs, a merged PR by its number and
-  // title and a commit pushed without one by its own, linked on GitHub, with a compare of them all.
+  // What the next build brings (Steward 0.36.135): in the card, folded, above its open PRs, a merged PR by its number
+  // and title and a commit pushed without one by its own, linked on GitHub, with a compare of them all.
   const nextBuild = { tag: 'v0.4.0', commit: 'c'.repeat(40), commits: [{ sha: 'aaaaaaa', pr: 12, title: 'Fix the thing' }, { sha: 'bbbbbbb', pr: null, title: 'Changelog: a line' }], count: 12 };
   const withNext = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], releases: true, nextBuild, prs: [pr] }] }, round: { ...body.round, repos: true } });
-  assert.match(withNext, /<tr class="prs-row"><td colSpan="3"><div class="pr-head">Next build brings 12 commits since v0\.4\.0 \(<a href="https:\/\/github\.com\/octocat\/fake\/compare\/c{40}\.\.\.main"[^>]*>compare<\/a>\)<\/div><table class="pr-table next-build">/);
-  assert.match(withNext, /href="https:\/\/github\.com\/octocat\/fake\/pull\/12"[^>]*>#12<\/a><\/td><td>Fix the thing<\/td>/);
-  assert.match(withNext, /href="https:\/\/github\.com\/octocat\/fake\/commit\/bbbbbbb"[^>]*><code>bbbbbbb<\/code><\/a><\/td><td>Changelog: a line<\/td>/);
+  assert.match(withNext, /<details class="sw-part sw-next"><summary>Next build brings 12 commits since v0\.4\.0 \(<a href="https:\/\/github\.com\/octocat\/fake\/compare\/c{40}\.\.\.main"[^>]*>compare<\/a>\)<\/summary><ul class="sw-list sw-commits">/);
+  assert.match(withNext, /href="https:\/\/github\.com\/octocat\/fake\/pull\/12"[^>]*>#12<\/a> Fix the thing<\/li>/);
+  assert.match(withNext, /href="https:\/\/github\.com\/octocat\/fake\/commit\/bbbbbbb"[^>]*><code>bbbbbbb<\/code><\/a> Changelog: a line<\/li>/);
   assert.match(withNext, /and 10 more/);
-  assert.ok(withNext.indexOf('Next build brings') < withNext.indexOf('>Pull requests<'), 'above its open PRs');
+  assert.ok(withNext.indexOf('Next build brings') < withNext.indexOf('sw-head-small">Pull requests<'), 'above its open PRs');
   // One the Steward doesn't release says so; over plain git, nothing is linked; with nothing new, nothing is said.
   const notReleased = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], releases: false, nextBuild }] }, round: { ...body.round, repos: true } });
   assert.match(notReleased, /Not released by the Steward: 12 commits since v0\.4\.0/);
   const plain = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], host: 'git', nextBuild: { ...nextBuild, commits: nextBuild.commits.slice(0, 1), count: 1 } }] }, round: { ...body.round, repos: true } });
-  assert.match(plain, /Next build brings 1 commit since v0\.4\.0<\/div>/);
-  assert.match(plain, /<td class="pr-num">#12<\/td><td>Fix the thing<\/td>/);
+  assert.match(plain, /Next build brings 1 commit since v0\.4\.0<\/summary>/);
+  assert.match(plain, /<li>#12 Fix the thing<\/li>/);
   assert.doesNotMatch(plain, /\/compare\/|and \d+ more/);
   const nothing = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], nextBuild: { ...nextBuild, commits: [], count: 0 } }] }, round: { ...body.round, repos: true } });
-  assert.doesNotMatch(nothing, /Next build brings|<tr class="prs-row">/);
+  assert.doesNotMatch(nothing, /Next build brings|class="sw-part sw-next"/);
   // No Merge conflicts card any more: the Steward catches no PR up (Steward 0.36.124).
   assert.doesNotMatch(withPr, /Merge conflicts|<table class="conflicts">/);
-  // Read now and then, in About: the kit. The last stage is on the page, above the staff. About carries no tour names:
-  // the tour shows the page.
+  // The page at a glance, then its tabs: the staff, the last stage beside its log, and the stages beside its rounds.
+  // Read now and then, in About: the kit. About carries no tour names: the tour shows the page.
   for (const h of [withPr, withOne]) {
     const { page, about } = split(h);
     assert.ok(about.includes('The kit the Steward hands out') && !page.includes('The kit the Steward hands out'));
     assert.ok(!about.includes('Last stage') && page.includes('Last stage'));
-    assert.ok(page.indexOf('Last stage') < page.indexOf('Staff') || !page.includes('Staff'), 'the last stage comes before the staff');
+    assert.deepEqual([...page.matchAll(/role="tab"[^>]*>([^<]+)/g)].map((m) => m[1]), ['Staff', 'Last stage', 'Roll out the kit', 'Found on this PC'], 'Found on this PC: not looked yet');
+    assert.ok(page.indexOf('class="ui-glance"') < page.indexOf('role="tablist"'), 'the tiles above the tabs');
     assert.doesNotMatch(about, /data-tour/);
   }
+  const tiles = (h: string) => [...h.matchAll(/<span class="ui-tile-label">([^<]+)<\/span><span class="ui-tile-value">([^<]*)<\/span>(?:<span class="ui-tile-note">([^<]*)<\/span>)?/g)].map((m) => [m[1], m[2], m[3]]);
+  assert.deepEqual(tiles(withPr).filter(([label]) => label === 'Staff' || label === 'Pull requests'), [['Staff', '1', '0 on kit 1.0.0'], ['Pull requests', '1', 'none failing']]);
+  assert.equal(tiles(withNext).find(([label]) => label === 'Next build')?.[2], '12 commits in 1 repository');
   const ping = await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');
