@@ -382,10 +382,11 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
         ? `It releases only when asked, until you say yes: "Builds and releases by itself" is off in Settings. A round every ${r.minutes} minutes while on duty only ${tend}.${after} Run now does a whole round.`
         : 'It releases only when asked, until you say yes: "Builds and releases by itself" is off in Settings. Run now does one round.'
       : r.build
-        ? `It builds at set times (${r.build.times.join(', ')}; Settings: Build pipeline): a build ${what}, each repository released once. ${r.build.building ? 'A build is under way now.' : r.build.next ? `The next build is at ${buildAt(r.build.next, now)}.` : 'No build time is set to come.'}${r.build.late ? ` ${r.build.late.charAt(0).toUpperCase()}${r.build.late.slice(1)}.` : ''}${r.build.wakes ? ' Plugged in, the PC is woken a few minutes before each build, and kept up until it closes.' : ''} Between builds, a round every ${r.minutes} minutes releases nothing, except for an urgent fix (a commit on main whose changelog entry starts "**Urgent fix:"): that builds at once, for its repository alone. An urgent kit goes out to every agent in that build, and each is built at once after it. Where Settings say so, a round also vouches for one of the team's open PRs no one has vouched for yet, as steward vouch would, and never merges it.${after}`
+        ? // The times, the next and the days are the Build schedule's chart, above: said here only when no time is to come.
+          `At each build time on the schedule, a build ${what}, each repository released once.${r.build.building ? ' A build is under way now.' : r.build.next ? '' : ' No build time is set to come.'}${r.build.late ? ` ${r.build.late.charAt(0).toUpperCase()}${r.build.late.slice(1)}.` : ''}${r.build.wakes ? ' Plugged in, the PC is woken a few minutes before each build, and kept up until it closes.' : ''} Between builds, a round every ${r.minutes} minutes releases nothing, except for an urgent fix (a commit on main whose changelog entry starts "**Urgent fix:"): that builds at once, for its repository alone.${r.castellan === false ? '' : ' An urgent kit goes out to every agent in that build, and each is built at once after it.'} Where Settings say so, a round also vouches for one of the team's open PRs no one has vouched for yet, as steward vouch would, and never merges it.${after}`
         : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${after}`;
-  // Where the last build's time went (buildtimes.ts), and that what is merged between builds is released at the next.
-  const took = r.on && !noRepos && r.build?.took ? ` ${r.build.took} Between builds, whoever wrote a PR merges it once vouched, and the next build releases it.` : '';
+  // That what is merged between builds is released at the next (where the last build's time went is the schedule's).
+  const took = r.on && !noRepos && r.build ? ' Between builds, whoever wrote a PR merges it once vouched, and the next build releases it.' : '';
   // A vendor's screen saver putting the PC to sleep stops the rounds whatever they do: said whatever the mode.
   const asleep = r.asleep ? ` ${r.asleep}` : '';
   return { what, when: `${when}${took}${asleep}` };
@@ -700,6 +701,179 @@ export const sentencesOf = (text: string): string[] =>
     .filter(Boolean);
 
 /** What the rounds do and when, beside the stages (or under the last stage, with none): roundWords' sentences as bullets. */
+const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+const WEEK: [string, string][] = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
+const minuteOf = (t: string) => {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+};
+const clock = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const sortTimes = (times: string[]) => [...new Set(times.map((t) => clock(minuteOf(t))))].sort((a, b) => minuteOf(a) - minuteOf(b));
+
+/**
+ * The part of the day the schedule's chart shows: the 12 hours around the build times when they fit in 12 (round the
+ * clock: 22:00 and 02:00 fit), centred and on the hour; otherwise the whole day from midnight. Pure.
+ */
+export function scheduleWindow(times: string[]): { start: number; hours: 12 | 24 } {
+  const mins = sortTimes(times).map(minuteOf);
+  if (!mins.length) return { start: 0, hours: 24 };
+  // The times fill the day but for its widest gap between neighbours; they begin where that gap ends.
+  let gap = -1;
+  let first = mins[0];
+  mins.forEach((m, i) => {
+    const next = i + 1 < mins.length ? mins[i + 1] : mins[0] + 1440;
+    if (next - m > gap) [gap, first] = [next - m, mins[(i + 1) % mins.length]];
+  });
+  const span = 1440 - gap;
+  if (span > 720) return { start: 0, hours: 24 };
+  return { start: (Math.floor((first - (720 - span) / 2) / 60) * 60 + 1440) % 1440, hours: 12 };
+}
+
+/** The days in words: every day, weekdays, weekends, or each by name. Pure. */
+export function daysWords(days: string[]): string {
+  const on = WEEK.filter(([k]) => days.includes(k));
+  if (on.length === 7) return 'every day';
+  if (!on.length) return 'on no day';
+  const keys = on.map(([k]) => k).join(',');
+  if (keys === 'mon,tue,wed,thu,fri') return 'on weekdays';
+  if (keys === 'sat,sun') return 'at weekends';
+  return `on ${on.map(([, l]) => l).join(', ')}`;
+}
+
+/** The next build from `now`: today's next time on a build day, or the first time of the next build day. Pure. */
+export function nextBuild(times: string[], days: string[], now: number): { at: number; time: string } | null {
+  const sorted = sortTimes(times);
+  if (!sorted.length || !days.some((d) => (DAY_KEYS as readonly string[]).includes(d))) return null;
+  const d = new Date(now);
+  for (let i = 0; i < 8; i++) {
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i);
+    if (!days.includes(DAY_KEYS[day.getDay()])) continue;
+    for (const t of sorted) {
+      const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(minuteOf(t) / 60), minuteOf(t) % 60).getTime();
+      if (at > now) return { at, time: t };
+    }
+  }
+  return null;
+}
+
+const inWords = (ms: number) => {
+  const m = Math.max(1, Math.round(ms / 60_000));
+  return m < 60 ? `in ${m} min` : m < 24 * 60 ? `in ${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}` : `in ${Math.round(m / 1440)} days`;
+};
+
+/**
+ * The build schedule (Settings' Build pipeline, set here since Steward 0.36.292): a line of the day with a mark at each
+ * build time, the next one lit and today's past ones dimmed, and the time now; under it the times and days, changed
+ * here and saved with Save (POST /api/schedule). The chart follows the changes before they're saved.
+ */
+function ScheduleCard({ r, now }: { r: RoundView; now: number }) {
+  const b = r.build;
+  const saved = { times: sortTimes(b?.times ?? []), days: b?.days ?? WEEK.map(([k]) => k) };
+  const [times, setTimes] = useState(saved.times);
+  const [days, setDays] = useState(saved.days);
+  const [adding, setAdding] = useState('');
+  const key = `${saved.times.join(',')}|${saved.days.join(',')}`;
+  // What was saved (here, or in settings.json) is shown once it comes back.
+  useEffect(() => {
+    setTimes(saved.times);
+    setDays(saved.days);
+  }, [key]);
+  if (!b) return null;
+  const changed = `${times.join(',')}|${days.join(',')}` !== key;
+  const win = scheduleWindow(times);
+  const span = win.hours * 60;
+  const at = (m: number) => ((m - win.start + 1440) % 1440) / span;
+  const inside = (m: number) => win.hours === 24 || (m - win.start + 1440) % 1440 <= span;
+  const d = new Date(now);
+  const nowMin = d.getHours() * 60 + d.getMinutes();
+  const today = days.includes(DAY_KEYS[d.getDay()]);
+  const next = nextBuild(times, days, now);
+  const nextToday = next && new Date(next.at).toDateString() === d.toDateString();
+  const step = win.hours === 12 ? 1 : 2;
+  const every = win.hours === 12 ? 2 : 4;
+  const hours = Array.from({ length: win.hours / step + 1 }, (_, i) => win.start + i * step * 60);
+  const add = () => {
+    if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(adding)) return;
+    setTimes(sortTimes([...times, adding]).slice(0, 12));
+    setAdding('');
+  };
+  const markOf = (t: string) => {
+    const m = minuteOf(t);
+    const isNext = !!nextToday && next!.time === t;
+    const done = today && m <= nowMin && !isNext;
+    const title = isNext ? `${t}: the next build, ${inWords(next!.at - now)}` : done ? `${t}: earlier today` : today ? `${t}: later today` : `${t}: not today`;
+    return { m, cls: isNext ? 'next' : done ? 'done' : '', title };
+  };
+  const summary = times.length ? `Builds at ${times.join(', ')}, ${daysWords(days)}.${next ? ` The next is at ${buildAt(new Date(next.at).toISOString(), now)}.` : ''}` : 'No build times.';
+  return (
+    <Section title="Build schedule" tour="schedule">
+      <Card className="sw-sched">
+        <div className="sw-sched-head">
+          <strong>{times.length ? `${times.length} ${times.length === 1 ? 'build' : 'builds'} a day, ${daysWords(days)}` : 'No build times'}</strong>
+          {next && <Text variant="muted">next {buildAt(new Date(next.at).toISOString(), now)}, {inWords(next.at - now)}</Text>}
+          {!r.on && <Badge tone="caution" label="waits: it doesn't build by itself" title={'"Builds and releases by itself" is off in Settings: these times wait until it is on.'} />}
+        </div>
+        <div className="sw-sched-chart" role="img" aria-label={summary}>
+          <div className="sw-sched-line" />
+          {hours.map((m, i) => (
+            <div key={m} className={`sw-sched-hour${(i * step) % every === 0 ? ' major' : ''}`} style={{ left: `${(i * step * 60 * 100) / span}%` }}>
+              {(i * step) % every === 0 && <span>{clock(m % 1440)}</span>}
+            </div>
+          ))}
+          {inside(nowMin) && (
+            <div className="sw-sched-now" style={{ left: `${at(nowMin) * 100}%` }} title={`Now, ${clock(nowMin)}`}>
+              <span>now</span>
+            </div>
+          )}
+          {times.map((t) => {
+            const k = markOf(t);
+            return (
+              <div key={t} className={`sw-sched-build ${k.cls}`} style={{ left: `${at(k.m) * 100}%` }} title={k.title}>
+                <span>{t}</span>
+              </div>
+            );
+          })}
+        </div>
+        {b.took && <Text variant="muted" as="p" className="sw-sched-took">{b.took}</Text>}
+        <div className="sw-sched-edit">
+          <div className="sw-line">
+            <span className="sw-sched-label">Times</span>
+            {times.map((t) => (
+              <span key={t} className="sw-time">
+                {t}
+                <button type="button" aria-label={`Remove ${t}`} title={`Remove ${t}`} disabled={times.length === 1} onClick={() => setTimes(times.filter((x) => x !== t))}>
+                  ×
+                </button>
+              </span>
+            ))}
+            <input type="time" className="sw-time-new" aria-label="A build time to add" value={adding} onChange={(e) => setAdding(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+            <button type="button" className="sw-time-add" disabled={!adding || times.length >= 12} onClick={add}>
+              Add
+            </button>
+          </div>
+          <div className="sw-line">
+            <span className="sw-sched-label">Days</span>
+            {WEEK.map(([k, l]) => (
+              <label key={k} className="pick">
+                <input type="checkbox" checked={days.includes(k)} onChange={(e) => setDays(e.target.checked ? WEEK.map(([x]) => x).filter((x) => x === k || days.includes(x)) : days.filter((x) => x !== k))} /> {l}
+              </label>
+            ))}
+          </div>
+          {changed && (
+            <div className="row sw-sched-save">
+              <PostButton title="Save" path="/api/schedule" body={() => ({ times, days })} disabled={!times.length || !days.length} />
+              <button type="button" className="sw-time-add" onClick={() => (setTimes(saved.times), setDays(saved.days))}>
+                Cancel
+              </button>
+              <Text variant="muted">A build the PC slept through begins once it wakes.</Text>
+            </div>
+          )}
+        </div>
+      </Card>
+    </Section>
+  );
+}
+
 function RoundCard({ r, now }: { r: RoundView; now: number }) {
   return (
     <Section title="Its rounds" tour="rounds">
@@ -823,6 +997,32 @@ const STYLE = `
 .sw-status p { margin: 0; }
 .sw-status p + p, .sw-status .turn + p, .sw-status .turn + .turn { margin-top: 6px; }
 .sw-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+/* The build schedule: a line of the day, a mark per build time (the next lit, today's past dimmed), and now. */
+.sw-sched-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.sw-sched-chart { position: relative; height: 78px; margin: 6px 22px 2px; }
+.sw-sched-line { position: absolute; left: 0; right: 0; top: 40px; height: 2px; border-radius: 1px; background: var(--line); }
+.sw-sched-hour { position: absolute; top: 37px; width: 1px; height: 8px; background: var(--line); }
+.sw-sched-hour.major { height: 12px; top: 35px; }
+.sw-sched-hour span { position: absolute; top: 18px; left: 0; transform: translateX(-50%); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.sw-sched-now { position: absolute; top: 8px; height: 44px; width: 0; border-left: 2px dashed var(--muted); }
+.sw-sched-now span { position: absolute; top: -6px; left: 4px; font-size: 11px; color: var(--muted); }
+.sw-sched-build { position: absolute; top: 33px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; border: 2px solid var(--accent); background: var(--surface, var(--bg)); box-sizing: border-box; cursor: default; }
+.sw-sched-build::after { content: ''; position: absolute; inset: -8px; }
+.sw-sched-build span { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--fg); }
+.sw-sched-build.done { border-color: var(--muted); background: var(--muted); }
+.sw-sched-build.done span { color: var(--muted); font-weight: 400; }
+.sw-sched-build.next { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.sw-sched-took { margin: 4px 0 0; font-size: 13px; }
+.sw-sched-edit { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; display: grid; gap: 8px; }
+.sw-sched-label { min-width: 48px; color: var(--muted); font-size: 13px; }
+.sw-time { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; }
+.sw-time button { background: none; border: 0; color: var(--muted); font-size: 15px; line-height: 1; padding: 2px 5px; border-radius: 999px; cursor: pointer; }
+.sw-time button:hover:not(:disabled) { color: var(--fg); background: var(--hover, transparent); }
+.sw-time button:disabled { opacity: .4; cursor: default; }
+.sw-time-new { font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface, var(--bg)); color: var(--fg); color-scheme: light dark; }
+.sw-time-add { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: none; color: var(--fg); cursor: pointer; }
+.sw-time-add:disabled { opacity: .5; cursor: default; }
+.sw-sched-save { align-items: center; gap: 10px; flex-wrap: wrap; }
 .sw-end { margin-left: auto; font-size: 13px; }
 .sw-name { font-size: 16px; }
 .sw-facts { display: flex; flex-wrap: wrap; gap: 2px 14px; color: var(--muted); font-size: 13px; margin-top: 4px; }
@@ -954,7 +1154,7 @@ export function tilesOf(v: StewardView, now: number): GlanceTile[] {
     const waiting = rows.filter((x) => x.releases !== false && (x.nextBuild?.count ?? 0) > 0);
     const commits = waiting.reduce((n, x) => n + (x.nextBuild?.count ?? 0), 0);
     const brings = waiting.length ? `${commits} ${commits === 1 ? 'commit' : 'commits'} in ${waiting.length} ${waiting.length === 1 ? 'repository' : 'repositories'}` : 'nothing new yet';
-    const to = hasEmployees(v) ? 'rounds' : undefined;
+    const to = hasEmployees(v) ? 'schedule' : undefined;
     if (!r.on) tiles.push({ label: 'Next build', value: 'When asked', note: `"Builds and releases by itself" is off; ${brings}`, to });
     else if (r.build?.building) tiles.push({ label: 'Next build', value: 'Building now', note: brings, tone: 'caution', to });
     else if (r.build?.next) tiles.push({ label: 'Next build', value: buildAt(r.build.next, now), note: brings, to });
@@ -1015,7 +1215,13 @@ export function StewardBody({ v }: { v: StewardView }) {
     tabs.push({
       id: 'stages',
       label: castellan ? 'Roll out the kit' : 'Release',
-      content: <Pair left={<Stages v={v} />} right={<RoundCard r={v.round} now={now} />} />,
+      // The schedule across the top, its chart as wide as the window; the buttons beside what the rounds do under it.
+      content: (
+        <>
+          <ScheduleCard r={v.round} now={now} />
+          <Pair left={<Stages v={v} />} right={<RoundCard r={v.round} now={now} />} />
+        </>
+      ),
     });
   if (foundOnPage(v.found)) tabs.push({ id: 'found', label: 'Found on this PC', count: v.found!.offered.length || undefined, content: <FoundCard f={v.found} finding={!!v.finding} now={now} tour="found" /> });
   return (

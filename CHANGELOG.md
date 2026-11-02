@@ -4,18 +4,23 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.292
 
-**The Steward's page is laid out for a wide screen: the page at a glance, then tabs, with a card for each staff member. Settings' Repositories no longer list staff Manor has retired.**
+**The Steward's page is laid out for a wide screen: the page at a glance, then tabs, with a card for each staff member, and the build schedule drawn as a chart on the Release tab, where it's changed too. Settings read more easily, and no longer list staff Manor has retired.**
 
 ### What's new
 
 - **At a glance**, above the tabs: what needs you, the staff (how many are behind, and how many updates are not yet released), the next build and what it brings, the open pull requests and how many fail, and the last stage. Each tile opens the tab it's about.
-- **Tabs**: the staff, the last stage, the stages, and the repositories found on this PC.
+- **Tabs**: the staff, the last stage, Release, and the repositories found on this PC.
   - **The staff**: a card each, side by side as the window allows, all the same height with room for a note. Each card shows its kit (or whether the Steward releases it), its latest release, and its branch and clone, then its release PC, what its next build brings (folded) and its open pull requests.
   - **What holds a release** (a pull request passed over, a version claimed on two PCs) is above the cards, not under them.
   - **The last stage**: its results beside its log, which scrolls in a box of its own.
-  - **The stages**: the stages beside a list of what the rounds do and when.
+  - **Release**: the build schedule, then the stages beside a list of what the rounds do and when.
+- **The build schedule, as a chart**: each build time on a line through the day, the next one marked, the ones already past today greyed, and the time now. When the times fit in 12 hours, it shows just those 12 hours; otherwise the whole day. Below it, the times and days to change: add or remove a time, tick the days, then Save.
 
 ### What changed
+
+- **The build times and days moved from Settings to the Release tab**, beside the chart. Settings no longer has a Build pipeline tab.
+- **Settings' help is in plain words and laid out as points** where it was one long paragraph (Repositories and Pipelines among them). It no longer speaks of hiring: a repository is added under Found on this PC.
+- **In a narrow window, a repository's line in Settings keeps its padding** when its labels wrap onto a second line.
 
 - **Needs you** shows the open alarms, each with its buttons. The ones dismissed or lately cleared are folded under them, or in the Last stage tab when none is open.
 - **Run now** shows only while "Builds and releases by itself" is off. When it's on, the rounds run anyway.
@@ -23,10 +28,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The page stops widening at 1680 pixels.
 - **Settings' Repositories leave out staff Manor has retired** (the Auditor, the Aletaster, the Reckoner and others). The rounds already passed them over. The next save drops them from the Steward's settings, and their clones aren't offered again under Found on this PC.
 - **A staff member not hired on this PC is no longer marked "needs a look"** in Settings' Repositories just because it has no installed copy here.
+- It runs on kit 2.148.5.
 
 ### Before you update
 
-- Nothing: it updates itself as usual.
+- The build times and days you set before are kept: find them on the Release tab now, not in Settings. Nothing else to do: it updates itself as usual.
 
 ## 0.36.291
 

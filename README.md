@@ -248,7 +248,7 @@ Claims are shared by every PC that looks after a repository through `refs/manor/
 
 ## The build pipeline
 
-The Steward builds at set times (`src/pipeline.ts`): four a day to start with, 00:00, 06:00, 12:00 and 18:00, which Settings' **Build pipeline** tab changes. There is no switch to turn it off (Steward 0.36.40 to 0.36.62 had one, off by default; a settings.json that still keeps it builds all the same).
+The Steward builds at set times (`src/pipeline.ts`): four a day to start with, 00:00, 06:00, 12:00 and 18:00, on every day. The page's **Release** tab draws them (Steward 0.36.292): the 12 hours around them when they fit in 12, the whole day otherwise, with the next build and the time now marked. Its times and days are changed there, beside the chart (POST `/api/schedule` with `{ "times": ["13:00", …], "days": ["mon", …] }`, saved into Settings' `buildPipeline` and checked as Settings would), no longer on a Settings tab of their own. There is no switch to turn it off (Steward 0.36.40 to 0.36.62 had one, off by default; a settings.json that still keeps it builds all the same).
 
 **Between builds** the rounds release nothing: nothing is released or rolled out, and nothing is merged by the Steward. Whoever writes a PR merges it once vouched (The rollout, "Merging and vouching"), and what it brings waits on the branch for the next build. On Castellan's own PC, a kit on the Steward's main with no release yet is tried on the agents meanwhile, a slice a round (Making a kit change), so the build finds it tried. Where Settings' `roundVouches` is on, a round then vouches for one of the team's open PRs no one has vouched for yet (Round vouches, under "Merging and vouching"): it sets the same status `steward vouch` does, and never merges it.
 

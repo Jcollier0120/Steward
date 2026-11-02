@@ -21,6 +21,12 @@
 .sf .sf-changed { display: none; }
 .sf.is-changed > .sf-head .sf-changed, .sf.is-changed > fieldset > legend .sf-changed { display: inline-block; }
 .sf-help, .sf-meta { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+/* A help of several lines (the React form's Help): paragraphs and points. */
+.sf-help-lines p { margin: 0; }
+.sf-help-lines p + p, .sf-help-lines ul + p { margin-top: 6px; }
+.sf-help-lines ul { margin: 4px 0 0; padding-left: 18px; }
+.sf-help-lines li + li { margin-top: 2px; }
+.sf-help code { font-size: 12px; overflow-wrap: anywhere; }
 .sf-meta { display: flex; gap: 4px 12px; flex-wrap: wrap; align-items: baseline; }
 .sf-control { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
 .sf-panel input[type=text], .sf-panel input[type=number], .sf-panel select {
@@ -80,6 +86,8 @@
 .sf-chip { font-size: 12px; line-height: 1.6; padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--fg); background: var(--hover, transparent); white-space: nowrap; }
 .sf-chip.off { color: var(--muted); background: none; border-style: dashed; }
 .sf-chip.warn { color: var(--warn); border-color: var(--warn); background: none; cursor: help; }
+/* Room above and below the chips and a switch, so a line that wraps in a narrow window doesn't sit on the record's edge. */
+.sf-record-line > .sf-chips, .sf-record-line > .sf-switch { margin-block: 6px; }
 .sf-record-line > .sf-switch { align-items: center; font-size: 13px; white-space: nowrap; }
 .sf-record-line > .sf-switch input[type=checkbox] { margin-top: 0; }
 .sf-record-body { border-top: 1px solid var(--line); padding-bottom: 10px; }

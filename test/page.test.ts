@@ -123,9 +123,9 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const withTeam = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true }, team: ['someone'], teamNote: null });
   for (const h of [withOne, withTeam]) assert.doesNotMatch(h, /data-post="\/api\/stage\/merge|>Merge the team/);
   assert.match(withOne, /The Steward merges only its own kit PRs, in the build that rolls them out/);
-  // By itself (Settings' default): it builds at set times, a build releasing each repository's main, its rounds only
-  // looking between builds but for an urgent fix; and Run now, in the title bar.
-  assert.match(withOne, /It builds at set times \(00:00, 06:00, 12:00, 18:00; Settings: Build pipeline\): a build releases each employee whose branch carries something new \(everyone merges their own PRs\)/);
+  // By itself (Settings' default): it builds at the schedule's times (drawn above, on the Release tab), a build releasing
+  // each repository's main, its rounds only looking between builds but for an urgent fix; and Run now, in the title bar.
+  assert.match(withOne, /At each build time on the schedule, a build releases each employee whose branch carries something new \(everyone merges their own PRs\)/);
   assert.match(withOne, /Between builds, a round every 10 minutes releases nothing, except for an urgent fix/);
   // A vendor's screen saver putting the PC to sleep (the kit's sleep-cause.ts): its line, after the rest; none under
   // node --test, where nothing of the PC is read.
@@ -405,4 +405,60 @@ test('stages side by side: a release beside a round, a third refused while both 
 test("a stage's POST takes the ticked employees and a well-formed kit only", () => {
   assert.deepEqual(askOf({ employees: ['porter', 'pinder'], kit: '1.0.1' }), { employees: ['porter', 'pinder'], kit: '1.0.1' });
   assert.deepEqual(askOf({ employees: 'porter', kit: '1.0.1; rm' }), { employees: [], kit: null });
+});
+
+test('the build schedule: the 12 hours around its times when they fit in 12, else the whole day; its days in words; the next build', async () => {
+  const m = await bundleForNode<{ scheduleWindow: (t: string[]) => { start: number; hours: number }; daysWords: (d: string[]) => string; nextBuild: (t: string[], d: string[], now: number) => { at: number; time: string } | null }>(
+    `export { daysWords, nextBuild, scheduleWindow } from '${importPath('src/web/steward.tsx')}';`,
+  );
+  // 10:00 to 19:00 spans 9 hours: 08:00 to 20:00, centred on the hour. 10:00 to 21:00: 09:00 to 21:00.
+  assert.deepEqual(m.scheduleWindow(['13:00', '10:00', '16:30', '19:00']), { start: 8 * 60, hours: 12 });
+  assert.deepEqual(m.scheduleWindow(['10:00', '13:00', '16:30', '19:00', '21:00']), { start: 9 * 60, hours: 12 });
+  // Round midnight: 22:00 and 02:00 are 4 hours apart, shown 18:00 to 06:00.
+  assert.deepEqual(m.scheduleWindow(['02:00', '22:00']), { start: 18 * 60, hours: 12 });
+  // The default four, 18 hours from first to last: the whole day. One time: the 12 hours around it.
+  assert.deepEqual(m.scheduleWindow(['00:00', '06:00', '12:00', '18:00']), { start: 0, hours: 24 });
+  assert.deepEqual(m.scheduleWindow(['09:30']), { start: 3 * 60, hours: 12 });
+  assert.equal(m.daysWords(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']), 'every day');
+  assert.equal(m.daysWords(['fri', 'mon', 'tue', 'wed', 'thu']), 'on weekdays');
+  assert.equal(m.daysWords(['sat', 'sun']), 'at weekends');
+  assert.equal(m.daysWords(['mon', 'wed']), 'on Mon, Wed');
+  // Monday 2 Nov 2026, 11:00 local: today's 13:00; after the last, the next build day's first.
+  const monday = (h: number) => new Date(2026, 10, 2, h, 0).getTime();
+  assert.equal(m.nextBuild(['10:00', '13:00'], ['mon', 'wed'], monday(11))?.time, '13:00');
+  const wed = m.nextBuild(['10:00', '13:00'], ['mon', 'wed'], monday(14))!;
+  assert.equal(new Date(wed.at).getDay(), 3);
+  assert.equal(wed.time, '10:00');
+  assert.equal(m.nextBuild(['10:00'], [], monday(9)), null);
+});
+
+test('the Release tab draws the schedule, and saving it there writes Settings\' build times and days, checked as Settings would', async () => {
+  const token = readFileSync(path.join(home, 'server.json'), 'utf8').match(/"token": "([0-9a-f]+)"/)![1];
+  const page = { 'x-token': token, origin: `http://steward.localhost:${port}` };
+  const body = (await (await fetch(`${base()}/api/page`)).json()).body;
+  const rows = [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', parts: [], usesKit: false, branch: 'main', checkout: { path: home, exists: true, branch: 'main', changes: 0 }, main: null, release: null, releaseNeeded: false, prs: [], prepared: null, notes: [] }];
+  const html = (await renderStewardBody())({ ...body, castellan: false, staff: { ...body.staff, rows }, round: { ...body.round, castellan: false, repos: true, build: { ...body.round.build, times: ['10:00', '13:00'], days: ['mon', 'tue', 'wed', 'thu', 'fri'] } } });
+  assert.match(html, /data-tour="schedule"/);
+  assert.match(html, /2 builds a day, on weekdays/);
+  assert.match(html, /class="sw-sched-build[^"]*"[^>]*><span>10:00<\/span>/);
+  assert.match(html, /aria-label="Remove 13:00"/);
+  assert.match(html, /At each build time on the schedule, a build releases each new version/);
+  assert.doesNotMatch(html, /An urgent kit goes out/, "a customer's PC carries no kit");
+  assert.doesNotMatch(html, /Settings: Build pipeline/);
+  // Saved: the times and days, the rest of the pipeline as it was; a time that isn't one refused, the file untouched.
+  const saved = await post('/api/schedule', page, { times: ['07:30', '19:00'], days: ['sat', 'sun'] });
+  assert.equal(saved.status, 200, await saved.clone().text());
+  const file = JSON.parse(readFileSync(path.join(home, 'settings.json'), 'utf8'));
+  // The days kept in Settings' own order.
+  assert.deepEqual([file.buildPipeline.times, [...file.buildPipeline.days].sort()], [['07:30', '19:00'], ['sat', 'sun']]);
+  assert.equal(typeof file.buildPipeline.windowMinutes, 'number');
+  const bad = await post('/api/schedule', page, { times: ['25:00'] });
+  assert.equal(bad.status, 400);
+  assert.match((await bad.json()).error, /time/i);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(home, 'settings.json'), 'utf8')).buildPipeline.times, ['07:30', '19:00']);
+  assert.equal((await post('/api/schedule', page, {})).status, 400);
+  assert.deepEqual([...(await (await fetch(`${base()}/api/page`)).json()).body.round.build.days].sort(), ['sat', 'sun']);
+  // Settings no longer draw it: the schedule is on the page.
+  const s = await (await fetch(`${base()}/api/settings`)).json();
+  assert.equal(s.schema.find((f: { key: string }) => f.key === 'buildPipeline')?.hidden, true);
 });

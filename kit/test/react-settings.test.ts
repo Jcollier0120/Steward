@@ -325,3 +325,10 @@ test('a list of short words is drawn in columns; a list of paths, or of two, one
   assert.doesNotMatch(list({ path: { is: 'folder' } }, ['C:\a', 'D:\b', 'E:\c']), /sf-short/, 'paths get the width');
   assert.doesNotMatch(list({}, ['node', 'python', 'a command line far longer than a word']), /sf-short/);
 });
+
+test('a help of several lines reads as paragraphs and points, with its code marked; one line is a paragraph as before', () => {
+  const lines = { key: 'pipeline', kind: 'text', label: 'Pipeline', help: 'How it is built.\n- `build`: its build commands\n- `test`: its tests\nNone: as its fields say.' };
+  const h = m.form({ ...data(), schema: [lines, schema[2]], values: { pipeline: '', notes: true } });
+  assert.match(h, /<div class="sf-help sf-help-lines" id="[^"]+"><p>How it is built\.<\/p><ul><li><code>build<\/code>: its build commands<\/li><li><code>test<\/code>: its tests<\/li><\/ul><p>None: as its fields say\.<\/p><\/div>/);
+  assert.match(h, /<p class="sf-help" id="[^"]+">Ask the model for a note\.<\/p>/, 'one line: unchanged');
+});
