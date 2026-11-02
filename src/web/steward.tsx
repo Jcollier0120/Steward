@@ -700,7 +700,6 @@ export const sentencesOf = (text: string): string[] =>
     .map((s) => s.trim())
     .filter(Boolean);
 
-/** What the rounds do and when, beside the stages (or under the last stage, with none): roundWords' sentences as bullets. */
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 const WEEK: [string, string][] = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
 const minuteOf = (t: string) => {
@@ -874,17 +873,26 @@ function ScheduleCard({ r, now }: { r: RoundView; now: number }) {
   );
 }
 
-function RoundCard({ r, now }: { r: RoundView; now: number }) {
-  return (
+/**
+ * What the rounds do and when, roundWords' sentences as bullets: beside the stages, untitled so the two cards line up;
+ * titled under the last stage, where there are no stages.
+ */
+function RoundCard({ r, now, titled = false }: { r: RoundView; now: number; titled?: boolean }) {
+  const card = (
+    <Card className="sw-round" tour={titled ? undefined : 'rounds'}>
+      <ul>
+        {sentencesOf(roundWords(r, now).when).map((s) => (
+          <li key={s}>{s}</li>
+        ))}
+      </ul>
+    </Card>
+  );
+  return titled ? (
     <Section title="Its rounds" tour="rounds">
-      <Card className="sw-round">
-        <ul>
-          {sentencesOf(roundWords(r, now).when).map((s) => (
-            <li key={s}>{s}</li>
-          ))}
-        </ul>
-      </Card>
+      {card}
     </Section>
+  ) : (
+    card
   );
 }
 
@@ -1201,7 +1209,7 @@ export function StewardBody({ v }: { v: StewardView }) {
               <LastStage l={v.last} now={now} />
               <TendingCard t={v.tending} r={v.round} now={now} />
               {/* With no stages to start, the rounds' words are here. */}
-              {!hasEmployees(v) && v.round.repos !== false && <RoundCard r={v.round} now={now} />}
+              {!hasEmployees(v) && v.round.repos !== false && <RoundCard r={v.round} now={now} titled />}
               {/* While an alarm is open they're under Needs you. */}
               {!alarmsOpen && <AlarmHistory a={v.alarms} now={now} />}
             </>

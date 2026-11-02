@@ -133,7 +133,9 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.doesNotMatch(withOne, /went to sleep/);
   const asleep = "This PC went to sleep 3 times since Wednesday at 16:54, the last today at 11:10, each about 30 seconds after ASUS's OLED Care screen saver came on. The staff stop while it sleeps: to keep them working while you're away, turn off Pixel Refresh in MyASUS → OLED Care.";
   const sleeping = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true, asleep } });
-  // Its rounds' words beside the stages, a sentence a bullet: the sleep line after the rest.
+  // Its rounds' words beside the stages, a sentence a bullet, with no title over them so the two cards line up: the
+  // sleep line after the rest.
+  assert.doesNotMatch(sleeping, /Its rounds/);
   assert.match(sleeping, /<li>Between builds, a round every 10 minutes releases nothing, except for an urgent fix[^<]*<\/li>/);
   assert.match(sleeping, /<li>This PC went to sleep 3 times since Wednesday at 16:54[^<]*<\/li><li>The staff stop while it sleeps: [^<]*turn off Pixel Refresh in MyASUS → OLED Care\.<\/li><\/ul>/);
   // Run now, in the title bar, only while it doesn't build and release by itself: by itself its rounds come anyway.
