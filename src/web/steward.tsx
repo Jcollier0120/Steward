@@ -201,7 +201,7 @@ function StaffCard({ r, kit, castellan, turn }: { r: StaffRowView; kit: string |
 
 /**
  * The staff, a card each, side by side as the window allows. Turns for no card here, claims another PC made too
- * (claims.ts) and the PRs passed over in their version lines (passover.ts), under them.
+ * (claims.ts) and the PRs passed over in their version lines (passover.ts), above them.
  */
 function StaffCards({ s, castellan, turns, clashes, passed }: { s: StaffView | null; castellan: boolean; turns: TurnsView | null | undefined; clashes?: string[]; passed?: string[] }) {
   const rows = s?.rows ?? [];
@@ -241,14 +241,15 @@ function StaffCards({ s, castellan, turns, clashes, passed }: { s: StaffView | n
         {under}
       </Card>
     );
+  // What holds a release (a PR passed over, a claim made twice, a turn with no card) above the cards, not buried under them.
   return (
     <>
+      {under && <Card className="sw-status">{under}</Card>}
       <div className="sw-cards" data-tour="staff">
         {rows.map((r) => (
           <StaffCard key={r.id} r={r} kit={s.kit} castellan={castellan} turn={turnOf.get(r.id)} />
         ))}
       </div>
-      {under && <Card>{under}</Card>}
     </>
   );
 }
@@ -812,8 +813,15 @@ const STYLE = `
 .titlebar, main.view, .ui-page-area > footer { max-width: 1680px; margin-inline: auto; }
 .sw-pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 0 20px; align-items: start; }
 @media (max-width: 1099.98px) { .sw-pair { grid-template-columns: minmax(0, 1fr); } }
-.sw-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 12px; align-items: start; margin-bottom: 12px; }
+.sw-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 12px; align-items: stretch; margin-bottom: 12px; }
 .sw-cards > .card { margin: 0; }
+/* One height for every card: the usual card's (its facts on two lines, its release PC, what its next build brings) and
+   two lines more, for a note or a wrapped line. One with more (its PRs) is taller, and its row with it. */
+.sw-repo { min-height: calc(152px + 2lh); }
+.sw-status { border-left: 3px solid var(--warn); }
+.sw-status .turns { margin-top: 0; }
+.sw-status p { margin: 0; }
+.sw-status p + p, .sw-status .turn + p, .sw-status .turn + .turn { margin-top: 6px; }
 .sw-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .sw-end { margin-left: auto; font-size: 13px; }
 .sw-name { font-size: 16px; }
@@ -937,7 +945,7 @@ export function tilesOf(v: StewardView, now: number): GlanceTile[] {
     const behind = kit ? rows.filter((r) => r.usesKit && r.main?.kit && r.main.kit !== kit).length : 0;
     const onKit = kit ? rows.filter((r) => r.main?.kit === kit).length : 0;
     const unreleased = rows.filter((r) => r.releaseNeeded).length;
-    const note = [behind ? `${behind} behind kit ${kit}` : '', unreleased ? `${unreleased} not released` : ''].filter(Boolean).join(', ');
+    const note = [behind ? `${behind} behind kit ${kit}` : '', unreleased ? `${unreleased} ${unreleased === 1 ? 'update' : 'updates'} not yet released` : ''].filter(Boolean).join(', ');
     const well = !rows.length ? 'none yet' : kit ? (onKit === rows.length ? `all on kit ${kit}` : `${onKit} on kit ${kit}`) : 'every version released';
     tiles.push({ label: castellan ? 'Staff' : 'Your repositories', value: rows.length, note: note || well, tone: behind || unreleased ? 'caution' : 'neutral', to: 'staff' });
   }

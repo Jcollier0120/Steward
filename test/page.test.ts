@@ -163,7 +163,9 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const inCards = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [clerk] }, round: { ...body.round, repos: true }, turns });
   assert.match(inCards, /<div class="card sw-repo">.*<div class="turn-cell"><div class="sw-line"><span>Released from <strong>DESKTOP-ABC<\/strong><\/span><span class="row turn-buttons">.*>Do it here</);
   assert.doesNotMatch(inCards, /Releasing for Clerk/, 'a card says it there');
-  assert.match(inCards, /Releasing for Porter: this PC \(kept there\)/, 'a turn with no card, under the cards');
+  assert.match(inCards, /Releasing for Porter: this PC \(kept there\)/, 'a turn with no card, in the status card');
+  assert.ok(inCards.indexOf('class="card sw-status"') < inCards.indexOf('class="card sw-repo"'), 'above the cards, not buried under them');
+  assert.ok(inCards.indexOf('Releasing for Porter') < inCards.indexOf('class="card sw-repo"'));
   assert.doesNotMatch(html, /<h2[^>]*>Release PC/);
   // The Steward's own repository: a card, with its release PC in it, and no stage ticks it.
   const self = { ...rows[0], id: 'steward', name: 'Steward', repo: 'octocat/steward', self: true };
@@ -218,6 +220,12 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const tiles = (h: string) => [...h.matchAll(/<span class="ui-tile-label">([^<]+)<\/span><span class="ui-tile-value">([^<]*)<\/span>(?:<span class="ui-tile-note">([^<]*)<\/span>)?/g)].map((m) => [m[1], m[2], m[3]]);
   assert.deepEqual(tiles(withPr).filter(([label]) => label === 'Staff' || label === 'Pull requests'), [['Staff', '1', '0 on kit 1.0.0'], ['Pull requests', '1', 'none failing']]);
   assert.equal(tiles(withNext).find(([label]) => label === 'Next build')?.[2], '12 commits in 1 repository');
+  // What waits to be released, in updates: one for each repository whose version isn't released yet.
+  const waits = (n: number) => ({ ...rows[0], id: `w${n}`, releaseNeeded: true, main: { version: '0.4.1', kit: null } });
+  const unreleased = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [waits(1), waits(2)] }, round: { ...body.round, repos: true } });
+  assert.equal(tiles(unreleased).find(([label]) => label === 'Staff')?.[2], '2 updates not yet released');
+  const one = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [waits(1), rows[0]] }, round: { ...body.round, repos: true } });
+  assert.equal(tiles(one).find(([label]) => label === 'Staff')?.[2], '1 update not yet released');
   const ping = await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');
