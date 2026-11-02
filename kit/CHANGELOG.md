@@ -15,7 +15,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### Before you update
 
-- **A test that asserts a developer's label names the hardware fails** (`label.includes(theAccelerator(from))`, or "written on" spelled out). A test that compares a label with `noteLabel(from, developer)` itself passes on both kits. The staff tests kit 2.149.0's trial found asserting it were brought up first (2026-11-02): the Chamberlain, the Developer Herald, the Herald, the Lamplighter, the Marshal, the Porter, the Reckoner, the Thatcher, the Warrener and the Watchman.
+- **A test that asserts a developer's label names the hardware fails** (`label.includes(theAccelerator(from))`, or "written on" spelled out). A test that compares a label with `noteLabel(from, developer)` itself passes on both kits. The staff tests kit 2.149.0's trial found asserting it were brought up first (2026-11-02): the Chamberlain, the Clerk, the Constable, the Developer Herald, the Herald, the Lamplighter, the Marshal, the Porter, the Reckoner, the Thatcher, the Warrener and the Watchman.
 - A developer's hover is the place to show where a note was written: `unverified` does it, and so should a staff member's own hover.
 
 ## 2.148.5
