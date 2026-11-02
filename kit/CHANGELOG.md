@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.150.0
+
+**A list setting can carry a few words for each item, drawn under it: the Warrener's destinations, each with what belongs there, in one list (the owner, 2026-11-02). A list of short words is as wide as its longest item.**
+
+### What's new
+
+- **A list's `notes`** (node/settings-kit.ts, react/settings-values.ts): the key of a map setting that holds a few words for each item. The React Settings form (react/settings-form.tsx' `NotedList`) draws each item's name in full, with Rename and Remove, and its words in a box under it, in two columns on a wide screen; the map is not drawn on its own, nor counted in Advanced or a long form's tabs. A new item, one being renamed, or one with a problem is a box; its words wait until it has a name. Onboarding's `keys` bring the map along with its list.
+  - Words follow an item as it is renamed. None are dropped from the map: a removed item's, and those under the name an item had before its renaming, stay (an agent may refuse to lose a default line, as the Warrener does), and come back with the name.
+  - The map's own messages show under the list, each entry's under its item.
+  - The values keep their shape and are checked as before; web/settings-panel.js and a page on an older kit draw the list and the map apart.
+
+### What changed
+
+- **A list of short words in columns** (`sf-short`, kit 2.140.0) makes its columns as wide as its longest item and its Remove, at least 210 pixels as before: at 210, a box cut off "Documents\Statements". The React form sets the width on the list (`grid-template-columns`).
+
+### Before you update
+
+- **A test that asserts `<ul class="sf-list sf-short">` exactly** fails: the list now has a `style`. Match `class="sf-list sf-short"` instead.
+
 ## 2.149.1
 
 **"Where its work runs" draws where the model work goes: a card for each accelerator, with an arrow to the next, in the order a request tries them, in place of a long paragraph (the owner, 2026-11-02).**

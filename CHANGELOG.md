@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.295
+
+**A staff member's Settings can show a few words beside each item of a list: the Warrener's destinations, each with what belongs there, in one list. The Steward hands kit 2.150.0 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.150.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a list in Settings can show each item's few words under it, in place of a separate table that repeated the same names. The Warrener uses it for its destinations and what belongs in each. A list of short words is laid out in columns as wide as its longest item, so none is cut off.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member shows it once it takes kit 2.150.0.
+
 ## 0.36.294
 
 **A staff member's About shows where its AI work goes as a picture: a card for each of this PC's AI chip, graphics card or processor, in the order a request tries them. The Steward hands kit 2.149.1 out, and runs on it.**

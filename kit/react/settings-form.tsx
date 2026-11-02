@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { BusyArea } from './busy.tsx';
 import { ErrorNote } from './feedback.tsx';
 import { Switch } from './forms.tsx';
@@ -73,6 +73,20 @@ interface EdProps {
   value: unknown;
   onChange: (v: unknown) => void;
   path: string;
+  noted?: Noted;
+}
+
+type NotesMap = SettingsField & { kind: 'map' };
+
+/** The map setting a list's `notes` names, if the schema has it. */
+const notesOf = (f: SettingsField, schema: SettingsField[]) => (f.kind === 'list' && f.notes ? schema.find((g): g is NotesMap => g.key === f.notes && g.kind === 'map') : undefined);
+
+/** A list's few words for each item (its `notes`): their map setting, its value, and a change to the list and them at once. */
+interface Noted {
+  f: NotesMap;
+  value: unknown;
+  changed: boolean;
+  set: (items: string[], words: Obj) => void;
 }
 
 /** A number as it is typed ("0." on its way to "0.5" stays as typed), and as the server reads it. */
@@ -137,15 +151,16 @@ function NullBox({ f, value, onChange, children }: EdProps & { children: ReactNo
   );
 }
 
-function List({ f, value, onChange, path }: EdProps) {
+function List({ f, value, onChange, path, noted }: EdProps) {
   const [added, setAdded] = useState(-1);
   if (f.kind !== 'list') return null;
   const items = Array.isArray(value) ? value.map((x) => String(x ?? '')) : [];
   const noun = f.item.label.toLowerCase();
   if (f.item.options) return <PickList f={f} items={items} noun={noun} path={path} onChange={onChange} />;
+  if (noted) return <NotedList f={f} items={items} noun={noun} path={path} noted={noted} />;
   return (
     <div>
-      <ul className={short(f, items) ? 'sf-list sf-short' : 'sf-list'}>
+      <ul className={short(f, items) ? 'sf-list sf-short' : 'sf-list'} style={columns(f, items)}>
         {items.map((x, i) => (
           <li key={i}>
             <div className="sf-item">
@@ -168,6 +183,13 @@ const SHORT_ITEM = 24;
 const short = (f: SettingsField & { kind: 'list' }, items: string[]) => items.length > 2 && !f.item.path && items.every((x) => x.length <= SHORT_ITEM);
 
 /**
+ * Those columns as wide as the longest item and its Remove (kit 2.150.0): at the stylesheet's 210 pixels, a box cut
+ * off "Documents\Statements".
+ */
+const columns = (f: SettingsField & { kind: 'list' }, items: string[]): CSSProperties | undefined =>
+  short(f, items) ? { gridTemplateColumns: `repeat(auto-fill, minmax(max(210px, calc(${Math.max(...items.map((x) => x.length)) + 2}ch + 110px)), 1fr))` } : undefined;
+
+/**
  * A list whose items are picked, not typed (`item.options`): each item by its option's label, with Remove, and a
  * dropdown of the options not in it yet. An item no longer offered shows as it is, until it's removed.
  */
@@ -178,7 +200,7 @@ function PickList({ f, items, noun, path, onChange }: { f: SettingsField & { kin
   const labels = items.map((x) => options.find((o) => o.value === x)?.label ?? x);
   return (
     <div>
-      <ul className={short(f, labels) ? 'sf-list sf-short' : 'sf-list'}>
+      <ul className={short(f, labels) ? 'sf-list sf-short' : 'sf-list'} style={columns(f, labels)}>
         {items.map((x, i) => (
           <li key={x}>
             <div className="sf-item">
@@ -207,6 +229,103 @@ function PickList({ f, items, noun, path, onChange }: { f: SettingsField & { kin
 
 function ListItem({ f, value, path, label, focus, onChange }: { f: SettingsField & { kind: 'list' }; value: string; path: string; label: string; focus: boolean; onChange: (s: string) => void }) {
   return <input type="text" spellCheck={false} autoComplete="off" autoFocus={focus} maxLength={f.item.maxLength ?? (f.item.path ? 1000 : 500)} placeholder={f.item.placeholder} value={value} aria-label={label} aria-invalid={useInvalid(path)} aria-describedby={msgId(path)} onChange={(e) => onChange(e.target.value)} />;
+}
+
+/**
+ * A list whose items each carry a few words (its `notes`, kit 2.150.0), kept in a map setting by item and drawn under
+ * each item rather than as a table of their own: the Warrener's folders and what belongs in each. An item shows as
+ * its name in full, with Rename and Remove; a new one, one being renamed, or one with a problem, as a box. Its words
+ * wait until it has a name, and follow it as it is renamed. Words are never dropped from the map: a removed item's,
+ * and those under the name an item had before its renaming, stay as they are (an agent may refuse to lose a default
+ * line, as the Warrener does), and come back with the name. The map's own messages show under the list.
+ */
+function NotedList({ f, items, noun, path, noted }: { f: SettingsField & { kind: 'list' }; items: string[]; noun: string; path: string; noted: Noted }) {
+  const msgs = useContext(MsgContext);
+  const [typing, setTyping] = useState<number[]>([]);
+  // By item: the name its words were under before its renaming began, kept; and, while it is renamed to nothing for
+  // now, the name its words are under, so they follow the name it gets next.
+  const origin = useRef(new Map<number, string>());
+  const held = useRef(new Map<number, string>());
+  const words = asObj(noted.value);
+  const keys = Object.keys(words);
+  const keyOf = (x: string) => (x in words ? x : (keys.find((k) => k.toLowerCase() === x.toLowerCase()) ?? x));
+  const rename = (i: number, s: string) => {
+    const w = { ...words };
+    const from = items[i] ? keyOf(items[i]) : held.current.get(i);
+    if (from !== undefined && !origin.current.has(i)) origin.current.set(i, from);
+    if (from !== undefined && from in w && s.trim()) {
+      const said = w[from];
+      if (from !== origin.current.get(i) && !items.some((y, j) => j !== i && y.toLowerCase() === from.toLowerCase())) delete w[from];
+      w[s] = said;
+      held.current.delete(i);
+    } else if (from !== undefined && !s.trim()) held.current.set(i, from);
+    noted.set(
+      items.map((y, j) => (j === i ? s : y)),
+      w,
+    );
+  };
+  const remove = (i: number) => {
+    const shift = (m: Map<number, string>) => new Map([...m].filter(([j]) => j !== i).map(([j, v]) => [j > i ? j - 1 : j, v] as [number, string]));
+    origin.current = shift(origin.current);
+    held.current = shift(held.current);
+    setTyping(typing.filter((j) => j !== i).map((j) => (j > i ? j - 1 : j)));
+    noted.set(
+      items.filter((_, j) => j !== i),
+      words,
+    );
+  };
+  const say = (i: number, text: string) => {
+    const w = { ...words };
+    const k = keyOf(items[i]);
+    if (text.trim()) w[k] = text;
+    else delete w[k];
+    noted.set(items, w);
+  };
+  const m = noted.f;
+  return (
+    <div>
+      <ul className="sf-list sf-noted">
+        {items.map((x, i) => {
+          const k = keyOf(x);
+          const at = keys.indexOf(k);
+          const named = !!x.trim();
+          const boxed = !named || typing.includes(i) || under(msgs, `${path}.${i}`);
+          return (
+            <li key={i}>
+              <div className="sf-item">
+                {boxed ? (
+                  <ListItem f={f} value={x} path={`${path}.${i}`} label={`${f.item.label} ${i + 1}`} focus={typing.includes(i)} onChange={(s) => rename(i, s)} />
+                ) : (
+                  <span className="sf-item-text sf-noted-name" title={x}>
+                    {x}
+                  </span>
+                )}
+                {!boxed && <Button title="Rename" variant="secondary" size="sm" accessibilityLabel={`Rename ${x}`} onPress={() => setTyping([...typing, i])} />}
+                <Button title="Remove" variant="secondary" size="sm" accessibilityLabel={`Remove ${noun} ${i + 1}`} onPress={() => remove(i)} />
+              </div>
+              <Msg path={`${path}.${i}`} />
+              <input
+                type="text"
+                className="sf-note"
+                autoComplete="off"
+                maxLength={m.valueRules?.maxLength ?? 500}
+                disabled={!named}
+                placeholder={named ? m.valueRules?.placeholder : `Name the ${noun} first`}
+                value={named && at >= 0 ? String(words[k] ?? '') : ''}
+                aria-label={`${m.valueLabel}: ${named ? x : `${noun} ${i + 1}`}`}
+                aria-invalid={(at >= 0 && msgs[`${m.key}.${at}.value`]?.kind === 'error') || undefined}
+                onChange={(e) => say(i, e.target.value)}
+              />
+              {at >= 0 && <Msg path={`${m.key}.${at}.key`} />}
+              {at >= 0 && <Msg path={`${m.key}.${at}.value`} />}
+            </li>
+          );
+        })}
+      </ul>
+      <Msg path={m.key} />
+      <Button title={`Add ${noun}`} variant="secondary" size="sm" disabled={f.maxItems !== undefined && items.length >= f.maxItems} onPress={() => (setTyping([...typing, items.length]), noted.set([...items, ''], words))} />
+    </div>
+  );
 }
 
 /** The most fields a record shows as a table row; a wider record folds to a line (RecordBox). */
@@ -497,9 +616,9 @@ function Help({ text, id }: { text: string; id: string }) {
  * `def` shows the default (settings and a group's fields; a record's fields don't), `tracked` marks it changed, and
  * `fold` makes a top-level group a section of its own, folded unless the form says it's open.
  */
-function FieldBlock({ f, value, onChange, path, def, saved, tracked = false, top = false, fold }: EdProps & { def?: unknown; saved?: unknown; tracked?: boolean; top?: boolean; fold?: { open: boolean; onToggle: (open: boolean) => void } }) {
+function FieldBlock({ f, value, onChange, path, def, saved, tracked = false, top = false, fold, noted }: EdProps & { def?: unknown; saved?: unknown; tracked?: boolean; top?: boolean; fold?: { open: boolean; onToggle: (open: boolean) => void } }) {
   const id = useId();
-  const cls = cx('sf', !!fold && 'sf-section', tracked && !same(f, value, saved) && 'is-changed');
+  const cls = cx('sf', !!fold && 'sf-section', tracked && (!same(f, value, saved) || !!noted?.changed) && 'is-changed');
   const help = f.help ? <Help text={f.help} id={`${id}-help`} /> : null;
   const tail = (
     <>
@@ -531,7 +650,7 @@ function FieldBlock({ f, value, onChange, path, def, saved, tracked = false, top
   const body = (
     <>
       {help}
-      <Editor f={f} value={value} onChange={onChange} path={path} def={def} saved={saved} />
+      <Editor f={f} value={value} onChange={onChange} path={path} def={def} saved={saved} noted={noted} />
       {tail}
     </>
   );
@@ -788,10 +907,15 @@ export function SettingsForm({ keys, onSaved, onDirty, initial, api }: { keys?: 
   useEffect(() => {
     if (!s.status.error || !data) return;
     const bad = data.schema.find((f) => under(msgs, f.key));
-    setTab(bad ? tabOf(bad, data.schema).id : 'general');
+    // A list's notes are in its tab.
+    const list = bad && data.schema.find((g) => notesOf(g, data.schema) === bad);
+    setTab(bad ? tabOf(list ?? bad, data.schema).id : 'general');
     requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[aria-invalid="true"], .sf-general')?.focus());
   }, [msgs, s.status.error]); // eslint-disable-line react-hooks/exhaustive-deps
-  const fields = data ? (keys ? keys.map((k) => data.schema.find((f) => f.key === k)).filter((f): f is SettingsField => !!f && !f.advanced) : data.schema) : [];
+  const asked = data ? (keys ? keys.map((k) => data.schema.find((f) => f.key === k)).filter((f): f is SettingsField => !!f && !f.advanced) : data.schema) : [];
+  // A list's notes go with it, saved with it and drawn under its items, never on their own.
+  const fields = data ? asked.flatMap((f) => [f, ...[notesOf(f, data.schema)].filter((n): n is NotesMap => !!n && !asked.includes(n))]) : [];
+  const withList = new Set(data ? fields.flatMap((f) => notesOf(f, data.schema)?.key ?? []) : []);
   const dirty = fields.some((f) => !f.readOnly && !same(f, draft[f.key], saved[f.key]));
   useFormGuards(root, dirty, msgs, s.status.error, onDirty);
   if (s.failed)
@@ -810,14 +934,14 @@ export function SettingsForm({ keys, onSaved, onDirty, initial, api }: { keys?: 
   if (!data) return note('Loading the settings…');
   // A developer's whole form, with Developer options off: none of it, not even an empty form.
   if (data.developerOnly) return null;
-  const visible = fields.filter((f) => shownNow(f, draft) || under(msgs, f.key));
+  const visible = fields.filter((f) => !withList.has(f.key) && (shownNow(f, draft) || under(msgs, f.key)));
   if (keys && !visible.length) return note('Nothing to set: the defaults just work.');
   const ordinary = visible.filter((f) => !f.advanced);
   const advanced = visible.filter((f) => f.advanced);
   const sections: SettingsField[] = keys ? [] : ordinary.filter((f) => f.kind === 'group');
   // Tabs: two or more groups or named tabs, in a long form, counted over all its ordinary settings (TAB_FIELDS); and two
   // panels to show now, never a row of one tab.
-  const all = keys ? [] : fields.filter((f) => !f.advanced && !f.hidden && !f.kept);
+  const all = keys ? [] : fields.filter((f) => !f.advanced && !f.hidden && !f.kept && !withList.has(f.key));
   const named = new Set(all.flatMap((f) => (f.kind === 'group' || f.tab ? [tabOf(f, data.schema).id] : [])));
   named.delete('general');
   const panels = panelsOf(ordinary, advanced, data.schema);
@@ -827,9 +951,11 @@ export function SettingsForm({ keys, onSaved, onDirty, initial, api }: { keys?: 
     setOpened({ ...opened, [key]: true });
     requestAnimationFrame(() => document.getElementById(sectionId(key))?.scrollIntoView({ block: 'start' }));
   };
-  const block = (f: SettingsField) => (
-    <FieldBlock key={f.key} f={f} value={draft[f.key]} path={f.key} def={data.defaults[f.key]} saved={saved[f.key]} tracked top onChange={(v) => s.setDraft({ ...draft, [f.key]: v })} fold={sections.includes(f) && !tabbed ? { open: open(f.key), onToggle: (o) => setOpened({ ...opened, [f.key]: o }) } : undefined} />
-  );
+  const block = (f: SettingsField) => {
+    const n = notesOf(f, data.schema);
+    const noted = n && { f: n, value: draft[n.key], changed: !same(n, draft[n.key], saved[n.key]), set: (items: string[], w: Obj) => s.setDraft({ ...draft, [f.key]: items, [n.key]: w }) };
+    return <FieldBlock key={f.key} f={f} value={draft[f.key]} path={f.key} def={data.defaults[f.key]} saved={saved[f.key]} tracked top onChange={(v) => s.setDraft({ ...draft, [f.key]: v })} fold={sections.includes(f) && !tabbed ? { open: open(f.key), onToggle: (o) => setOpened({ ...opened, [f.key]: o }) } : undefined} noted={noted} />;
+  };
   const cancel = () => {
     s.setDraft(clone(saved));
     s.setMsgs(toMsgs({}, data.warnings));

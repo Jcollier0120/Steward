@@ -64,7 +64,7 @@ export type SettingsField =
   | (Common & TextRules & { kind: 'text' })
   | (Common & { kind: 'choice'; options: SettingsOption[] })
   | (Common & { kind: 'choices'; options: SettingsOption[] })
-  | (Common & { kind: 'list'; item: TextRules & { label: string; options?: SettingsOption[] }; matchCase?: boolean; minItems?: number; maxItems?: number })
+  | (Common & { kind: 'list'; item: TextRules & { label: string; options?: SettingsOption[] }; matchCase?: boolean; minItems?: number; maxItems?: number; notes?: string })
   | (Common & { kind: 'records'; fields: SettingsField[]; noun?: string; blank?: Record<string, unknown>; title?: string; unique?: string; minItems?: number; maxItems?: number; advancedLabel?: string; line?: string[]; noAdd?: boolean })
   | (Common & { kind: 'group'; fields: SettingsField[] })
   | (Common & { kind: 'map'; keyLabel: string; valueLabel: string; keyRules?: TextRules; valueRules?: TextRules; maxItems?: number });

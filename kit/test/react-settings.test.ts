@@ -320,10 +320,26 @@ test("with Manor installed: the settings set on its Staff settings are said in a
 
 test('a list of short words is drawn in columns; a list of paths, or of two, one a line (kit 2.140.0)', () => {
   const list = (item: object, v: string[]) => m.form({ schema: [{ key: 'l', kind: 'list', label: 'L', item: { label: 'Item', ...item } }], values: { l: v }, defaults: { l: [] }, problems: [], warnings: {}, file: '' });
-  assert.match(list({}, ['node', 'python', 'dotnet']), /<ul class="sf-list sf-short">/);
+  assert.match(list({}, ['node', 'python', 'dotnet']), /<ul class="sf-list sf-short" style="grid-template-columns:repeat\(auto-fill, minmax\(max\(210px, calc\(8ch \+ 110px\)\), 1fr\)\)">/, 'as wide as its longest item (kit 2.150.0)');
   assert.doesNotMatch(list({}, ['node', 'python']), /sf-short/, 'two fit on their lines');
   assert.doesNotMatch(list({ path: { is: 'folder' } }, ['C:\a', 'D:\b', 'E:\c']), /sf-short/, 'paths get the width');
   assert.doesNotMatch(list({}, ['node', 'python', 'a command line far longer than a word']), /sf-short/);
+});
+
+test("a list with notes: each item's words under it, its map not drawn on its own, and asked for with its list (kit 2.150.0)", () => {
+  const folders = { key: 'dest', kind: 'list', label: 'Destinations', item: { label: 'Folder' }, notes: 'about' };
+  const about = { key: 'about', kind: 'map', label: 'What belongs where', keyLabel: 'Folder', valueLabel: 'What belongs there', valueRules: { maxLength: 160, placeholder: 'In a few words' }, advanced: true };
+  const values = { dest: ['Documents\\Receipts', 'Documents\\Other'], about: { 'documents\\receipts': 'paid invoices', Elsewhere: 'kept' } };
+  const d = { schema: [folders, about], values, defaults: values, problems: [], warnings: {}, file: '' };
+  const h = m.form(d);
+  assert.match(h, /<ul class="sf-list sf-noted">/);
+  assert.match(h, /<span class="sf-item-text sf-noted-name" title="Documents\\Receipts">Documents\\Receipts<\/span>/, 'the name in full, not in a box');
+  assert.match(h, /aria-label="Rename Documents\\Receipts"/);
+  assert.match(h, /<input type="text" class="sf-note"[^>]* maxLength="160" placeholder="In a few words" aria-label="What belongs there: Documents\\Receipts" value="paid invoices"/, 'found ignoring case');
+  assert.match(h, /aria-label="What belongs there: Documents\\Other" value=""/);
+  assert.doesNotMatch(h, /sf-table|What belongs where|Advanced/, 'the map is not drawn on its own, nor counted as advanced');
+  assert.doesNotMatch(h, /Elsewhere/, "words for a folder not in the list are kept, not drawn");
+  assert.match(m.form(d, ['dest']), /class="sf-note"/, "onboarding's few settings: the notes come with their list");
 });
 
 test('a help of several lines reads as paragraphs and points, with its code marked; one line is a paragraph as before', () => {
