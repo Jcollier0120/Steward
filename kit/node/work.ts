@@ -250,6 +250,46 @@ const named = (a: Accelerator) => `${theAccelerator(a)} (${(['chat', 'vision', '
  */
 const plainNamed = (a: Accelerator) => (a.kind === 'npu' ? AI_CHIP : a.kind === 'cpu' ? 'the processor' : theAccelerator(a));
 
+const WORKS = ['chat', 'vision', 'embed'] as const;
+/** The work an accelerator does, in Reeve's words on its own page (accelerators.tsx): Chat, Pictures, Search. */
+const WORK_CHIPS: Record<(typeof WORKS)[number], string> = { chat: 'Chat', vision: 'Pictures', embed: 'Search' };
+/** A card's name: "the NVIDIA GeForce RTX 4090" as "NVIDIA GeForce RTX 4090", "the AI chip" as "AI chip". */
+const cardName = (s: string) => {
+  const bare = s.replace(/^the\s+/i, '');
+  return bare.charAt(0).toUpperCase() + bare.slice(1);
+};
+/** What each kind is, under its name, in plain words (none for the processor, which says it). */
+const PLAIN_KIND: Partial<Record<Accelerator['kind'], string>> = { npu: 'Built for AI work', gpu: 'Graphics card' };
+
+/** What does model work on this PC, in the order requests try them (Reeve's), the NPU alone for an NPU-only agent. */
+const working = (cfg: AcceleratorConfig, npuOnly = false) => cfg.accelerators.filter((a) => a.enabled !== false && WORKS.some((w) => serves(a, w)) && (!npuOnly || a.kind === 'npu'));
+
+/**
+ * One accelerator as a card in the path, as Reeve's page draws it (kit 2.149.1). A developer sees its kind, its name, the
+ * work it does and how many requests it takes at once; everyone else the AI chip, a graphics card by name, or the
+ * processor, and what it is.
+ */
+function accCard(a: Accelerator, developer: boolean): string {
+  if (!developer) {
+    const name = cardName(plainNamed(a));
+    const kind = PLAIN_KIND[a.kind];
+    return `<li class="work-acc"><strong>${esc(name)}</strong>${kind && kind !== name ? `<span class="muted small">${kind}</span>` : ''}</li>`;
+  }
+  const name = cardName(theAccelerator(a));
+  const kind = a.kind.toUpperCase();
+  const chips = WORKS.filter((w) => serves(a, w)).map((w) => `<span class="chip">${WORK_CHIPS[w]}</span>`).join('');
+  const room = a.kind !== 'npu' && a.slots > 1 ? `${a.slots} requests at once` : 'One request at a time';
+  const memory = a.kind !== 'gpu' ? '' : a.memoryGb && a.memoryGb >= 2 ? `, ${a.memoryGb} GB of its own memory` : ", shares the PC's memory";
+  return `<li class="work-acc"><span class="work-acc-head"><span class="badge${a.kind === 'npu' ? ' npu' : ''}">${kind}</span>${name.toUpperCase() === kind ? '' : ` <strong>${esc(name)}</strong>`}</span><span class="chips">${chips}</span><span class="muted small">${room}${memory}</span></li>`;
+}
+
+/** The accelerators as cards, an arrow between each and the next: the order a request tries them. */
+function workPath(on: Accelerator[], developer: boolean): string {
+  // In plain words, two of a kind (two AI chips) are one card: they're the same to the person.
+  const cards = developer ? on : on.filter((a, i) => on.findIndex((b) => plainNamed(b) === plainNamed(a)) === i);
+  return `<ol class="work-path" aria-label="In this order">${cards.map((a) => accCard(a, developer)).join('')}</ol>`;
+}
+
 /**
  * What this PC has for the model, in the order requests try them, in words. `developer` (the manor's Developer
  * options) names Reeve, which keeps the list, and each accelerator with the work it serves; without, it's "the local
@@ -271,6 +311,33 @@ export function workLine(l: WorkLine, developer: boolean): Pick<WorkLine, 'what'
 }
 
 /**
+ * Where the agent's model work goes on this PC (kit 2.149.1: a path of cards, where it was a paragraph): Reeve's
+ * accelerators in the order a request tries them, each with what it does, and a line on when a request moves on. An
+ * NPU-only agent (the Lamplighter's driver checks) never moves on: the NPU or nothing. `developer` names Reeve, the
+ * NPU, the work and Task Manager's graph; without, it's the local AI, the AI chip, a graphics card and the processor.
+ */
+function modelWork(cfg: AcceleratorConfig | { error: string }, developer: boolean, npuOnly: boolean): string {
+  if ('error' in cfg) return `<p>${esc(thisPc(cfg, developer))}</p>`;
+  const npus = working(cfg, true);
+  const npuGraph = `Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.`;
+  if (npuOnly)
+    return developer
+      ? `<p><strong>Its model work</strong> goes to the NPU only, through the model server Reeve runs there, taking its turn with every other agent's requests, and only when no other agent holds or waits for it. Never to a graphics card or the processor, whatever Reeve's order says. ${npus.length ? 'This PC has one.' : "This PC has none, so it asks no model, and its words are its own code's."}</p>
+${npus.length ? `${workPath(npus, true)}\n<p class="muted small">${npuGraph}</p>` : ''}`
+      : `<p><strong>Its AI work</strong> goes to the local AI on the AI chip only, taking its turn with every other agent's, and only when no other agent is using it. Never to a graphics card or the processor. ${npus.length ? 'This PC has one.' : 'This PC has none, so it asks no AI, and its words are its own.'}</p>`;
+  const on = working(cfg);
+  if (!on.length) return developer ? '<p><strong>Its model work</strong> has nowhere to go: nothing Reeve lists on this PC does chat, pictures or search.</p>' : "<p><strong>Its AI work</strong> has nowhere to go: the local AI isn't set up on this PC.</p>";
+  const onlyNpu = on.every((a) => a.kind === 'npu');
+  if (!developer)
+    return `<p><strong>Its AI work</strong> goes to the local AI, taking turns with every other agent's. Each request goes to the first of these that can do it, and waits its turn there:</p>
+${workPath(on, false)}
+<p class="muted small">${onlyNpu ? 'So its AI work runs on the AI chip only, never on the processor or a graphics card.' : "It moves on to the next only when the one before can't do it, or it's too big for it. Background work keeps off a graphics card a game is using."}</p>`;
+  return `<p><strong>Its model work</strong> goes to the model servers Reeve runs, taking turns with every other agent's requests. Each request goes to the first of these that does its work, and waits its turn there:</p>
+${workPath(on, true)}
+<p class="muted small">${onlyNpu ? 'So its model work runs on the NPU only, never on the processor or a graphics card. ' : "It moves on to the next only when the one before can't take it: the request is too big for it, or it failed in the last 10 minutes. Background work keeps off a graphics card a game is using. "}${npus.length ? npuGraph : "Task Manager shows the model's work as the graphics card's (Performance, then GPU) or the processor's."}</p>`;
+}
+
+/**
  * The section, as page.ts puts it in the Settings page. `developer` is the manor's Developer options (developer.ts),
  * read now unless given. `o` is for tests too: an agent and an accelerator config of their own; by default this
  * agent, and Reeve's config.json as the kit reads it for every request. Empty for a developer role with the switch
@@ -289,28 +356,7 @@ export function workSection(o: { id?: string; name?: string; config?: Accelerato
     .join('');
   const table = rows ? `<table class="work-table"><tr><th>What</th><th>Where it runs</th><th>When</th></tr>${rows}</table>` : '';
   const notes = ((dev ? w?.notes : w?.plainNotes ?? w?.notes) ?? []).map((n) => `<p class="muted small">${esc(n)}</p>`).join('');
-  const cfg = () => o.config ?? loadAccelerators();
-  const hasNpu = () => {
-    const c = cfg();
-    return !('error' in c) && c.accelerators.some((a) => a.kind === 'npu' && a.enabled !== false && serves(a, 'chat'));
-  };
-  const model = w && !w.model
-    ? `<p>${esc(name)} uses no ${dev ? 'model' : 'AI'}.</p>`
-    : dev
-      ? w?.npuOnly
-        ? `<p><strong>Its model work</strong> goes to the NPU only, through the model server Reeve runs there, taking its turn in the NPU's line with every other agent's requests, and only when no other agent holds or waits for it. Never to a graphics card or the processor, whatever Reeve's order says. ${hasNpu() ? 'This PC has one.' : "This PC has none, so it asks no model, and its words are its own code's."}</p>
-<p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`
-        : hasNpu()
-          ? `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: one at a time on the NPU, and as many as a graphics card's server has slots. The NPU comes first (by default; Reeve's order can say otherwise): it does model work without the processor or a graphics card, so every request it can do waits its turn there, even when another is free. A graphics card or the processor takes a request only when the NPU can't: it doesn't serve that work, the request is too big for it, or it failed in the last 10 minutes. Then the order is graphics cards with 2 GB or more of their own memory, then graphics that share the PC's memory, then the processor. Background work keeps off a graphics card a game is using. ${esc(thisPc(cfg(), true))}</p>
-<p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`
-          : `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: as many at once as a server has slots. Graphics cards with 2 GB or more of their own memory come first, the most memory first, then graphics that share the PC's memory, then the processor (by default; Reeve's order can say otherwise). The next one takes a request only when the one before can't: it doesn't serve that work, the request is too big for it, or it failed in the last 10 minutes. Background work keeps off a graphics card a game is using, and waits for it rather than slow the game. ${esc(thisPc(cfg(), true))}</p>
-<p class="muted small">Task Manager shows the model's work as the graphics card's (Performance, then GPU) or the processor's.</p>`
-      // In plain words: the local AI, the AI chip, and no Task Manager graph.
-      : w?.npuOnly
-        ? `<p><strong>Its AI work</strong> goes to the local AI on the AI chip only, taking its turn with every other agent's, and only when no other agent is using it. Never to a graphics card or the processor. ${hasNpu() ? 'This PC has one.' : 'This PC has none, so it asks no AI, and its words are its own.'}</p>`
-        : hasNpu()
-          ? `<p><strong>Its AI work</strong> goes to the local AI, taking turns with every other agent's. The AI chip comes first: it does AI work without the processor or a graphics card. A graphics card or the processor takes a request only when the AI chip can't, or when it's too big for it. Background work keeps off a graphics card a game is using. ${esc(thisPc(cfg(), false))}</p>`
-          : `<p><strong>Its AI work</strong> goes to the local AI, taking turns with every other agent's: on a graphics card first, the one with the most memory, then the processor. Background work keeps off a graphics card a game is using, and waits for it rather than slow the game. ${esc(thisPc(cfg(), false))}</p>`;
+  const model = w && !w.model ? `<p>${esc(name)} uses no ${dev ? 'model' : 'AI'}.</p>` : modelWork(o.config ?? loadAccelerators(), dev, !!w?.npuOnly);
   return `<section class="work-runs" data-settings-extra>
 <h2>Where its work runs</h2>
 <div class="card">

@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.294
+
+**A staff member's About shows where its AI work goes as a picture: a card for each of this PC's AI chip, graphics card or processor, in the order a request tries them. The Steward hands kit 2.149.1 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.149.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): "Where its work runs" in a staff member's About draws the AI work's path in place of a long paragraph. Each card names the AI chip, graphics card or processor, and an arrow leads to the next one a request goes to when the one before can't take it. With developer staff hired, a card also shows the work it does (chat, pictures, search) and how many requests it takes at once.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member shows the cards once it takes kit 2.149.1.
+
 ## 0.36.293
 
 **Text the local AI writes on a staff member's page says only which staff member wrote it, for developers too: "summary from the Herald", without ", written on the NPU". The Steward hands kit 2.149.0 out, and runs on it.**
