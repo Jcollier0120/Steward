@@ -155,8 +155,12 @@ export type Field =
    * A list of texts. With `item.options`, the page offers those to pick from (a dropdown of the ones not in the list
    * yet) in place of typing; the value is the same list of texts, checked by the same rules, so an item no longer
    * offered stays until removed, and a page on an older kit simply types them.
+   *
+   * With `notes` (kit 2.150.0), the key of a map setting holding a few words for each item (the Warrener's folders
+   * and what belongs in each): the page draws each item's words under it, the map not on its own. The values keep
+   * their shape: the list and the map are saved and checked as before, and a page on an older kit draws the two apart.
    */
-  | (Common & { kind: 'list'; item: TextRules & { label: string; options?: Option[] }; matchCase?: boolean; minItems?: number; maxItems?: number })
+  | (Common & { kind: 'list'; item: TextRules & { label: string; options?: Option[] }; matchCase?: boolean; minItems?: number; maxItems?: number; notes?: string })
   /** A list of small records, each with the same fields. */
   | (Common & {
       kind: 'records';
