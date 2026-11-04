@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.296
+
+**On a PC that doesn't release your repositories, Castellan's Settings can show the build times of the PC that does, even without Other PCs turned on.**
+
+### What changed
+
+- The PC that releases a repository now shares its Build pipeline settings (build times, days, when the newest kit goes in, and how long a build may take) with the release turn it already keeps in that repository. When they change there, the other PCs see the new ones at their next look.
+- Castellan's Settings, Developer, on the other PCs shows those settings, read only, as the release manager's, once Castellan is updated too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each PC shares its settings once it runs this version; until then, the other PCs show their own, read only, as before.
+
 ## 0.36.295
 
 **A staff member's Settings can show a few words beside each item of a list: the Warrener's destinations, each with what belongs there, in one list. The Steward hands kit 2.150.0 out, and runs on it.**

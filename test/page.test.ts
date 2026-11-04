@@ -343,7 +343,7 @@ test("the pipeline says whether this PC releases any repository it looks after, 
   const settingsFile = path.join(home, 'settings.json');
   const turnsFile = path.join(home, 'turns.json');
   const was = readFileSync(settingsFile, 'utf8');
-  const pipeline = async () => (await (await fetch(`${base()}/api/pipeline`)).json()) as { releasesHere?: unknown; times?: unknown };
+  const pipeline = async () => (await (await fetch(`${base()}/api/pipeline`)).json()) as { releasesHere?: unknown; releasePcs?: unknown; times?: unknown };
   const turn = (repo: string, status: string) => ({ repo, status, at: '2026-10-30T12:00:00Z', ...(status === 'elsewhere' ? { record: { pc: 'other', name: 'DESKTOP-ABC', until: '2099-01-01T00:00:00Z', since: '2026-10-30T12:00:00Z', pinned: false } } : {}) });
   try {
     writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), employees: [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', checkout: home }] }));
@@ -352,7 +352,9 @@ test("the pipeline says whether this PC releases any repository it looks after, 
     assert.equal(v.releasesHere, true, 'no turn taken yet: no other PC holds it, so this one releases it');
     // The Steward's own repository too, where Settings name it: every turn another PC's.
     writeFileSync(turnsFile, JSON.stringify({ at: null, device: null, repos: { 'octocat/fake': turn('octocat/fake', 'elsewhere'), 'octocat/steward': turn('octocat/steward', 'elsewhere') } }));
-    assert.equal((await pipeline()).releasesHere, false, "every repository's turn is another PC's");
+    const v2 = await pipeline();
+    assert.equal(v2.releasesHere, false, "every repository's turn is another PC's");
+    assert.deepEqual(v2.releasePcs, [{ name: 'DESKTOP-ABC', repos: 2, pinned: false, pipeline: null, at: '2026-10-30T12:00:00Z' }], 'the PC that releases them, without settings from an older Steward');
     writeFileSync(turnsFile, JSON.stringify({ at: null, device: null, repos: { 'octocat/fake': turn('octocat/fake', 'here'), 'octocat/steward': turn('octocat/steward', 'elsewhere') } }));
     assert.equal((await pipeline()).releasesHere, true, "this PC holds one's turn");
     writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), employees: [], stewardRepo: '' }));
