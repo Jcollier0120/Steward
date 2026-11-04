@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.298
+
+**A staff member's About calls the NPU the NPU, not the AI chip, and says the staff where it said agents. The Steward hands kit 2.150.2 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.150.2** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): "Where its work runs" in a staff member's About names the NPU as the ads and Task Manager do: its card says **NPU**, with "Built for AI work" under it. It says the rest of the staff where it said every other agent.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.297
 
 **A staff member's Settings sends you to Castellan's Settings, Employees, for the settings set there. The Steward hands kit 2.150.1 out, and runs on it.**

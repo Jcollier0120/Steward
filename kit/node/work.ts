@@ -11,7 +11,7 @@ import { isDeveloper } from './developer.ts';
  * glance, and Reeve's and Heiward's Settings pages their own.
  *
  * With the manor's Developer options off (developer.ts, spec/DEVELOPER-OPTIONS.md), the section is said in plain
- * words: "the local AI" for Reeve's model and its servers, "the AI chip" for the NPU, each line's `plain` wording, no
+ * words: "the local AI" for Reeve's model and its servers, "the NPU" by that name (the ads' word, and Task Manager's), each line's `plain` wording, no
  * developer-only line, and no tool, command, model server, chip maker or Task Manager graph by name. A developer
  * role (`developerRole`), whose work doesn't run while the switch is off, has no section then at all.
  */
@@ -52,11 +52,11 @@ const MODEL = "Reeve's model (below)";
 const VISION = "Reeve's vision model (below)";
 /** MODEL and VISION in plain words. */
 const PLAIN_WHERE: Record<string, string> = { [MODEL]: 'the local AI (below)', [VISION]: 'the local AI (below)' };
-/** The NPU in plain words. */
-const AI_CHIP = 'the AI chip';
+/** The NPU in plain words: by that name, as the ads and Task Manager say it, never its maker's. */
+const PLAIN_NPU = 'the NPU';
 /** The kit's text reader (ocr.ts, spec/OCR.md): our own model, on the NPU where it runs there, else on the processor. */
 const READER = "the kit's text-reading model on the NPU, where it runs there (Qualcomm's, Intel's NPU 3720, AMD's XDNA 2), else on the processor";
-const PLAIN_READER = `a text reader of its own, on ${AI_CHIP} where it can, else on the processor`;
+const PLAIN_READER = `a text reader of its own, on ${PLAIN_NPU} where it can, else on the processor`;
 const READER_NOTE = "The text reader is the kit's own model, which reads more exactly than Windows' own OCR. Windows OCR is used only until the model has been fetched, or where it can't start, and to read again a line in another alphabet, where Windows has that language.";
 const PLAIN_READER_NOTE = "It reads text with a reader of its own, which reads more exactly than Windows' own text recognition. Windows' is used only until that reader is set up, or where it can't start, and to read again words in another alphabet, where Windows has that language.";
 
@@ -74,9 +74,9 @@ export const WORK: Record<string, AgentWork> = {
     developerRole: true,
     lines: [
       { what: "Reading each accelerator's toolchain: its driver, model server and runtime", where: 'the processor (WMI)', when: 'every hour, about 2 seconds', plain: { what: "Reading each accelerator's driver and software", where: 'the processor' } },
-      { what: 'An audit: asking each model questions whose answers code checks', where: 'each accelerator Reeve lists, in turn: the NPU, a graphics card, the processor. This is on purpose', when: 'weekly, and when you press Audit now after a change', plain: { what: 'An audit: asking the local AI questions whose answers it checks', where: 'each part of this PC that can run the local AI, in turn: the AI chip, a graphics card, the processor. This is on purpose' } },
+      { what: 'An audit: asking each model questions whose answers code checks', where: 'each accelerator Reeve lists, in turn: the NPU, a graphics card, the processor. This is on purpose', when: 'weekly, and when you press Audit now after a change', plain: { what: 'An audit: asking the local AI questions whose answers it checks', where: 'each part of this PC that can run the local AI, in turn: the NPU, a graphics card, the processor. This is on purpose' } },
     ],
-    notes: ['An audit is the one time an agent sends work to every accelerator, not just the first free one, so a graphics card or the processor working hard during an audit is expected.'],
+    notes: ['An audit is the one time one of the staff sends work to every accelerator, not just the first free one, so a graphics card or the processor working hard during an audit is expected.'],
   },
   clerk: {
     model: true,
@@ -116,7 +116,7 @@ export const WORK: Record<string, AgentWork> = {
     developerRole: true,
     lines: [
       { what: "Comparing each project's versions, tags, changelog and release files, and the checksums of its local build", where: 'the network, and the processor and disk for the checksums', when: 'every 6 hours, or Run now', dev: true },
-      { what: 'Asking Castellan and the Steward who works at the manor, so each agent is tasted too', where: "Castellan's and the Steward's pages, on this PC (a request to each)", when: 'at the start of the same round, a moment; about 14 projects a round in all', dev: true },
+      { what: 'Asking Castellan and the Steward who works at the manor, so each of the staff is tasted too', where: "Castellan's and the Steward's pages, on this PC (a request to each)", when: 'at the start of the same round, a moment; about 14 projects a round in all', dev: true },
       { what: "Cloning a project that isn't on this PC (gh repo clone for one on GitHub, git clone for one anywhere else), and fetching each clone (git fetch), fast-forwarding its default branch when it's checked out and clean", where: 'the network and the disk', when: 'in the same round, just before each project is tasted; a first clone takes longer', dev: true },
       { what: 'A changelog line for each merged change that has none', where: MODEL, when: 'at most 12 a round, about 25 seconds on the NPU', dev: true },
       { what: "Handing a project's work orders to a worker, when Settings → Work orders names one (it's off by default), in a git worktree of its own", where: "Claude Code (claude -p), which runs on Anthropic's servers, with its tool calls on this PC's processor; or a command of yours, on this PC", when: 'at the end of the round, at most 2 projects, one at a time, each for at most 20 minutes (Time for each)', dev: true },
@@ -144,7 +144,7 @@ export const WORK: Record<string, AgentWork> = {
     model: false,
     developerRole: true,
     lines: [
-      { what: "Rolling out a kit version: a worktree of each agent, its packages, its typecheck and tests, its release build", where: 'the processor, the disk and the network', when: 'only when a stage is started, two agents at a time (Settings), for a few minutes', dev: true },
+      { what: "Rolling out a kit version: a worktree of each employee's repository, its packages, its typecheck and tests, its release build", where: 'the processor, the disk and the network', when: 'only when a stage is started, two employees at a time (Settings), for a few minutes', dev: true },
     ],
     notes: ['Between stages it does nothing.'],
   },
@@ -169,16 +169,16 @@ export const WORK: Record<string, AgentWork> = {
     model: false,
     developerRole: true,
     lines: [
-      { what: "Handing out the staff's work in order: each repository's checks, the kit's trials, full test suites and the Wright's jobs, in four lanes, never more at once than the PC has room for", where: 'the processor, a moment, and its ledger on the disk; the work itself runs in the agent that asked for it', when: 'when an agent asks for a turn, and in its sweep every 15 seconds, which takes back the turns of agents that stopped answering', dev: true },
+      { what: "Handing out the staff's work in order: each repository's checks, the kit's trials, full test suites and the Wright's jobs, in four lanes, never more at once than the PC has room for", where: 'the processor, a moment, and its ledger on the disk; the work itself runs in the employee that asked for it', when: 'when one of the staff asks for a turn, and in its sweep every 15 seconds, which takes back the turns of staff that stopped answering', dev: true },
       { what: "A look at the PC's room: its processors and the checks pace, its memory, the accelerators' lines, whether you're using it and whether it's on battery", where: 'the processor; whether you are using it, one PowerShell call', when: 'every 15 seconds, a moment; whether you are using it, every minute', dev: true },
     ],
-    notes: ["It uses no model and runs no work of its own: each task names a repository and a commit, and the agent that asked runs that repository's own checks.", 'It comes with Workshop Pro: on a PC without it, it hands out no work, and each agent runs its own as before.'],
+    notes: ["It uses no model and runs no work of its own: each task names a repository and a commit, and the employee that asked runs that repository's own checks.", 'It comes with Workshop Pro: on a PC without it, it hands out no work, and each of the staff runs its own as before.'],
   },
   surveyor: {
     model: true,
     lines: [
-      { what: "Its checks: Castellan, every agent's page and logs, the PC (one PowerShell script) and the code checkouts", where: 'the processor and the disk', when: 'every 60 minutes (Settings), a few seconds to a minute', plain: { what: "Its checks: Castellan, every agent's page, and the PC" } },
-      { what: 'Explanations, the daily report, suggestions and what is new', where: MODEL, when: 'only when no other agent holds or waits for an accelerator; at most 8 a round' },
+      { what: "Its checks: Castellan, every employee's page and logs, the PC (one PowerShell script) and the code checkouts", where: 'the processor and the disk', when: 'every 60 minutes (Settings), a few seconds to a minute', plain: { what: "Its checks: Castellan, every employee's page, and the PC" } },
+      { what: 'Explanations, the daily report, suggestions and what is new', where: MODEL, when: 'only when none of the other staff holds or waits for an accelerator; at most 8 a round' },
     ],
   },
   lamplighter: {
@@ -188,7 +188,7 @@ export const WORK: Record<string, AgentWork> = {
       { what: "Its guard: reading the graphics cards, the event log and who signed in, and archiving a new driver (pnputil /export-driver) with each file's SHA-256", where: 'the processor and the disk, as SYSTEM (Windows PowerShell); never the graphics card', when: 'at start-up and sign-in, when a driver is installed or the display resets, and every 5 minutes, about a second; an export takes longer (a driver can be 500 MB)', plain: { what: "Its guard: reading the graphics cards, Windows' record of what happened and who signed in, and keeping a copy of each new graphics driver", where: 'the processor and the disk, as an administrator; never the graphics card', when: 'at start-up and sign-in, when a driver is installed or the screen resets, and every 5 minutes, about a second; keeping a copy takes longer (a driver can be 500 MB)' } },
       { what: 'Rolling a driver back: removing the new one, and installing the last good one from the archive (pnputil)', where: 'the processor and the disk, as SYSTEM', when: 'only after a new graphics driver nobody kept at sign-in, or that left the screen dark', plain: { what: 'Rolling a driver back: removing the new one, and putting back the last good one it kept', where: 'the processor and the disk, as an administrator' } },
       { what: 'Its page: reading what the guard did, and the graphics cards', where: 'the processor (PowerShell)', when: 'every 5 minutes (Settings), a moment', plain: { where: 'the processor' } },
-      { what: 'A few plain sentences on a rollback', where: "Reeve's model on the NPU only (below)", when: 'after a rollback, only when no other agent holds or waits for the NPU', plain: { where: 'the local AI, on the AI chip only (below)', when: 'after a rollback, only when no other agent is using the AI chip' } },
+      { what: 'A few plain sentences on a rollback', where: "Reeve's model on the NPU only (below)", when: 'after a rollback, only when none of the other staff holds or waits for the NPU', plain: { where: 'the local AI, on the NPU only (below)', when: 'after a rollback, only when none of the other staff is using the NPU' } },
     ],
     notes: ['The guard is the one part of the manor that runs as an administrator (SYSTEM), and it uses no model: detecting a dark screen and rolling back are code.'],
     plainNotes: ['The guard is the one part of the manor that runs as an administrator, and it uses no AI: noticing a dark screen and rolling back are its own work.'],
@@ -197,11 +197,11 @@ export const WORK: Record<string, AgentWork> = {
     model: false,
     lines: [
       { what: 'A look at every model server: who uses each accelerator, whether each answers, how much memory GenieX holds, whether a game wants a graphics card, and any model server nobody configured', where: 'the processor (one PowerShell process list) and the model servers on this PC', when: 'every minute, a moment', plain: { what: 'A look at the local AI: who uses each accelerator, whether it answers, how much memory it holds, and whether a game wants a graphics card', where: 'the processor' } },
-      { what: 'Stopping a server nobody has used for 10 minutes (Settings), one a game needs the card back from, or an orphan; restarting one that stopped answering or holds too much', where: 'the model servers it keeps: GenieX on the NPU, llama-server on a graphics card or the processor', when: 'only when nobody holds or waits for that accelerator', plain: { what: 'Resting the local AI when nobody has used it for 10 minutes (Settings) or a game needs the graphics card back; starting it again when it stops answering or holds too much memory', where: 'the AI chip, a graphics card or the processor, wherever the local AI runs' } },
+      { what: 'Stopping a server nobody has used for 10 minutes (Settings), one a game needs the card back from, or an orphan; restarting one that stopped answering or holds too much', where: 'the model servers it keeps: GenieX on the NPU, llama-server on a graphics card or the processor', when: 'only when nobody holds or waits for that accelerator', plain: { what: 'Resting the local AI when nobody has used it for 10 minutes (Settings) or a game needs the graphics card back; starting it again when it stops answering or holds too much memory', where: 'the NPU, a graphics card or the processor, wherever the local AI runs' } },
       { what: 'Setting up a graphics card or the processor: llama.cpp and the models, downloaded and checked', where: 'the network and the disk (some 6 GB), and a moment of the graphics card to list its devices', when: 'only when you press Set up', plain: { what: 'Setting up a graphics card or the processor for the local AI: its software and models, downloaded and checked', where: 'the network and the disk (some 6 GB), and a moment of the graphics card' } },
     ],
-    notes: ["The model servers run every other agent's model work, not the Smith's: it uses no model, it keeps them. A server it stops starts again by itself at the next request, in seconds."],
-    plainNotes: ["The local AI does every other agent's AI work, not the Smith's: the Smith uses none, it looks after it. When it rests, it starts again by itself the next time an agent needs it, in seconds."],
+    notes: ["The model servers run the rest of the staff's model work, not the Smith's: it uses no model, it keeps them. A server it stops starts again by itself at the next request, in seconds."],
+    plainNotes: ["The local AI does the rest of the staff's AI work, not the Smith's: the Smith uses none, it looks after it. When it rests, it starts again by itself the next time one of the staff needs it, in seconds."],
   },
   thatcher: {
     model: true,
@@ -245,15 +245,15 @@ const WORK_NAMES: Record<string, string> = { chat: 'chat', vision: 'vision', emb
 const named = (a: Accelerator) => `${theAccelerator(a)} (${(['chat', 'vision', 'embed'] as const).filter((w) => serves(a, w)).map((w) => WORK_NAMES[w]).join(', ')})`;
 
 /**
- * One accelerator in plain words: the AI chip and the processor (not their maker's names), and a graphics card as
+ * One accelerator in plain words: the NPU and the processor (not their maker's names), and a graphics card as
  * the person knows it ("the NVIDIA GeForce RTX 4090").
  */
-const plainNamed = (a: Accelerator) => (a.kind === 'npu' ? AI_CHIP : a.kind === 'cpu' ? 'the processor' : theAccelerator(a));
+const plainNamed = (a: Accelerator) => (a.kind === 'npu' ? PLAIN_NPU : a.kind === 'cpu' ? 'the processor' : theAccelerator(a));
 
 const WORKS = ['chat', 'vision', 'embed'] as const;
 /** The work an accelerator does, in Reeve's words on its own page (accelerators.tsx): Chat, Pictures, Search. */
 const WORK_CHIPS: Record<(typeof WORKS)[number], string> = { chat: 'Chat', vision: 'Pictures', embed: 'Search' };
-/** A card's name: "the NVIDIA GeForce RTX 4090" as "NVIDIA GeForce RTX 4090", "the AI chip" as "AI chip". */
+/** A card's name: "the NVIDIA GeForce RTX 4090" as "NVIDIA GeForce RTX 4090", "the NPU" as "NPU". */
 const cardName = (s: string) => {
   const bare = s.replace(/^the\s+/i, '');
   return bare.charAt(0).toUpperCase() + bare.slice(1);
@@ -266,7 +266,7 @@ const working = (cfg: AcceleratorConfig, npuOnly = false) => cfg.accelerators.fi
 
 /**
  * One accelerator as a card in the path, as Reeve's page draws it (kit 2.149.1). A developer sees its kind, its name, the
- * work it does and how many requests it takes at once; everyone else the AI chip, a graphics card by name, or the
+ * work it does and how many requests it takes at once; everyone else the NPU, a graphics card by name, or the
  * processor, and what it is.
  */
 function accCard(a: Accelerator, developer: boolean): string {
@@ -285,7 +285,7 @@ function accCard(a: Accelerator, developer: boolean): string {
 
 /** The accelerators as cards, an arrow between each and the next: the order a request tries them. */
 function workPath(on: Accelerator[], developer: boolean): string {
-  // In plain words, two of a kind (two AI chips) are one card: they're the same to the person.
+  // In plain words, two of a kind (two NPUs) are one card: they're the same to the person.
   const cards = developer ? on : on.filter((a, i) => on.findIndex((b) => plainNamed(b) === plainNamed(a)) === i);
   return `<ol class="work-path" aria-label="In this order">${cards.map((a) => accCard(a, developer)).join('')}</ol>`;
 }
@@ -293,13 +293,13 @@ function workPath(on: Accelerator[], developer: boolean): string {
 /**
  * What this PC has for the model, in the order requests try them, in words. `developer` (the manor's Developer
  * options) names Reeve, which keeps the list, and each accelerator with the work it serves; without, it's "the local
- * AI", the NPU is the AI chip, and the work isn't named.
+ * AI", the NPU by that name, and the work isn't named.
  */
 export function thisPc(cfg: AcceleratorConfig | { error: string }, developer = true): string {
   if ('error' in cfg) return developer ? `${cfg.error}, so there is no model work here.` : "The local AI isn't set up on this PC, so there is no AI work here.";
   const on = cfg.accelerators.filter((a) => a.enabled !== false && (['chat', 'vision', 'embed'] as const).some((w) => serves(a, w)));
   const onlyNpu = on.length > 0 && on.every((a) => a.kind === 'npu');
-  if (!developer) return `On this PC, the local AI uses ${[...new Set(on.map(plainNamed))].join(', then ')}.${onlyNpu ? ' So its AI work runs on the AI chip only, never on the processor or a graphics card.' : ''}`;
+  if (!developer) return `On this PC, the local AI uses ${[...new Set(on.map(plainNamed))].join(', then ')}.${onlyNpu ? ' So its AI work runs on the NPU only, never on the processor or a graphics card.' : ''}`;
   return `On this PC, Reeve lists ${on.map(named).join(', then ')}.${onlyNpu ? ' So its model work runs on the NPU only, never on the processor or a graphics card.' : ''}`;
 }
 
@@ -314,7 +314,7 @@ export function workLine(l: WorkLine, developer: boolean): Pick<WorkLine, 'what'
  * Where the agent's model work goes on this PC (kit 2.149.1: a path of cards, where it was a paragraph): Reeve's
  * accelerators in the order a request tries them, each with what it does, and a line on when a request moves on. An
  * NPU-only agent (the Lamplighter's driver checks) never moves on: the NPU or nothing. `developer` names Reeve, the
- * NPU, the work and Task Manager's graph; without, it's the local AI, the AI chip, a graphics card and the processor.
+ * NPU, the work and Task Manager's graph; without, it's the local AI, the NPU, a graphics card and the processor.
  */
 function modelWork(cfg: AcceleratorConfig | { error: string }, developer: boolean, npuOnly: boolean): string {
   if ('error' in cfg) return `<p>${esc(thisPc(cfg, developer))}</p>`;
@@ -322,17 +322,17 @@ function modelWork(cfg: AcceleratorConfig | { error: string }, developer: boolea
   const npuGraph = `Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.`;
   if (npuOnly)
     return developer
-      ? `<p><strong>Its model work</strong> goes to the NPU only, through the model server Reeve runs there, taking its turn with every other agent's requests, and only when no other agent holds or waits for it. Never to a graphics card or the processor, whatever Reeve's order says. ${npus.length ? 'This PC has one.' : "This PC has none, so it asks no model, and its words are its own code's."}</p>
+      ? `<p><strong>Its model work</strong> goes to the NPU only, through the model server Reeve runs there, taking its turn with the rest of the staff's requests, and only when none of the other staff holds or waits for it. Never to a graphics card or the processor, whatever Reeve's order says. ${npus.length ? 'This PC has one.' : "This PC has none, so it asks no model, and its words are its own code's."}</p>
 ${npus.length ? `${workPath(npus, true)}\n<p class="muted small">${npuGraph}</p>` : ''}`
-      : `<p><strong>Its AI work</strong> goes to the local AI on the AI chip only, taking its turn with every other agent's, and only when no other agent is using it. Never to a graphics card or the processor. ${npus.length ? 'This PC has one.' : 'This PC has none, so it asks no AI, and its words are its own.'}</p>`;
+      : `<p><strong>Its AI work</strong> goes to the local AI on the NPU only, taking its turn with the rest of the staff's, and only when none of the other staff is using it. Never to a graphics card or the processor. ${npus.length ? 'This PC has one.' : 'This PC has none, so it asks no AI, and its words are its own.'}</p>`;
   const on = working(cfg);
   if (!on.length) return developer ? '<p><strong>Its model work</strong> has nowhere to go: nothing Reeve lists on this PC does chat, pictures or search.</p>' : "<p><strong>Its AI work</strong> has nowhere to go: the local AI isn't set up on this PC.</p>";
   const onlyNpu = on.every((a) => a.kind === 'npu');
   if (!developer)
-    return `<p><strong>Its AI work</strong> goes to the local AI, taking turns with every other agent's. Each request goes to the first of these that can do it, and waits its turn there:</p>
+    return `<p><strong>Its AI work</strong> goes to the local AI, taking turns with the rest of the staff's. Each request goes to the first of these that can do it, and waits its turn there:</p>
 ${workPath(on, false)}
-<p class="muted small">${onlyNpu ? 'So its AI work runs on the AI chip only, never on the processor or a graphics card.' : "It moves on to the next only when the one before can't do it, or it's too big for it. Background work keeps off a graphics card a game is using."}</p>`;
-  return `<p><strong>Its model work</strong> goes to the model servers Reeve runs, taking turns with every other agent's requests. Each request goes to the first of these that does its work, and waits its turn there:</p>
+<p class="muted small">${onlyNpu ? 'So its AI work runs on the NPU only, never on the processor or a graphics card.' : "It moves on to the next only when the one before can't do it, or it's too big for it. Background work keeps off a graphics card a game is using."}</p>`;
+  return `<p><strong>Its model work</strong> goes to the model servers Reeve runs, taking turns with the rest of the staff's requests. Each request goes to the first of these that does its work, and waits its turn there:</p>
 ${workPath(on, true)}
 <p class="muted small">${onlyNpu ? 'So its model work runs on the NPU only, never on the processor or a graphics card. ' : "It moves on to the next only when the one before can't take it: the request is too big for it, or it failed in the last 10 minutes. Background work keeps off a graphics card a game is using. "}${npus.length ? npuGraph : "Task Manager shows the model's work as the graphics card's (Performance, then GPU) or the processor's."}</p>`;
 }
