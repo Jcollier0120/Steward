@@ -116,7 +116,7 @@ test('the page carries the section, which the script moves into Settings after t
 });
 
 /** What the section never says with Developer options off (spec/DEVELOPER-OPTIONS.md): tools, commands, ports, model servers, code. */
-const DEVELOPER_WORDS = [/Reeve/, /PowerShell/, /\bWMI\b/, /pnputil/, /GenieX/i, /llama/i, /SHA-256/, /winget/, /FFmpeg/, /x26[45]|SVT-AV1/, /\bgit\b|\bgh\b|GitHub/, /worktree|checkout|repositor|changelog|upstream|typecheck/i, /\bports?\b/i, /\bSYSTEM\b/, /model server/i, /Claude/, /\bOCR\b/, /\bcode\b/, /NPU/, /Hexagon/, /Snapdragon/, /Qualcomm/, /vision model/, /Task Manager/, /\(chat|embeddings/];
+const DEVELOPER_WORDS = [/Reeve/, /PowerShell/, /\bWMI\b/, /pnputil/, /GenieX/i, /llama/i, /SHA-256/, /winget/, /FFmpeg/, /x26[45]|SVT-AV1/, /\bgit\b|\bgh\b|GitHub/, /worktree|checkout|repositor|changelog|upstream|typecheck/i, /\bports?\b/i, /\bSYSTEM\b/, /model server/i, /Claude/, /\bOCR\b/, /\bcode\b/, /Hexagon/, /Snapdragon/, /Qualcomm/, /vision model/, /Task Manager/, /\(chat|embeddings/];
 
 test('with Developer options off, the section is in plain words: the local AI, no tool, command or server by name, and no developer work', () => {
   const both = parseAccelerators({
@@ -130,18 +130,20 @@ test('with Developer options off, the section is in plain words: the local AI, n
     for (const id of [...Object.keys(WORK), 'someone-new']) {
       const plain = workSection({ id, name: id, config, developer: false });
       for (const word of DEVELOPER_WORDS) assert.doesNotMatch(plain, word, `${id}'s plain section`);
+      // The staff, each by name: never "agents", whether Developer options are on or off.
+      for (const s of [plain, workSection({ id, name: id, config, developer: true })]) assert.doesNotMatch(s, /\bagents?\b/i, `${id}'s section says staff`);
     }
   }
   const clerk = workSection({ id: 'clerk', name: 'Clerk', config: legacyNpu, developer: false });
   assert.match(clerk, /Its AI work<\/strong> goes to the local AI/);
-  assert.match(clerk, /<li class="work-acc"><strong>AI chip<\/strong><span class="muted small">Built for AI work<\/span><\/li><\/ol>/, 'the AI chip alone, a card');
-  assert.match(clerk, /So its AI work runs on the AI chip only/);
+  assert.match(clerk, /<li class="work-acc"><strong>NPU<\/strong><span class="muted small">Built for AI work<\/span><\/li><\/ol>/, 'the NPU alone, a card');
+  assert.match(clerk, /So its AI work runs on the NPU only/);
   assert.doesNotMatch(clerk, /vision/, 'the vision model is the local AI too');
-  assert.match(clerk, /a text reader of its own, on the AI chip where it can, else on the processor/);
+  assert.match(clerk, /a text reader of its own, on the NPU where it can, else on the processor/);
   assert.doesNotMatch(clerk, /doesn&#39;t offer it/, "the reader is our own, not Windows' held back");
-  assert.match(workSection({ id: 'clerk', name: 'Clerk', config: both, developer: false }), /<strong>AI chip<\/strong>.*<\/li><li class="work-acc"><strong>Graphics card<\/strong><\/li>/, 'the NPU by what it is, not its maker, then the card');
+  assert.match(workSection({ id: 'clerk', name: 'Clerk', config: both, developer: false }), /<strong>NPU<\/strong>.*<\/li><li class="work-acc"><strong>Graphics card<\/strong><\/li>/, "the NPU by that name, not its maker's, then the card");
   assert.match(workSection({ id: 'miller', name: 'Miller', config: both, developer: false }), /Windows may count the video encoding as graphics use/);
-  assert.match(workSection({ id: 'lamplighter', name: 'Lamplighter', config: both, developer: false }), /the local AI on the AI chip only/);
+  assert.match(workSection({ id: 'lamplighter', name: 'Lamplighter', config: both, developer: false }), /the local AI on the NPU only/);
   // A developer role's work doesn't run with the switch off, so its page has no section then; with it on, all of it.
   for (const id of ['auditor', 'developer-herald', 'aletaster', 'pinder', 'steward', 'toller', 'assayer', 'seneschal']) {
     assert.equal(WORK[id].developerRole, true, `${id} is a developer role`);

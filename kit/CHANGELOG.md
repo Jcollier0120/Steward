@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.150.2
+
+**"Where its work runs" calls the NPU the NPU, the word the ads and Task Manager use, and says the staff where it said agents (the owner, 2026-11-04).**
+
+### What changed
+
+- **node/work.ts**: with Developer options off, the NPU is "the NPU" (its card in the path is **NPU**, "Built for AI work" under it), where it was "the AI chip"; still never its maker's name. Every line, note and paragraph says the staff, one of the staff or an employee where it said agents ("taking turns with the rest of the staff's", "only when none of the other staff is using it"), with Developer options on or off.
+- **spec/DEVELOPER-OPTIONS.md** says so.
+
+### What an agent must do
+
+- **A test that asserts the old words fails**: "AI chip", "on the AI chip only", "every other agent's", "no other agent". Assert "NPU", "on the NPU only", "the rest of the staff's" or "none of the other staff".
+
 ## 2.150.1
 
 **A staff member's Settings sends you to Manor's Settings, Employees for the settings kept there: Manor folded its Staff settings tab into Employees (Manor's wide layout, the owner, 2026-11-04).**
