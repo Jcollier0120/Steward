@@ -287,7 +287,7 @@ test("a Section titled as the page tab it's in leaves its title and count to the
          <Section title="Findings" count={2}>Outside</Section>
          <PageTabs tabs={[
            { id: 'findings', label: 'Findings', count: 2, content: <><Section title="findings" count={2}>A</Section><Section title="Older" count={5}>B</Section></> },
-           { id: 'files', label: 'Loose files', content: <Section title="Loose files" right={<button>Tick all</button>}>C</Section> },
+           { id: 'files', label: 'Loose files', content: <Section title="Loose files" right={<button>Check all</button>}>C</Section> },
          ]} />
        </>);`,
     { location: { hash: '#/' }, document: { documentElement: { dataset: {} } } },
@@ -296,7 +296,7 @@ test("a Section titled as the page tab it's in leaves its title and count to the
   assert.match(h, /^<section class="ui-section ui-gap-md"><div class="ui-section-head"><div class="ui-section-name"><h2>Findings<\/h2><span class="muted ui-count">· 2<\/span>/, 'outside a tab: as ever');
   assert.match(h, /id="page-panel-findings"[^>]*><section class="ui-section ui-gap-md">A<\/section>/, "the tab's own name: no heading row");
   assert.match(h, /<h2>Older<\/h2><span class="muted ui-count">· 5<\/span>/, 'another name: its heading');
-  assert.match(h, /id="page-panel-files"[^>]*><section class="ui-section ui-gap-md"><div class="ui-section-head"><div class="ui-section-name"><\/div><div class="ui-section-right"><button>Tick all<\/button><\/div><\/div>C/, 'a right-hand part: the row, without the title');
+  assert.match(h, /id="page-panel-files"[^>]*><section class="ui-section ui-gap-md"><div class="ui-section-head"><div class="ui-section-name"><\/div><div class="ui-section-right"><button>Check all<\/button><\/div><\/div>C/, 'a right-hand part: the row, without the title');
 });
 
 test('showSection (a Glance tile, a link): a part in a hidden page tab has its tab chosen, and is scrolled to once drawn', async () => {

@@ -78,7 +78,7 @@ export function usePageTab(ids: readonly string[]): [string, (id: string) => voi
 
 /**
  * An agent's page in tabs, for a page too long for one column: put it in the page's body, after what should show
- * whatever the tab (a summary). Each tab's panel is drawn and kept while hidden, so what's typed or ticked in one
+ * whatever the tab (a summary). Each tab's panel is drawn and kept while hidden, so what's typed or checked in one
  * stays, and the tour finds every part (it shows the tab a part is in: SHOW_TAB). A Section titled as its tab leaves
  * the title to the tab (TabLabel). A short page needs none.
  *

@@ -345,7 +345,7 @@ test("each work's order by generation (kit 2.111.0): AMD's Ryzen AI 300 sends ev
     embed: { devices: ['gpu', 'cpu'] },
     rerank: { devices: ['gpu', 'cpu'] },
   });
-  assert.match(amd.generations.xdna2.order!.rerank!.basis, /Radeon 860M.*73\.8 s on the processor.*tried and parked.*The owner's ruling \(2026-10-25\): "Yes: on AMD too, a ticked reranker goes to the Radeon/, 'its figures, the NPU parked, and the ruling behind it');
+  assert.match(amd.generations.xdna2.order!.rerank!.basis, /Radeon 860M.*73\.8 s on the processor.*tried and parked.*The owner's ruling \(2026-10-25\): "Yes: on AMD too, a checked reranker goes to the Radeon/, 'its figures, the NPU parked, and the ruling behind it');
   // Intel's route orders the reranker, on every generation, one nobody knows too: the card, then the processor.
   const intel = V.NPU_CATALOG.routes.intel;
   for (const id of [...Object.keys(intel.generations), 'next-lake', null]) assert.deepEqual(V.workOrderFor(intel, id), { rerank: { devices: ['gpu', 'cpu'] } }, `intel ${id}`);
@@ -2043,10 +2043,10 @@ test('beside an Intel NPU with no room for its embeddings (16 GB), with the swit
   assert.ok(!got.some((d) => CHAT_GGUF.test(d) || VL_GGUF.test(d)), got.join('\n'));
 });
 
-// Intel's reranker (kit 2.135.5, the owner's ruling): ticked in the Smith's Set up, it goes on the card, never the
+// Intel's reranker (kit 2.135.5, the owner's ruling): checked in the Smith's Set up, it goes on the card, never the
 // processor, and the work order setup writes puts the card first for it, so with the switch off the card still reranks,
 // on demand.
-test("beside an Intel NPU, with the switch off, a ticked reranker goes on the card, not the processor, and the order written keeps it reranking there; the switch on, the same set-up", async () => {
+test("beside an Intel NPU, with the switch off, a checked reranker goes on the card, not the processor, and the order written keeps it reranking there; the switch on, the same set-up", async () => {
   for (const gpuWithNpu of [false, true]) {
     const run = await intelSetup(`rerank-${gpuWithNpu ? 'on' : 'off'}`, { gpuWithNpu, kinds: ['chat', 'vision', 'embed', 'rerank'] });
     assert.equal(run.r.code, 0, run.log.join('\n'));
@@ -2059,7 +2059,7 @@ test("beside an Intel NPU, with the switch off, a ticked reranker goes on the ca
     // What the card does beside the NPU with the switch off: the embeddings this 16 GB NPU leaves it, and the reranker.
     assert.deepEqual(core.cardWorkBesideNpu(kindsOf(run.arc), core.npuServes([run.npuEntry]), core.workOrderIn(run.written)), ['embed', 'rerank']);
   }
-  // Without the reranker ticked, nothing changes: the switch off plans the card for embeddings alone, as before.
+  // Without the reranker checked, nothing changes: the switch off plans the card for embeddings alone, as before.
   const off = await planSetup({ detection: LUNAR(), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: path.join(home, 'rerank-none'), env: ENV, exists: disk(), gpuWithNpu: false });
   assert.deepEqual(off.targets.map((t) => [t.id, t.kinds]), [[ARC, ['embed']]]);
 });
@@ -2085,14 +2085,14 @@ test("beside AMD's NPU, with the switch off, the Radeon is planned for the pictu
   // A person's own list of accelerators: the core reads no work order, so the card is set up for its embeddings alone, as before.
   const theirs = await plan(false, { acceleratorOrder: ['npu', RADEON, 'cpu'] });
   assert.deepEqual(theirs.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[RADEON, ['embed'], ['chat', 'vision']]]);
-  // The reranker is an add-on: none planned unless it's ticked.
+  // The reranker is an add-on: none planned unless it's checked.
   assert.ok(!off.targets.some((t) => t.kinds.includes('rerank')));
 });
 
-// AMD's reranker (kit 2.136.3, the owner's ruling, as Intel's): ticked in the Smith's Set up, it goes on the Radeon,
+// AMD's reranker (kit 2.136.3, the owner's ruling, as Intel's): checked in the Smith's Set up, it goes on the Radeon,
 // never the processor, and the work order setup writes puts the card first for it, so with the switch off the card
 // still reranks, on demand; chat stays on the NPU.
-test("beside AMD's NPU, with the switch off, a ticked reranker goes on the Radeon, not the processor, and the order written keeps it reranking there beside the pictures, never chat; the switch on, the same set-up", async () => {
+test("beside AMD's NPU, with the switch off, a checked reranker goes on the Radeon, not the processor, and the order written keeps it reranking there beside the pictures, never chat; the switch on, the same set-up", async () => {
   const pc = { detection: parseDetection(`${AMD_IGPU}${NPU.strix}\n${X64('AMD Ryzen AI 9 HX 370 w/ Radeon 890M')}`), card: 'gpu-amd-radeon-tm-890m-graphics', list: '  Vulkan0: AMD Radeon(TM) 890M Graphics (16384 MiB, 15000 MiB free)\n' };
   for (const gpuWithNpu of [false, true]) {
     const run = await intelSetup(`amd-rerank-${gpuWithNpu ? 'on' : 'off'}`, { gpuWithNpu, kinds: ['chat', 'vision', 'embed', 'rerank'], pc });

@@ -42,12 +42,12 @@ const CHECK = [
   'Docs to review (their product has moved on a minor version or more):',
   '- content/docs/assayer-overview.md (assayer 0.2.4, now 0.3.5)',
   '',
-  '- The Steward: the chart gives Gaming Butler, but the setup doesn\'t tick it for "gaming" (Manor\'s staff.json uses)',
+  '- The Steward: the chart gives Gaming Butler, but the setup doesn\'t check it for "gaming" (Manor\'s staff.json uses)',
 ].join('\n');
 
 test("a failed step's reason: the end of its last paragraph, each try's same error once, npm's wrap-up and banners left out", () => {
   assert.deepEqual(reasonLines(SIGNING), ["release: couldn't sign Castellan-Setup-0.16.105-arm64.exe: SignTool Error: No certificates were found that met all the given criteria."]);
-  assert.deepEqual(reasonLines(CHECK), ['- The Steward: the chart gives Gaming Butler, but the setup doesn\'t tick it for "gaming" (Manor\'s staff.json uses)']);
+  assert.deepEqual(reasonLines(CHECK), ['- The Steward: the chart gives Gaming Butler, but the setup doesn\'t check it for "gaming" (Manor\'s staff.json uses)']);
   assert.deepEqual(reasonLines('a\nb\nc\nd\ne'), ['c', 'd', 'e'], 'at most three');
   assert.deepEqual(reasonLines('npm error code 1\n\n'), [], 'nothing telling: nothing');
   assert.equal(reasonLines('x'.repeat(400))[0].length, 300, 'cut to a line');

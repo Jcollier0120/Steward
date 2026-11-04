@@ -57,7 +57,7 @@ test("Reeve's repositories: those on GitHub the person can push to are offered, 
   assert.deepEqual(found.repos.map((x) => [x.repo, x.push]), [['me/app', true], ['them/lib', false]], 'the ignored one and the local one are left out');
   assert.match(r.gh[0].join(' '), /r0: repository\(owner: "me", name: "app"\) \{ viewerPermission \}/);
   assert.deepEqual(candidates(found, []).map((x) => x.repo), ['me/app']);
-  // Picked, with merging ticked and releasing not: no kit, nothing installed, its tests and version read from its clone.
+  // Picked, with merging checked and releasing not: no kit, nothing installed, its tests and version read from its clone.
   const picked = lookAfter('me/app', { merges: true, release: false });
   assert.ok('employee' in picked);
   const e = loadSettings().employees[0];
@@ -72,7 +72,7 @@ test("Reeve's repositories: those on GitHub the person can push to are offered, 
   assert.equal(anyRepo('me/app')?.repo, 'me/app');
 });
 
-test('several picked are looked after in one go, each as ticked, and the ones it can\'t are said', () => {
+test('several picked are looked after in one go, each as checked, and the ones it can\'t are said', () => {
   const two = fakeEmployee(path.join(home, 'clones', 'two'), { version: '0.1.0', kit: null });
   const three = fakeEmployee(path.join(home, 'clones', 'three'), { version: '0.1.0', kit: null });
   const repo = (slug: string, dir: string) => ({ repo: slug, name: slug.split('/')[1], path: dir, branch: 'main', lockfiles: [], push: true });
@@ -133,7 +133,7 @@ test("with Manor here and its Repositories brought in, they are the Steward's li
 });
 
 test("a round on the person's PC: none of their PRs merged, even where Settings once said yes, a new version released to their own repository, and no kit asked for", async () => {
-  // Releasing: switched on in Settings as "tag" (it has no release script), as Look after's tick would have.
+  // Releasing: switched on in Settings as "tag" (it has no release script), as Look after's checkbox would have.
   const raw = JSON.parse(readFileSync(settingsFile(), 'utf8'));
   raw.employees[0].release = 'tag';
   raw.employees.push({ ...raw.employees[0], id: 'app-two', name: 'two', repo: 'me/two', merges: false, release: '' });
@@ -216,7 +216,7 @@ test("the held-back wording: on the person's PC the page and Settings speak of t
   assert.doesNotMatch(html, /\/api\/stage\/(bump|push)/, "no kit rollout's buttons");
   assert.doesNotMatch(html, /Roll out the kit/, 'no kit rollout to show');
   assert.match(html, /Found on this PC/);
-  assert.match(html, /only if you tick that/);
+  assert.match(html, /only if you check that/);
   assert.match(html, /releases only when asked, until you say yes/);
   assert.match(html, /data-post="\/api\/repos\/look-after"/);
   assert.match(html, /aria-label="Pick me\/new"/, 'each one found can be picked');

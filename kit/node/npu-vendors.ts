@@ -140,7 +140,7 @@ export interface NpuRoute {
   rerankServer?: NpuRerankServer;
   /**
    * Each work's order on every generation of this maker's NPU, unknown ones too, as a generation's `order` is: a
-   * generation's own, for a work it orders, goes over it (workOrderFor). Intel's puts a ticked reranker on the graphics
+   * generation's own, for a work it orders, goes over it (workOrderFor). Intel's puts a checked reranker on the graphics
    * card first (kit 2.135.5): its NPU reranks nowhere, and with Manor's switch off the card then still reranks, on demand.
    * AMD's XDNA 2 does the same from kit 2.136.3 (its NPU's reranker tried and parked), as that generation's `order`.
    */

@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.150.3
+
+**A staff member's About and page say "check" for a checkbox, not "tick" (the owner, 2026-11-04).**
+
+### What changed
+
+- **node/work.ts**: "Where its work runs" says "Moving the files you check" and "Installing the upgrades you check", done "only when you check them".
+- Comments across the kit (page refresh, settings, tabs, the reranker's ruling) say checked and checking for a checkbox. Timer ticks keep their names.
+
+### What an agent must do
+
+- **A test that asserts the old words fails**: "the files you tick", "the upgrades you tick", "only when you tick them". Assert "check" instead.
+
 ## 2.150.2
 
 **"Where its work runs" calls the NPU the NPU, the word the ads and Task Manager use, and says the staff where it said agents (the owner, 2026-11-04).**

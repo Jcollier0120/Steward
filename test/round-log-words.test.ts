@@ -37,7 +37,7 @@ test("the PC waking, as fresh-start.ts writes it, raises no warning", async (t) 
   let woke = 0;
   const stop = watchWake(() => woke++, 5, () => now);
   now += WOKE_AFTER_MS + 1;
-  await until(() => woke === 1, 10_000, 'the tick that sees the PC woke');
+  await until(() => woke === 1, 10_000, 'the check that sees the PC woke');
   stop();
   takeFreshStart('releases');
   takeFreshStart('tend');

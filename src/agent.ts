@@ -129,7 +129,7 @@ export function steadyLog(write: (line: string) => void, steady: RegExp[] = STEA
   };
 }
 
-/** What a stage's POST asks: the ticked employees, the kit shown on the page. */
+/** What a stage's POST asks: the checked employees, the kit shown on the page. */
 export function askOf(body: any): StageAsk {
   const employees = Array.isArray(body?.employees) ? body.employees.map(String).filter(Boolean).slice(0, 100) : [];
   const kit = typeof body?.kit === 'string' && /^\d+\.\d+\.\d+$/.test(body.kit) ? body.kit : null;
@@ -598,7 +598,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
           clearTimeout(timer);
         }
       },
-      // Look after repositories Reeve found (found.ts): added to Settings, releasing only as ticked. One
+      // Look after repositories Reeve found (found.ts): added to Settings, releasing only as checked. One
       // ({ repo, merges, release }), or several at once ({ repos: [{ repo, merges, release }, …] }); or Add, any clone by
       // its folder ({ folder, release }), on any host or none. A repository's name is owner/name on GitHub, host/path on
       // another host (gitlab.com/group/app), local/<folder> for one on this PC alone.

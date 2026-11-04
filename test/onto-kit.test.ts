@@ -34,7 +34,7 @@ const lookedAfter = (id: string, checkout: string, extra: Record<string, unknown
   test: ['npm run typecheck', 'npm test'], versionFiles: ['package.json'], release: '', install: '', approve: '', installed: '', ...extra,
 });
 
-test('Look after takes an agent with the kit onto it, merging and releasing as ticked; a repository without it as before', () => {
+test('Look after takes an agent with the kit onto it, merging and releasing as checked; a repository without it as before', () => {
   const butler = agent('Butler');
   const site = agent('Site', { kit: null });
   const found = { at: new Date().toISOString(), from: 'reeve' as const, error: null, repos: [
@@ -55,7 +55,7 @@ test('Look after takes an agent with the kit onto it, merging and releasing as t
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).employees.map((x: { id: string }) => x.id), ['butler', 'site']);
 });
 
-test('Look after with releasing unticked leaves the release empty, so the Release stage passes it over', () => {
+test('Look after with releasing unchecked leaves the release empty, so the Release stage passes it over', () => {
   const marshal = agent('Marshal');
   const found = { at: new Date().toISOString(), from: 'reeve' as const, error: null, repos: [{ repo: 'Jcollier0120/Marshal', name: 'Marshal', path: marshal, branch: 'main', lockfiles: [], push: true }] };
   const file = path.join(home, 'no-release.json');

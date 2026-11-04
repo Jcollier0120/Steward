@@ -130,10 +130,10 @@ export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: num
 /**
  * The agent's page: its title bar, `body`, and a small script for buttons. A button with data-post="/api/x"
  * POSTs (with the page token) and reloads; data-body='{"json":1}' sends that, data-form="#id" sends the
- * form's fields (ticked boxes of one name become a list), data-confirm="text" asks first, in the page's own
+ * form's fields (checked boxes of one name become a list), data-confirm="text" asks first, in the page's own
  * dialog (never the browser's). While it waits the button spins, and it and what it acts on (its form, else the card
  * it's in) take no presses; an error or the server's message is said in the same dialog. While `busy`,
- * the page refreshes itself every few seconds, unless something on it is ticked or being typed in, or
+ * the page refreshes itself every few seconds, unless something on it is checked or being typed in, or
  * the Settings panel has changes not yet saved, or Settings or the Theme menu is open.
  *
  * The look is Heiward's (and Manor's): the manor's themes (themes.ts: Windows 11's Light and Dark, and six colour
@@ -443,7 +443,7 @@ document.addEventListener('click', (e) => {
   route();
   link.hidden = false;
 })();
-// Someone at the page: typing, ticking, in Settings or the theme menu, answering its dialog, or waiting on a button. A
+// Someone at the page: typing, checking, in Settings or the theme menu, answering its dialog, or waiting on a button. A
 // reload then waits for them.
 const engaged = () => !!document.querySelector('input:checked:not([data-keep]), :focus:is(input, textarea, select), [data-dirty], body.on-settings, #theme-menu:not([hidden]), .ui-dialog, button[aria-busy]');
 if (REFRESH) setInterval(() => {

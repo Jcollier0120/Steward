@@ -607,7 +607,7 @@ export function withoutGpuBesideNpu(list, gpuWithNpu, order) {
  * for, though the NPU serves it (kit 2.135.3: AMD XDNA 2's pictures). The owner's ruling (2026-10-24): "Yes: on AMD,
  * pictures go to the Radeon on demand even with the graphics-card switch off; chat stays off the card." So chat never
  * is, whatever an order says. A reranker, an add-on, only where the order puts the card first for it (kit 2.135.5),
- * the owner's ruling the same day: "Yes: on Intel, a ticked reranker goes to the graphics card on demand even with the
+ * the owner's ruling the same day: "Yes: on Intel, a checked reranker goes to the graphics card on demand even with the
  * switch off, like AMD's pictures; it stops when idle." The one rule requests (withoutGpuBesideNpu), the keeper and
  * setup follow.
  * @template {string} K

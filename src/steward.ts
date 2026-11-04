@@ -87,7 +87,7 @@ export interface StageAsk {
   tendOnly?: boolean;
   /**
    * round: the owner's Build now (pipeline.ts): a build begins at once, whatever the build times, for the employees asked
-   * about (all when none); ticked, its releases go out to customers at once too.
+   * about (all when none); checked, its releases go out to customers at once too.
    */
   buildNow?: BuildNow;
 }

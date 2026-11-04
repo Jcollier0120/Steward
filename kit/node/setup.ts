@@ -1104,7 +1104,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   // Beside an NPU, with Manor's switch off, a card is never asked for the NPU's work (the keeper keeps it out): none of it is set up on the card,
   // but the work the PC's work order puts the card first for (kit 2.135.3: AMD's pictures, run on demand), the order setup writes for
   // this NPU's generation (setupCommand's withWorkOrder), none when a list of the person's own takes its place. Kinds
-  // asked for by name (the Smith's Set up, --serve) are set up on the card whole: a reranker ticked there goes on the
+  // asked for by name (the Smith's Set up, --serve) are set up on the card whole: a reranker checked there goes on the
   // card, which Intel's order (kit 2.135.5) and AMD XDNA 2's (kit 2.136.3) keep reranking beside the NPU, on demand, and
   // other routes keep out.
   const besideNpu = o.gpuWithNpu === false && npuServes.size > 0 && !o.kinds?.length;
