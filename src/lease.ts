@@ -9,6 +9,7 @@ import { githubApi } from './glance.ts';
 import type { GitHubApi } from './kit/github.ts';
 import { fileAt, lsRemote, readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
 import type { Runner } from './run.ts';
+import { normalizePipeline, type BuildPipeline } from './pipeline.ts';
 import type { Employee, Settings } from './settings.ts';
 import type { ResolvedPipeline } from './repoconfig.ts';
 import { isGithubRepo } from './scm.ts';
@@ -20,7 +21,7 @@ import { checkoutOf, mapLimit, result, workRootOf, type EmployeeResult } from '.
  * the same repositories. (Since Steward 0.36.124 no Steward merges anyone else's PRs.)
  *
  * The meeting place is a ref in the repository's own remote, on any host: `refs/manor/release-pc`, a tiny orphan commit
- * holding release-pc.json, `{ pc, name, until, since, pinned, checkout }`, read and written with plain git
+ * holding release-pc.json, `{ pc, name, until, since, pinned, checkout, pipeline }`, read and written with plain git
  * (remote-ref.ts), by compare-and-swap. No licence, no Exchequer, nothing of GitHub's: it works for anyone.
  *
  * - Before a stage publishes (releases, the Release button, a stamp, refresh and kit rollout pushes, and the merges
@@ -69,7 +70,24 @@ export interface TurnRecord {
   pinned: boolean;
   /** Whether that PC has a checkout of the repository: one that has takes the turn from one that hasn't. */
   checkout?: boolean;
+  /**
+   * That PC's Build pipeline settings, so the other PCs' Manors show the ones the builds use, read only, with or without
+   * the estate. Written again as soon as they change. An older Steward's record has none.
+   */
+  pipeline?: SharedPipeline;
 }
+
+/** The Build pipeline settings a turn record carries: when the builds run, and how. */
+export type SharedPipeline = Pick<BuildPipeline, 'times' | 'days' | 'kit' | 'windowMinutes'>;
+
+/** A record's or Settings' buildPipeline as a turn record carries it, by normalizePipeline's rules. Pure. */
+export function sharedPipeline(raw: unknown): SharedPipeline {
+  const p = normalizePipeline(raw);
+  return { times: p.times, days: p.days, kit: p.kit, windowMinutes: p.windowMinutes };
+}
+
+/** This PC's, for its turn records; none from Settings without them (the tests'). */
+const pipelineOf = (s: Pick<Settings, 'buildPipeline'>): SharedPipeline | undefined => (s.buildPipeline ? sharedPipeline(s.buildPipeline) : undefined);
 
 export interface Device {
   id: string;
@@ -213,7 +231,15 @@ export function readRecord(text: string | null | undefined): TurnRecord | null {
   try {
     const j = JSON.parse(text);
     if (typeof j?.pc !== 'string' || typeof j?.until !== 'string' || Number.isNaN(Date.parse(j.until))) return null;
-    return { pc: j.pc, name: String(j.name ?? ''), until: j.until, since: String(j.since ?? j.until), pinned: j.pinned === true, ...(typeof j.checkout === 'boolean' ? { checkout: j.checkout } : {}) };
+    return {
+      pc: j.pc,
+      name: String(j.name ?? ''),
+      until: j.until,
+      since: String(j.since ?? j.until),
+      pinned: j.pinned === true,
+      ...(typeof j.checkout === 'boolean' ? { checkout: j.checkout } : {}),
+      ...(j.pipeline && typeof j.pipeline === 'object' && Array.isArray(j.pipeline.times) ? { pipeline: sharedPipeline(j.pipeline) } : {}),
+    };
   } catch {
     return null;
   }
@@ -233,9 +259,9 @@ export function decide(rec: TurnRecord | null, me: { pc: string; checkout: boole
 /** Whether the Steward would publish anything to an employee's repository: else it takes no turn there. */
 const publishes = (e: Employee) => e.merges || !!e.release || !!e.refresh || e.usesKit;
 
-function recordFor(me: Device, checkout: boolean, now: number, ttlMs: number, had: TurnRecord | null, pinned?: boolean): TurnRecord {
+function recordFor(me: Device, checkout: boolean, now: number, ttlMs: number, had: TurnRecord | null, pinned?: boolean, pipeline?: SharedPipeline): TurnRecord {
   const mine = had?.pc === me.id;
-  return { pc: me.id, name: me.name, until: new Date(now + ttlMs).toISOString(), since: mine ? had!.since : new Date(now).toISOString(), pinned: pinned ?? (mine ? had!.pinned : false), checkout };
+  return { pc: me.id, name: me.name, until: new Date(now + ttlMs).toISOString(), since: mine ? had!.since : new Date(now).toISOString(), pinned: pinned ?? (mine ? had!.pinned : false), checkout, ...(pipeline ? { pipeline } : {}) };
 }
 
 const unreachableNote = (e: Pick<Employee, 'name'>) => `releasing ${e.name} waits until this PC can reach its remote`;
@@ -255,8 +281,11 @@ async function claimTurn(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 
   return { repo: e.repo, status: now2?.pc === me.id ? 'here' : 'elsewhere', sha: again.sha, ...(now2 ? { record: now2 } : {}), at };
 }
 
-/** One repository's turn: read, and taken or renewed as decide() says. */
-export async function turnOne(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 'repo'>, o: { me: Device; checkout: boolean; now: number; ttlMs: number; kept?: RepoTurn; refs?: TurnRefs }): Promise<RepoTurn> {
+/**
+ * One repository's turn: read, and taken or renewed as decide() says. Its own, with `pipeline` (this PC's Build pipeline
+ * settings) other than the record says: renewed at once, so the other PCs see the new ones.
+ */
+export async function turnOne(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 'repo'>, o: { me: Device; checkout: boolean; now: number; ttlMs: number; kept?: RepoTurn; refs?: TurnRefs; pipeline?: SharedPipeline }): Promise<RepoTurn> {
   const at = new Date(o.now).toISOString();
   // Both refs in one look: the claims ref's commit is kept for claims.ts.
   const ls = await (o.refs ?? ((x: RemoteRepo, refs: string[]) => lsRemote(run, x, refs)))(r, [RELEASE_PC_REF, CLAIMS_REF]);
@@ -266,11 +295,12 @@ export async function turnOne(run: Runner, r: RemoteRepo, e: Pick<Employee, 'nam
   // The record at a commit read before is the one kept with it: a commit's file never changes, so git isn't asked again.
   const rec = !sha ? null : sha === o.kept?.sha && o.kept.record ? o.kept.record : readRecord(await fileAt(run, r, RELEASE_PC_REF, sha, RELEASE_PC_FILE));
   const d = decide(rec, { pc: o.me.id, checkout: o.checkout }, o.now, o.ttlMs);
-  if (d === 'keep') return { repo: e.repo, status: 'here', sha: sha!, record: rec!, claimsSha, at };
+  const changed = !!o.pipeline && JSON.stringify(rec?.pipeline ?? null) !== JSON.stringify(o.pipeline);
+  if (d === 'keep' && !changed) return { repo: e.repo, status: 'here', sha: sha!, record: rec!, claimsSha, at };
   if (d === 'elsewhere') return { repo: e.repo, status: 'elsewhere', sha: sha!, record: rec!, claimsSha, at };
   // Taken from another PC (run out, or a pin gone quiet): not pinned here.
   const pinned = rec && rec.pc !== o.me.id ? false : undefined;
-  return { ...(await claimTurn(run, r, e, recordFor(o.me, o.checkout, o.now, o.ttlMs, rec, pinned), sha, o.me, o.now)), claimsSha };
+  return { ...(await claimTurn(run, r, e, recordFor(o.me, o.checkout, o.now, o.ttlMs, rec, pinned, o.pipeline), sha, o.me, o.now)), claimsSha };
 }
 
 /** The words for a repository another PC publishes. */
@@ -330,6 +360,7 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
   const state = loadTurns();
   const before = state.repos;
   const ttlMs = turnMs(o.settings, state, me, nowOf());
+  const pipeline = pipelineOf(o.settings);
   const turns = await mapLimit(unique, 4, async (e): Promise<RepoTurn | null> => {
     if (!publishes(e)) return null;
     try {
@@ -338,7 +369,7 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
       remotes.set(e.id, r);
       const checkout = !!e.checkout && existsSync(checkoutOf(e));
       checkouts.set(e.id, checkout);
-      return await turnOne(o.run, r, e, { me, checkout, now: nowOf(), ttlMs, kept: before[key(e.repo)], refs: deps.refs });
+      return await turnOne(o.run, r, e, { me, checkout, now: nowOf(), ttlMs, kept: before[key(e.repo)], refs: deps.refs, pipeline });
     } catch (err) {
       log(`[${e.id}] turn: ${(err as Error).message}`);
       return { repo: e.repo, status: 'unreachable', note: unreachableNote(e), at: new Date(nowOf()).toISOString() };
@@ -381,7 +412,7 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
       if (sha && sha === t.sha && t.record) {
         // Still its own, near its end: renewed.
         const checkout = checkouts.get(e.id) ?? true;
-        next = await claimTurn(o.run, r, full, recordFor(me, checkout, now, ttlMs, t.record), sha, me, now);
+        next = await claimTurn(o.run, r, full, recordFor(me, checkout, now, ttlMs, t.record, undefined, pipeline), sha, me, now);
       } else {
         // Moved: Do it here on this PC (still its own), or another PC's now.
         const rec = sha ? readRecord(await fileAt(o.run, r, RELEASE_PC_REF, sha, RELEASE_PC_FILE)) : null;
@@ -416,7 +447,7 @@ export async function handOver(e: Employee, o: { run: Runner; settings: Settings
     const had = read.kind === 'found' ? readRecord(read.text) : null;
     // Taken from another PC: it is seen, so the turn is three rounds long, not half a day.
     const ttlMs = had && had.pc !== me.id ? ttlFor(o.settings) * 1000 : turnMs(o.settings, loadTurns(), me, now);
-    const rec = recordFor(me, checkout, now, ttlMs, had, o.pin ?? (had?.pc === me.id ? had.pinned : false));
+    const rec = recordFor(me, checkout, now, ttlMs, had, o.pin ?? (had?.pc === me.id ? had.pinned : false), pipelineOf(o.settings));
     const t = await claimTurn(o.run, r, e, rec, read.kind === 'found' ? read.sha : null, me, now);
     if (t.status === 'alone') return { ok: false, message: `${t.note}.` };
     if (t.status === 'unreachable') return { ok: false, message: `Not now: ${t.note}.` };
@@ -486,3 +517,38 @@ export function turnsView(employees: Pick<Employee, 'id' | 'name' | 'repo'>[], n
  * remote out of reach, or no turn taken yet). False when another PC holds every one's, or there are none.
  */
 export const releasesHere = (repos: string[], s: TurnsState = loadTurns()): boolean => repos.some((r) => s.repos[key(r)]?.status !== 'elsewhere');
+
+/** Another PC holding the release turn of repositories looked after here, as GET /api/pipeline's releasePcs say. */
+export interface ReleasePc {
+  name: string;
+  /** How many of the repositories it releases. */
+  repos: number;
+  pinned: boolean;
+  /** Its Build pipeline settings, as its newest record says: null from a Steward before 0.36.296. */
+  pipeline: SharedPipeline | null;
+  /** When this PC last read its record. */
+  at: string;
+}
+
+/**
+ * The other PCs that release these repositories (their turns are 'elsewhere'), the one with most first, each with its
+ * Build pipeline settings: for Manor, which shows them read only where this PC releases none (releasesHere false).
+ */
+export function releasePcs(repos: string[], s: TurnsState = loadTurns()): ReleasePc[] {
+  const by = new Map<string, ReleasePc>();
+  for (const k of new Set(repos.map(key))) {
+    const t = s.repos[k];
+    if (!t || t.status !== 'elsewhere' || !t.record) continue;
+    const rec = t.record;
+    const had = by.get(rec.pc);
+    if (!had) {
+      by.set(rec.pc, { name: rec.name, repos: 1, pinned: rec.pinned, pipeline: rec.pipeline ?? null, at: t.at });
+      continue;
+    }
+    // Its name and settings as its newest record says.
+    const newer = Date.parse(t.at) > Date.parse(had.at);
+    const pipeline = (newer ? (rec.pipeline ?? had.pipeline) : (had.pipeline ?? rec.pipeline)) ?? null;
+    by.set(rec.pc, { name: newer ? rec.name : had.name, repos: had.repos + 1, pinned: had.pinned || rec.pinned, pipeline, at: newer ? t.at : had.at });
+  }
+  return [...by.values()].sort((a, b) => b.repos - a.repos || a.name.localeCompare(b.name));
+}

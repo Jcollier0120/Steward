@@ -16,8 +16,13 @@ Each repository's remote holds `refs/manor/release-pc`: a tiny commit, with no p
 which PC has the repository's turn.
 
 ```json
-{ "pc": "<device id>", "name": "DESKTOP-ABC", "until": "…", "since": "…", "pinned": false, "checkout": true }
+{ "pc": "<device id>", "name": "DESKTOP-ABC", "until": "…", "since": "…", "pinned": false, "checkout": true,
+  "pipeline": { "times": ["14:00"], "days": ["tue", "fri"], "kit": "every", "windowMinutes": 30 } }
 ```
+
+- `pipeline` is that PC's Build pipeline settings (Steward 0.36.296): written with each renewal, and at once when they
+  change there, so the other PCs' Manors show the builds' times read only, with or without the estate. GET
+  /api/pipeline's `releasePcs` lists the PCs that release the repositories looked after, each with its settings.
 
 - The device id is Manor's (`%USERPROFILE%\.manor\device.json`), or the Steward's own when Manor hasn't made one.
 - On GitHub it is read through GitHub's API from the Steward's own process (`git/matching-refs/manor`, asked again with

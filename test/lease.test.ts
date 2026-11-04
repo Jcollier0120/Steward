@@ -520,6 +520,49 @@ test("a round's two looks at the turns are one guard: each employee is asked of 
   assert.equal(L.joinGuards(null, first.guard), first.guard);
 });
 
+test("the release PC's Build pipeline settings ride in its turn record, written again at once when they change", async () => {
+  fresh();
+  const r = remote();
+  const clerk = emp('clerk', r);
+  const at = (times: string[]) => ({ ...settings, buildPipeline: { times, days: ['tue', 'fri'], kit: 'every', windowMinutes: 30 } }) as Settings;
+  await L.takeTurns([clerk], { run: realRun, settings: at(['14:00']), deps: deps({ clerk: r }) });
+  assert.deepEqual((await recordOf(r))?.pipeline, { times: ['14:00'], days: ['tue', 'fri'], kit: 'every', windowMinutes: 30 });
+  const sha = await shaOf(r, L.RELEASE_PC_REF);
+  await L.takeTurns([clerk], { run: realRun, settings: at(['14:00']), deps: deps({ clerk: r }, T0 + MIN) });
+  assert.equal(await shaOf(r, L.RELEASE_PC_REF), sha, 'unchanged, early in its turn: not written again');
+  await L.takeTurns([clerk], { run: realRun, settings: at(['09:00', '14:00']), deps: deps({ clerk: r }, T0 + 2 * MIN) });
+  assert.notEqual(await shaOf(r, L.RELEASE_PC_REF), sha, 'changed: written again at once');
+  const rec = await recordOf(r);
+  assert.deepEqual([rec?.pc, rec?.since, rec?.pipeline?.times], [A.id, new Date(T0).toISOString(), ['09:00', '14:00']], 'still its turn, since it was first taken');
+  // The other PC reads them with the turn, and its pipeline names that PC with them.
+  const t = await L.takeTurns([clerk], { run: realRun, settings: at(['18:00']), deps: deps({ clerk: r }, T0 + 3 * MIN, B) });
+  assert.deepEqual(t.acting, []);
+  assert.deepEqual(L.releasePcs([r.key]).map((p) => [p.name, p.repos, p.pipeline?.times]), [['LAPTOP', 1, ['09:00', '14:00']]]);
+  assert.deepEqual((await recordOf(r))?.pipeline?.times, ['09:00', '14:00'], "the other PC's own settings aren't written into a turn it doesn't hold");
+});
+
+test('releasePcs: the other PCs that release these repositories, the one with most first, each with its newest record\'s settings', () => {
+  const at = (m: number) => new Date(T0 + m * MIN).toISOString();
+  const p = (times: string[]) => ({ times, days: ['mon' as const], kit: 'every' as const, windowMinutes: 30 });
+  const rec = (pc: string, name: string, pipeline?: ReturnType<typeof p>): TurnRecord => ({ pc, name, until: at(30), since: at(0), pinned: false, ...(pipeline ? { pipeline } : {}) });
+  const s: import('../src/lease.ts').TurnsState = {
+    at: at(0),
+    device: A,
+    repos: {
+      'me/app': { repo: 'me/app', status: 'elsewhere', record: rec(B.id, B.name, p(['14:00'])), at: at(1) },
+      'me/web': { repo: 'me/web', status: 'elsewhere', record: rec(B.id, 'DESKTOP-NEW', p(['15:00'])), at: at(2) },
+      'me/cli': { repo: 'me/cli', status: 'elsewhere', record: rec('cccccccc-0000-4000-8000-000000000003', 'OLD-PC'), at: at(1) },
+      'me/own': { repo: 'me/own', status: 'here', record: rec(A.id, A.name), at: at(1) },
+    },
+  };
+  assert.deepEqual(L.releasePcs(['me/app', 'Me/Web', 'me/cli', 'me/own', 'me/app'], s), [
+    { name: 'DESKTOP-NEW', repos: 2, pinned: false, pipeline: p(['15:00']), at: at(2) },
+    { name: 'OLD-PC', repos: 1, pinned: false, pipeline: null, at: at(1) },
+  ]);
+  assert.deepEqual(L.releasePcs(['me/own'], s), [], 'this PC releases it');
+  assert.equal(L.readRecord(JSON.stringify({ ...rec(B.id, B.name), pipeline: { times: 'bad' } }))?.pipeline, undefined, 'settings that are no list of times are left out');
+});
+
 test("releasesHere: this PC releases a repository whose turn it holds or no other PC does; not one another PC holds, nor none", () => {
   const rec = { pc: B.id, name: B.name, until: new Date(T0 + TTL).toISOString(), since: new Date(T0).toISOString(), pinned: false };
   const at = new Date(T0).toISOString();
