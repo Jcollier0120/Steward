@@ -100,7 +100,7 @@ test("the agent's own page: without Manor every field; with Manor, the ones set 
 
   const refused: any = await saveSettingsReply(spec, { values: { roundEvery: 45, plainNotes: false } }, false, { manor, asked: false });
   assert.equal(refused.status, 400);
-  assert.match(refused.json.errors.roundEvery, /Oakfield Manor's Settings, Staff settings/);
+  assert.match(refused.json.errors.roundEvery, /Oakfield Manor's Settings, Employees\./);
   assert.match(refused.json.errors.plainNotes, /whole staff/);
   assert.equal(read().roundEvery, 30, 'nothing written');
 

@@ -777,14 +777,14 @@ function FormHead({ data, later, general, whole }: { data: SettingsData; later: 
   );
 }
 
-/** The settings this form leaves out, set on Manor's Settings with the rest of the staff's (kit 2.140.0), in a line. */
+/** The settings this form leaves out, set on Manor's Settings, Employees, with the rest of the staff's (kit 2.140.0), in a line. */
 function InManor({ manor, url, labels }: NonNullable<SettingsData['inManor']>) {
   // In quotes, as the form's labels: "Look for new clips every" reads as a name, not half a sentence.
   const q = labels.map((l) => `"${l}"`);
   const named = q.length <= 1 ? q.join('') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
   return (
     <p className="sf-intro muted sf-in-manor">
-      {named} {labels.length === 1 ? 'is' : 'are'} set with the rest of the staff's settings, on {manor}'s <a href={url}>Staff settings</a>.
+      {named} {labels.length === 1 ? 'is' : 'are'} set with the rest of the staff's settings, on {manor}'s <a href={url}>Settings, Employees</a>.
     </p>
   );
 }
@@ -893,7 +893,7 @@ export const TAB_FIELDS = 8;
  * TAB_FIELDS ordinary settings) is in tabs instead: General (the settings in no group, and Advanced), then a tab for
  * each group; one Save for them all, and a tab with a problem in it marked, and shown when a save is refused. A field
  * with `shownWhen` shows only while its key holds one of those values. `initial` is GET /api/settings's answer, already
- * in hand (a test's). `api` is where it's read and saved, /api/settings unless said: Manor's Staff settings draws each
+ * in hand (a test's). `api` is where it's read and saved, /api/settings unless said: Manor's Settings, Employees, draws each
  * employee's shared settings from its own address for them (kit 2.140.0).
  */
 export function SettingsForm({ keys, onSaved, onDirty, initial, api }: { keys?: string[]; onSaved?: () => void; onDirty?: (dirty: boolean) => void; initial?: SettingsData; api?: string }) {

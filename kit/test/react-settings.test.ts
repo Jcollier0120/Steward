@@ -309,10 +309,10 @@ test('a list with item.options is picked, not typed: each item by its label with
   assert.match(none, /No repository to pick from yet\./);
 });
 
-test("with Manor installed: the settings set on its Staff settings are said in a line, with the way there (kit 2.140.0)", () => {
+test("with Manor installed: the settings set on its Settings, Employees are said in a line, with the way there (kit 2.140.0)", () => {
   const inManor = { manor: 'Oakfield Manor', url: 'http://castellan.localhost:18585/#/settings/staff', labels: ['Plain-words notes', 'A round every'] };
   const html = m.form({ ...short(), inManor });
-  assert.match(html, /<p class="sf-intro muted sf-in-manor">(&quot;|")Plain-words notes(&quot;|") and (&quot;|")A round every(&quot;|") are set with the rest of the staff&#x27;s settings, on Oakfield Manor&#x27;s <a href="http:\/\/castellan\.localhost:18585\/#\/settings\/staff">Staff settings<\/a>\.<\/p>/);
+  assert.match(html, /<p class="sf-intro muted sf-in-manor">(&quot;|")Plain-words notes(&quot;|") and (&quot;|")A round every(&quot;|") are set with the rest of the staff&#x27;s settings, on Oakfield Manor&#x27;s <a href="http:\/\/castellan\.localhost:18585\/#\/settings\/staff">Settings, Employees<\/a>\.<\/p>/);
   assert.match(m.form({ ...short(), inManor: { ...inManor, labels: ['Video quality'] } }), /(&quot;|")Video quality(&quot;|") is set with/);
   assert.doesNotMatch(m.form(short()), /sf-in-manor/, 'without Manor, nothing');
   assert.doesNotMatch(m.form({ ...short(), inManor }, ['notes']), /sf-in-manor/, "onboarding's few settings say nothing of it");

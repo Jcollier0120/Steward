@@ -128,7 +128,7 @@ interface Common {
   /** A record's switch: drawn on the record's folded line, and working there, so the one that matters most is a click away. */
   inline?: boolean;
   /**
-   * A top-level setting the staff share, set on Manor's Settings (Staff settings) while Manor is installed (kit
+   * A top-level setting the staff share, set on Manor's Settings (Employees) while Manor is installed (kit
    * 2.140.0): shared-settings.ts' fields carry it. 'shared': one value for the whole manor, in Manor's settings.json,
    * which the agent's read function takes first. 'own': the agent's own value, kept in its own settings.json, shown and
    * saved on Manor's Settings through /api/settings?manor=1. Either way the agent's own Settings leaves it out and says
@@ -642,7 +642,7 @@ export interface SettingsReply {
   usedFrom?: string;
   /**
    * With Manor installed, the settings this form leaves out since they're set on Manor's Settings (Field.inManor, kit
-   * 2.140.0): the manor's name, the address of its Staff settings, and each one's label. The panels say so in a line.
+   * 2.140.0): the manor's name, the address of its Employees, and each one's label. The panels say so in a line.
    */
   inManor?: { manor: string; url: string; labels: string[] };
 }
@@ -689,7 +689,7 @@ export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>,
   for (const [k, v] of Object.entries(changes)) {
     const f = schema.find((x) => x.key === k);
     const elsewhere = f ? undefined : all.find((x) => x.key === k && x.inManor);
-    if (elsewhere && place.manor) out.errors[k] = elsewhere.inManor === 'shared' ? `It's set for the whole staff on ${place.manor.name}'s Settings.` : `It's set on ${place.manor.name}'s Settings, Staff settings.`;
+    if (elsewhere && place.manor) out.errors[k] = elsewhere.inManor === 'shared' ? `It's set for the whole staff on ${place.manor.name}'s Settings.` : `It's set on ${place.manor.name}'s Settings, Employees.`;
     else if (!f) out.errors[k] = `There's no setting called "${k}".`;
     else if (f.readOnly) out.errors[k] = "This one can't be changed here.";
     else {

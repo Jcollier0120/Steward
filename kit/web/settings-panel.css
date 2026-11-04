@@ -67,7 +67,7 @@
 .sf-list.sf-noted > li { margin: 0; min-width: 0; padding: 8px 0; border-top: 1px solid var(--line); }
 .sf-item-text.sf-noted-name { flex: 1 1 auto; font-weight: 600; }
 .sf-panel input[type=text].sf-note { display: block; width: 100%; max-width: none; margin-top: 4px; }
-/* Manor's Staff settings, said where its fields would be (kit 2.140.0). */
+/* Manor's Settings, Employees, said where its fields would be (kit 2.140.0). */
 .sf-in-manor a { color: var(--accent-text, var(--accent)); }
 .sf-item-text { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; padding: 5px 0; }
 .sf-panel select.sf-pick { margin-top: 2px; }

@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.297
+
+**A staff member's Settings sends you to Castellan's Settings, Employees, for the settings set there. The Steward hands kit 2.150.1 out, and runs on it.**
+
+### What changed
+
+- **Kit 2.150.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): Castellan's Staff settings tab is now part of Employees, so a staff member's Settings says that a setting kept there is on Castellan's **Settings, Employees**, and the link opens it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member says it once it takes kit 2.150.1.
+
 ## 0.36.296
 
 **On a PC that doesn't release your repositories, Castellan's Settings can show the build times of the PC that does, even without Other PCs turned on.**

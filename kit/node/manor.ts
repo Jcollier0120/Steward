@@ -102,11 +102,15 @@ export const manorSettingsUrl = (m: ManorLink) => `${m.url}#/settings`;
 /** Manor's Settings, Employees: the staff, and why developer features are on or off (#/settings/employees). */
 export const manorStaffUrl = (m: ManorLink) => `${m.url}#/settings/employees`;
 
-/** Manor's Settings, Staff settings: the settings the staff share, set once for the manor (#/settings/staff, kit 2.140.0). */
+/**
+ * Manor's Settings, Employees: the settings the staff share, set once for the manor (kit 2.140.0). The address is still
+ * #/settings/staff, the tab's before Manor folded it into Employees: a Manor since opens Employees from it, an older one
+ * its Staff settings.
+ */
 export const manorStaffSettingsUrl = (m: ManorLink) => `${m.url}#/settings/staff`;
 
 /**
- * The manor's value for a setting the staff share (settings.json's "shared", on Manor's Settings, Staff settings:
+ * The manor's value for a setting the staff share (settings.json's "shared", on Manor's Settings, Employees:
  * shared-settings.ts), read afresh; undefined without an installed Manor, or one that doesn't say (no "shared", or no
  * such key in it). The caller checks the value's kind: one it can't use counts as unsaid. Under node --test none is
  * read unless the test gives `home`.
