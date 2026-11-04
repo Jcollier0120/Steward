@@ -13,7 +13,7 @@ import type { Field } from './settings-kit.ts';
  * - preset: the video copies' quality (videoQualityField, readVideoQuality).
  * - keepVideoTags: whether a video copy keeps where it was filmed and the camera (keepVideoTagsField, readKeepVideoTags).
  *
- * With Manor installed they're set on Manor's Settings, Staff settings (kit 2.140.0), each field's `inManor` says how,
+ * With Manor installed they're set on Manor's Settings, Employees (kit 2.140.0), each field's `inManor` says how,
  * and the agent's own Settings leaves them out (settings-kit.ts' settingsReply says where they are instead):
  * - 'own' (roundEvery, modelCallsPerRound): each agent's own value, as before, kept in its own settings.json; Manor's
  *   Settings shows it beside the agent's name and saves it through the agent's GET and POST /api/settings?manor=1.
@@ -171,7 +171,7 @@ export function readKeepVideoTags(raw: unknown, fallback = false, o: { home?: st
 }
 
 /**
- * The settings Manor keeps for the whole staff (inManor 'shared'), as its Staff settings draws them, and the value each
+ * The settings Manor keeps for the whole staff (inManor 'shared'), as its Employees draws them, and the value each
  * has while neither Manor nor an agent says one: Manor reads the list from here, so a shared setting the kit adds is
  * there too.
  */

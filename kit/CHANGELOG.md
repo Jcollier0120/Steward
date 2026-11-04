@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.150.1
+
+**A staff member's Settings sends you to Manor's Settings, Employees for the settings kept there: Manor folded its Staff settings tab into Employees (Manor's wide layout, the owner, 2026-11-04).**
+
+### What changed
+
+- **react/settings-form.tsx' `InManor`**: the line under the form says the settings left out "are set with the rest of the staff's settings, on Oakfield Manor's **Settings, Employees**", the link's words in place of "Staff settings".
+- **node/settings-kit.ts' `saveSettingsReply`**: a save naming an `own` setting kept in Manor is refused with "It's set on Oakfield Manor's Settings, Employees."
+- **node/manor.ts' `manorStaffSettingsUrl`** keeps its address, `#/settings/staff`: a Manor with the wide layout opens Employees from it, and an older one its Staff settings tab.
+- spec/SHARED-SETTINGS.md says where Manor shows each kind: `own` ones on the employee's settings line, `shared` ones under **Settings for the whole staff**.
+
+### Before you update
+
+- **A test that asserts the old words fails**: "Staff settings</a>" in the line under the form, or "Settings, Staff settings" in a refusal. Assert "Settings, Employees" instead.
+
 ## 2.150.0
 
 **A list setting can carry a few words for each item, drawn under it: the Warrener's destinations, each with what belongs there, in one list (the owner, 2026-11-02). A list of short words is as wide as its longest item.**
