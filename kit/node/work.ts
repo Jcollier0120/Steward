@@ -108,7 +108,7 @@ export const WORK: Record<string, AgentWork> = {
     lines: [
       { what: "Looking at the loose files in Downloads and on the Desktop, reading a PDF's first page and pictures of documents", where: `the processor; the text in a picture, ${READER}`, when: 'every hour; at most 40 PDFs, Office files and pictures a round', plain: { where: `the processor; the text in a picture, ${PLAIN_READER}` } },
       { what: 'A name and a folder for each document', where: MODEL, when: 'at most 15 a round' },
-      { what: 'Moving the files you tick', where: 'the disk', when: 'only when you press File the ticked ones' },
+      { what: 'Moving the files you check', where: 'the disk', when: 'only when you press File the checked ones' },
     ],
   },
   aletaster: {
@@ -208,7 +208,7 @@ export const WORK: Record<string, AgentWork> = {
     lines: [
       { what: 'Asking winget which installed apps have upgrades', where: 'the processor', when: 'every 6 hours, a few seconds', plain: { what: 'Asking Windows which installed apps have upgrades' } },
       { what: 'One line on what each upgrade changes', where: MODEL, when: 'at most 10 a round' },
-      { what: 'Installing the upgrades you tick', where: 'the processor, the disk and the network', when: 'only when you tick them, one at a time' },
+      { what: 'Installing the upgrades you check', where: 'the processor, the disk and the network', when: 'only when you check them, one at a time' },
     ],
   },
   reckoner: {

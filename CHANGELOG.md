@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.299
+
+**The Steward's page says "check" for a checkbox, not "tick". The Steward hands kit 2.150.3 out, and runs on it.**
+
+### What changed
+
+- The page, its help and README say check: the employees checked for a stage, an **All** box that checks every repository, and Look after's checkboxes, off unless you check them.
+- **Kit 2.150.3** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a staff member's "Where its work runs" says "the files you check" and "the upgrades you check".
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.298
 
 **A staff member's About calls the NPU the NPU, not the AI chip, and says the staff where it said agents. The Steward hands kit 2.150.2 out, and runs on it.**

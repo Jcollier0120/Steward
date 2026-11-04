@@ -341,9 +341,9 @@ test("AMD-like, the switch off: a picture starts the Radeon's vision server (its
   }
 });
 
-// ---------------------------------------------------------------- Intel: a ticked reranker on the card, on demand (kit 2.135.5)
+// ---------------------------------------------------------------- Intel: a checked reranker on the card, on demand (kit 2.135.5)
 
-test("Intel-like, the switch off, a reranker ticked: the card keeps only its reranker beside the NPU (Intel's route's order puts the card first); its server starts with the first rerank and the keeper stops it once unused, never starting it again; without the order, as before", async () => {
+test("Intel-like, the switch off, a reranker checked: the card keeps only its reranker beside the NPU (Intel's route's order puts the card first); its server starts with the first rerank and the keeper stops it once unused, never starting it again; without the order, as before", async () => {
   fresh();
   const ORDER = workOrderFor(NPU_CATALOG.routes.intel, 'meteor-lake')!;
   assert.deepEqual(ORDER, { rerank: { devices: ['gpu', 'cpu'] } });
@@ -410,9 +410,9 @@ test("Intel-like, the switch off, a reranker ticked: the card keeps only its rer
   }
 });
 
-// ---------------------------------------------------------------- AMD: a ticked reranker on the Radeon, on demand (kit 2.136.3)
+// ---------------------------------------------------------------- AMD: a checked reranker on the Radeon, on demand (kit 2.136.3)
 
-test("AMD-like, the switch off, a reranker ticked: the Radeon keeps its reranker beside its pictures and embeddings (AMD xdna2's order puts the card first, the owner's ruling as Intel's); its server starts with the first rerank and the keeper stops it once unused, never starting it again; chat never goes to the card, the NPU failed or not", async () => {
+test("AMD-like, the switch off, a reranker checked: the Radeon keeps its reranker beside its pictures and embeddings (AMD xdna2's order puts the card first, the owner's ruling as Intel's); its server starts with the first rerank and the keeper stops it once unused, never starting it again; chat never goes to the card, the NPU failed or not", async () => {
   fresh();
   const ORDER = workOrderFor(NPU_CATALOG.routes.amd, 'xdna2')!;
   assert.deepEqual(ORDER.rerank, { devices: ['gpu', 'cpu'] });

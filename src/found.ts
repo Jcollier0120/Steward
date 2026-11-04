@@ -23,7 +23,7 @@ import { employeesOfProjects, inEffect, isSelf, loadSettings, manorTakesOver, no
  * offers those whose origin is on GitHub and that the account gh is signed in as can push to (one gh query for all of
  * them, viewerPermission ADMIN, MAINTAIN or WRITE), less those it already looks after and those Reeve leaves alone. The
  * person picks: Look after adds one to Settings (lookAfter), with what can be read from its clone (how to test it, its
- * version files, its release script), and with merging and releasing off unless the person ticked them. Nothing is
+ * version files, its release script), and with merging and releasing off unless the person checked them. Nothing is
  * merged, released or claimed for a repository that isn't in Settings, except a version claimed by name (claims.ts).
  *
  * The look is kept in repos-found.json, and made again at most every hour, or when the page asks (Refresh).
@@ -346,7 +346,7 @@ export interface Picked {
 }
 
 /**
- * Look after, for several at once (the page's ticked ones): each added in turn as lookAfter adds one, so each takes an
+ * Look after, for several at once (the page's checked ones): each added in turn as lookAfter adds one, so each takes an
  * id the ones before left free. The ones it couldn't add, each in words.
  */
 export function lookAfterAll(picks: Picked[], o: { found?: FoundState; file?: string; manorHome?: string } = {}): { employees: Employee[]; errors: string[] } {

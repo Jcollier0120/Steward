@@ -587,7 +587,7 @@ test("each work's order brought to this kit's (kit 2.135.1): an AMD PC set up wh
   const unserved = fakePc(null, { workOrder: OLD, support: amd });
   assert.deepEqual(await refreshNpu(unserved.deps), { did: 'no-npu' });
   assert.deepEqual(unserved.config().workOrder, order);
-  // One set up before kit 2.136.3, its reranker ticked or not: the reranker's order comes with the look, apart, nothing
+  // One set up before kit 2.136.3, its reranker checked or not: the reranker's order comes with the look, apart, nothing
   // else changed; the keeper serves a reranker on the Radeon only while searches ask for it.
   const before2136 = fakePc(null, { workOrder: order, rerankOrder: undefined, support: amd });
   const had = before2136.config();

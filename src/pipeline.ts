@@ -15,7 +15,7 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
  * is the same build), and the page says it was late, and why (lateLine). The Steward wakes the PC for its builds, and
  * holds it until they close (build-hold.ts), so on AC power that happens only when the PC can't be woken. The owner's
  * override, Build now (POST /api/pipeline/build, or `steward build` at a console), begins one at once: for some
- * repositories, or all, and, ticked, lets its releases out to customers at once too. An urgent fix (a commit on main whose
+ * repositories, or all, and, checked, lets its releases out to customers at once too. An urgent fix (a commit on main whose
  * changelog entry has a line starting "**Urgent fix:", stages/urgent.ts) begins one at once too, for its repository
  * alone, without the kit (unless the kit is the urgent fix: kitRides); and so do releases that waited until this PC could
  * sign, once a round between builds finds it can (signing.ts's signedBetween, Steward 0.36.161), rather than waiting for

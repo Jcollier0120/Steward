@@ -13,7 +13,7 @@ So reports are always the person's choice, every time: shown in full before they
 ## Three kinds of report
 
 1. **Report a problem.** A link on every agent's page and in Manor ("Something not working? Tell us"). The person picks what it's about (setup, an agent, the local AI, something else), says what happened in their own words if they like, and sees exactly what will be sent.
-2. **"This answer is wrong"**, beside every local model's answer. Every agent's answer already carries the kit's label ("Written by a local model… check it"), from one place, `page.ts`'s `unverified()`; Manor's Ask box and repairs show their own. One click opens a short form: what was wrong (made up, wrong, nonsense, ignored the instructions, too slow), and a comment if they like. The question and answer are **not** included unless the person ticks "include the question and answer", which shows them first.
+2. **"This answer is wrong"**, beside every local model's answer. Every agent's answer already carries the kit's label ("Written by a local model… check it"), from one place, `page.ts`'s `unverified()`; Manor's Ask box and repairs show their own. One click opens a short form: what was wrong (made up, wrong, nonsense, ignored the instructions, too slow), and a comment if they like. The question and answer are **not** included unless the person checks "include the question and answer", which shows them first.
 3. **Help other PCs like yours.** When setup can't use the NPU, when the NPU check fails, or after the benchmark runs, the page offers to send its report: the NPU check's and the benchmark's reports already say nothing about the person or the PC, and they are exactly what we need from a generation we've never run.
 
 ## The format: `castellan-report/1`
@@ -69,6 +69,6 @@ Most reports from the NPU will be about combinations: this generation, with this
 ## Decisions for the owner
 
 - Reports go to our own Exchequer (recommended) rather than an email address or a third-party form: it already knows each PC, rate-limits, and keeps no more than we choose.
-- The question and answer are left out unless ticked (recommended), so "nothing you ask leaves the PC" stays true unless the person chooses otherwise.
+- The question and answer are left out unless checked (recommended), so "nothing you ask leaves the PC" stays true unless the person chooses otherwise.
 - Triage writes the issues the Wright works from (recommended), never the reports themselves.
 - 180 days' keeping (a guess: long enough to see a driver's problem through to its fix).

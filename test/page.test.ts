@@ -169,7 +169,7 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.ok(inCards.indexOf('class="card sw-status"') < inCards.indexOf('class="card sw-repo"'), 'above the cards, not buried under them');
   assert.ok(inCards.indexOf('Releasing for Porter') < inCards.indexOf('class="card sw-repo"'));
   assert.doesNotMatch(html, /<h2[^>]*>Release PC/);
-  // The Steward's own repository: a card, with its release PC in it, and no stage ticks it.
+  // The Steward's own repository: a card, with its release PC in it, and no stage checks it.
   const self = { ...rows[0], id: 'steward', name: 'Steward', repo: 'octocat/steward', self: true };
   const selfTurn = row({ id: 'steward', name: 'Steward', repo: 'octocat/steward', status: 'here', holder: 'this PC' });
   const withSelf = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [rows[0], self] }, round: { ...body.round, repos: true }, turns: { at: null, rows: [selfTurn] } });
@@ -178,8 +178,8 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.doesNotMatch(withSelf, /Releasing for Steward/, 'said in its card, not under the cards');
   assert.match(withSelf, /name="employees"[^>]*value="fake"/);
   assert.doesNotMatch(withSelf, /name="employees"[^>]*value="steward"/, 'its builds release it');
-  // One box ticks every repository, or none: the Steward's own card isn't counted.
-  assert.match(withSelf, /<label class="pick pick-all"><input type="checkbox"[^>]*aria-label="Tick every repository"[^>]*\/> All \(1 of 1\)<\/label>/);
+  // One box checks every repository, or none: the Steward's own card isn't counted.
+  assert.match(withSelf, /<label class="pick pick-all"><input type="checkbox"[^>]*aria-label="Check every repository"[^>]*\/> All \(1 of 1\)<\/label>/);
   // Cards and lists, no tables: open PRs are a list in their repository's card, under a small heading; notes only once
   // a card has one.
   assert.doesNotMatch(withOne, /<table|<th>/);
@@ -249,7 +249,7 @@ test('a stage needs the token, from its own origin or none: without it nothing s
   await served.idle();
   const last = JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8'));
   assert.equal(last.stage, 'release');
-  assert.deepEqual(last.asked, { employees: [], kit: '1.0.0' }, 'the ticked employees (none) and the kit, as the page posts them');
+  assert.deepEqual(last.asked, { employees: [], kit: '1.0.0' }, 'the checked employees (none) and the kit, as the page posts them');
   assert.deepEqual(last.results, []);
   // Merge and Merge the team's PRs are gone (Steward 0.36.124: whoever wrote a PR merges it), even with the token.
   for (const gone of ['/api/stage/merge', '/api/stage/merge-team']) assert.equal((await post(gone, page)).status, 404, gone);
@@ -409,7 +409,7 @@ test('stages side by side: a release beside a round, a third refused while both 
   assert.deepEqual([idle.slots[0].used, idle.running.filter((t: { kind: string }) => t.kind === 'stage')], [0, []], 'each stage ended with it');
 });
 
-test("a stage's POST takes the ticked employees and a well-formed kit only", () => {
+test("a stage's POST takes the checked employees and a well-formed kit only", () => {
   assert.deepEqual(askOf({ employees: ['porter', 'pinder'], kit: '1.0.1' }), { employees: ['porter', 'pinder'], kit: '1.0.1' });
   assert.deepEqual(askOf({ employees: 'porter', kit: '1.0.1; rm' }), { employees: [], kit: null });
 });

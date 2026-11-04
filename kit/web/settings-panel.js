@@ -192,7 +192,7 @@
     return ed;
   }
 
-  /** The "Automatic" (or "None") box of a setting that may be null: ticked, the editor below is hidden. */
+  /** The "Automatic" (or "None") box of a setting that may be null: checked, the editor below is hidden. */
   function nullBox(f, body) {
     const box = h('input', { type: 'checkbox', 'data-keep': true });
     box.addEventListener('change', () => (body.hidden = box.checked));

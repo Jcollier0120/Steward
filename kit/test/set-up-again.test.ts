@@ -568,7 +568,7 @@ test("Manor's switch off adds the pictures too (kit 2.135.3), never chat; the pe
 });
 
 // Intel's reranker on the card (kit 2.135.5): its route's order puts the card first for one. A PC whose card was set up
-// with the reranker ticked (the Smith's Set up names the kinds, so the card got it) needs nothing: once the keeper's look
+// with the reranker checked (the Smith's Set up names the kinds, so the card got it) needs nothing: once the keeper's look
 // writes the order, requests use it. One whose processor took it gains the card's, the same way as AMD's pictures.
 const INTEL_PC = parseDetection(`adapter|0|32902|134217728|8303607808|0x00000000_0x0000a3a3|0|Intel(R) Graphics
 npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost
@@ -612,9 +612,9 @@ test("Intel, a reranker the processor took (kit 2.135.5): the card gains it, its
   const plan = await planSetup({ detection: INTEL_PC, ids: [INTEL_CARD_ID], kinds: off.kinds, raw: intelConfig(entry, cpu), releases: [pinnedRelease()], hfFiles: pinnedHfFiles, home: tools, skipNpu: true });
   assert.deepEqual(plan.targets.map((t) => [t.id, t.kinds]), [[INTEL_CARD_ID, ['chat', 'vision', 'embed', 'rerank']]]);
 
-  // No reranker anywhere: none added, it's an add-on the person ticks.
+  // No reranker anywhere: none added, it's an add-on the person checks.
   assert.deepEqual(await behind(intelConfig(entry), false), []);
-  // The card reranks already (the Smith's Set up, the reranker ticked): nothing to do.
+  // The card reranks already (the Smith's Set up, the reranker checked): nothing to do.
   const both = await cardFor(INTEL_PC, INTEL_CARD_ID, ['chat', 'vision', 'embed', 'rerank' as never], INTEL_LIST);
   assert.ok(both.entry.rerank?.startCommand?.length);
   assert.deepEqual(await A.behindPins({ raw: intelConfig(both.entry, await cpuFor(INTEL_PC, both.tools, ['rerank'])), detection: INTEL_PC, kit: KIT, tools: both.tools, gpuWithNpu: false }), []);
@@ -625,7 +625,7 @@ test("Intel, a reranker the processor took (kit 2.135.5): the card gains it, its
 });
 
 // AMD's reranker on the Radeon (kit 2.136.3, the owner's ruling, as Intel's): AMD xdna2's order puts the card first for
-// one. A PC whose Radeon was set up with the reranker ticked needs nothing once the keeper's look writes the order; one
+// one. A PC whose Radeon was set up with the reranker checked needs nothing once the keeper's look writes the order; one
 // whose processor took it gains the Radeon's, the same way as Intel's, beside the pictures it gained before.
 test("AMD, a reranker the processor took (kit 2.136.3): the Radeon gains it, AMD xdna2's order putting the card first, the switch off or on; the processor's stays; a PC with no reranker, or whose Radeon has one, gains nothing", async () => {
   assert.deepEqual(AMD_ORDER.rerank, { devices: ['gpu', 'cpu'] });
@@ -648,9 +648,9 @@ test("AMD, a reranker the processor took (kit 2.136.3): the Radeon gains it, AMD
   const plan = await planSetup({ detection: AMD_PC, ids: [RADEON_ID], kinds: off.kinds, raw, releases: [pinnedRelease()], hfFiles: pinnedHfFiles, home: tools, skipNpu: true });
   assert.deepEqual(plan.targets.map((t) => [t.id, t.kinds]), [[RADEON_ID, ['vision', 'embed', 'rerank']]]);
 
-  // No reranker anywhere: none added, it's an add-on the person ticks.
+  // No reranker anywhere: none added, it's an add-on the person checks.
   assert.deepEqual(await behind(amdConfig(entry), false), []);
-  // The Radeon reranks already (the Smith's Set up, the reranker ticked): nothing to do.
+  // The Radeon reranks already (the Smith's Set up, the reranker checked): nothing to do.
   const both = await cardFor(AMD_PC, RADEON_ID, ['vision', 'embed', 'rerank' as never], RADEON_LIST);
   assert.ok(both.entry.rerank?.startCommand?.length);
   assert.deepEqual(await A.behindPins({ raw: amdConfig(both.entry, { accelerators: [FLM, both.entry, await cpuFor(AMD_PC, both.tools, ['rerank'])] }), detection: AMD_PC, kit: KIT, tools: both.tools, gpuWithNpu: false }), []);

@@ -614,7 +614,7 @@ function TurnLine({ x }: { x: TurnRow }) {
   );
 }
 
-/** One box for every pick: ticks them all, or none once all are; half-ticked while only some are, with how many. */
+/** One box for every pick: checks them all, or none once all are; half-checked while only some are, with how many. */
 function PickAll({ count, of, onChange }: { count: number; of: number; onChange: (on: boolean) => void }) {
   const box = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -622,27 +622,27 @@ function PickAll({ count, of, onChange }: { count: number; of: number; onChange:
   }, [count, of]);
   return (
     <label className="pick pick-all">
-      <input ref={box} type="checkbox" checked={count === of && of > 0} onChange={(e) => onChange(e.target.checked)} aria-label="Tick every repository" /> {`All (${count} of ${of})`}
+      <input ref={box} type="checkbox" checked={count === of && of > 0} onChange={(e) => onChange(e.target.checked)} aria-label="Check every repository" /> {`All (${count} of ${of})`}
     </label>
   );
 }
 
 /**
- * The stages, for the ticked employees: one that doesn't take the kit starts unticked. The Steward's own row isn't one:
+ * The stages, for the checked employees: one that doesn't take the kit starts unchecked. The Steward's own row isn't one:
  * its builds release it (stages/self.ts).
  */
 function Stages({ v }: { v: StewardView }) {
   const s = v.staff;
   const kit = s?.kit ?? null;
   const rows = (s?.rows ?? []).filter((r) => !r.self);
-  const [ticked, setTicked] = useState<Record<string, boolean>>({});
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
   const castellan = v.castellan !== false;
-  const isTicked = (r: StaffRowView) => ticked[r.id] ?? (castellan ? r.usesKit : true);
-  const all = <PickAll count={rows.filter(isTicked).length} of={rows.length} onChange={(on) => setTicked(Object.fromEntries(rows.map((r) => [r.id, on])))} />;
-  const ask = () => ({ kit: kit ?? '', employees: rows.filter(isTicked).map((r) => r.id) });
+  const isChecked = (r: StaffRowView) => checked[r.id] ?? (castellan ? r.usesKit : true);
+  const all = <PickAll count={rows.filter(isChecked).length} of={rows.length} onChange={(on) => setChecked(Object.fromEntries(rows.map((r) => [r.id, on])))} />;
+  const ask = () => ({ kit: kit ?? '', employees: rows.filter(isChecked).map((r) => r.id) });
   const onKit = rows.filter((r) => r.usesKit);
   const offKit = rows.filter((r) => !r.usesKit);
-  const who = `the ticked employees (${onKit.length} take the kit)`;
+  const who = `the checked employees (${onKit.length} take the kit)`;
   const noKit = noSlot(v) || !kit;
   const one = offKit.length === 1;
   const offKitNote = offKit.length ? ` ${offKit.map((r) => r.name).join(' and ')} ${one ? "doesn't" : "don't"} take the kit yet: the stages pass over ${one ? 'it' : 'them'}.` : '';
@@ -656,7 +656,7 @@ function Stages({ v }: { v: StewardView }) {
           {all}
           {rows.map((r) => (
             <label key={r.id} className="pick">
-              <input type="checkbox" name="employees" value={r.id} checked={isTicked(r)} onChange={(e) => setTicked({ ...ticked, [r.id]: e.target.checked })} /> {r.name}
+              <input type="checkbox" name="employees" value={r.id} checked={isChecked(r)} onChange={(e) => setChecked({ ...checked, [r.id]: e.target.checked })} /> {r.name}
             </label>
           ))}
         </div>
@@ -676,7 +676,7 @@ function Stages({ v }: { v: StewardView }) {
         {all}
         {rows.map((r) => (
           <label key={r.id} className="pick" title={r.usesKit ? undefined : "Doesn't take the kit yet"}>
-            <input type="checkbox" name="employees" value={r.id} checked={isTicked(r)} onChange={(e) => setTicked({ ...ticked, [r.id]: e.target.checked })} /> {r.name}
+            <input type="checkbox" name="employees" value={r.id} checked={isChecked(r)} onChange={(e) => setChecked({ ...checked, [r.id]: e.target.checked })} /> {r.name}
           </label>
         ))}
       </div>
@@ -898,8 +898,8 @@ function RoundCard({ r, now, titled = false }: { r: RoundView; now: number; titl
 
 /**
  * The repositories Reeve found on this PC that you can push to and the Steward doesn't look after yet (found.ts), each
- * with Look after: added to Settings with releasing as ticked here, off unless you tick it. Several
- * picked (their boxes, or All) are looked after in one go, each with its own ticks.
+ * with Look after: added to Settings with releasing as checked here, off unless you check it. Several
+ * picked (their boxes, or All) are looked after in one go, each with its own checkboxes.
  */
 function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; finding: boolean; now: number; tour?: string }) {
   const [asked, setAsked] = useState<Record<string, { merges: boolean; release: boolean }>>({});
@@ -933,7 +933,7 @@ function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; findin
           <>
             <Text variant="muted" as="p">
               Your repositories that Reeve found here: on GitHub the ones you can push to, and each one on another host or on
-              this PC alone. Look after one to have its versions claimed, and its PRs and releases watched, or tick several and look after them in one go. It releases its new versions only if you tick that; you merge your own PRs.{f.into === 'manor' ? " It goes into Manor's Repositories, the one list every agent reads: change or remove it there." : ''}
+              this PC alone. Look after one to have its versions claimed, and its PRs and releases watched, or check several and look after them in one go. It releases its new versions only if you check that; you merge your own PRs.{f.into === 'manor' ? " It goes into Manor's Repositories, the one list every agent reads: change or remove it there." : ''}
             </Text>
             <div className="row pick-bar">
               <label className="pick">

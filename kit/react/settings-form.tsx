@@ -139,7 +139,7 @@ function Choices({ f, value, onChange }: EdProps) {
   );
 }
 
-/** A setting that may be null ("Automatic"): ticked, its editor goes, and comes back as it was when unticked. */
+/** A setting that may be null ("Automatic"): checked, its editor goes, and comes back as it was when unchecked. */
 function NullBox({ f, value, onChange, children }: EdProps & { children: ReactNode }) {
   const last = useRef<unknown>(value === null ? (f.kind === 'list' ? [] : f.kind === 'group' ? Object.fromEntries(f.fields.map((g) => [g.key, blank(g)])) : '') : value);
   if (value !== null) last.current = value;
