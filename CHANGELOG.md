@@ -127,7 +127,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - **A kit bump's notes** (the entry it writes for the kit a staff member now carries) say "kit" where they said "the Steward's kit", and "the parts all the staff share" where they said "the parts every agent of the manor shares".
-  - Under What changed, a line for each kit version, oldest first, is the first sentence of its headline, without who asked and when ("(the owner, 2026-11-01)") or a pull request it names.
+  - Under What changed, a line for each kit version, oldest first, is the first sentence of its headline, without who asked and when, or a pull request it names.
   - Under Before you update, only the kit's points marked `Everyone:`. The rest ("A test that spells out the old label fails", "Nothing to do. A test that compared…") were for the staff's makers, and showed on every staff member's About.
 - **The build joins several kit bumps into one headline**, the newest kit's, and leaves it out when the release brings changes of its own: their headlines alone, with the kits still listed under What changed. A kit with an urgent fix stays in the headline. An entry written before this version is read the same way.
 - **Kit 2.148.4** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a release's notes say "with kit X", and the spec says how a kit entry reaches the staff's notes.
@@ -179,7 +179,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What changed
 
-- **Kit 2.148.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): the kit reads the Watchman's `driver-work.json`, which names each card whose driver its guard is changing (a rollback, through a crash until the start-up that finishes it, or a driver being installed). While a card is named there, no request goes to it, a person's included, and no model server starts on it. The keeper stops the servers it has there within seconds, after a 10-second grace for requests under way. Nothing is marked failed, and the other cards and the processor go on. Found on GAMING-010 on 2026-10-31: the manor started a model server on the RTX 4080 SUPER in the middle of the guard's rollback, and Windows stopped with an error about 14 seconds later.
+- **Kit 2.148.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): the kit reads the Watchman's `driver-work.json`, which names each card whose driver its guard is changing (a rollback, through a crash until the start-up that finishes it, or a driver being installed). While a card is named there, no request goes to it, a person's included, and no model server starts on it. The keeper stops the servers it has there within seconds, after a 10-second grace for requests under way. Nothing is marked failed, and the other cards and the processor go on. Found on a test PC on 2026-10-31: the manor started a model server on the RTX 4080 SUPER in the middle of the guard's rollback, and Windows stopped with an error about 14 seconds later.
 
 ### Before you update
 
@@ -232,7 +232,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What changed
 
-- **A pull request's labels** come from Azure DevOps' labels route (`az devops invoke --resource pullRequestLabels`, GET) when it is asked by its number or branch (viewPr) with its labels wanted. Found live on WEASELDEV03 (AMD), 2026-10-31, on the owner's test organization:
+- **A pull request's labels** come from Azure DevOps' labels route (`az devops invoke --resource pullRequestLabels`, GET) when it is asked by its number or branch (viewPr) with its labels wanted. Found live on an AMD test PC, 2026-10-31, on a test organization:
   - `az repos pr show` gave `"labels": null` on a pull request labelled `wright`;
   - `az repos pr list` and the labels route both gave `wright`.
   - So a recheck never saw owner-done on an Azure DevOps pull request (recheck.ts), and anything that read one by its number saw no owner-first.
@@ -284,7 +284,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What changed
 
-- **Pull requests** are listed, shown, opened, changed, completed and abandoned with `az repos pr`. A pull request's iterations, statuses and comments, a commit's statuses, refs and annotated tags (releases) are asked with `az devops invoke`, in the repository's own route. Found live on WEASELDEV03 (AMD), 2026-10-31: `az rest` to an organization of Microsoft accounts answered with "Azure DevOps Services | Sign In", and az then stopped printing it ("'charmap' codec can't encode '∞'"), so every Azure DevOps call failed. The extension, signed in the same way (`az login`), is let in.
+- **Pull requests** are listed, shown, opened, changed, completed and abandoned with `az repos pr`. A pull request's iterations, statuses and comments, a commit's statuses, refs and annotated tags (releases) are asked with `az devops invoke`, in the repository's own route. Found live on an AMD test PC, 2026-10-31: `az rest` to an organization of Microsoft accounts answered with "Azure DevOps Services | Sign In", and az then stopped printing it ("'charmap' codec can't encode '∞'"), so every Azure DevOps call failed. The extension, signed in the same way (`az login`), is let in.
 - **A pull request asked by its number** is worked with only when it is the repository's: Azure DevOps numbers them across the organization, and `az repos pr` shows and updates one by its number alone.
 - **Completing one** checks its head just before (`az repos pr update` completes it at the head it reads itself) and again once it is completed, so one pushed to in between is said. Squashing works as before; az can't rebase one or change its base, and the Steward says so rather than doing either.
 - **Who you are** is the account `az account show` names. Azure DevOps may write the same name in another case on a pull request; the Steward already compares them ignoring case.
@@ -754,7 +754,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **AMD's NPU reads text in pictures.** On a PC with an AMD Ryzen AI 300 processor or later, the staff's text reader now runs on its NPU instead of the processor. It uses a copy of our model 2 made for AMD's NPU, which computes it exactly.
   - On a Ryzen AI 7 350, a picture costs 27% less energy than on the processor.
-  - It reads 1,221 of our check's 1,253 lines exactly, against 1,224 on the processor and 736 with Windows' own OCR. Each line it reads differently is off by a space, a letter or a quote mark. The owner accepted the three lines.
+  - It reads 1,221 of our check's 1,253 lines exactly, against 1,224 on the processor and 736 with Windows' own OCR. Each line it reads differently is off by a space, a letter or a quote mark.
   - The first time, the PC downloads the copy and Windows ML's part (about 54 MB, 3 MB kept) and prepares it for the NPU in the background, in a few minutes. Until then the processor reads, as before.
   - Older AMD processors with an NPU (Ryzen 7040 and 8040) keep reading on the processor.
 - **The text reader's helper program isn't signed for now.** Its source changed, so each PC builds it itself until the owner signs it again.
@@ -1131,7 +1131,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - **Intel's NPU 3720 reads with the model.** That's the Core Ultra Series 1, and the 200U and 200H. Clerk, Scribe, Reeve and Warrener read text in screenshots and scanned pages with it, as on a Snapdragon. It reads better than Windows OCR in every kind of text the check has, and uses less processor time a picture.
-  - It does spend more energy: 0.86 J a picture against Windows OCR's 0.47 J, about 0.1 Wh more for a thousand pictures. The owner chose it for how much better it reads.
+  - It does spend more energy: 0.86 J a picture against Windows OCR's 0.47 J, about 0.1 Wh more for a thousand pictures. It was chosen for how much better it reads.
   - Other Intel NPUs, and AMD's, read with Windows OCR until they're measured.
 
 ### Before you update
@@ -1266,7 +1266,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What's new
 
-- **Each kind of work goes where it costs least.** On a Ryzen AI 7 350 the manor measured each kind of work on the NPU, the Radeon graphics and the processor. Chat stays on the NPU: a triage costs it 26 J, the Radeon 41 J and the processor 89 J. A picture costs the Radeon 10 J and the NPU 27 J, so pictures now go to the Radeon. The owner's rule: "Radeon unless only NPU up", and "keep single pictures on the NPU when it's running, but send batches of 4 or more waiting pictures to the Radeon." So when the NPU's server is already running and the Radeon's isn't, a single picture goes to the NPU, as starting the Radeon's server for it would cost more (66 J). When 4 or more pictures are waiting, from any of the staff, they go to the Radeon: from the fourth, its start has paid for itself. Search (embeddings) stays on the Radeon, at 13 mJ a word-piece against the processor's 44.
+- **Each kind of work goes where it costs least.** On a Ryzen AI 7 350 the manor measured each kind of work on the NPU, the Radeon graphics and the processor. Chat stays on the NPU: a triage costs it 26 J, the Radeon 41 J and the processor 89 J. A picture costs the Radeon 10 J and the NPU 27 J, so pictures now go to the Radeon. The rule: "Radeon unless only NPU up", and "keep single pictures on the NPU when it's running, but send batches of 4 or more waiting pictures to the Radeon." So when the NPU's server is already running and the Radeon's isn't, a single picture goes to the NPU, as starting the Radeon's server for it would cost more (66 J). When 4 or more pictures are waiting, from any of the staff, they go to the Radeon: from the fourth, its start has paid for itself. Search (embeddings) stays on the Radeon, at 13 mJ a word-piece against the processor's 44.
 
 ### What changed
 
@@ -1655,7 +1655,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **Releases after a stamp.** When a build writes a repository's unstamped changelog entries into its version (the stamp) and merges that, it then releases main. The release used to take main's head from the build's first look at GitHub, which was from before the stamp, and so released the commit before it. On 2026-10-19 this happened twice to Manor:
   - At the 19:00 build, Manor 0.17.2 was stamped, but the release still read 0.17.1, said it was already released, and released nothing.
-  - At the owner's build that evening, 0.17.2 was stamped again to bring in the Seneschal's entry. Then 0.17.2 was released from the commit before that stamp. The code was the same, but its notes said "Brings 2 changes" and left out the Seneschal.
+  - At that evening's build, 0.17.2 was stamped again to bring in the Seneschal's entry. Then 0.17.2 was released from the commit before that stamp. The code was the same, but its notes said "Brings 2 changes" and left out the Seneschal.
 - Now every merge the Steward makes of its own PRs (a stamp, or a kit PR left open by an earlier build) has the round read that branch from GitHub again before it releases.
 
 ### Before you update
@@ -3196,7 +3196,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 - Writing the turn record or the shared version claims to a repository's remote used to start four git commands to build the commit before the push. The Steward now writes that small commit itself, and only the push still goes through git. The push's compare-and-swap is the same as before, so two PCs still can't both take a turn. The commit is the same one git would have made.
 - Reading a turn record or the claims back no longer starts git to read the file. The Steward reads it from the objects it already has, and asks git only when they're packed.
 - Clearing a stage's worktree used to list every worktree with git, remove it, and then always tidy up git's records of worktrees. The Steward now reads those records from git's own files and tidies up only when a worktree folder has gone missing. A folder that isn't there anymore costs no git command at all. Worktrees under a junction or a Dev Drive, and ones deleted by hand, are still found and cleared as before.
-- The Steward's own tests of these parts run faster: on the owner's laptop, the turn and claims tests went from 29 to 23 seconds and the catch-up's from 37 to 35.
+- The Steward's own tests of these parts run faster: on a test laptop, the turn and claims tests went from 29 to 23 seconds and the catch-up's from 37 to 35.
 
 ## 0.36.23
 
@@ -3246,7 +3246,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 
 ### What changed
 
-- The Steward's tests no longer build each stand-in repository from scratch with eight git commands. They build the first of each kind once and copy it for the rest, each copy with a first commit of its own. Its slowest test files take about a quarter less time: on the owner's laptop, the merge guard's tests went from 30 to 22 seconds and the catch-up's from 80 to 59. The whole set of seven slowest files went from 218 to 181 seconds.
+- The Steward's tests no longer build each stand-in repository from scratch with eight git commands. They build the first of each kind once and copy it for the rest, each copy with a first commit of its own. Its slowest test files take about a quarter less time: on a test laptop, the merge guard's tests went from 30 to 22 seconds and the catch-up's from 80 to 59. The whole set of seven slowest files went from 218 to 181 seconds.
 - A few tests make several of their stand-in pull requests in one push instead of one push each.
 - Nothing the Steward does outside its tests changed.
 
@@ -3286,7 +3286,7 @@ Details for each staff member's maintainer are in [kit/CHANGELOG.md](kit/CHANGEL
 
 ### What changed
 
-- The Steward now works in its work folder by its real path, wherever the folder is reached through a junction, a symbolic link or a Dev Drive mounted in a folder. From the evening of 2026-10-13, when the owner's work folder became a junction to a Dev Drive, every agent's release ran its release command there and did nothing: the kit's release script didn't recognise itself through the junction and exited without building or publishing. The Steward reported each one released, round after round, and every other round failed with "a missing but already registered worktree".
+- The Steward now works in its work folder by its real path, wherever the folder is reached through a junction, a symbolic link or a Dev Drive mounted in a folder. From the evening of 2026-10-13, when a work folder became a junction to a Dev Drive, every agent's release ran its release command there and did nothing: the kit's release script didn't recognise itself through the junction and exited without building or publishing. The Steward reported each one released, round after round, and every other round failed with "a missing but already registered worktree".
 - A release command that finishes without making the agent's GitHub release is now a failed release on the PC that releases Castellan too, as it already was everywhere else, rather than "released". Such a release raises the usual alarm and waits for a person or a new commit, instead of reporting success.
 - A folder the Steward made in its work folder is recognised as its own however its path is spelled, so one a stopped stage left behind is still cleared.
 - The Steward hands out kit 2.73.1: the kit's scripts recognise themselves through junctions and Dev Drive mounts too, and the kit's new spec/DEV-DRIVES.md sets out how every agent compares paths.

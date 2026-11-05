@@ -7,7 +7,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // A slow start (boot-speed.ts, the core's bootSpeed): each program keeps the decode speeds its servers report, by boot,
-// and this boot is slow when it decodes well under the earlier boots' usual. The numbers are WEASELDEV03's (an AMD
+// and this boot is slow when it decodes well under the earlier boots' usual. The numbers are LAPTOP-AMD's (an AMD
 // Ryzen AI 7 350, qwen3.5:2b on FastFlowLM 1.0.7): 16-31-token answers at 20.5-20.8 tokens a second after a normal
 // start, 15.8 after one that went into Modern Standby in its first two minutes. Everything in a scratch folder.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-boot-speed-'));

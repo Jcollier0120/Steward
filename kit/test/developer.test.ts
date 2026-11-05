@@ -49,14 +49,14 @@ test("standalone (no Manor): the agent's own switch, off unless its settings.jso
 });
 
 test("under Manor, Manor's value wins over the agent's own, both ways; a Manor that hasn't said leaves the agent's", () => {
-  const on = manorAt('manor-on', { name: 'Weasel Manor', developerOptions: true });
+  const on = manorAt('manor-on', { name: 'Hill Manor', developerOptions: true });
   const off = manorAt('manor-off', { developerOptions: false });
   const silent = manorAt('manor-silent', { name: 'Quiet Manor' });
   const notInstalled = manorAt('manor-gone', { developerOptions: true }, false);
   own({ developerOptions: false });
   const d = developer({ home: on });
   assert.equal(d.on, true);
-  assert.equal(d.setBy?.name, 'Weasel Manor', "Manor's: the agent shows developerOptionsNote() in place of its own switch");
+  assert.equal(d.setBy?.name, 'Hill Manor', "Manor's: the agent shows developerOptionsNote() in place of its own switch");
   own({ developerOptions: true });
   assert.deepEqual(developer({ home: off }).on, false, "the agent's own on, Manor's off: off");
   assert.deepEqual(developer({ home: silent }), { on: true, setBy: null }, "Manor hasn't said: the agent's own");

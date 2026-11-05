@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.150.3
 
-**A staff member's About and page say "check" for a checkbox, not "tick" (the owner, 2026-11-04).**
+**A staff member's About and page say "check" for a checkbox, not "tick".**
 
 ### What changed
 
@@ -17,7 +17,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.150.2
 
-**"Where its work runs" calls the NPU the NPU, the word the ads and Task Manager use, and says the staff where it said agents (the owner, 2026-11-04).**
+**"Where its work runs" calls the NPU the NPU, the word the ads and Task Manager use, and says the staff where it said agents.**
 
 ### What changed
 
@@ -30,7 +30,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.150.1
 
-**A staff member's Settings sends you to Manor's Settings, Employees for the settings kept there: Manor folded its Staff settings tab into Employees (Manor's wide layout, the owner, 2026-11-04).**
+**A staff member's Settings sends you to Manor's Settings, Employees for the settings kept there: Manor folded its Staff settings tab into Employees (Manor's wide layout).**
 
 ### What changed
 
@@ -45,7 +45,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.150.0
 
-**A list setting can carry a few words for each item, drawn under it: the Warrener's destinations, each with what belongs there, in one list (the owner, 2026-11-02). A list of short words is as wide as its longest item.**
+**A list setting can carry a few words for each item, drawn under it: the Warrener's destinations, each with what belongs there, in one list. A list of short words is as wide as its longest item.**
 
 ### What's new
 
@@ -64,7 +64,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.149.1
 
-**"Where its work runs" draws where the model work goes: a card for each accelerator, with an arrow to the next, in the order a request tries them, in place of a long paragraph (the owner, 2026-11-02).**
+**"Where its work runs" draws where the model work goes: a card for each accelerator, with an arrow to the next, in the order a request tries them, in place of a long paragraph.**
 
 ### What changed
 
@@ -81,7 +81,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.149.0
 
-**A note's label says only who wrote it, for developers too: "summary from the Herald", without ", written on the NPU" (the owner, 2026-11-02).**
+**A note's label says only who wrote it, for developers too: "summary from the Herald", without ", written on the NPU".**
 
 ### What changed
 
@@ -97,7 +97,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.148.5
 
-**Settings read more easily: a long help can be laid out as points, and in a narrow window a repository's or record's line keeps its padding when it wraps (the owner, 2026-11-02).**
+**Settings read more easily: a long help can be laid out as points, and in a narrow window a repository's or record's line keeps its padding when it wraps.**
 
 ### What changed
 
@@ -111,7 +111,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.148.4
 
-**A release's notes say "kit" where they said "the Steward's kit". The spec says how a kit entry reaches the staff's notes from Steward 0.36.291 on (the owner, 2026-11-01).**
+**A release's notes say "kit" where they said "the Steward's kit". The spec says how a kit entry reaches the staff's notes from Steward 0.36.291 on.**
 
 ### What changed
 
@@ -128,7 +128,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.148.3
 
-**Connect your AI splits what the staff member connects by itself from the rest, under a heading each (the owner, 2026-11-01).**
+**Connect your AI splits what the staff member connects by itself from the rest, under a heading each.**
 
 ### What changed
 
@@ -140,7 +140,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.148.2
 
-**"Where its work runs" names the staff's own text reader, the kit's model on the NPU where it runs there, else on the processor, where the Clerk's and the Warrener's lines still said Windows' own OCR, on the processor (the owner, 2026-11-01).**
+**"Where its work runs" names the staff's own text reader, the kit's model on the NPU where it runs there, else on the processor, where the Clerk's and the Warrener's lines still said Windows' own OCR, on the processor.**
 
 ### What changed
 
@@ -154,7 +154,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.148.1
 
-**A note's label names the staff member who wrote it, in its own word for its notes or for what it did: "summary from the Herald", "explained by the Surveyor", where it said "note from the local AI, unverified" (the owner, 2026-10-31).**
+**A note's label names the staff member who wrote it, in its own word for its notes or for what it did: "summary from the Herald", "explained by the Surveyor", where it said "note from the local AI, unverified".**
 
 ### What changed
 
@@ -192,7 +192,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - a rollback, from before it changes anything until it's done, through a crash until the start-up that finishes it;
   - a driver being installed (Windows Update, the maker's installer, Windows).
   Each entry holds until its `until`, which the guard moves on at each look, so one the guard no longer renews lets go by itself.
-  - Found on GAMING-010 (RTX 4080 SUPER), 2026-10-31: the manor started `llama-server.exe` on the card 89 s into the guard's rollback of NVIDIA's 621.01, while pnputil was still removing it. Windows stopped with bug check 0x7E in nvlddmkm.sys about 14 s later, the third bug check during a rollback on that PC.
+  - Found on a test PC (RTX 4080 SUPER), 2026-10-31: the manor started `llama-server.exe` on the card 89 s into the guard's rollback of NVIDIA's 621.01, while pnputil was still removing it. Windows stopped with bug check 0x7E in nvlddmkm.sys about 14 s later, the third bug check during a rollback on that PC.
 - **No request goes there** (core `candidates`, `driver`): a held card is skipped for every request, a person's too ("the Watchman is rolling back the driver of the …"), and the work goes to another card or the processor. With none left it waits, as for a busy accelerator, and a request whose server fails there meanwhile marks nothing failed.
 - **No server starts there** (`ensureServer`): `DriverChanging`, a `ServerNotRunning`, for a server on a held card. The keeper doesn't set a held card up again meanwhile.
 - **The keeper stops its servers there**: in their turn when that's had at once, else once the requests under way end, within `driverGraceMs` (10 s), and then all the same; never restarted. It watches the file, so this comes within seconds of the guard writing it, not at the next minute's look. The guard waits 20 s for them before pnputil runs.
@@ -236,7 +236,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - **A stale OAuth access token is forgotten where GCM keeps a refresh token** (git-auth.ts' `signedIn`).
   - GCM hands back the access token it keeps however old it is (Codeberg's last an hour). It makes a new one from its refresh token only once it keeps none.
-  - Since 2.146.6 a refused sign-in is forgotten only when shown stale. On a private repository, the only one a process reads, nothing shows that: the host refuses it (401) with the sign-in and without. So the refusal stood until a person signed in again. Found live on WEASELDEV03 (AMD), 2026-10-31: `git ls-remote` of the owner's private Codeberg repository was refused with GCM's 1-hour-old token, through kit 2.146.6+.
+  - Since 2.146.6 a refused sign-in is forgotten only when shown stale. On a private repository, the only one a process reads, nothing shows that: the host refuses it (401) with the sign-in and without. So the refusal stood until a person signed in again. Found live on an AMD test PC, 2026-10-31: `git ls-remote` of the owner's private Codeberg repository was refused with GCM's 1-hour-old token, through kit 2.146.6+.
   - Now, when the host refuses a sign-in (401) and nothing shows why, the kit asks Windows Credential Manager for GCM's refresh token by name: `cmdkey /list:git:https://refresh_token.<host>`. cmdkey lists names, never secrets.
   - Where it is there, the helper is told to forget the access token (`git credential reject`, the helper's own answer). GCM's erase leaves the refresh token as it is.
   - The helper is then asked again with the host's `WWW-Authenticate` (`wwwauth[]`, as git asks after a 401), makes a new access token from its refresh token, and the command runs once more with it. GCM 2.9 knows a Gitea or Forgejo host (Codeberg) only by its `Basic realm="Gitea"`. Without it, GCM has no OAuth to make a token by and would ask for a password, which it can't (the kit asks no one): found live, 2026-10-31, through GCM's own trace.
@@ -607,7 +607,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.142.3
 
-**The shared video switch is called "Keep GPS and camera details in video copies". Its old name, "Keep a video's place and camera details", read as where the videos are kept, and sent the owner to Manor's Staff settings looking for a folder setting that isn't there.**
+**The shared video switch is called "Keep GPS and camera details in video copies". Its old name, "Keep a video's place and camera details", read as where the videos are kept, and sent people to Manor's Staff settings looking for a folder setting that isn't there.**
 
 ### What changed
 
@@ -812,7 +812,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.137.0
 
-**AMD's XDNA 2 NPU (Ryzen AI 300 and later) reads with the text reader's model by default, with a copy of model 2 made for it (`ocr-model-v2-amd`). Measured on a Ryzen AI 7 350, a picture costs 27% less energy there than on its processor (3,492 mJ against 4,757), and it reads 1,221 of the check's 1,253 lines, against the processor's 1,224 and Windows OCR's 736. The three lines are the owner's call.**
+**AMD's XDNA 2 NPU (Ryzen AI 300 and later) reads with the text reader's model by default, with a copy of model 2 made for it (`ocr-model-v2-amd`). Measured on a Ryzen AI 7 350, a picture costs 27% less energy there than on its processor (3,492 mJ against 4,757), and it reads 1,221 of the check's 1,253 lines, against the processor's 1,224 and Windows OCR's 736.**
 
 ### What changed
 
@@ -953,7 +953,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
 
 ### What changed
 
-- **The owner's ruling (2026-10-25):** "Yes: on AMD too, a ticked reranker goes to the Radeon on demand even with the switch off, like Intel's; it stops when idle."
+- **The rule:** "on AMD too, a ticked reranker goes to the Radeon on demand even with the switch off, like Intel's; it stops when idle."
 - **Before this, with the switch off, a ticked reranker didn't run on AMD.** The Smith's Set up names the kinds, so the Radeon was set up with the reranker. Then the core's rule beside the NPU took the card's reranker away from every request, and AMD's NPU doesn't rerank. Unless the processor had been set up for it, Reeve searched without it.
 - **Data only:** AMD XDNA 2's generation in npu-vendors.json adds `rerank` to its `order` (`routes.amd.generations.xdna2.order.rerank`): the Radeon, then the processor. Its `basis` gives the figures below and the ruling. The rest is kit 2.135.5's, unchanged:
   - setup writes the order apart from `workOrder`, as `rerankOrder` (a kit before refuses a `rerank` in `workOrder`), and puts a ticked reranker on the Radeon, not the processor, the switch on or off;
@@ -1019,7 +1019,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
 ### What changed
 
 - **What broke:** a release signs its scripts (kit 2.123.0), and the signature block took ps-worker.ps1 from 3.4 KB to 18 KB. ps.ts started the worker as `-EncodedCommand`, its text as UTF-16 in base64: about 48,000 characters, over the 32,767 a Windows command line holds. `spawn` threw ENAMETOOLONG at every start. It threw out of `powershell()` itself, not as a rejection, so the script never fell back to a powershell.exe of its own.
-  - Seen on the owner's laptop from 2026-10-24 21:34Z, in each agent released signed (Chamberlain, Clerk, Envoy, Manor, Reeve, the Steward, the Surveyor). Clerk's rounds failed in OCR's `runScript` and `otherAlphabetLanguages`. Every one's pace was set by priority alone ("the full pace couldn't be set beyond priority"). Manor couldn't look at the accelerators.
+  - Seen on a test laptop from 2026-10-24 21:34Z, in each agent released signed (Chamberlain, Clerk, Envoy, Manor, Reeve, the Steward, the Surveyor). Clerk's rounds failed in OCR's `runScript` and `otherAlphabetLanguages`. Every one's pace was set by priority alone ("the full pace couldn't be set beyond priority"). Manor couldn't look at the accelerators.
 - **ps.ts' worker runs from its file** (`-File`, with `-ExecutionPolicy Bypass` as before): its length no longer matters, and its signature counts where Windows checks one (Smart App Control).
 - **A worker Windows won't start at all** (spawn throwing, for any reason) no longer fails the script. It runs on its own (`oneShot`), and so does every later script in that process, as when powershell.exe can't start.
 - Unchanged: a script sent to the worker goes on its standard input, and a long one on its own goes in as a temporary file.
@@ -1038,7 +1038,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
 
 ### What changed
 
-- **The owner's ruling (2026-10-24):** "Yes: on Intel, a ticked reranker goes to the graphics card on demand even with the switch off, like AMD's pictures; it stops when idle."
+- **The rule:** "on Intel, a ticked reranker goes to the graphics card on demand even with the switch off, like AMD's pictures; it stops when idle."
 - **Before this, with the switch off, a ticked reranker didn't run on Intel.** The Smith's Set up names the kinds, so the card was set up with the reranker, the switch on or off. Then the core's rule beside the NPU (`withoutGpuBesideNpu`) took the card's reranker away from every request, and no Intel NPU reranks. Unless the processor had been set up for it, Reeve searched without it.
 - **The rule is data:** Intel's route in npu-vendors.json has an `order` of its own (`routes.intel.order`, NpuRoute's new `order`): `rerank`, the graphics card, then the processor, for every generation, an unknown one too. `workOrderFor` puts a generation's own order over its route's, work by work.
   - AMD's route has none: its reranker waits for its own VitisAI trial. The Snapdragons' have none: an X2's NPU reranks.
@@ -1106,7 +1106,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
 
 ### What changed
 
-- **The core's rule beside the NPU:** with the switch off, a graphics card also keeps the work the PC's work order puts it first for, even though the NPU serves it. This is the owner's ruling of 2026-10-24: "Yes: on AMD, pictures go to the Radeon on demand even with the graphics-card switch off; chat stays off the card."
+- **The core's rule beside the NPU:** with the switch off, a graphics card also keeps the work the PC's work order puts it first for, even though the NPU serves it. The rule: "on AMD, pictures go to the Radeon on demand even with the graphics-card switch off; chat stays off the card."
   - Today that is AMD XDNA 2's pictures (its order: the Radeon, then the NPU, then the processor). Intel's and Snapdragon's generations have no order, so nothing changes there.
   - Chat never goes to the card beside an NPU, whatever an order says, the NPU failed or not. The card's reranker stays out too.
   - The order is config.json's `workOrder` as the core reads it: none with an `acceleratorOrder` list of the person's own, so their pictures stay on the NPU.
@@ -1149,7 +1149,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
 
 ### What changed
 
-- **npu-vendors.json:** AMD's XDNA 2 order for pictures is the Radeon, then the NPU, then the processor, with no `runningFirst` or `batchAt`. This is the owner's ruling of 2026-10-24: "Yes: AMD single pictures go to the Radeon." Until now a lone picture went to the NPU while FastFlowLM was up and the Radeon's server wasn't, unless 4 or more waited.
+- **npu-vendors.json:** AMD's XDNA 2 order for pictures is the Radeon, then the NPU, then the processor, with no `runningFirst` or `batchAt`. The rule: "AMD single pictures go to the Radeon." Until now a lone picture went to the NPU while FastFlowLM was up and the Radeon's server wasn't, unless 4 or more waited.
   - The Radeon read the suite's pictures right 8 times of 8, against the NPU's 6 of 8.
   - A warm picture there costs 10.4 J, against 26.6 J on the NPU.
   - Starting its server for a lone picture costs 66 J, the price of the better read.
@@ -1201,7 +1201,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
   - every other group the same.
 
   The processor reads as the NPU does (1,224). 15 of model 1's 42 missed lines are now right, and 3 others are newly missed.
-- **spec/OCR.md** has model 2's figures, what's left (30 lines, from 42), and the owner's rule for choosing how a PC reads:
+- **spec/OCR.md** has model 2's figures, what's left (30 lines, from 42), and the rule for choosing how a PC reads:
   - accuracy is never given up for less power;
   - a route that reads clearly better wins over a cheaper one, without asking the owner again;
   - the least energy decides between routes that read as well.
@@ -1266,7 +1266,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
 
 ## 2.129.0
 
-**Text in an alphabet other than Latin (Cyrillic, Greek, Chinese, Arabic…) is read again by Windows' own OCR, where Windows has an OCR language of that alphabet for the account. Windows' lines replace the model's only where they hold that alphabet; text in the Latin alphabet keeps the model's read. This was the owner's call.**
+**Text in an alphabet other than Latin (Cyrillic, Greek, Chinese, Arabic…) is read again by Windows' own OCR, where Windows has an OCR language of that alphabet for the account. Windows' lines replace the model's only where they hold that alphabet; text in the Latin alphabet keeps the model's read.**
 
 ### What's new
 
@@ -1321,7 +1321,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
 
 ## 2.126.0
 
-**When the NPU's line is too long for a background batch, a second copy of the text reader reads it with our own model on the processor. Windows OCR used to read it. The owner chose how well it reads over the power it costs.**
+**When the NPU's line is too long for a background batch, a second copy of the text reader reads it with our own model on the processor. Windows OCR used to read it. How well it reads was chosen over the power it costs.**
 
 ### What changed
 
@@ -1335,7 +1335,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
 
 ## 2.124.0
 
-**Wherever no NPU can read with our own model, it reads on the processor: an NPU that fails its self-check, a Snapdragon's included, no longer leaves the reading to Windows OCR. The owner chose how well it reads over the power it costs.**
+**Wherever no NPU can read with our own model, it reads on the processor: an NPU that fails its self-check, a Snapdragon's included, no longer leaves the reading to Windows OCR. How well it reads was chosen over the power it costs.**
 
 ### What changed
 
@@ -1373,7 +1373,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
 
 ## 2.122.0
 
-**An Intel PC whose NPU isn't measured yet, or that has none, reads text with our own model on the processor, as an AMD PC does since 2.121.0. The owner chose how well it reads over the power it costs.**
+**An Intel PC whose NPU isn't measured yet, or that has none, reads text with our own model on the processor, as an AMD PC does since 2.121.0. How well it reads was chosen over the power it costs.**
 
 ### What changed
 
@@ -1624,7 +1624,7 @@ On a Ryzen AI 7 350 on 2026-10-25 (VitisAI plugin 1.8.75, Windows ML 2.4.89), wi
 - **`NpuGeneration.order`** (optional): for `chat`, `vision` and `embed`, the kinds of device that work spends least energy on, first preferred (`devices`: `npu`, `gpu`, `cpu`, each once), `runningFirst`, `batchAt`, and a `basis` with the figures. `workOrderFor(route, generation)` gives it without its bases (null for none), and `fallbackDevices(route, generation, work)` the devices after the NPU (a card, then the processor, unless the order says otherwise). Only AMD's XDNA 2 has one: chat on the NPU, the Radeon, the processor; pictures on the Radeon, the NPU, the processor, a running server first unless 4 or more wait; embeddings on the Radeon, the processor.
 - **config.json's `workOrder`**, a keeper key (`KEEPER_KEYS`, `ACCELERATOR_KEYS`): those orders, as setup writes them. `parseAccelerators` reads it only when `acceleratorOrder` is "auto" (the core's `readWorkOrder`), leaving out a work written wrong, and `validateAccelerators` names it.
 - **`candidates` follows the work's order** (the core, and its vectors): the fitting accelerators in that work's devices' order, any it leaves out after them (`workOrdered`), and with `runningFirst`, those whose server is up first (the state's `running`), unless as many of the work wait as its `batchAt` (the state's `waiting`). The NPU first then applies as before. The node `candidates` takes `workOrder`, `running(id)` and `waiting`. `serversUp(accs, work, workOrder, look?)` asks each server of that work whether it's up (a GET of its `/v1/models`, all at once, 0.5 s at most: `UP_PROBE_MS`), only when that work's order goes by it. `Npu` asks before each request (its `serversUp` option replaces it in tests). Manor's gpuWithNpu off still keeps a card out.
-- **Why pictures go to the Radeon on AMD** (a Ryzen AI 7 350, 2026-10-23): a warm picture costs the Radeon 10.4 J (Qwen3-VL-2B, llama.cpp) against the NPU's 26.6 J (FastFlowLM 1.0.10), and the Radeon read 8 of 8 against the NPU's 6. But starting the Radeon's server and one picture costs 66 J. n pictures cost about 55.6 + 10.4n J on the Radeon from a stopped server, against 26.6n J on the NPU: the same at 3.4. **The owner's answers**: asked by the AMD manager where pictures should go, "Radeon unless only NPU up"; then, to the Snapdragon manager, "keep single pictures on the NPU when it's running, but send batches of 4 or more waiting pictures to the Radeon." So a picture goes to the NPU only when FastFlowLM is up, the Radeon's server isn't, and fewer than 4 pictures wait (vision's `batchAt` 4). With both servers up, a single picture goes to the warm Radeon (10.4 J against 26.6 J): the owner's ruling on that case, to the Snapdragon manager, of "With both servers up, a single picture stays on the NPU. Only batches of 4 or more go to the Radeon.", was "actually change that, make it the gpu instead". The Radeon's server, once started, takes the pictures after (`runningFirst`) and holds its 2.8 GB beside FastFlowLM's 3.8 GB until the keeper stops it.
+- **Why pictures go to the Radeon on AMD** (a Ryzen AI 7 350, 2026-10-23): a warm picture costs the Radeon 10.4 J (Qwen3-VL-2B, llama.cpp) against the NPU's 26.6 J (FastFlowLM 1.0.10), and the Radeon read 8 of 8 against the NPU's 6. But starting the Radeon's server and one picture costs 66 J. n pictures cost about 55.6 + 10.4n J on the Radeon from a stopped server, against 26.6n J on the NPU: the same at 3.4. **The rules**: for where pictures should go, "Radeon unless only NPU up"; then, "keep single pictures on the NPU when it's running, but send batches of 4 or more waiting pictures to the Radeon." So a picture goes to the NPU only when FastFlowLM is up, the Radeon's server isn't, and fewer than 4 pictures wait (vision's `batchAt` 4). With both servers up, a single picture goes to the warm Radeon (10.4 J against 26.6 J): the ruling on that case was "With both servers up, a single picture stays on the NPU. Only batches of 4 or more go to the Radeon.", was "actually change that, make it the gpu instead". The Radeon's server, once started, takes the pictures after (`runningFirst`) and holds its 2.8 GB beside FastFlowLM's 3.8 GB until the keeper stops it.
 - **Counting what waits** (`waitingFor(work, turns)`, npu.ts): this process's requests of the work from when each is asked until its turn starts, so a batch sent at once counts itself whole, and other processes' tickets in those turns' lines that say they're of it. `Npu` counts only for a work whose order has a `batchAt`. **`AskOptions.batch`**: how many the caller is sending together, this one included (a folder of screenshots); the larger of the two counts.
 - **A ticket says its work** (spec/NPU-QUEUE.md): `"work"` in its contents, `chat`, `vision`, `embed` or `rerank` (the core's `ticketText`, its sixth argument; `waitingOf` reads it back, and `queueSnapshot`'s waiting has it). `TurnOptions.work` and `acceleratorTurn`'s `work` write it. Informational: a ticket without it counts as no picture.
 - **Setup writes `workOrder`** from the NPU's generation, whether its NPU was set up or blocked (`withWorkOrder`), and removes it where there's none. When the NPU can't take a work, its fallback follows the order (`fallbackDevices`): a work whose order puts the processor before a card goes to the processor.
@@ -2625,7 +2625,7 @@ Nothing until it adopts a module; then it deletes its own copy and imports the k
 
 **A page's console no longer ends when Manor updates, and a page whose console has gone runs its git, gh and PowerShell hidden instead of failing every one.**
 
-On WEASELDEV02 (Intel Core Ultra 5 225U), on 2026-10-17 at 18:21Z, Manor updated itself once the PC woke from Modern Standby. Its update ends Manor's task (`schtasks /End`), and Task Scheduler then ends every process in the task's job. That job held more than Manor:
+On OFFICE-PC (Intel Core Ultra 5 225U), on 2026-10-17 at 18:21Z, Manor updated itself once the PC woke from Modern Standby. Its update ends Manor's task (`schtasks /End`), and Task Scheduler then ends every process in the task's job. That job held more than Manor:
 
 - Manor starts each page through the agent's `open`, detached. Node never asks for CREATE_BREAKAWAY_FROM_JOB, so that `open`, the cmd its `start /b` runs, cmd's console host (conhost.exe) and the named launcher all stay in the task's job.
 - Only the page leaves it (named.cs, under the manor's ceiling).
@@ -2830,7 +2830,7 @@ The looks wait until nobody has used the NPU for 2 minutes (`NPU_REFRESH_QUIET_M
 
 **A slow start is noticed. Some PCs come up from a restart with the NPU decoding well below its usual speed until the next restart, and nothing but the speed shows it. The kit now keeps the decode speed each chat answer was written at, by boot, so Manor can say when this boot is slow and that a restart usually fixes it.**
 
-On WEASELDEV03 (an AMD Ryzen AI 7 350, qwen3.5:2b on FastFlowLM 1.0.7), a boot that went into Modern Standby in its first two minutes decoded 16- to 31-token answers at 15.8 tokens a second against 20.5 to 20.8 after a normal start (17.4 against 22.9 for answers of 100 tokens and more), all day, until a restart. Prompts read as fast as ever.
+On OFFICE-PC (an AMD Ryzen AI 7 350, qwen3.5:2b on FastFlowLM 1.0.7), a boot that went into Modern Standby in its first two minutes decoded 16- to 31-token answers at 15.8 tokens a second against 20.5 to 20.8 after a normal start (17.4 against 22.9 for answers of 100 tokens and more), all day, until a restart. Prompts read as fast as ever.
 
 ### What's new
 
@@ -3092,9 +3092,9 @@ On WEASELDEV03 (an AMD Ryzen AI 7 350, qwen3.5:2b on FastFlowLM 1.0.7), a boot t
   - **Who passed none:** the keeper's NPU refresh, which stops the NPU's servers first and so was refused on every PC (`/v1/chat/completions on … refused the connection (ECONNREFUSED)`). Also npu-check's kit-test, harden-timeout, harden-nonsense and calibrate steps, which stop the server first too.
   - **Setup passes one,** so Set up local AI was never affected.
   - **Seen on all three vendors under kit 2.78.12, on 2026-10-17:**
-    - **Snapdragon X2 (WEASELDEV01, GenieX), 01:31Z:** refused on 127.0.0.1:18181, so it kept Qwen3-VL-4B instead of Qwen3-VL-2B.
-    - **AMD XDNA 2 (WEASELDEV03, FastFlowLM), 01:32Z:** refused on 18184, so it kept qwen3-it:4b and qwen3vl-it:4b instead of qwen3.5:2b.
-    - **Intel NPU (WEASELDEV02, OpenVINO Model Server), 02:46Z:** refused on 18183, so it kept a 5.98 GB command instead of 3.72 GB.
+    - **Snapdragon X2 (OFFICE-PC, GenieX), 01:31Z:** refused on 127.0.0.1:18181, so it kept Qwen3-VL-4B instead of Qwen3-VL-2B.
+    - **AMD XDNA 2 (OFFICE-PC, FastFlowLM), 01:32Z:** refused on 18184, so it kept qwen3-it:4b and qwen3vl-it:4b instead of qwen3.5:2b.
+    - **Intel NPU (OFFICE-PC, OpenVINO Model Server), 02:46Z:** refused on 18183, so it kept a 5.98 GB command instead of 3.72 GB.
     - The managers put the cost at about 1 to 1.2 GB on the X2 and the XDNA 2, and 2.3 GB on Intel's.
     - No new server was started on any of them: no `started.<pid>.json` for 18181, and no new OVMS graph or NPU cache. A refresh replayed by hand passed on the X2 in 20 s and on the XDNA 2 in 22 s. The XDNA 2's started its server through `ensureServer` itself before the test.
   - A PC whose `npu-refresh.json` says `failed` for 2.78.12 looks again with this kit, as with any newer kit.
@@ -3612,8 +3612,8 @@ FastFlowLM sets the mode with AMD's `xrt-smi.exe` and ignores the result. On a P
 ### What changed
 
 - **setup.ts**: the embedding server on a graphics card (or the processor) starts with `-c 4096 -b 2048 -ub 512`, not `-c 8192 -b 2048 -ub 2048`. Its endpoint gets its own `maxContextTokens`, 1,365 (`EMBED_CAP`), below the card's: by the kit's estimate of 3 characters a token, an input under it is at most 4,095 characters, and so fits 4,096 tokens even at a token a character.
-  - On a Radeon 860M (WEASELDEV03, llama.cpp b11669 Vulkan), the server held 1,278 MB of the card's memory against 1,891 MB, and its working set was 1,386 MB against 2,049 MB. The times were the same: 28 ms against 31 ms for a query, 288 ms against 293 ms for Reeve's longest input (2,060 characters, 451 tokens), and 2.22 s against 2.24 s for 2,694 tokens. Every vector matched old against new (cosine 1.000000), as it did old against old.
-  - **On a Core Ultra 5 225U's Intel Graphics** (WEASELDEV02, 4 Xe cores, llama.cpp b11624 Vulkan, 2026-10-15). Runs went old, new, old, new, with each input sent 5 times warm. It held 0.60 GB less:
+  - On a Radeon 860M (OFFICE-PC, llama.cpp b11669 Vulkan), the server held 1,278 MB of the card's memory against 1,891 MB, and its working set was 1,386 MB against 2,049 MB. The times were the same: 28 ms against 31 ms for a query, 288 ms against 293 ms for Reeve's longest input (2,060 characters, 451 tokens), and 2.22 s against 2.24 s for 2,694 tokens. Every vector matched old against new (cosine 1.000000), as it did old against old.
+  - **On a Core Ultra 5 225U's Intel Graphics** (OFFICE-PC, 4 Xe cores, llama.cpp b11624 Vulkan, 2026-10-15). Runs went old, new, old, new, with each input sent 5 times warm. It held 0.60 GB less:
     - working set 1.37 GB against 1.97;
     - private bytes 1.41 GB against 2.01;
     - the card's shared memory 1.25 GB against 1.85;
@@ -3909,7 +3909,7 @@ FastFlowLM sets the mode with AMD's `xrt-smi.exe` and ignores the result. On a P
 
 ### What changed in the NPU benchmark
 
-Made on WEASELDEV02 (#255, #257, #258) and released first in this version.
+Made on OFFICE-PC (#255, #257, #258) and released first in this version.
 
 **The NPU benchmark runs, reports and reads near the generation's own cap, and counts an energy figure only when the battery's reading can tell it. On a Snapdragon its pictures reach GenieX as files and a text candidate is measured as one, a candidate's report carries its files' SHA-256s, and its spec says how to run it on a PC.**
 
@@ -4029,7 +4029,7 @@ Made on WEASELDEV02 (#255, #257, #258) and released first in this version.
 
 - **install.ts**: the release copied to `app.new` is flushed before it is swapped in for `app`, and so is `app` after the release is copied into a folder that can't be moved (`replaceContents`, which now flushes what it copied into). Windows writes a rename at once and a file's contents a few seconds later: when a PC crashed right after an update, the agent's app folder came back with every file the right size and nothing in it but NUL bytes, and its page couldn't start until it was installed again. `InstallDeps.flush` stands in for the flush in tests.
 - **safeinstall.ts**: `app.prev`, the copy a rollback puts back, is flushed as it's made.
-- **store.ts** `writeJson`, accelerator-config.ts `writeJsonWhole` and the accelerators' shared files: the temporary file is flushed before the rename, so a crash leaves the old file or the new one. About 1 ms more a write (0.2 ms to 1.2 ms on the owner's laptop); a write that would change nothing still writes nothing.
+- **store.ts** `writeJson`, accelerator-config.ts `writeJsonWhole` and the accelerators' shared files: the temporary file is flushed before the rename, so a crash leaves the old file or the new one. About 1 ms more a write (0.2 ms to 1.2 ms on a test laptop); a write that would change nothing still writes nothing.
 - An agent's app folder of 130 files flushes in about 0.03 s.
 
 ### What changed for Intel's NPU 3720
@@ -5126,7 +5126,7 @@ Nothing: it updates itself as usual.
 
 ## 2.31.0
 
-**Local AI on every Copilot+ NPU, installed by setup: Qualcomm Snapdragon, Intel Core Ultra and AMD Ryzen AI.** The owner's call: Snapdragon-only was a deal breaker. The NPU is now found by the Neural processor class whatever its maker, setup installs its maker's model server and models with a pinned SHA-256 and writes its entry only after a test request, and the accelerators move to a folder Manor owns, so a household gets working AI without Reeve. spec/NPU-VENDORS.md says which server each maker gets, why, and what is still unverified on hardware.
+**Local AI on every Copilot+ NPU, installed by setup: Qualcomm Snapdragon, Intel Core Ultra and AMD Ryzen AI.** Snapdragon alone wasn't enough. The NPU is now found by the Neural processor class whatever its maker, setup installs its maker's model server and models with a pinned SHA-256 and writes its entry only after a test request, and the accelerators move to a folder Manor owns, so a household gets working AI without Reeve. spec/NPU-VENDORS.md says which server each maker gets, why, and what is still unverified on hardware.
 - **node/npu-vendors.ts and spec/npu-vendors.json are new.** The routes, as data: Qualcomm's GenieX 0.7.0 (chat and vision on one Qwen3-VL-4B), Intel's OpenVINO Model Server 2026.4.1 (chat on Qwen3-4B INT4), AMD's FastFlowLM 1.0.7 (chat and vision on Qwen3-4B-Instruct-2507 and Qwen3-VL-4B, XDNA 2 only). Each has its pinned download (URL, size, SHA-256), how it installs (GenieX's installer per user and silent; the others unpacked into the tools home), its port (18181, 18183, 18184), its start arguments and environment, its models, caps, timeouts, quirks and licences, and per generation whether it is supported and verified. `npuVendorOf`, `npuGeneration`, `npuSupport` (supported, or why not: an unknown maker or generation, AMD's first XDNA, a driver older than the server needs, the wrong processor for its build), `planNpu`, `npuEntry`, `routeEnv`, `checkPinned` (a pulled model's files against their pinned SHA-256s: the X2 Elite's Qwen3-VL-4B is pinned).
 - **node/detect.ts: vendor-neutral detection, as Heiward's NpuHardware.cs.** DETECT_PS lists the ComputeAccelerator class with its maker, PnP id and driver (`npu2|…`), and falls back to the Hexagon driver. `Detection.npu` is a `DetectedNpu`: as before, plus `manufacturer`, `deviceId`, `vendor`, `generation`, `label`, `supported`, `why`, `verified`. `parseNpus(text, arch)` is new. An NPU the manor can't use is still an NPU in hardware.json.
 - **node/setup.ts: the NPU first, then the cards, then the processor.** `planSetup` plans the NPU's server and models (`SetupPlan.npu`, or `npuNote` saying why not) unless a person configured the NPU (asking for `npu` by name sets it up again), counts them in the download it asks about, and with no graphics card sets the processor up for embeddings when the NPU chats (none of the NPU servers makes embeddings). `runSetup` sets the NPU up first (`setUpNpu`: download and check, install, pull, check the pinned files, then `testNpuEntry`, a chat and a vision answer in the NPU's turn), and writes its entry only when all of it worked. `SetupIo` gains `run`, `exists`, `testNpu` and `hash` (`NpuIo`); `PlanInput` and `SetupOptions` take `env`. The install's GenieX default is dropped on a PC whose NPU the manor can't use too. The report shows the NPU's maker, generation and why it isn't used.
@@ -5519,7 +5519,7 @@ Nothing: it updates itself as usual.
 
 ## 2.3.0
 
-**Back to the manor, from every agent's page.** When Manor is installed here, the title bar starts with Manor's icon and "Back to <manor>" (its name from Manor's settings, "Back to Weasel Manor" say), linking to Manor's page; a narrow window shows the icon alone. node/manor.ts is new:
+**Back to the manor, from every agent's page.** When Manor is installed here, the title bar starts with Manor's icon and "Back to <manor>" (its name from Manor's settings, "Back to Hill Manor" say), linking to Manor's page; a narrow window shows the icon alone. node/manor.ts is new:
 - **`manorLink()`** reads Manor's settings.json (in %USERPROFILE%\.manor, or MANOR_HOME, as Manor reads it) for its name and port. It is null when Manor isn't installed (no settings.json, or no app folder beside it), and then the title bar says nothing.
 - **`/manor-icon.svg`** serves Manor's icon from the agent's own address (its page loads images from itself only): the one Manor's page shows, kept for ten minutes; else the generic icon in Manor's app folder; else a plain house. An SVG with anything that runs is never served.
 - **Nothing for an agent to do.** Reeve's and Heiward's pages, which aren't the kit's, get the link in their own PRs.

@@ -77,7 +77,7 @@ export const MANOR_GRACE_MS = 90_000;
 
 /**
  * Manor's sign-in task, by the names Manor has had: in its folder for this account (since Manor's Everyone install:
- * \Manor (Jcoll)\Home page), then the older ones, run only when they're this account's own (the kit's runOwnTask), never
+ * \Manor (Sam)\Home page), then the older ones, run only when they're this account's own (the kit's runOwnTask), never
  * another account's.
  */
 export const manorTasks = (env: NodeJS.ProcessEnv = process.env) => [taskName('Home page', env, 'Manor'), '\\Manor\\Home page', '\\Castellan\\Home page'];

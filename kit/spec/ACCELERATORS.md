@@ -268,7 +268,7 @@ The manor's own use is far lighter (2 to 7 minutes of the NPU's time a day on th
 
 ## Driver work (kit 2.148.0)
 
-While the Watchman's driver guard changes a graphics card's driver, the manor keeps off that card. On GAMING-010 (RTX 4080 SUPER) on 2026-10-31, the manor started llama-server.exe on the card 89 s into the guard's rollback of NVIDIA's 621.01, while pnputil was still removing it. Windows stopped with bug check 0x7E in nvlddmkm.sys about 14 s later, the third bug check during a rollback on that PC (10-27, 10-30). That overlap is a strong lead, not a proven cause.
+While the Watchman's driver guard changes a graphics card's driver, the manor keeps off that card. On DESKTOP-GAMING (RTX 4080 SUPER) on 2026-10-31, the manor started llama-server.exe on the card 89 s into the guard's rollback of NVIDIA's 621.01, while pnputil was still removing it. Windows stopped with bug check 0x7E in nvlddmkm.sys about 14 s later, the third bug check during a rollback on that PC (10-27, 10-30). That overlap is a strong lead, not a proven cause.
 
 - **The guard says so**: `driver-work.json` in its own folder, `%ProgramData%\Watchman\lamplighter` (every user may read it; only SYSTEM and Administrators write there). It names each card whose driver is changing (Shared files, below):
   - a rollback, from before it changes anything until it's done, with its stage: `rolling`, `restart` (waiting for Windows to restart) or `finishing` (a start-up finishing one the PC went down in the middle of);

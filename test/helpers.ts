@@ -37,7 +37,7 @@ process.env.EXCHEQUER_PUBLISHER_KEY ??= 'steward-test-publisher-key';
 makersPcForTests(() => true);
 // Developer Pro (the kit's developer-pro.ts, its own check of the same firmware): the Wright's and the Bailiff's work with
 // the staff is done there, so the tests see it too, unless one says otherwise (developerProForTests(() => false)). Left to
-// the firmware, every other PC (WEASELDEV02, a contributor's) failed the tests that file work for the Wright.
+// the firmware, every other PC (LAPTOP-INTEL, a contributor's) failed the tests that file work for the Wright.
 developerProForTests(() => true);
 
 // The real git.exe, as run.ts starts it (the kit's git-exe.ts): Git for Windows' launcher on PATH would double each one's cost.

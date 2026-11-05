@@ -2219,7 +2219,7 @@ test('a Snapdragon, whose NPU serves all three: its card is set up whole, as bef
   assert.equal(off.downloadBytes, on.downloadBytes);
 });
 
-// Smart App Control (kit 2.104.0): FastFlowLM 1.0.7's libraries are unsigned, and on WEASELDEV03 (2026-10-22) Windows
+// Smart App Control (kit 2.104.0): FastFlowLM 1.0.7's libraries are unsigned, and on LAPTOP-AMD (2026-10-22) Windows
 // stopped flm.exe at once (0xC0E90002) to pull and to serve. Setup tries it, knows the block, and goes on to what runs.
 /** A Code Integrity block of `file` in `folder`, as the log names it: by volume, not drive. */
 const blockOf = (folder: string, file: string) => ({ file: `\\Device\\HarddiskVolume3${folder.slice(2)}\\${file}`, policy: 'VerifiedAndReputableDesktop' });

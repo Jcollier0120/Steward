@@ -970,7 +970,7 @@ An idle stop never races a request: the keeper stops a server only holding the N
 
 Integrated graphics have under 2 GB of memory of their own (`OWN_MEMORY_GB`: an Intel Core Ultra's, an AMD Ryzen AI's Radeon, a Snapdragon's Adreno), so their llama.cpp servers hold the PC's own memory, as the NPU's do. On a PC under 20 GB, with no `gpuIdleStopMinutes` in config.json, the keeper stops such a card's servers (chat, vision, embeddings and a reranker) by the NPU's rule, from llama.cpp's cold start (`idleStop.cardColdStartMs`, 6 s): 20 times it is 2 minutes, so the floor's 5 (npu-vendors.ts' `cardIdleStopMinutes`). A card with memory of its own, one whose memory config.json doesn't give, the processor, and any card on a bigger PC keep rules.json's 10, as before.
 
-Measured on WEASELDEV02 (Core Ultra 5 225U, 15.4 GB, Intel Graphics with 0.1 GB of their own), llama.cpp b11669-vulkan, from the disk cache, below-normal priority, start to the first answer, two runs each:
+Measured on LAPTOP-INTEL (Core Ultra 5 225U, 15.4 GB, Intel Graphics with 0.1 GB of their own), llama.cpp b11669-vulkan, from the disk cache, below-normal priority, start to the first answer, two runs each:
 
 | Server | Cold start | Holds while idle |
 |---|---|---|
