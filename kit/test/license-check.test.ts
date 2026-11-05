@@ -443,6 +443,22 @@ test("an Everyone install: the PC's id is in the shared license folder, and the 
   assert.deepEqual([c.state, c.held], ['paid', false]);
   writeFileSync(path.join(shared, 'license', 'device.json'), JSON.stringify({ id: '11111111-1111-4111-8111-111111111111' }));
   assert.equal(check.checkLicense({ id: 'fixture', home: manor, env, guid: null }).state, 'another-pc');
+
+  // Brought from the first account's own Manor folder (a Just me install before): its id was made from that folder,
+  // which device.json names, so another account's staff count it too. Naming a folder can't make another PC's id this one's.
+  const here = '6f1d2c3b-4a59-4e1f-9b2a-0c1d2e3f4a5b';
+  const first = path.join(root, 'first-account', '.manor');
+  const brought = lic.deviceIdFor(here, first);
+  hold({ ...payload, sub: brought });
+  const on = () => check.checkLicense({ id: 'fixture', home: manor, env, guid: here }).state;
+  writeFileSync(path.join(shared, 'license', 'device.json'), JSON.stringify({ id: brought, pc: lic.pcFor(here) }));
+  assert.equal(on(), 'another-pc', 'with no folder to make it from');
+  writeFileSync(path.join(shared, 'license', 'device.json'), JSON.stringify({ id: brought, pc: lic.pcFor(here), folder: first }));
+  assert.equal(on(), 'paid', 'made from the folder it names');
+  const theirs = lic.deviceIdFor('0f0e0d0c-0b0a-4909-8807-060504030201', first);
+  hold({ ...payload, sub: theirs });
+  writeFileSync(path.join(shared, 'license', 'device.json'), JSON.stringify({ id: theirs, pc: lic.pcFor(here), folder: first }));
+  assert.equal(on(), 'another-pc', "another PC's, whatever folder it names");
   rmSync(shared, { recursive: true, force: true });
 });
 

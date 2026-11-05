@@ -207,12 +207,19 @@ export function pcFor(guid: string): string {
   return createHash('sha256').update(`castellan/pc/v1\n${guid.trim().toLowerCase()}`, 'utf8').digest('hex').slice(0, 32);
 }
 
-/** device.json in `folder`: its id, and which PC made it (`pc`) where it says; null when there's none to read. */
-export function readDevice(folder: string): { id: string; pc?: string } | null {
+/** device.json as the license check reads it: its id, which PC made it (`pc`) and the folder its id was made for (`folder`), where it says. */
+export interface KeptDevice {
+  id: string;
+  pc?: string;
+  folder?: string;
+}
+
+/** device.json in `folder`, or null when there's none to read. */
+export function readDevice(folder: string): KeptDevice | null {
   try {
-    const j = JSON.parse(readFileSync(path.join(folder, DEVICE_FILE), 'utf8').replace(/^﻿/, '')) as { id?: unknown; pc?: unknown };
+    const j = JSON.parse(readFileSync(path.join(folder, DEVICE_FILE), 'utf8').replace(/^﻿/, '')) as { id?: unknown; pc?: unknown; folder?: unknown };
     if (typeof j?.id !== 'string') return null;
-    return typeof j.pc === 'string' ? { id: j.id, pc: j.pc } : { id: j.id };
+    return { id: j.id, ...(typeof j.pc === 'string' ? { pc: j.pc } : {}), ...(typeof j.folder === 'string' && j.folder ? { folder: j.folder } : {}) };
   } catch {
     return null;
   }
@@ -225,12 +232,14 @@ export const readDeviceId = (folder: string): string | null => readDevice(folder
  * Whether an id is this PC's, by what it can be told by (kit 2.151.0): one made from a PC (version 8) is made again
  * here from MachineGuid and each folder, and must be the same, whatever device.json says beside it; a random one from
  * before 2026-10-21 by device.json's `pc`, where it says. Where MachineGuid can't be read, or an old id has no `pc`,
- * there's nothing to tell it by, and it is this PC's.
+ * there's nothing to tell it by, and it is this PC's. device.json's `folder` is one more folder to make it from: an
+ * Everyone install's shared device.json, brought from the first account's own Manor folder, says that folder. Naming
+ * any folder there can't make another PC's id this one's: the id is made from this PC's MachineGuid.
  */
-function madeHere(id: string, pc: string | undefined, folders: readonly string[], guid: string | null): boolean {
+function madeHere(d: KeptDevice, folders: readonly string[], guid: string | null): boolean {
   if (!guid) return true;
-  if (MADE_HERE.test(id)) return folders.some((f) => deviceIdFor(guid, f) === id);
-  return pc === undefined || pc === pcFor(guid);
+  if (MADE_HERE.test(d.id)) return (d.folder ? [...folders, d.folder] : folders).some((f) => deviceIdFor(guid, f) === d.id);
+  return d.pc === undefined || d.pc === pcFor(guid);
 }
 
 /**
@@ -244,7 +253,7 @@ function madeHere(id: string, pc: string | undefined, folders: readonly string[]
  * to check it by, so it is this PC's.
  */
 export function isThisPc(sub: string, folders: readonly string[], guid: string | null = machineGuid()): boolean {
-  const kept = folders.map(readDevice).filter((d): d is { id: string; pc?: string } => !!d);
-  if (kept.length) return kept.some((d) => d.id === sub && madeHere(d.id, d.pc, folders, guid));
-  return madeHere(sub, undefined, folders, guid);
+  const kept = folders.map(readDevice).filter((d): d is KeptDevice => !!d);
+  if (kept.length) return kept.some((d) => d.id === sub && madeHere(d, folders, guid));
+  return madeHere({ id: sub }, folders, guid);
 }
