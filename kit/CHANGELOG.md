@@ -2,6 +2,36 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.152.0
+
+**A release carries no source: the server's code is V8 bytecode, built for the Node.js the staff run on, on Arm64 and x64.**
+
+### What's new
+
+- **node/bytecode.ts** (new): `buildBytecode(stage, { esbuild, nodes, folders, id })`, after `minifyRelease`. Each module the server runs (every `.js` under `src\` but a `web` folder's) is turned into CommonJS by esbuild, compiled whole by V8, and its code cache written beside it for each Node.js and processor (`cli.arm64-v22.23.3.jsc`). Its `.js` becomes a one-line stub, `src\package.json` says CommonJS, and the entry stubs `require` their module. Then each Node.js loads every module, in a temporary home and folder (`smokeTest`): one that can't load stops the release, and so does one that ends the process as it loads (a script that does its work whenever it's loaded). A worker thread's script, which loads only in a worker, is tried there.
+  - Top-level awaits go into async functions, chained in order (`withoutTopLevelAwait`); an `await import(x)` in a declaration becomes a `require`. Any other await in a declaration, and `import.meta.resolve`, aren't built: the build says where.
+  - A published release is built for `RUNTIME_NODE` (v22.23.3, what Castellan's setup brings) on Arm64 and x64, by those Node.js builds themselves: downloaded once from nodejs.org, checked against `NODE_PINS`, kept in `%USERPROFILE%\.steward\node` (`KIT_NODES`). An x64 PC can't build Arm64's, so it can't publish.
+  - **A zip for each processor:** built for both (`--publish`, `--as-published`), the release has `<Name>.arm64-<version>.zip` and `<Name>.x64-<version>.zip` beside the zip with both (`archZipName`, `stageForArch`), each with one processor's bytecode and native files and a release.json naming that processor alone. A Manor downloads its own (Porter: 2.9 MB, against 5.1 MB with both); a Manor from before never matches their names, and takes the one with both.
+  - Also: `keepOwnBytecode`, `bytecodeRelease`, `nodeFor`, `bytecodeNodes`, `isServerModule`, `stubOf`, `entryStubOf`, `toCommonJs`, `jscFor`, `jscNode`, `isArchZip`.
+- **node/run-bytecode.cjs** (new; a release carries it as `src\kit\run-bytecode.cjs`): runs a module from its bytecode. On a Node.js it has none for, it says which it runs on, and that Castellan's setup brings that one. A V8 flag set as the code runs (`v8.setFlagsFromString`) doesn't stop the modules loaded after it.
+- **spec/RELEASES.md**: "Bytecode".
+
+### What changed
+
+- **node/release.ts**: a release (not `--readable`) is built as bytecode. `release.json` says `"form": "bytecode"` and `"bytecode": { "node": [...], "arch": [...] }`. The install note names the Node.js to install with. SHA256SUMS.txt lists each processor's zip after the one with both, and `--publish` publishes them all; `--install` installs this PC's. New: `npm run release -- --as-published` builds the bytecode for each processor, as `--publish` does, and publishes nothing: whether a release would build, before it's published.
+- **node/install.ts**: installing a bytecode release keeps only the installing Node.js's bytecode. On a Node.js it has none for, nothing is installed or changed, and it says why.
+- **node/outside-run.ts**: runs its job only when Node starts it as a script (`node outside-run.js <folder>`, as Task Scheduler does). Loaded by anything else, as a release's check loads every module, it does nothing. Before, loading it wrote pid.json, result.json and log.txt where it was loaded, and ended the process.
+
+### What an agent must do
+
+- **Have no top-level `await` in a declaration** (`const x = await f()` at a module's top): move it into the code that uses it. `await import()` there is fine, and so is a top-level `await` in a statement (a CLI's `switch`). Its release says where, if there's one.
+- **Not use `import.meta.resolve`** in the server's code.
+- **Have no module that does its work whenever it's loaded and ends the process** (`process.exit` at its top level): a script run by Node should check it's the one Node started, as outside-run.ts does.
+- **Not read a function's source** (`fn.toString()`): there's none to read.
+- **Release from an Arm PC** (the Snapdragon laptops), which builds both processors' bytecode. Its first published release downloads Node.js 22.23.3 for x64 once (about 30 MB).
+- **Its installed copies take a bytecode release only on Node.js 22.23.3**, which Castellan's setup brings. A PC whose agent runs on another Node.js keeps the copy it has, and its update says why.
+- **Its tests** run from source, as before.
+
 ## 2.151.0
 
 **An installed copy's license check can't be switched off or fooled from outside: no environment variable turns it off or adds a key, and a device.json copied from another PC is that PC's. The hold banner's Subscribe (or Sign in) goes to Manor's Settings, License.**

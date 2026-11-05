@@ -1,5 +1,6 @@
-import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { OutsideJob, OutsideSetupResult } from './outside.ts';
 
 /**
@@ -35,14 +36,28 @@ async function doJob(job: OutsideJob): Promise<unknown> {
   return null;
 }
 
-writeWhole('pid.json', { pid: process.pid });
-try {
-  const { job, env } = JSON.parse(readFileSync(file('job.json'), 'utf8')) as { job: OutsideJob; env: Record<string, string> };
-  Object.assign(process.env, env, { KIT_OUTSIDE: '1' });
-  writeWhole('result.json', { ok: true, value: await doJob(job) });
-} catch (e: any) {
-  log(String(e?.message ?? e));
-  writeWhole('result.json', { ok: false, error: String(e?.message ?? e).split(/\r?\n/)[0] });
+/**
+ * Whether this is the script Node was started with: only then does it run its job. Anything else that loads it, as a
+ * release's build loads every module to check it (bytecode.ts smokeTest), gets nothing done.
+ */
+function startedAsScript(): boolean {
+  try {
+    return !!process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
 }
-// The PowerShell worker, and anything else setup left waiting on, would hold the process: it's done.
-process.exit(0);
+
+if (startedAsScript()) {
+  writeWhole('pid.json', { pid: process.pid });
+  try {
+    const { job, env } = JSON.parse(readFileSync(file('job.json'), 'utf8')) as { job: OutsideJob; env: Record<string, string> };
+    Object.assign(process.env, env, { KIT_OUTSIDE: '1' });
+    writeWhole('result.json', { ok: true, value: await doJob(job) });
+  } catch (e: any) {
+    log(String(e?.message ?? e));
+    writeWhole('result.json', { ok: false, error: String(e?.message ?? e).split(/\r?\n/)[0] });
+  }
+  // The PowerShell worker, and anything else setup left waiting on, would hold the process: it's done.
+  process.exit(0);
+}

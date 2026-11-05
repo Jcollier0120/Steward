@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, r
 import os from 'node:os';
 import path from 'node:path';
 import { APP, appRoot, dataDir, devCheckout, pageUrl } from '../app.ts';
+import { bytecodeRelease, keepOwnBytecode, type BytecodeRelease } from './bytecode.ts';
 import { duty, setDuty } from './duty.ts';
 import { flushTree } from './flush.ts';
 import { endProcesses, keepOwnArch, nativeRelease, pagesFrom, processesUnder, type NativeRelease } from './native.ts';
@@ -78,8 +79,13 @@ export interface Release {
   built: string;
   /** The Steward's kit it carries in src\kit\ (none in a release from before the kit had a version). */
   kit?: string;
-  /** Built (minified: minify.ts, kit 2.16.0), or readable (--readable, never published); none before kit 2.16.0. */
-  form?: 'minified' | 'readable';
+  /**
+   * Built: as V8 bytecode, no source (bytecode.ts, kit 2.152.0), or minified (minify.ts, kit 2.16.0); or readable
+   * (--readable, never published); none before kit 2.16.0.
+   */
+  form?: 'bytecode' | 'minified' | 'readable';
+  /** A bytecode release's Node.js versions and processors (bytecode.ts, kit 2.152.0): install keeps the one running it. */
+  bytecode?: BytecodeRelease;
   /** The native files it carries (native.ts, kit 2.62.0): where, for which processors, and whether they're signed. */
   native?: NativeRelease;
   /**
@@ -132,8 +138,10 @@ export interface InstallDeps {
   rename?(from: string, to: string): void;
   /** Writes a folder's files through to the disk before it is swapped in (default: flush.ts flushTree). */
   flush?(dir: string): void;
-  /** This PC's processor, as Node names it (default: process.arch): which native files are kept. */
+  /** This PC's processor, as Node names it (default: process.arch): which native files and bytecode are kept. */
   arch?: string;
+  /** The version of the Node.js the task runs, `node` (default: process.version): which bytecode is kept. */
+  nodeVersion?: string;
   /** The processes running a program from under a folder (default: native.ts processesUnder). */
   programsIn?(dir: string): Promise<number[]>;
   /** Ends processes by id (default: native.ts endProcesses). */
@@ -307,8 +315,9 @@ export function readRelease(root: string): Release | null {
     const r = JSON.parse(readFileSync(path.join(root, 'release.json'), 'utf8').replace(/^\uFEFF/, ''));
     if (!r || typeof r.version !== 'string') return null;
     const native = nativeRelease(r.native);
-    const { native: _, ...rest } = r;
-    return { ...(rest as Release), ...(native ? { native } : {}) };
+    const bytecode = bytecodeRelease(r.bytecode);
+    const { native: _, bytecode: __, ...rest } = r;
+    return { ...(rest as Release), ...(native ? { native } : {}), ...(bytecode ? { bytecode } : {}) };
   } catch {
     return null;
   }
@@ -566,7 +575,7 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     out(`${what} from ${d.root}: ${update ? `would update the installed copy${before ? ` (${before.version})` : ''}` : 'would install it'}.`);
     if (unfinished) out(`  0. Put ${unfinished.version} back in ${app} from ${app}.old, where an earlier install that never finished its swap left it.`);
     out(`  1. End its page process, if it's running (${d.pageUrl}).`);
-    out(`  2. Copy the release to ${app}.new${release.native ? ` (its native files for this PC's processor only)` : ''}, then swap it in for ${app}.`);
+    out(`  2. Copy the release to ${app}.new${release.native ? ` (its native files for this PC's processor only)` : ''}${release.bytecode ? ` (its bytecode for this Node.js only, ${process.version} for ${d.arch ?? process.arch})` : ''}, then swap it in for ${app}.`);
     out(`  3. Register the task ${TASK_NAME} for ${d.user}, ${manorStarts ? 'run only when asked: Manor starts it at sign-in (Castellan is in Startup apps)' : 'at sign-in'}: ${SCHTASKS} ${quoted(create)}`);
     out(`     It runs: ${CONHOST} ${taskArguments(d.node, app)}`);
     out(`     In: ${app}`);
@@ -606,6 +615,12 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     cpSync(d.root, next, { recursive: true });
     const noNative = keepOwnArch(next, release.native, d.arch);
     if (noNative) out(noNative);
+    // Its bytecode for the Node.js its task runs, this one (bytecode.ts): the other processors' and versions' go.
+    const notHere = keepOwnBytecode(next, release.bytecode, { arch: d.arch ?? process.arch, version: d.nodeVersion ?? process.version });
+    if (notHere) {
+      rmSync(next, { recursive: true, force: true });
+      return unchanged(`${notHere} Nothing was changed.`);
+    }
     // On the disk before the swap: a crash after it then finds the release whole, not files of NUL bytes (kit 2.73.3).
     (d.flush ?? flushTree)(next);
   } catch (e) {
