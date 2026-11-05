@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.301
+
+**The Steward hands kit 2.151.0 out, and runs on it: the staff's license check can't be switched off from outside, and their hold banner has Subscribe.**
+
+### What changed
+
+- **Kit 2.151.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): in an installed copy, no environment variable turns the license check off or adds a key it trusts, and a device.json copied from another PC no longer makes this one licensed. When the trial has ended, a staff member's page has **Subscribe**, to Castellan's Settings, License; with no license, **Sign in**.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.300
 
 **The Steward hands kit 2.150.4 out, and runs on it: a round's time limit counts only the time the PC was awake.**

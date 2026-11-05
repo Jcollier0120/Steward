@@ -2,6 +2,30 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.151.0
+
+**An installed copy's license check can't be switched off or fooled from outside: no environment variable turns it off or adds a key, and a device.json copied from another PC is that PC's. The hold banner's Subscribe (or Sign in) goes to Manor's Settings, License.**
+
+### What's new
+
+- **node/built.ts** (new): `isBuiltRelease()`, true in a built release and false in a checkout run from its source. minify.ts's build writes `true` in place of `KIT_BUILT`, so nothing at run time changes it: no setting, no environment variable.
+- **node/manor.ts**: `manorLicenseUrl(m)`, Manor's Settings, License (`#/settings/license`). A Manor from before it opens General, which holds License.
+- **node/license-check.ts**: `holdAction(text)`, the hold banner's button: **Subscribe** once the trial ended, **Sign in** when this PC holds no license.
+
+### What changed
+
+- **node/license.ts**:
+  - `licenseCheckOn(env, built)`: a built release always reads the license. Before, `NODE_TEST_CONTEXT` set in the environment, as any person can set one, turned the check off in every agent.
+  - `trustedKeys(env, carried, built)`: a built release takes no key from `MANOR_LICENCE_KEYS`. Before, a key set there let anyone sign a license of their own that every agent took.
+  - `isThisPc`: an id made from a PC (version 8) is made again from MachineGuid and the folder, and must be the same, even with a device.json beside it; a random id from before 2026-10-21 must have device.json's `pc` say this PC, where it says. Before, device.json's id was taken as it was, so a licence.json and device.json copied from a licensed PC made another PC licensed. New: `pcFor(guid)` (Manor's), `readDevice(folder)`.
+- **node/minify.ts**: each module is built with `KIT_BUILT` as `true`.
+- **node/page.ts**, **node/react-page.ts**, **react/shell.tsx**: the hold banner has **Subscribe** (or **Sign in**), to Manor's Settings, License, where a Manor is. The page shell's new `license` says where and what.
+
+### What an agent must do
+
+- **Nothing.** Its next release, built on this kit, checks its license whatever the environment says, and its page's hold banner has the button.
+- **Its tests** run from source, so `NODE_TEST_CONTEXT` and `MANOR_LICENCE_KEYS` still work there as before.
+
 ## 2.150.4
 
 **A round's time limit, and a PowerShell script's, count only the time the PC was awake: a round a sleep caught goes on after the wake instead of being let go.**

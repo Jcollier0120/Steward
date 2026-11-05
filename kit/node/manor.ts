@@ -103,6 +103,12 @@ export const manorSettingsUrl = (m: ManorLink) => `${m.url}#/settings`;
 export const manorStaffUrl = (m: ManorLink) => `${m.url}#/settings/employees`;
 
 /**
+ * Manor's Settings, License: where a license is bought or signed in to (#/settings/license, kit 2.151.0). A Manor from
+ * before it opens General, which holds License.
+ */
+export const manorLicenseUrl = (m: ManorLink) => `${m.url}#/settings/license`;
+
+/**
  * Manor's Settings, Employees: the settings the staff share, set once for the manor (kit 2.140.0). The address is still
  * #/settings/staff, the tab's before Manor folded it into Employees: a Manor since opens Employees from it, an older one
  * its Staff settings.

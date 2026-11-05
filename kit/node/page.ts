@@ -3,9 +3,9 @@ import { APP } from '../app.ts';
 import { shownDataDir } from './demo.ts';
 import { isDeveloper } from './developer.ts';
 import { duty, type Duty } from './duty.ts';
-import { heldNote, holdPill, shownHold } from './license-check.ts';
+import { heldNote, holdAction, holdPill, shownHold } from './license-check.ts';
 import { lookFor, sceneSvg, type Look } from './look.ts';
-import { manorLink, manorSettingsUrl, manorStaffUrl, type ManorLink } from './manor.ts';
+import { manorLicenseUrl, manorLink, manorSettingsUrl, manorStaffUrl, type ManorLink } from './manor.ts';
 import { firstRoundNow, roundTimes, type RoundState } from './schedule.ts';
 import { groupLabel, themes, themesCss, type Theme } from './themes.ts';
 import { workSection } from './work.ts';
@@ -166,6 +166,7 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
   const d = duty();
   const themeKey = JSON.stringify(`${APP.id}:theme`);
   const manor = manorLink();
+  const held = shownHold();
   // The manor's Developer options (developer.ts): off, no path in the footer and the work section in plain words.
   const dev = isDeveloper();
   // With Manor, the manor's theme, and the marks that say it's Manor's (as Heiward's and Reeve's pages have them).
@@ -203,7 +204,7 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
     <span class="titlebar-action" id="titlebar-action"></span>
   </div>
 </header>
-${settling(look, firstRoundNow())}${shownHold() ? heldBanner() : offDuty(d)}<main class="view">
+${settling(look, firstRoundNow())}${held ? heldBanner(held, manor) : offDuty(d)}<main class="view">
 ${o.body}
 ${workSection({ developer: dev })}
 </main>
@@ -518,9 +519,13 @@ function settling(look: Look, first: RoundState['firstRound']): string {
 ` : '';
 }
 
-/** The trial has ended, or this PC holds no license (license-check.ts): said in plain words, in place of the off-duty banner, with no Back on duty. */
-function heldBanner(): string {
-  return `<div class="banners"><div class="banner-note offduty trial-ended" role="status"><span>${esc(heldNote())}</span></div></div>
+/**
+ * The trial has ended, or this PC holds no license (license-check.ts): said in plain words, in place of the off-duty
+ * banner, with no Back on duty; and Subscribe (or Sign in) to Manor's Settings, License, where a Manor is (kit 2.151.0).
+ */
+function heldBanner(held: string, manor: ManorLink | null): string {
+  const go = manor ? `<a class="banner-go" href="${esc(manorLicenseUrl(manor))}">${esc(holdAction(held))}</a>` : '';
+  return `<div class="banners"><div class="banner-note offduty trial-ended" role="status"><span>${esc(heldNote(held))}</span>${go}</div></div>
 `;
 }
 
@@ -682,6 +687,8 @@ p { margin: 8px 0; }
 .settling-mark .st-s2 { animation-delay: .5s; } .settling-mark .st-s3 { animation-delay: 1s; } .settling-mark .st-s4 { animation-delay: 1.5s; }
 @keyframes kit-step { 0%, 60%, 100% { opacity: .2; } 10%, 40% { opacity: 1; } }
 .banner-note button { padding: 3px 12px; }
+.banner-note a.banner-go { font-weight: 500; line-height: 1.4; padding: 3px 12px; border-radius: 6px; background: var(--accent); color: var(--accent-fg); text-decoration: none; }
+.banner-note a.banner-go:hover { filter: brightness(1.08); }
 /* The panel's content runs the width of the window, its padding aside: no column of its own for text, panels or
    Settings, which would break lines short and leave the rest of a wide window empty. */
 main.view { flex: 1; min-width: 0; margin: 0 12px 12px; padding: 14px 24px 28px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }

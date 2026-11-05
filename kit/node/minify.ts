@@ -97,6 +97,8 @@ async function buildModule(esbuild: Esbuild, file: string): Promise<string> {
     target: 'node22',
     logLevel: 'silent',
     tsconfigRaw: { compilerOptions: { verbatimModuleSyntax: true } },
+    // A built release says so (built.ts, kit 2.151.0): what is only for development and tests never applies to it.
+    define: { KIT_BUILT: 'true' },
     plugins: [
       {
         name: 'one-file',

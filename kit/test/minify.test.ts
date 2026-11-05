@@ -98,6 +98,26 @@ test('a release built: a minified .js beside each .ts, the entry a stub, .d.ts g
   assert.equal(r.stdout.trim(), "hello, manor found Keeper 1000 later side import '../src/kit/agent-checks.ts';", 'runs from the stub; finds what is beside it; keeps names');
 });
 
+test('a release built says so (built.ts, kit 2.151.0); its source run as it is does not, and no environment variable changes that', async () => {
+  const esbuild = await loadEsbuild(steward);
+  assert.ok(!('error' in esbuild));
+  const stage = path.join(tmp, 'built-stage');
+  mkdirSync(path.join(stage, 'src', 'kit'), { recursive: true });
+  writeFileSync(path.join(stage, 'package.json'), '{ "type": "module" }');
+  cpSync(path.join(steward, 'kit', 'node', 'built.ts'), path.join(stage, 'src', 'kit', 'built.ts'));
+  const run = (env: NodeJS.ProcessEnv = {}) => {
+    const r = spawnSync(process.execPath, [path.join(stage, 'src', 'cli.ts')], { encoding: 'utf8', windowsHide: true, env: { ...process.env, KIT_BUILT: 'true', ...env } });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  // From its source: an environment variable of that name is not the build saying so.
+  writeFileSync(path.join(stage, 'src', 'cli.ts'), "import { isBuiltRelease } from './kit/built.ts';\nconsole.log(String(isBuiltRelease()));\n");
+  assert.equal(run(), 'false');
+  await minifyRelease(stage, esbuild as never);
+  assert.equal(run({ NODE_TEST_CONTEXT: 'child' }), 'true');
+  assert.doesNotMatch(readFileSync(path.join(stage, 'src', 'kit', 'built.js'), 'utf8'), /KIT_BUILT/, 'the build wrote its answer in');
+});
+
 test("a released agent's notes name it: the kit reads its app.js, as it reads app.ts in a checkout", async () => {
   const esbuild = await loadEsbuild(steward);
   assert.ok(!('error' in esbuild));

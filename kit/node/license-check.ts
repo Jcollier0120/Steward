@@ -233,6 +233,9 @@ export const trialEnded = licenseHeld;
 /** The status pill's words for a hold (holdText's). */
 export const holdPill = (text: string): string => (text === TRIAL_ENDED_TEXT ? 'Trial ended' : 'No license');
 
+/** The banner's button for a hold (kit 2.151.0), to Manor's Settings, License: Subscribe once the trial ended, else Sign in. */
+export const holdAction = (text: string): string => (text === TRIAL_ENDED_TEXT ? 'Subscribe' : 'Sign in');
+
 /** The page's words for a hold: what happened, what brings it back, and that nothing was lost. */
 export function heldNote(text = licenseHeld() ?? TRIAL_ENDED_TEXT): string {
   let manor = MANOR_DEFAULT_NAME;
