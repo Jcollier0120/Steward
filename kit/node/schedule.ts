@@ -9,6 +9,7 @@ import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { paceProcess } from './gentle.ts';
 import { FIRST_ROUND_WAITING, MEMORY_WAITING, NoRoom, WORK_WAITING, inFirstRoundTurn, inWorkTurn, pace, type Pace } from './pace.ts';
 import { rotaPhase, rotaStartAt } from './rota.ts';
+import { awakeTimeout, type AwakeTimer } from './slept.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 import { inWork, startWork } from './work-tasks.ts';
 import { updateHold } from './update-hold.ts';
@@ -173,7 +174,10 @@ export class RoundTimeout extends Error {
 
 const span = (ms: number) => (ms >= 3_600_000 && ms % 3_600_000 === 0 ? `${ms / 3_600_000} h` : ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`);
 
-/** How long a round may run before it is let go, unless the agent says: three intervals, and at least two hours. */
+/**
+ * How long a round may run before it is let go, unless the agent says: three intervals, and at least two hours. Of the
+ * PC's awake time (kit 2.150.4, slept.ts): the time it sleeps in the middle of a round isn't counted.
+ */
 export const roundTimeLimit = (everyMs: number) => Math.max(3 * everyMs, 2 * 3_600_000);
 
 /** round.json, in the agent's data folder: `{ "rounds": { "<name>": RoundRecord } }`, one entry per schedule. */
@@ -473,7 +477,7 @@ export function every(
     let waitedTurn: string | null = null;
     const controller = new AbortController();
     const limit = typeof opts.timeoutMs === 'function' ? opts.timeoutMs() : opts.timeoutMs ?? roundTimeLimit(interval());
-    let limitTimer: NodeJS.Timeout | undefined;
+    let limitTimer: AwakeTimer | undefined;
     // The manor's pace (pace.ts), the owner's setting: a round, asked for or not, at it (kit 2.73.0); a scheduled
     // agent's first in its turn.
     const p = pace();
@@ -506,7 +510,8 @@ export function every(
         used = u;
         const work = inWork(task, () => job({ signal: controller.signal, awake }));
         const late = new Promise<never>((_, reject) => {
-          limitTimer = setTimeout(() => reject(new RoundTimeout(limit)), limit);
+          // The PC's awake time (slept.ts, kit 2.150.4): a round caught by a sleep goes on after it, not let go at the wake.
+          limitTimer = awakeTimeout(() => reject(new RoundTimeout(limit)), limit);
         });
         try {
           await Promise.race([work, late]);
@@ -573,7 +578,7 @@ export function every(
       for (const letGo of holds) letGo();
       firstNow = null;
       if (waiting === WORK_WAITING || waiting === MEMORY_WAITING) waiting = null;
-      clearTimeout(limitTimer);
+      limitTimer?.clear();
       const u = used as { cpu: NodeJS.CpuUsage; memory: number; sampler?: NodeJS.Timeout } | null;
       if (u) clearInterval(u.sampler);
       const spent = u ? process.cpuUsage(u.cpu) : null;

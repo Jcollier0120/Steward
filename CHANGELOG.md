@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.300
+
+**The Steward hands kit 2.150.4 out, and runs on it: a round's time limit counts only the time the PC was awake.**
+
+### What changed
+
+- **Kit 2.150.4** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a round that a sleep catches goes on after the wake instead of being let go "past its time limit", and so does a PowerShell script. The new `node/slept.ts` also reads the PC's sleeps from Windows' event log, so the Surveyor can judge a round's age by the hours the PC was awake.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.299
 
 **The Steward's page says "check" for a checkbox, not "tick". The Steward hands kit 2.150.3 out, and runs on it.**
