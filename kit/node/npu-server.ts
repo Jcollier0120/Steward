@@ -81,7 +81,7 @@ export async function startServer(entry: AcceleratorEntry, logFile: string): Pro
  * Why a server a tool started exited before it answered (kit 2.104.0), in words: its exit code where it's known, what
  * Windows' application control blocked of it since the start (a block's 0xC0E90002 said so where the log names no
  * file), and its log's last lines. The NPU check and the benchmark say it at once, rather than waiting out their
- * 20 minutes for an answer: on WEASELDEV03 (2026-10-23) FastFlowLM exited at once under Smart App Control, its log
+ * 20 minutes for an answer: on LAPTOP-AMD (2026-10-23) FastFlowLM exited at once under Smart App Control, its log
  * empty, and the benchmark waited for it all the same.
  */
 export async function exitedSay(entry: AcceleratorEntry, code: number | null, o: { since: number; logFile: string; logFrom: number; read?: ReadLog; sac?: SacState | null }): Promise<{ say: string; blocked: Block[] }> {

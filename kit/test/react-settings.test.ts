@@ -244,7 +244,7 @@ test('a setting used only at the next start, install, or install as an administr
 test('opened from Manor (#/tour?from=): its last step offers Back to <manor>, and only to an address on this PC', () => {
   const o = { intro: { title: 'Meet the fixture', text: 'It carries the kit.' }, settings: [], tour: [{ tour: 'status', text: 'On duty or off.' }] };
   const manor = 'http://manor.localhost:8888/#/roles/fixture';
-  assert.match(m.tour(o, 'tour', manor, null, 'Weasel Manor'), />Done<.*>Back to Weasel Manor</, "the last step: Done, and Back to the manor's name");
+  assert.match(m.tour(o, 'tour', manor, null, 'Hill Manor'), />Done<.*>Back to Hill Manor</, "the last step: Done, and Back to the manor's name");
   assert.match(m.tour(o, 'tour', manor), />Done<.*>Back to Castellan</, 'with no name: Castellan');
   assert.match(m.tour(o, 'tour', manor, null, '  '), />Back to Castellan</, 'a blank name: Castellan');
   assert.doesNotMatch(m.tour(o, 'intro', manor), /Back to Castellan/, 'not before the last step');

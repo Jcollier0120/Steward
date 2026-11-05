@@ -53,7 +53,7 @@ test('a line that says something failed still raises a warning', () => {
     "[steward] kit 2.146.6 tried on every agent: 30 passed, 1 failed, 2 failed without it too (not held against it), 3 not tried (nothing they take from the kit changes)",
     // stages/bump.ts: a step of an agent's checks, the change's failure, and the failure without the kit too.
     '[miller]   failed: "says what failed" (expected 1, got 2)',
-    "[miller] they failed here, and on GAMING-010 (the Seneschal's s-12): the change's failure",
+    "[miller] they failed here, and on DESKTOP-GAMING (the Seneschal's s-12): the change's failure",
     '[miller] without the kit it fails otherwise (npm test failed (exit 1)): the failure stands',
     // stages/self.ts, stages/rollout.ts, steward.ts: a release held by its failure, a rollout's count, a stage that stopped.
     '[steward] v0.36.276 failed to release at abc1234 (npm ci failed (exit 1), so v0.36.276 wasn\'t released), so the rounds leave it until a new commit lands on main',

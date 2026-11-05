@@ -30,7 +30,7 @@ function manorAt(name: string, settings: unknown, o: { installed?: boolean; art?
 }
 
 test("Manor's name, page and theme from its settings; nothing without an installed Manor", () => {
-  assert.deepEqual(manorLink(manorAt('named', { name: 'Weasel Manor', port: 18585, theme: 'onyx', developerOptions: true })), { name: 'Weasel Manor', port: 18585, url: 'http://castellan.localhost:18585/', theme: 'onyx', developerOptions: true, gpuWithNpu: true });
+  assert.deepEqual(manorLink(manorAt('named', { name: 'Hill Manor', port: 18585, theme: 'onyx', developerOptions: true })), { name: 'Hill Manor', port: 18585, url: 'http://castellan.localhost:18585/', theme: 'onyx', developerOptions: true, gpuWithNpu: true });
   assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Castellan', port: 18585, url: 'http://castellan.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true }, 'Manor\'s own defaults: no name is Castellan');
   assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80, theme: 'paisley' })), { name: 'Castellan', port: 18585, url: 'http://castellan.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true });
   assert.equal(manorLink(manorAt('unreadable', '{nope'))!.name, 'Castellan');
@@ -43,10 +43,10 @@ test("Manor's name, page and theme from its settings; nothing without an install
 });
 
 test('the title bar says Back to <manor> first, with its icon, only when Manor is installed', () => {
-  process.env.MANOR_HOME = manorAt('for-page', { name: 'Weasel Manor', port: 18600 });
+  process.env.MANOR_HOME = manorAt('for-page', { name: 'Hill Manor', port: 18600 });
   try {
     const html = page({ token: 't', body: '<p>hi</p>' });
-    assert.match(html, /<header class="titlebar[^"]*"[^>]*>\s*<a class="manor-back" href="http:\/\/castellan\.localhost:18600\/" title="Back to Weasel Manor"><img src="\/manor-icon\.svg" alt="" width="22" height="22"><span>Back to Weasel Manor<\/span><\/a>/);
+    assert.match(html, /<header class="titlebar[^"]*"[^>]*>\s*<a class="manor-back" href="http:\/\/castellan\.localhost:18600\/" title="Back to Hill Manor"><img src="\/manor-icon\.svg" alt="" width="22" height="22"><span>Back to Hill Manor<\/span><\/a>/);
   } finally {
     process.env.MANOR_HOME = path.join(tmp, 'no-manor');
   }
@@ -69,10 +69,10 @@ test("with Manor, the page wears the manor's theme from its first paint, and its
   } finally {
     process.env.MANOR_HOME = path.join(tmp, 'no-manor');
   }
-  process.env.MANOR_HOME = manorAt('windows', { name: 'Weasel Manor' });
+  process.env.MANOR_HOME = manorAt('windows', { name: 'Hill Manor' });
   try {
     const html = page({ token: 't', body: '' });
-    assert.match(html, /<html lang="en" data-manor="Weasel Manor" data-manor-url="http:\/\/castellan\.localhost:18585\/">/, "Match Windows: no data-theme, and still Manor's");
+    assert.match(html, /<html lang="en" data-manor="Hill Manor" data-manor-url="http:\/\/castellan\.localhost:18585\/">/, "Match Windows: no data-theme, and still Manor's");
     assert.match(html, /aria-disabled="true" data-theme="system">.*<span class="ti-label">Match Windows<\/span>/);
     assert.doesNotMatch(html, /localStorage\.getItem/);
   } finally {
@@ -83,7 +83,7 @@ test("with Manor, the page wears the manor's theme from its first paint, and its
 test("Manor's Developer options: true or false when its settings say; null when absent or anything else", () => {
   assert.equal(manorLink(manorAt('dev-on', { developerOptions: true }))!.developerOptions, true);
   assert.equal(manorLink(manorAt('dev-off', { developerOptions: false }))!.developerOptions, false);
-  assert.equal(manorLink(manorAt('dev-absent', { name: 'Weasel Manor' }))!.developerOptions, null);
+  assert.equal(manorLink(manorAt('dev-absent', { name: 'Hill Manor' }))!.developerOptions, null);
   (['true', 'false', 1, 0, null, [true], {}] as unknown[]).forEach((value, i) =>
     assert.equal(manorLink(manorAt(`dev-odd-${i}`, { developerOptions: value }))!.developerOptions, null, JSON.stringify(value)));
   assert.equal(manorLink(manorAt('dev-unreadable', '{"developerOptions": true'))!.developerOptions, null, 'unreadable: Manor hasn\'t said');
@@ -91,19 +91,19 @@ test("Manor's Developer options: true or false when its settings say; null when 
 });
 
 test("an agent's developer features: Manor's Developer options when it's installed and says, else the agent's own switch", () => {
-  const on = manorAt('says-on', { name: 'Weasel Manor', port: 18600, developerOptions: true });
-  const off = manorAt('says-off', { name: 'Weasel Manor', developerOptions: false });
+  const on = manorAt('says-on', { name: 'Hill Manor', port: 18600, developerOptions: true });
+  const off = manorAt('says-off', { name: 'Hill Manor', developerOptions: false });
   for (const own of [true, false]) {
     // Manor says: its value wins, whatever the agent's own switch is, and it's Manor that set it.
     let r = developerOptions(own, on);
     assert.equal(r.on, true, `own ${own}, Manor on`);
-    assert.equal(r.setBy!.name, 'Weasel Manor');
+    assert.equal(r.setBy!.name, 'Hill Manor');
     assert.equal(r.setBy!.url, 'http://castellan.localhost:18600/');
     r = developerOptions(own, off);
     assert.equal(r.on, false, `own ${own}, Manor off`);
     assert.ok(r.setBy);
     // Manor hasn't said (absent, or not true or false), or isn't installed: the agent's own switch.
-    for (const home of [manorAt('says-nothing', { name: 'Weasel Manor' }), manorAt('says-yes', { developerOptions: 'yes' }), manorAt('not-installed', { developerOptions: true }, { installed: false }), path.join(tmp, 'nowhere')]) {
+    for (const home of [manorAt('says-nothing', { name: 'Hill Manor' }), manorAt('says-yes', { developerOptions: 'yes' }), manorAt('not-installed', { developerOptions: true }, { installed: false }), path.join(tmp, 'nowhere')]) {
       assert.deepEqual(developerOptions(own, home), { on: own, setBy: null }, `${home}, own ${own}`);
     }
   }
@@ -126,10 +126,10 @@ test("the graphics card beside the NPU: Manor's gpuWithNpu when it says; else th
   // ManorLink: false only when Manor says false; an older Manor (no key), or anything else, is true.
   assert.equal(manorLink(manorAt('gpu-off', { gpuWithNpu: false }))!.gpuWithNpu, false);
   assert.equal(manorLink(manorAt('gpu-on', { gpuWithNpu: true }))!.gpuWithNpu, true);
-  assert.equal(manorLink(manorAt('gpu-old', { name: 'Weasel Manor', developerOptions: true }))!.gpuWithNpu, true, 'an older Manor never set it aside');
+  assert.equal(manorLink(manorAt('gpu-old', { name: 'Hill Manor', developerOptions: true }))!.gpuWithNpu, true, 'an older Manor never set it aside');
   for (const [i, value] of ['false', 0, null, {}].entries()) assert.equal(manorLink(manorAt(`gpu-odd-${i}`, { gpuWithNpu: value }))!.gpuWithNpu, true, JSON.stringify(value));
   // gpuWithNpu(): Manor's value wins when it says, and it's Manor that set it.
-  const off = manorAt('gpu-says-off', { name: 'Weasel Manor', port: 18600, gpuWithNpu: false });
+  const off = manorAt('gpu-says-off', { name: 'Hill Manor', port: 18600, gpuWithNpu: false });
   const on = manorAt('gpu-says-on', { gpuWithNpu: true });
   for (const own of [true, false]) {
     const r = gpuWithNpu(own, off);
@@ -137,7 +137,7 @@ test("the graphics card beside the NPU: Manor's gpuWithNpu when it says; else th
     assert.equal(r.setBy!.url, 'http://castellan.localhost:18600/');
     assert.equal(gpuWithNpu(own, on).on, true, `own ${own}, Manor on`);
     // An older Manor without the key, one that says something else, or none: the agent's own switch.
-    for (const home of [manorAt('gpu-says-nothing', { name: 'Weasel Manor' }), manorAt('gpu-says-no', { gpuWithNpu: 'no' }), manorAt('gpu-not-installed', { gpuWithNpu: false }, { installed: false }), path.join(tmp, 'nowhere')]) {
+    for (const home of [manorAt('gpu-says-nothing', { name: 'Hill Manor' }), manorAt('gpu-says-no', { gpuWithNpu: 'no' }), manorAt('gpu-not-installed', { gpuWithNpu: false }, { installed: false }), path.join(tmp, 'nowhere')]) {
       assert.deepEqual(gpuWithNpu(own, home), { on: own, setBy: null }, `${home}, own ${own}`);
     }
   }

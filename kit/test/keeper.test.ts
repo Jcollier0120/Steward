@@ -765,7 +765,7 @@ test("a card that shares the PC's memory stops by the NPU's rule on a PC under 2
   const { serversToReap } = await import('./fixture/src/kit/keeper.ts');
   const { cardIdleStopMinutes, NPU_CATALOG } = await import('./fixture/src/kit/npu-vendors.ts');
   const ep = (port: number) => ({ baseUrl: `http://127.0.0.1:${port}`, model: `m${port}`, startCommand: [LLAMA, '--port', String(port)] });
-  // As WEASELDEV02's config.json has them: OpenVINO Model Server on the NPU, Intel's graphics with 0.1 GB of their own.
+  // As LAPTOP-INTEL's config.json has them: OpenVINO Model Server on the NPU, Intel's graphics with 0.1 GB of their own.
   const raw = (memoryGb?: number, extra: Record<string, any> = {}) => ({
     ...extra,
     accelerators: [

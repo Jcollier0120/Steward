@@ -32,7 +32,7 @@ export function taskAccount(env: NodeJS.ProcessEnv = process.env): string {
 
 /**
  * A task in its program's Task Scheduler folder for this account (kit 2.95.0): taskName('Home page') is
- * \Porter (Jcoll)\Home page, and `program` names another's (taskName('Home page', env, 'Manor') is Manor's). Task
+ * \Porter (Sam)\Home page, and `program` names another's (taskName('Home page', env, 'Manor') is Manor's). Task
  * Scheduler's names are the PC's, not the account's, so two accounts' \Porter\Home page were one task: the second
  * account's install replaced the first's, or was refused (Castellan for everyone on a PC, Manor's
  * docs/EVERYONE-INSTALL.md). Each account's folder is made by that account.

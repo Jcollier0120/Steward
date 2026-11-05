@@ -2826,7 +2826,7 @@ export async function measureNpu(e: AcceleratorEntry): Promise<NpuMeasuring | { 
  * words; none when each answered. A model's first load on the NPU (OpenVINO compiles it) may take minutes, so it is
  * given 15, or `timeoutMs` (the NPU check's forced timeout). `held`: the caller holds the
  * NPU's turn already, and has stopped its servers, so the entry's own command answers (npu-refresh.ts). `logFile` takes
- * what a server it starts prints (ensureServer's): the NPU's refresh keeps one, since its test on WEASELDEV03 (kit
+ * what a server it starts prints (ensureServer's): the NPU's refresh keeps one, since its test on LAPTOP-AMD (kit
  * 2.78.12, 2026-10-17) was refused and left nothing to say why.
  */
 export async function testNpuEntry(

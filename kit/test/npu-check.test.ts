@@ -919,7 +919,7 @@ test('a server already on the route\'s port: on the NPU the check refuses, in a 
 });
 
 test("a server that exits before it answers fails the start at once, with its exit and its log's last lines (kit 2.104.0)", async () => {
-  // Found on WEASELDEV03 (2026-10-23): FastFlowLM exited at once under Smart App Control (0xC0E90002), its log empty,
+  // Found on LAPTOP-AMD (2026-10-23): FastFlowLM exited at once under Smart App Control (0xC0E90002), its log empty,
   // and the benchmark waited out its 20 minutes for an answer all the same.
   const s = await scene();
   let stopped = 0;

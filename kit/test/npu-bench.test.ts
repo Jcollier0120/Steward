@@ -503,7 +503,7 @@ test("each request is in the NPU's turn, as an agent's is, so the keeper's reape
 });
 
 test("a server that exits before it answers ends the run at once, with why (kit 2.104.0), rather than after the start's 20 minutes", async () => {
-  // Found on WEASELDEV03 (2026-10-23): Smart App Control stopped FastFlowLM as it started (0xC0E90002), its log empty,
+  // Found on LAPTOP-AMD (2026-10-23): Smart App Control stopped FastFlowLM as it started (0xC0E90002), its log empty,
   // and the benchmark waited out its 20 minutes for an answer all the same.
   const s = await scene({ vendor: 'amd' });
   const t0 = Date.now();
@@ -562,7 +562,7 @@ test("a server that doesn't stream or count tokens is measured all the same, and
 });
 
 test("--no-setup with the chat model here and Intel's embedder not: nothing pulled, the embeddings not measured; with the chat model gone too, refused, and the prompt counts the embedder with the chat model", async () => {
-  // Intel's embedding model is in the route's embedServer, not its models: on WEASELDEV02 (2026-10-17) setup pulled it
+  // Intel's embedding model is in the route's embedServer, not its models: on LAPTOP-INTEL (2026-10-17) setup pulled it
   // (428 MB through OpenVINO Model Server) past --no-setup, because the bench counted only the route's models.
   const s = await scene();
   const route = s.catalog.routes.intel;

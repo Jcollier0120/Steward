@@ -108,7 +108,7 @@ test("a release's page: bundled into src/web/page.js, its sources left out", asy
 });
 
 test("the react part's frame is page.ts's, class for class: title bar, notice, Settings and footer", async () => {
-  const shell = { ...pageShell({ busy: true }), offDutySince: '3 minutes ago', manor: { name: 'Weasel Manor', url: 'http://manor.localhost:18585/', theme: 'system', settingsUrl: 'http://manor.localhost:18585/#/settings' } };
+  const shell = { ...pageShell({ busy: true }), offDutySince: '3 minutes ago', manor: { name: 'Hill Manor', url: 'http://manor.localhost:18585/', theme: 'system', settingsUrl: 'http://manor.localhost:18585/#/settings' } };
   const { render } = await bundleForNode<{ render: (d: unknown) => string }>(
     `import { renderToStaticMarkup } from 'react-dom/server';
      import { Page, Card, Text, Badge, PostButton } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
@@ -120,7 +120,7 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
   );
   const html = render({ shell, body: {} });
   assert.match(html, /<header class="titlebar busy" data-agent="[a-z-]+" data-tour="titlebar">/);
-  assert.match(html, /<a class="manor-back" href="http:\/\/manor\.localhost:18585\/" title="Back to Weasel Manor">/);
+  assert.match(html, /<a class="manor-back" href="http:\/\/manor\.localhost:18585\/" title="Back to Hill Manor">/);
   assert.match(html, /<span class="status-pill busy" title="A round is under way/);
   // The pill on the name's line, after the name, plain text in the brand's link; the role alone under them (its whole
   // text its title); none in the tools.
@@ -128,7 +128,7 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
   assert.match(html, /<div class="tools"><a class="tool-link" id="about-link"/);
   assert.equal((html.match(/class="status-pill/g) ?? []).length, 1);
   assert.match(html, /<a class="tool-link" id="settings-link" href="#\/settings"/);
-  assert.match(html, /Weasel Manor chooses the theme, for every page in the manor/);
+  assert.match(html, /Hill Manor chooses the theme, for every page in the manor/);
   assert.match(html, /<span class="titlebar-action" data-tour="action"><button type="button" class="quiet" data-post="\/api\/run">Run now<\/button><\/span>/);
   assert.match(html, /<div class="banner-note offduty" role="status"><span><strong>Off duty<\/strong> since 3 minutes ago/);
   assert.match(html, /<div class="card empty" data-tour="mine"><span class="muted">quiet<\/span> <span class="badge tone-success">fine<\/span><\/div>/);

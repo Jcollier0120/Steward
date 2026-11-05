@@ -142,7 +142,7 @@ export const smartAppControlOutsideTests = (): SacState | null => (process.env.N
 /**
  * STATUS_SYSTEM_INTEGRITY_POLICY_VIOLATION (kit 2.104.0): how a program exits when Windows' application control blocks
  * a library it loads as it starts. FastFlowLM 1.0.7's flm.exe exits so at once under Smart App Control, printing
- * nothing, when it's started to serve or to pull a model (WEASELDEV03, 2026-10-22): the Code Integrity log names the
+ * nothing, when it's started to serve or to pull a model (LAPTOP-AMD, 2026-10-22): the Code Integrity log names the
  * library it stopped at (llama_npu.dll, qwen3_5vl_npu.dll, qwen3_5_omni_npu.dll, qwen3vl_flash.dll).
  */
 export const BLOCKED_EXIT = 0xc0e90002;

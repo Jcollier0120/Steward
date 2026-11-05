@@ -1502,7 +1502,7 @@ test("gpuWithNpu on, an older Manor without the key, no Manor, or no NPU: the ca
   const ids = (l: { id: string }[]) => l.map((a) => a.id);
   const need = { work: 'chat' as const, tokens: 500, lane: 'background' as const };
   try {
-    for (const settings of [{ gpuWithNpu: true }, { name: 'Weasel Manor', developerOptions: true }, null]) {
+    for (const settings of [{ gpuWithNpu: true }, { name: 'Hill Manor', developerOptions: true }, null]) {
       if (settings) manorSays(settings);
       else noManor();
       const model = new Npu(cfg);

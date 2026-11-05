@@ -595,7 +595,7 @@ test('a processor entry: the CPU build, no device, no offload', () => {
   assert.equal(e.vision, undefined);
 });
 
-// This PC's Intel Graphics, as the kit set it up before (WEASELDEV02, 2026-10-15): vision alone beside the NPU.
+// This PC's Intel Graphics, as the kit set it up before (LAPTOP-INTEL, 2026-10-15): vision alone beside the NPU.
 const INTEL_ID = 'gpu-intel-r-graphics';
 const VK = '%USERPROFILE%\\.manor\\accelerators\\servers\\llama.cpp\\b11669-vulkan-x64\\llama-server.exe';
 const MODELS = '%USERPROFILE%\\.manor\\accelerators\\models';
@@ -758,7 +758,7 @@ test("the keeper's look adds it once for each kit version: config.json written, 
   assert.ok(existsSync(cardRefreshFile(file)));
 });
 
-// This PC's Radeon embedding server, as the kit set it up before (WEASELDEV03, 2026-10-15): -c 8192 -ub 2048.
+// This PC's Radeon embedding server, as the kit set it up before (LAPTOP-AMD, 2026-10-15): -c 8192 -ub 2048.
 const AMD_ID = 'gpu-amd-radeon-860m-graphics';
 const oldEmbed = () => ({
   baseUrl: 'http://127.0.0.1:18191',

@@ -164,15 +164,15 @@ test('the sign-in task runs open from app at sign-in, hidden, with no time limit
 // ---------------------------------------------------------------- a task folder for each account
 
 test("each account's tasks are in a folder of its own, named after the agent and the profile folder", () => {
-  assert.equal(taskAccount({ USERPROFILE: 'C:\\Users\\Jcoll', USERNAME: 'jeremy' }), 'Jcoll', "the profile folder's name, which renaming the account doesn't change");
+  assert.equal(taskAccount({ USERPROFILE: 'C:\\Users\\Sam', USERNAME: 'jeremy' }), 'Sam', "the profile folder's name, which renaming the account doesn't change");
   assert.equal(taskAccount({ USERPROFILE: 'C:\\Users\\Pat Smith\\' }), 'Pat Smith');
   assert.equal(taskAccount({ USERPROFILE: 'C:\\Users\\a:b*c?"d<e>f|g' }), 'a_b_c__d_e_f_g', "what Task Scheduler won't take in a name");
   assert.equal(taskAccount({ USERNAME: 'pat' }), 'pat', "the user's name without a profile folder");
   assert.equal(taskAccount({}), 'user');
-  const env = { USERPROFILE: 'C:\\Users\\Jcoll' };
-  assert.equal(taskName('Home page', env), `\\${APP.name} (Jcoll)\\Home page`);
-  assert.equal(taskName('Wake', env), `\\${APP.name} (Jcoll)\\Wake`);
-  assert.equal(taskName('Home page', env, 'Manor'), '\\Manor (Jcoll)\\Home page', "another program's, as Manor names its own");
+  const env = { USERPROFILE: 'C:\\Users\\Sam' };
+  assert.equal(taskName('Home page', env), `\\${APP.name} (Sam)\\Home page`);
+  assert.equal(taskName('Wake', env), `\\${APP.name} (Sam)\\Wake`);
+  assert.equal(taskName('Home page', env, 'Manor'), '\\Manor (Sam)\\Home page', "another program's, as Manor names its own");
   assert.equal(WAKE_TASK_NAME, taskName('Wake'));
   assert.equal(OLD_TASK_NAME, `\\${APP.name}\\Home page`, 'the name before kit 2.95.0');
   assert.equal(OLD_WAKE_TASK_NAME, `\\${APP.name}\\Wake`);
