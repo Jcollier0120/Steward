@@ -106,7 +106,7 @@ function stoppedSince(start: number, now: number): number {
 export interface AwakeTimer {
   /** Stops it: its function never runs. Again, or once it has run, does nothing. */
   clear(): void;
-  /** The awake time it has still to wait (ms); 0 once it has run or been cleared. */
+  /** The awake time it has still to wait (ms); 0 once it has run or been cleared. A budget's own clock, too. */
   left(): number;
   /** As a Node timer's: it doesn't keep the process up. */
   unref(): AwakeTimer;
@@ -149,6 +149,8 @@ export function awakeTimeout(fn: () => void, ms: number): AwakeTimer {
     clear: end,
     left: () => {
       if (done) return 0;
+      // Asked right at a wake, before the ticker's next beat: the sleep that ended a moment ago counts.
+      beat();
       const now = clock.now();
       return Math.max(0, ms - (now - start - stoppedSince(start, now)));
     },

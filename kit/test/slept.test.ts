@@ -98,6 +98,16 @@ test('a sleep in the middle is left out: the timer waits on after the wake for t
   assert.ok(awake >= HOUR - S.TICK_MS && awake <= HOUR, `about an hour awake: ${awake / MIN} min`);
 });
 
+test('left() asked at the moment of waking, before anything has run, already leaves the sleep out', () => {
+  const c = useFake();
+  const t = S.awakeTimeout(() => {}, HOUR);
+  c.run(20 * MIN);
+  c.sleep(10 * HOUR);
+  assert.equal(t.left(), 40 * MIN, 'not 0: the ten hours asleep are no awake time');
+  c.run(40 * MIN);
+  assert.equal(t.left(), 0);
+});
+
 test('every sleep is left out, however many come before its time', () => {
   const c = useFake();
   let ranAt: number | null = null;
