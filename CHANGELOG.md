@@ -15,7 +15,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **The staff, and the Steward, then run only on Node.js 22.23.3**, which Castellan's setup brings. A PC whose staff run on another Node.js keeps the copies it has, and their updates say why, until setup is run again.
 - **Releases are published from an Arm PC**, which builds both processors' bytecode. The first one downloads Node.js 22.23.3 for x64 once (about 30 MB).
-- Downloads are larger: each release carries its code for both processors.
+- Downloads are about four times larger (a few MB each): each release carries its code for both processors. An installed copy keeps only its own.
 
 ## 0.36.301
 
