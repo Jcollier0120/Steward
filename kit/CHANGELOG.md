@@ -17,6 +17,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **node/schedule.ts**: a round's time limit (`roundTimeLimit`, or the agent's `timeoutMs`) is an `awakeTimeout`.
 - **node/ps.ts**: the PowerShell worker's and a one-shot script's timeouts are `awakeTimeout`s. `WorkerGone`'s time left is the awake time left.
 - **spec/ROUND.md** says so, with what the event log says of a night's sleep.
+- **test/npu-bench.test.ts**: a free port for a fake route leaves 200 above it, as the benchmark's server off the NPU goes up to 199 ports above. One over 65435 failed a test now and then.
 
 ### What an agent must do
 

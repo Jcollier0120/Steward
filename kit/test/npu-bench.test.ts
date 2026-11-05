@@ -73,12 +73,19 @@ const RIGHT: Record<string, string> = {
   count: '3',
 };
 
+/**
+ * A port free now, with room above it: the benchmark puts a server off the NPU 100 to 199 ports above its route's
+ * (npu-bench.ts' freePorts). Windows' ephemeral ports go up to 65535, and one above 65435 failed a test now and then
+ * ("Port should be >= 0 and < 65536. Received type number (65539)").
+ */
 async function freePort(): Promise<number> {
-  const s = createServer();
-  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
-  const port = (s.address() as AddressInfo).port;
-  await new Promise((r) => s.close(r));
-  return port;
+  for (;;) {
+    const s = createServer();
+    await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
+    const port = (s.address() as AddressInfo).port;
+    await new Promise((r) => s.close(r));
+    if (port + 200 < 65536) return port;
+  }
 }
 
 /**
