@@ -12,7 +12,7 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'bytecode-test-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const {
-  BYTECODE_ARCHES, NODE_PINS, RUNTIME_NODE, buildBytecode, bytecodeNodes, bytecodeRelease, entryStubOf, isServerModule, jscFor, jscNode, keepOwnBytecode, nodeFor, nodeKey, stubOf, withoutTopLevelAwait,
+  BYTECODE_ARCHES, NODE_PINS, RUNTIME_NODE, archZipName, buildBytecode, bytecodeNodes, bytecodeRelease, entryStubOf, isArchZip, isServerModule, jscFor, jscNode, keepOwnBytecode, nodeFor, nodeKey, stageForArch, stubOf, withoutTopLevelAwait,
 } = await import('../node/bytecode.ts');
 const { loadEsbuild } = await import('../node/minify.ts');
 
@@ -169,6 +169,43 @@ test("installed, it keeps the bytecode for the Node.js running it; for another N
   assert.deepEqual(readdirSync(path.join(app, 'src')).sort(), ['cli.js', 'cli.x64-v22.23.3.jsc', 'kit']);
   assert.deepEqual(readdirSync(path.join(app, 'src', 'kit')), ['x.x64-v22.23.3.jsc']);
   assert.equal(keepOwnBytecode(app, undefined), null);
+});
+
+test("each processor's own zip: a name a Manor from before never takes, and only that processor's bytecode and native files, release.json saying so", () => {
+  assert.equal(archZipName('Developer Herald', '0.5.3', 'arm64'), 'DeveloperHerald.arm64-0.5.3.zip');
+  // A Manor from before takes `<Name>-*.zip` (its install.ts assetPattern): never a processor's own.
+  const before = /^DeveloperHerald-.*\.zip$/i;
+  assert.ok(!before.test(archZipName('Developer Herald', '0.5.3', 'arm64')) && !before.test(archZipName('Developer Herald', '0.5.3', 'x64')));
+  assert.ok(isArchZip('DeveloperHerald.x64-0.5.3.zip', 'Developer Herald') && isArchZip('Porter.arm64-0.4.1+dev.abc.zip', 'Porter'));
+  assert.ok(!isArchZip('DeveloperHerald-0.5.3.zip', 'Developer Herald') && !isArchZip('Herald.arm64-0.5.3.zip', 'Developer Herald') && !isArchZip('Porter.arm64-0.4.1.zip.sha', 'Porter'));
+
+  const stage = path.join(tmp, 'both');
+  const release = { id: 'demo', version: '1.0.0', form: 'bytecode', sold: true, bytecode: { node: ['v22.23.3'], arch: ['arm64', 'x64'] }, native: { out: 'native/bin', arch: ['arm64', 'x64'], signed: true } };
+  write(stage, {
+    'release.json': JSON.stringify(release),
+    'src/cli.js': 'stub',
+    'src/cli.arm64-v22.23.3.jsc': 'a',
+    'src/cli.x64-v22.23.3.jsc': 'x',
+    'src/kit/lib.arm64-v22.23.3.jsc': 'a',
+    'src/kit/lib.x64-v22.23.3.jsc': 'x',
+    'node_modules/pkg/cache.x64-v1.0.0.jsc': 'theirs',
+    'native/bin/arm64/tool.exe': 'a',
+    'native/bin/x64/tool.exe': 'x',
+    'native/bin/notices/tool.txt': 'n',
+  });
+  const own = stageForArch(stage, 'x64');
+  try {
+    const all = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? all(path.join(dir, e.name)).map((f) => `${e.name}/${f}`) : [e.name])).sort();
+    assert.deepEqual(all(own), ['native/bin/notices/tool.txt', 'native/bin/x64/tool.exe', 'node_modules/pkg/cache.x64-v1.0.0.jsc', 'release.json', 'src/cli.js', 'src/cli.x64-v22.23.3.jsc', 'src/kit/lib.x64-v22.23.3.jsc']);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(own, 'release.json'), 'utf8')), { ...release, bytecode: { node: ['v22.23.3'], arch: ['x64'] }, native: { out: 'native/bin', arch: ['x64'], signed: true } });
+    // The stage is as it was: the zip with both is made from it.
+    assert.equal(JSON.parse(readFileSync(path.join(stage, 'release.json'), 'utf8')).bytecode.arch.length, 2);
+    assert.ok(existsSync(path.join(stage, 'src/cli.arm64-v22.23.3.jsc')) && existsSync(path.join(stage, 'native/bin/arm64/tool.exe')));
+    // Installed on the other processor, it says so, and nothing goes.
+    assert.match(keepOwnBytecode(own, bytecodeRelease(JSON.parse(readFileSync(path.join(own, 'release.json'), 'utf8')).bytecode), { arch: 'arm64', version: 'v22.23.3' })!, /for x64, and this is Node\.js v22\.23\.3 for arm64/);
+  } finally {
+    rmSync(own, { recursive: true, force: true });
+  }
 });
 
 test("a module whose bytecode isn't this Node.js's stops with words that say which Node.js it runs on", () => {

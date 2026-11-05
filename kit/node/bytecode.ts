@@ -113,6 +113,44 @@ export function keepOwnBytecode(app: string, r: BytecodeRelease | undefined, own
   return null;
 }
 
+/**
+ * A processor's own zip (kit 2.152.0): its name without spaces, the processor, then the version
+ * (DeveloperHerald.arm64-0.5.3.zip). A release built for both processors has one for each beside the zip with both,
+ * and Manor takes the one for its PC. The processor comes before the dash so a Manor from before this kit, which takes
+ * `<Name>-*.zip` whatever the order its files are listed in, never takes one: it takes the zip with both.
+ */
+export const archZipName = (name: string, version: string, arch: string) => `${name.replaceAll(' ', '')}.${arch}-${version}.zip`;
+
+/** Whether a zip's name is a processor's own (archZipName's), for this name. */
+export const isArchZip = (file: string, name: string) => new RegExp(`^${name.replaceAll(' ', '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.[a-z0-9]+-.+\\.zip$`, 'i').test(file);
+
+/**
+ * A staged release's copy for one processor (kit 2.152.0), made beside the stage: the other processors' bytecode and
+ * native files left out, and its release.json saying it runs on this processor alone, which install.ts checks. The
+ * caller zips it, then removes it.
+ */
+export function stageForArch(stage: string, arch: string): string {
+  const release = JSON.parse(readFileSync(path.join(stage, 'release.json'), 'utf8')) as Record<string, unknown> & { bytecode?: BytecodeRelease; native?: { out: string; arch: string[] } };
+  const nativeOut = release.native?.out.replace(/\\/g, '/').replace(/\/+$/, '');
+  const others = (release.native?.arch ?? []).filter((a) => a !== arch).map((a) => `${nativeOut}/${a}`);
+  const into = mkdtempSync(`${stage}-${arch}-`);
+  cpSync(stage, into, {
+    recursive: true,
+    filter: (src) => {
+      const rel = path.relative(stage, src).replace(/\\/g, '/');
+      if (others.includes(rel)) return false;
+      // As keepOwnBytecode: a package's own files are its own, whatever their names.
+      if (!rel.endsWith('.jsc') || rel.split('/').includes('node_modules')) return true;
+      const n = jscNode(path.posix.basename(rel));
+      return !n || n.arch === arch;
+    },
+  });
+  if (release.bytecode) release.bytecode = { ...release.bytecode, arch: [arch] };
+  if (release.native) release.native = { ...release.native, arch: release.native.arch.filter((a) => a === arch) };
+  writeFileSync(path.join(into, 'release.json'), JSON.stringify(release, null, 2) + '\n');
+  return into;
+}
+
 /** esbuild's error texts, or the message. */
 const errorsOf = (e: unknown): string[] => (e as { errors?: { text: string }[] }).errors?.map((x) => x.text) ?? [String((e as Error).message)];
 const TLA = /top-level await/i;

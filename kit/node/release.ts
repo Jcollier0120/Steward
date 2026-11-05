@@ -2,7 +2,9 @@
 /**
  * Builds this agent's release, as every Node agent of Manor's does (Manor's docs/INSTALLING.md, "Releases"):
  *
- *   npm run release                  artifacts\<id>\<Name, no spaces>-<version>.zip and artifacts\<id>\SHA256SUMS.txt
+ *   npm run release                  artifacts\<id>\<Name, no spaces>-<version>.zip and artifacts\<id>\SHA256SUMS.txt; built
+ *                                    for both processors (--publish, --as-published), each one's own zip beside it too,
+ *                                    <Name>.<arch>-<version>.zip, the download Manor takes (bytecode.ts archZipName)
  *   npm run release -- --install     builds it, then installs it on this PC (node <unpacked>\src\cli.ts install)
  *   npm run release -- --publish     builds it, then publishes it: v<version> in the agent's own repository, and for
  *                                    Castellan's own agents (a releases repository) the Exchequer; Heiward alone
@@ -76,7 +78,7 @@ import { fileURLToPath } from 'node:url';
 import { APP } from '../app.ts';
 import type { Release } from './install.ts';
 import { isUrgent, letOut, NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, saleOf, type ExchequerOutcome } from './exchequer.ts';
-import { buildBytecode, bytecodeNodes, RUNTIME_NODE, type BytecodeNode } from './bytecode.ts';
+import { archZipName, buildBytecode, bytecodeNodes, isArchZip, RUNTIME_NODE, stageForArch, type BytecodeNode } from './bytecode.ts';
 import { importsLeftOut, leftOutText, loadEsbuild, minifyRelease } from './minify.ts';
 import { buildNative, CERTUM_TIMESTAMP, nativeOf, nativeSources, runBuild, stageNative, type Arch, type Native, type NativeBuilt } from './native.ts';
 import { CHANGELOG, readChangelog, releaseChangelog, releaseNotes, type Notes } from './notes.ts';
@@ -256,7 +258,10 @@ function sha256(file: string): string {
 
 interface Built {
   release: Release;
+  /** The zip with every processor's code, which a Manor from before kit 2.152.0 takes. */
   zip: string;
+  /** Each processor's own zip, when it's built for more than one (archZipName): a Manor takes its PC's. */
+  archZips: { arch: string; zip: string }[];
   sums: string;
   /** manor-agent.json beside the zip, when the checkout announces the agent. */
   announcement: string | null;
@@ -465,25 +470,43 @@ async function build(readable = false, publishing = false, asPublished = publish
 
     const outDir = path.join(root, 'artifacts', APP.id);
     mkdirSync(outDir, { recursive: true });
-    // Every earlier build's zip goes ("Steward-0.8.20.zip"): the name without its version and ".zip".
+    // Every earlier build's zip goes ("Steward-0.8.20.zip", "Steward.arm64-0.8.20.zip"): the name without its version and ".zip".
     const prefix = zipName(APP.name, '').replace(/\.zip$/, '');
-    for (const f of readdirSync(outDir)) if (f.startsWith(prefix) && f.endsWith('.zip')) rmSync(path.join(outDir, f));
+    for (const f of readdirSync(outDir)) if ((f.startsWith(prefix) && f.endsWith('.zip')) || isArchZip(f, APP.name)) rmSync(path.join(outDir, f));
+    // A zip, checked to carry each script exactly as it was signed.
+    const zipUp = (from: string, zip: string) => {
+      execFileSync(TAR, ['-a', '-c', '-f', zip, '-C', from, ...readdirSync(from).sort()], { windowsHide: true, stdio: ['ignore', 'ignore', 'inherit'] });
+      const changed = scripts ? changedSinceSigning(zip, scripts.hashes, TAR) : [];
+      if (changed.length) {
+        rmSync(zip, { force: true });
+        throw new Error(`Not published: ${path.basename(zip)} doesn't carry its scripts as they were signed: ${changed.join('; ')}.`);
+      }
+    };
     const name = zipName(APP.name, release.version);
     const zip = path.join(outDir, name);
-    execFileSync(TAR, ['-a', '-c', '-f', zip, '-C', stage, ...readdirSync(stage).sort()], { windowsHide: true, stdio: ['ignore', 'ignore', 'inherit'] });
-    const changed = scripts ? changedSinceSigning(zip, scripts.hashes, TAR) : [];
-    if (changed.length) {
-      rmSync(zip, { force: true });
-      throw new Error(`Not published: the zip doesn't carry its scripts as they were signed: ${changed.join('; ')}.`);
+    zipUp(stage, zip);
+    // Built for both processors, each has its own zip too, with only its own bytecode and native files: the download
+    // a Manor takes (kit 2.152.0). The zip with both stays, for the Manors from before.
+    const archZips: { arch: string; zip: string }[] = [];
+    for (const arch of release.bytecode && release.bytecode.arch.length > 1 ? release.bytecode.arch : []) {
+      const own = stageForArch(stage, arch);
+      try {
+        const file = path.join(outDir, archZipName(APP.name, release.version, arch));
+        zipUp(own, file);
+        archZips.push({ arch, zip: file });
+      } finally {
+        rmSync(own, { recursive: true, force: true });
+      }
     }
     const announcement = path.join(outDir, ANNOUNCEMENT);
     rmSync(announcement, { force: true });
     if (announced) cpSync(announced.file, announcement);
     const sums = path.join(outDir, 'SHA256SUMS.txt');
     const hash = sha256(zip);
-    const listed = [{ name, hash }, ...(announced ? [{ name: ANNOUNCEMENT, hash: sha256(announcement) }] : [])];
+    const listed = [{ name, hash }, ...archZips.map((a) => ({ name: path.basename(a.zip), hash: sha256(a.zip) })), ...(announced ? [{ name: ANNOUNCEMENT, hash: sha256(announcement) }] : [])];
     writeFileSync(sums, sumsText(listed));
     console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 2 + (changelog ? 1 : 0) + nativeCount} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
+    for (const a of archZips) console.log(`  for ${a.arch} alone: ${path.relative(root, a.zip)}, ${Math.ceil(statSync(a.zip).size / 1024)} KB`);
     console.log(`  sha256 ${hash} (${path.relative(root, sums)})`);
     if (minified) console.log(`  built with esbuild ${esbuild!.version}: ${minified.ts} TypeScript and ${minified.js} JavaScript files, ${Math.ceil(minified.before / 1024)} KB of code to ${Math.ceil(minified.after / 1024)} KB`);
     else console.log('  readable: not built, so it can be looked into here; it is never published');
@@ -507,7 +530,7 @@ async function build(readable = false, publishing = false, asPublished = publish
     console.log(`  notes: ${notes.from === 'changelog' ? `CHANGELOG.md's entry for ${pkg.version}` : 'the commits since the release before'}`);
     for (const w of notes.warnings) console.warn(`  warning: ${w}`);
     if (isUrgent(notes.notes)) console.log('  urgent: its entry is marked "**Urgent fix:", so once published it goes out to customers at once');
-    return { release, zip, sums, announcement: announced ? announcement : null, notes, scripts: { count: scripts ? Object.keys(scripts.hashes).length : scriptFiles.length, signed: !!scripts } };
+    return { release, zip, archZips, sums, announcement: announced ? announcement : null, notes, scripts: { count: scripts ? Object.keys(scripts.hashes).length : scriptFiles.length, signed: !!scripts } };
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
@@ -548,7 +571,7 @@ function released(gh: string, tag: string, repo: string): 'there' | 'none' | { e
  */
 async function publish(b: Built, urgent = false): Promise<number> {
   const { release } = b;
-  if (release.form !== 'minified') {
+  if (release.form === 'readable') {
     console.error('Not published: a readable release stays on this PC. Release again without --readable.');
     return 1;
   }
@@ -578,7 +601,7 @@ async function publish(b: Built, urgent = false): Promise<number> {
     console.error(`Not published: ${NO_GH}.`);
     return 1;
   }
-  const assets = [b.zip, b.sums, ...(b.announcement ? [b.announcement] : [])];
+  const assets = [b.zip, ...b.archZips.map((a) => a.zip), b.sums, ...(b.announcement ? [b.announcement] : [])];
   // The notes go in a file: a double quote inside an argument can reach gh split on Windows, and an entry has them.
   const notesDir = mkdtempSync(path.join(os.tmpdir(), `${APP.id}-notes-`));
   const notesFile = path.join(notesDir, 'notes.md');
@@ -812,7 +835,7 @@ async function main(args: string[]): Promise<number> {
     const code = await publish(built, urgent);
     if (code !== 0) return code;
   }
-  if (args.includes('--install')) return installRelease(built.zip, args.filter((a) => a === '--no-start' || a === '--dry-run'));
+  if (args.includes('--install')) return installRelease(built.archZips.find((a) => a.arch === process.arch)?.zip ?? built.zip,args.filter((a) => a === '--no-start' || a === '--dry-run'));
   return 0;
 }
 
