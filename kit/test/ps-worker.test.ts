@@ -13,7 +13,7 @@ import { pathToFileURL } from 'node:url';
 // ENAMETOOLONG, and every script with it (Clerk's rounds, every staff member's pace, Manor's look at the accelerators).
 // The kit's ps.ts here runs a worker signed as a release signs it: a signature block of the same size.
 const kit = mkdtempSync(path.join(os.tmpdir(), 'ps-worker-'));
-for (const f of ['ps.ts', 'console.ts']) copyFileSync(new URL(`../node/${f}`, import.meta.url), path.join(kit, f));
+for (const f of ['ps.ts', 'console.ts', 'slept.ts']) copyFileSync(new URL(`../node/${f}`, import.meta.url), path.join(kit, f));
 writeFileSync(path.join(kit, 'package.json'), '{"type":"module"}');
 const signature = Array.from({ length: 220 }, () => `# ${randomBytes(48).toString('base64')}\r\n`).join('');
 const worker = readFileSync(new URL('../node/ps-worker.ps1', import.meta.url), 'utf8') + `\r\n# SIG # Begin signature block\r\n${signature}# SIG # End signature block\r\n`;

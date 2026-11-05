@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sharesConsole, startFailed } from './console.ts';
+import { awakeTimeout, type AwakeTimer } from './slept.ts';
 
 const PRELUDE = "$ProgressPreference = 'SilentlyContinue'; $ErrorActionPreference = 'Stop'; " +
   'try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }\n';
@@ -91,8 +92,8 @@ class WorkerGone extends Error {
 interface Pending {
   resolve: (out: string) => void;
   reject: (e: Error) => void;
-  timer: NodeJS.Timeout;
-  deadline: number;
+  /** Its time limit, of the PC's awake time (slept.ts, kit 2.150.4): a script a sleep caught goes on after it. */
+  timer: AwakeTimer;
 }
 
 class Worker {
@@ -135,13 +136,13 @@ class Worker {
     this.idle = null;
     this.hold(true);
     return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = awakeTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`PowerShell timed out after ${timeoutMs} ms`));
         // Only stopping the worker stops a script that never ends. What else it was running starts again on its own.
         this.stop();
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer, deadline: Date.now() + timeoutMs });
+      this.pending.set(id, { resolve, reject, timer });
       this.proc.stdin.write(`${id}|${Buffer.from(PRELUDE + script, 'utf8').toString('base64')}\n`);
     });
   }
@@ -156,7 +157,7 @@ class Worker {
       const p = this.pending.get(id);
       if (!p) continue;
       this.pending.delete(id);
-      clearTimeout(p.timer);
+      p.timer.clear();
       const text = (s = '') => Buffer.from(s, 'base64').toString('utf8');
       if (failed === '0') p.resolve(text(out));
       else p.reject(new Error(`PowerShell exited 1: ${(text(err) || text(out)).trim().slice(0, 500)}`));
@@ -186,10 +187,10 @@ class Worker {
     if (this.idle) clearTimeout(this.idle);
     if (current === this) current = null;
     this.hold(false);
-    const now = Date.now();
     for (const p of this.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(new WorkerGone(Math.max(1000, p.deadline - now)));
+      const left = p.timer.left();
+      p.timer.clear();
+      p.reject(new WorkerGone(Math.max(1000, left)));
     }
     this.pending.clear();
   }
@@ -221,24 +222,26 @@ export function oneShot(script: string, timeoutMs: number): Promise<string> {
     how = ['-File', file];
   }
   const cleanup = () => file && rmSync(file, { force: true });
-  const deadline = Date.now() + timeoutMs;
+  // Of the PC's awake time (slept.ts, kit 2.150.4), and what the first start left of it for the second.
+  let left = timeoutMs;
   const attempt = (start: { windowsHide: boolean }): Promise<string> =>
     new Promise<string>((resolve, reject) => {
       const p = spawn('powershell.exe', [...PS_ARGS, ...how], start);
       let out = '';
       let err = '';
-      const timer = setTimeout(() => {
+      const timer = awakeTimeout(() => {
         p.kill();
         reject(new Error(`PowerShell timed out after ${timeoutMs} ms`));
-      }, Math.max(1000, deadline - Date.now()));
+      }, Math.max(1000, left));
       p.stdout.setEncoding('utf8').on('data', (d) => (out += d));
       p.stderr.setEncoding('utf8').on('data', (d) => (err += d));
       p.on('error', (e) => {
-        clearTimeout(timer);
+        timer.clear();
         reject(e);
       });
       p.on('close', (code) => {
-        clearTimeout(timer);
+        left = timer.left();
+        timer.clear();
         if (code === 0) resolve(out);
         // The console it shared had gone between console.ts' look and the start: once more, hidden.
         else if (startFailed(code, start.windowsHide)) attempt({ windowsHide: true }).then(resolve, reject);

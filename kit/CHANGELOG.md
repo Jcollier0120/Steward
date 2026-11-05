@@ -2,6 +2,28 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.150.4
+
+**A round's time limit, and a PowerShell script's, count only the time the PC was awake: a round a sleep caught goes on after the wake instead of being let go.**
+
+### What changed
+
+- **node/slept.ts** (new):
+  - `awakeTimeout(fn, ms)` is a setTimeout that leaves out the time the process couldn't run (the PC asleep), with `clear()`, `left()` and `unref()`; `awakeDelay(ms)` waits as much.
+    - While one waits, a ticker beats every 5 s, and a beat 30 s or more after the one before is a sleep.
+    - With no sleep it is exactly a setTimeout, mocked timers included.
+  - `readSleeps(since)` reads the PC's sleeps and times off from Windows' event log: Modern Standby's Kernel-Power 507 sessions, S3 and hibernation, shutdown to start. It gives `{ spans, standbySince }`, and `sleptIn(spans, from, to)` adds them up.
+  - Before, Node's timers counted the sleep, and a limit that fell due during it fired at the next wake. On the owner's laptop, after two days with the lid shut, rounds were let go after 913 minutes "past their time limit (2 h)", three of them in a row stopped the Smith's rounds, and "The PC's checks couldn't run".
+- **node/schedule.ts**: a round's time limit (`roundTimeLimit`, or the agent's `timeoutMs`) is an `awakeTimeout`.
+- **node/ps.ts**: the PowerShell worker's and a one-shot script's timeouts are `awakeTimeout`s. `WorkerGone`'s time left is the awake time left.
+- **spec/ROUND.md** says so, with what the event log says of a night's sleep.
+
+### What an agent must do
+
+- **Nothing.** Rounds and scripts that a sleep catches go on after it by themselves.
+- **A time limit of the agent's own** that guards work through a sleep (a job's timeout, a deadline loop) takes `awakeTimeout()` or `awakeDelay()` in place of setTimeout.
+- **A test that copies ps.ts somewhere by itself** copies slept.ts beside it.
+
 ## 2.150.3
 
 **A staff member's About and page say "check" for a checkbox, not "tick".**
