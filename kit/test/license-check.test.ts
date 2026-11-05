@@ -30,6 +30,7 @@ const { readJson } = await import('./fixture/src/kit/store.ts');
 const { dutyStatus } = await import('./fixture/src/kit/service.ts');
 const { page, pillOf } = await import('./fixture/src/kit/page.ts');
 const { pageShell } = await import('./fixture/src/kit/react-page.ts');
+const { isBuiltRelease } = await import('./fixture/src/kit/built.ts');
 
 const DAY = 24 * 60 * 60_000;
 const iso = (t: number) => new Date(t).toISOString();
@@ -127,7 +128,27 @@ test('a trial that has ended holds it: its rounds, Run now, its ping and its pag
   const shell = pageShell({ onboarding: null });
   assert.match(shell.trialEnded ?? '', /^The trial ended: a license brings it back\./);
   assert.equal(shell.pill.text, 'Trial ended');
+  assert.equal(shell.license, null, 'no Manor to send it to: no button');
+
+  // With a Manor, the banner's Subscribe goes to its Settings, License (kit 2.151.0).
+  withManor(() => {
+    assert.match(page({ token: 't', body: '<p>body</p>' }), /<a class="banner-go" href="http:\/\/[a-z.]+:4747\/#\/settings\/license">Subscribe<\/a>/);
+    const l = pageShell({ onboarding: null }).license;
+    assert.equal(l?.action, 'Subscribe');
+    assert.match(l?.url ?? '', /^http:\/\/[a-z.]+:4747\/#\/settings\/license$/);
+  });
 });
+
+/** Manor's settings.json, so the agent's page finds a Manor (on port 4747) while `fn` runs. */
+function withManor(fn: () => void): void {
+  const file = path.join(manor, 'settings.json');
+  writeFileSync(file, JSON.stringify({ name: 'Castellan', port: 4747 }));
+  try {
+    fn();
+  } finally {
+    rmSync(file, { force: true });
+  }
+}
 
 test('a new license lifts the hold at once: licence.json changing is read straight away', () => {
   hold(license({ tier: 'trial', runsUntil: Date.now() - 60_000 }));
@@ -230,6 +251,11 @@ test('no licence.json: the agent holds, says why, and its page says signing in b
   const shell = pageShell({ onboarding: null });
   assert.match(shell.trialEnded ?? '', /^This PC holds no license for it/);
   assert.equal(shell.pill.text, 'No license');
+  // With a Manor, the banner's Sign in goes to its Settings, License (kit 2.151.0).
+  withManor(() => {
+    assert.match(page({ token: 't', body: '<p>body</p>' }), /<a class="banner-go" href="http:\/\/[a-z.]+:4747\/#\/settings\/license">Sign in<\/a>/);
+    assert.equal(pageShell({ onboarding: null }).license?.action, 'Sign in');
+  });
 });
 
 test('in demo mode the page shows no hold (kit 2.142.1), so its pictures show a licensed page; its rounds still hold', () => {
@@ -321,6 +347,19 @@ test('under node --test, an agent checks only when MANOR_LICENSE_CHECK says so: 
   assert.equal(check.licenseCheckOn({}), true, 'outside the tests it always checks');
 });
 
+test('a built release always checks, and trusts no key from the environment (kit 2.151.0): an environment variable is anyone\'s', () => {
+  // Run from its source (these tests): NODE_TEST_CONTEXT turns the check off, and MANOR_LICENCE_KEYS adds the tests' key.
+  assert.equal(isBuiltRelease(), false);
+  assert.equal(lic.licenseCheckOn({ NODE_TEST_CONTEXT: 'child' }), false);
+  const env = { MANOR_LICENCE_KEYS: JSON.stringify(publicJwk) };
+  assert.ok(lic.trustedKeys(env).some((k: JsonWebKey) => k.x === publicJwk.x));
+  // Built: neither does anything.
+  assert.equal(lic.licenseCheckOn({ NODE_TEST_CONTEXT: 'child' }, true), true);
+  assert.deepEqual(lic.trustedKeys(env, lic.LICENSE_KEYS, true), [...lic.LICENSE_KEYS]);
+  hold(license({ tier: 'household' }));
+  assert.ok('error' in lic.verifyLicense(lic.readHeld(manor)!.licence, lic.trustedKeys(env, lic.LICENSE_KEYS, true)), 'a license signed with a key of its own is refused');
+});
+
 test("the shared part reads licence.json as Manor's license.ts does", () => {
   hold(license({ tier: 'household' }));
   assert.equal(lic.readHeld(manor)?.token, 'secret-token');
@@ -360,6 +399,38 @@ test("another PC's license holds it: device.json's id, or one made again from Ma
   assert.equal(on('0f0e0d0c-0b0a-4909-8807-060504030201').held, false);
 });
 
+test("a device.json copied from another PC beside its licence.json is that PC's, not this one's (kit 2.151.0)", () => {
+  const device = path.join(manor, 'device.json');
+  const here = '6f1d2c3b-4a59-4e1f-9b2a-0c1d2e3f4a5b';
+  const there = '0f0e0d0c-0b0a-4909-8807-060504030201';
+  const on = () => check.checkLicense({ id: 'fixture', home: manor, guid: here });
+  const payload = license({ tier: 'household' });
+
+  // An id made from a PC (version 8) is made again here, whatever device.json says beside it.
+  const theirs = lic.deviceIdFor(there, manor);
+  hold({ ...payload, sub: theirs });
+  writeFileSync(device, JSON.stringify({ id: theirs, pc: lic.pcFor(there) }));
+  assert.deepEqual([on().state, on().held], ['another-pc', true], 'copied as it was');
+  writeFileSync(device, JSON.stringify({ id: theirs }));
+  assert.equal(on().state, 'another-pc', 'with its pc taken out');
+  writeFileSync(device, JSON.stringify({ id: theirs, pc: lic.pcFor(here) }));
+  assert.equal(on().state, 'another-pc', "with this PC's pc written in");
+  const mine = lic.deviceIdFor(here, manor);
+  hold({ ...payload, sub: mine });
+  writeFileSync(device, JSON.stringify({ id: mine, pc: lic.pcFor(here) }));
+  assert.deepEqual([on().state, on().held], ['paid', false], "this PC's own");
+
+  // A random id from before 2026-10-21, by device.json's pc where it says.
+  hold(payload);
+  writeFileSync(device, JSON.stringify({ id: payload.sub, pc: lic.pcFor(there) }));
+  assert.equal(on().state, 'another-pc', "another PC's");
+  writeFileSync(device, JSON.stringify({ id: payload.sub, pc: lic.pcFor(here) }));
+  assert.equal(on().state, 'paid', "this PC's");
+  writeFileSync(device, JSON.stringify({ id: payload.sub }));
+  assert.equal(on().state, 'paid', 'nothing to tell it by');
+  assert.equal(lic.pcFor(here.toUpperCase()), lic.pcFor(here), 'whatever the case');
+});
+
 test("an Everyone install: the PC's id is in the shared license folder, and the license is its", () => {
   const shared = path.join(root, 'shared');
   mkdirSync(path.join(shared, 'license'), { recursive: true });
@@ -372,6 +443,22 @@ test("an Everyone install: the PC's id is in the shared license folder, and the 
   assert.deepEqual([c.state, c.held], ['paid', false]);
   writeFileSync(path.join(shared, 'license', 'device.json'), JSON.stringify({ id: '11111111-1111-4111-8111-111111111111' }));
   assert.equal(check.checkLicense({ id: 'fixture', home: manor, env, guid: null }).state, 'another-pc');
+
+  // Brought from the first account's own Manor folder (a Just me install before): its id was made from that folder,
+  // which device.json names, so another account's staff count it too. Naming a folder can't make another PC's id this one's.
+  const here = '6f1d2c3b-4a59-4e1f-9b2a-0c1d2e3f4a5b';
+  const first = path.join(root, 'first-account', '.manor');
+  const brought = lic.deviceIdFor(here, first);
+  hold({ ...payload, sub: brought });
+  const on = () => check.checkLicense({ id: 'fixture', home: manor, env, guid: here }).state;
+  writeFileSync(path.join(shared, 'license', 'device.json'), JSON.stringify({ id: brought, pc: lic.pcFor(here) }));
+  assert.equal(on(), 'another-pc', 'with no folder to make it from');
+  writeFileSync(path.join(shared, 'license', 'device.json'), JSON.stringify({ id: brought, pc: lic.pcFor(here), folder: first }));
+  assert.equal(on(), 'paid', 'made from the folder it names');
+  const theirs = lic.deviceIdFor('0f0e0d0c-0b0a-4909-8807-060504030201', first);
+  hold({ ...payload, sub: theirs });
+  writeFileSync(path.join(shared, 'license', 'device.json'), JSON.stringify({ id: theirs, pc: lic.pcFor(here), folder: first }));
+  assert.equal(on(), 'another-pc', "another PC's, whatever folder it names");
   rmSync(shared, { recursive: true, force: true });
 });
 

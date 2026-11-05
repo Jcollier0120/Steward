@@ -355,6 +355,14 @@ export function Page<Body>({ data, reload, action, settings, settingsTabs, about
             <div className="banners">
               <div className="banner-note offduty trial-ended" role="status">
                 <span>{s.trialEnded}</span>
+                {s.license && (
+                  <Button
+                    title={s.license.action}
+                    onPress={() => {
+                      location.href = s.license!.url;
+                    }}
+                  />
+                )}
               </div>
             </div>
           )}

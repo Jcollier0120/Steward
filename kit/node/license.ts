@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash, createPublicKey, verify, type JsonWebKey } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { isBuiltRelease } from './built.ts';
 
 /**
  * The license a PC holds, as Manor keeps it and every agent reads it (kit 2.45.0): Manor's licence.json, `{ token,
@@ -22,7 +23,7 @@ export const LICENSE_FILE = 'licence.json';
  * Exchequer's repository prints it (an Ed25519 public JWK). Compare a key's `kid` with the one the Exchequer's GET
  * /api/v1/health shows. A rotation carries both keys for a while (the Exchequer's docs/DEPLOY.md, "Rotating keys"),
  * then a later kit drops the old one. Not secret: these are public keys. MANOR_LICENCE_KEYS may add more, for
- * development and tests (trustedKeys).
+ * development and tests, to a checkout run from its source only (trustedKeys).
  */
 export const LICENSE_KEYS: readonly JsonWebKey[] = [
   // The Exchequer's first license signing key, made 2026-10-06.
@@ -61,12 +62,14 @@ export interface Held {
 }
 
 /**
- * The keys a license may be signed with: the ones carried (LICENSE_KEYS), and MANOR_LICENCE_KEYS's for development
- * (a JWK, or a JSON list of them). One that can't be read is left out.
+ * The keys a license may be signed with: the ones carried (LICENSE_KEYS), and, run from a checkout's source only,
+ * MANOR_LICENCE_KEYS's for development and tests (a JWK, or a JSON list of them). A built release (`built`,
+ * built.ts) never takes one from it (kit 2.151.0): a key anyone can set would let anyone sign a license of their own.
+ * One that can't be read is left out.
  */
-export function trustedKeys(env: NodeJS.ProcessEnv = process.env, carried: readonly JsonWebKey[] = LICENSE_KEYS): JsonWebKey[] {
+export function trustedKeys(env: NodeJS.ProcessEnv = process.env, carried: readonly JsonWebKey[] = LICENSE_KEYS, built = isBuiltRelease()): JsonWebKey[] {
   const keys = [...carried];
-  const extra = env.MANOR_LICENCE_KEYS?.trim();
+  const extra = built ? '' : env.MANOR_LICENCE_KEYS?.trim();
   if (extra) {
     try {
       const j = JSON.parse(extra) as unknown;
@@ -77,10 +80,12 @@ export function trustedKeys(env: NodeJS.ProcessEnv = process.env, carried: reado
 }
 
 /**
- * Whether this process reads this PC's license: always, but under node --test, where it reads it only with
- * MANOR_LICENSE_CHECK=on (so no agent's tests read this PC's own license). license-check.ts and developer-pro.ts ask.
+ * Whether this process reads this PC's license: always, but under node --test in a checkout run from its source,
+ * where it reads it only with MANOR_LICENSE_CHECK=on (so no agent's tests read this PC's own license). A built release
+ * (`built`, built.ts) always reads it (kit 2.151.0): NODE_TEST_CONTEXT is only an environment variable, and anyone can
+ * set one. license-check.ts and developer-pro.ts ask.
  */
-export const licenseCheckOn = (env: NodeJS.ProcessEnv = process.env) => !env.NODE_TEST_CONTEXT || env.MANOR_LICENSE_CHECK === 'on';
+export const licenseCheckOn = (env: NodeJS.ProcessEnv = process.env, built = isBuiltRelease()) => built || !env.NODE_TEST_CONTEXT || env.MANOR_LICENSE_CHECK === 'on';
 
 const b64 = (s: string) => Buffer.from(s, 'base64url');
 
@@ -193,28 +198,62 @@ export function machineGuid(env: NodeJS.ProcessEnv = process.env): string | null
   return guidRead;
 }
 
-/** device.json's id in `folder`, or null when there's none to read. */
-export function readDeviceId(folder: string): string | null {
+/**
+ * device.json's `pc`: which PC made it (Manor's license.ts pcFor): Windows' id for this installation (MachineGuid),
+ * hashed apart from the id (SHA-256), so a device.json copied from another PC is told from this PC's own. Nothing in
+ * it can be read back.
+ */
+export function pcFor(guid: string): string {
+  return createHash('sha256').update(`castellan/pc/v1\n${guid.trim().toLowerCase()}`, 'utf8').digest('hex').slice(0, 32);
+}
+
+/** device.json as the license check reads it: its id, which PC made it (`pc`) and the folder its id was made for (`folder`), where it says. */
+export interface KeptDevice {
+  id: string;
+  pc?: string;
+  folder?: string;
+}
+
+/** device.json in `folder`, or null when there's none to read. */
+export function readDevice(folder: string): KeptDevice | null {
   try {
-    const j = JSON.parse(readFileSync(path.join(folder, DEVICE_FILE), 'utf8').replace(/^﻿/, '')) as { id?: unknown };
-    return typeof j?.id === 'string' ? j.id : null;
+    const j = JSON.parse(readFileSync(path.join(folder, DEVICE_FILE), 'utf8').replace(/^﻿/, '')) as { id?: unknown; pc?: unknown; folder?: unknown };
+    if (typeof j?.id !== 'string') return null;
+    return { id: j.id, ...(typeof j.pc === 'string' ? { pc: j.pc } : {}), ...(typeof j.folder === 'string' && j.folder ? { folder: j.folder } : {}) };
   } catch {
     return null;
   }
 }
 
+/** device.json's id in `folder`, or null when there's none to read. */
+export const readDeviceId = (folder: string): string | null => readDevice(folder)?.id ?? null;
+
+/**
+ * Whether an id is this PC's, by what it can be told by (kit 2.151.0): one made from a PC (version 8) is made again
+ * here from MachineGuid and each folder, and must be the same, whatever device.json says beside it; a random one from
+ * before 2026-10-21 by device.json's `pc`, where it says. Where MachineGuid can't be read, or an old id has no `pc`,
+ * there's nothing to tell it by, and it is this PC's. device.json's `folder` is one more folder to make it from: an
+ * Everyone install's shared device.json, brought from the first account's own Manor folder, says that folder. Naming
+ * any folder there can't make another PC's id this one's: the id is made from this PC's MachineGuid.
+ */
+function madeHere(d: KeptDevice, folders: readonly string[], guid: string | null): boolean {
+  if (!guid) return true;
+  if (MADE_HERE.test(d.id)) return (d.folder ? [...folders, d.folder] : folders).some((f) => deviceIdFor(guid, f) === d.id);
+  return d.pc === undefined || d.pc === pcFor(guid);
+}
+
 /**
  * Whether a license's `sub` is this PC's, looked for in Manor's folder and, in an Everyone install, the shared license
  * folder (`folders`, where device.json is kept):
- * - device.json's id where one is kept, as Manor's readLicense has it;
+ * - device.json's id where one is kept, as Manor's readLicense has it, and one this PC made (madeHere, kit 2.151.0):
+ *   a device.json copied from another PC beside its licence.json is that PC's, not this one's;
  * - with none (a licence.json copied from another PC alone), an id made from a PC (version 8) is made again here from
  *   MachineGuid and each folder, and must be the same.
  * An id from before 2026-10-21 (random) with no device.json, or a PC whose MachineGuid can't be read: there's nothing
  * to check it by, so it is this PC's.
  */
 export function isThisPc(sub: string, folders: readonly string[], guid: string | null = machineGuid()): boolean {
-  const kept = folders.map(readDeviceId).filter((id): id is string => !!id);
-  if (kept.length) return kept.includes(sub);
-  if (!MADE_HERE.test(sub) || !guid) return true;
-  return folders.some((f) => deviceIdFor(guid, f) === sub);
+  const kept = folders.map(readDevice).filter((d): d is KeptDevice => !!d);
+  if (kept.length) return kept.some((d) => d.id === sub && madeHere(d, folders, guid));
+  return madeHere({ id: sub }, folders, guid);
 }
