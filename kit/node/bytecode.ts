@@ -317,24 +317,40 @@ console.log(JSON.stringify({ modules, bytes }));
 /**
  * What a Node.js runs to load each module in a list (a JSON file), as an installed agent would: the first that can't
  * load stops it, saying which and why, and so does one that ends the process as it loads (a script that does its work
- * whenever it's loaded, which would end the check there, its modules after it unloaded). Then it says how many it
- * loaded, and ends, whatever the modules started.
+ * whenever it's loaded, which would end the check there, its modules after it unloaded). A module that can't load here
+ * may be a worker thread's script (worker_threads' parentPort is null outside one): it's loaded again in a worker, and
+ * fails only if it can't load there either. Then it says how many it loaded, and ends, whatever the modules started.
  */
 const SMOKE = `
+const { Worker } = require('node:worker_threads');
 const files = JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8'));
 const exit = process.exit;
 let at = null;
-const fail = (error) => { console.error(JSON.stringify({ file: at, error })); exit(4); };
-process.exit = (code) => fail('it ends the process as it loads (process.exit(' + (code ?? '') + ')): a script that does its work whenever it is loaded, not only when Node starts it');
+const fail = (file, error) => { console.error(JSON.stringify({ file, error })); exit(4); };
+const said = (e) => String((e && e.stack) || e).split('\\n').slice(0, 5).join(' | ');
+process.exit = (code) => fail(at, 'it ends the process as it loads (process.exit(' + (code ?? '') + ')): a script that does its work whenever it is loaded, not only when Node starts it');
 let loaded = 0;
+const again = [];
 for (const f of files) {
   at = f;
   try { require(f); loaded++; }
-  catch (e) { fail(String((e && e.stack) || e).split('\\n').slice(0, 5).join(' | ')); }
+  catch (e) { again.push([f, e]); }
 }
 process.exit = exit;
-console.log(JSON.stringify({ loaded }));
-exit(0);
+const inWorker = (f) => new Promise((resolve) => {
+  const w = new Worker('const { parentPort } = require("node:worker_threads"); require(' + JSON.stringify(f) + '); parentPort.postMessage("loaded, as a check");', { eval: true });
+  w.on('message', (m) => { if (m === 'loaded, as a check') { resolve(true); w.terminate(); } });
+  w.on('error', () => resolve(false));
+  w.on('exit', () => resolve(false));
+});
+(async () => {
+  for (const [f, e] of again) {
+    if (!(await inWorker(f))) fail(f, said(e));
+    loaded++;
+  }
+  console.log(JSON.stringify({ loaded }));
+  exit(0);
+})();
 `;
 
 /** What a process said last, for an error: its own last line, or an uncaught error's line. */

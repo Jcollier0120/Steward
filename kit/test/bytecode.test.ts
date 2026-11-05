@@ -112,6 +112,8 @@ function stageOf(name: string, extra: Record<string, string> = {}): string {
     'src/dyn.js': 'export const dyn=42;',
     // Loaded after the CLI sets a V8 flag, as Reeve's MCP server does: V8's flags' hash is another then.
     'src/late.js': 'export const late=7;',
+    // A worker thread's script, which can't load anywhere else (parentPort is null): the check loads it in a worker.
+    'src/kit/worker.js': 'import{parentPort as p}from"node:worker_threads";p.on("message",(m)=>p.postMessage(m*2));',
     'src/kit/required.js': 'import{pathToFileURL as p}from"node:url";const m=(await import(new URL("../dyn.js",import.meta.url).href)).dyn;export{m};',
     'src/web/page.js': 'window.page=1;',
     'src/kit/web/settings-panel.js': 'window.panel=1;',
@@ -125,12 +127,12 @@ const cliIn = (stage: string, ...args: string[]) => spawnSync(process.execPath, 
 test('a release built as bytecode carries no module source, and runs as it did: imports, import(), import.meta, a top-level await, names and stack traces', () => {
   const stage = stageOf('whole');
   const built = buildBytecode(stage, { esbuild, nodes: [here], id: 'demo' });
-  assert.equal(built.modules, 5);
+  assert.equal(built.modules, 6);
   assert.deepEqual(built.wrapped.sort(), ['src/cli.js', 'src/kit/required.js']);
   assert.deepEqual(built.nodes.map((n) => nodeKey(n)), [nodeKey(here)]);
 
   // Each module is a stub with its bytecode beside it; the page's scripts, the browser's, are as they were.
-  for (const m of ['src/cli.js', 'src/lib.js', 'src/dyn.js', 'src/late.js', 'src/kit/required.js']) {
+  for (const m of ['src/cli.js', 'src/lib.js', 'src/dyn.js', 'src/late.js', 'src/kit/required.js', 'src/kit/worker.js']) {
     assert.match(readFileSync(path.join(stage, m), 'utf8'), /^require\("(\.\/|\.\.\/)?(kit\/)?run-bytecode\.cjs"\)\(module,require,__filename,__dirname\);/);
     assert.ok(existsSync(path.join(stage, jscFor(m, here))), m);
   }
