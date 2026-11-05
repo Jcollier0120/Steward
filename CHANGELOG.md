@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.302
+
+**The Steward hands kit 2.152.0 out, and runs on it: the staff's releases carry no source code, only compiled bytecode.**
+
+### What changed
+
+- **Kit 2.152.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a release built by the kit carries the staff's server code as V8 bytecode, compiled for the Node.js Castellan's setup brings (22.23.3), on Arm64 and x64, in place of its source. Each release is loaded once by each of those before it's zipped, so one that can't run isn't published.
+- The Steward's own releases are built the same way.
+
+### Before you update
+
+- **The staff, and the Steward, then run only on Node.js 22.23.3**, which Castellan's setup brings. A PC whose staff run on another Node.js keeps the copies it has, and their updates say why, until setup is run again.
+- **Releases are published from an Arm PC**, which builds both processors' bytecode. The first one downloads Node.js 22.23.3 for x64 once (about 30 MB).
+- Downloads are larger: each release carries its code for both processors.
+
 ## 0.36.301
 
 **The Steward hands kit 2.151.0 out, and runs on it: the staff's license check can't be switched off from outside, and their hold banner has Subscribe.**

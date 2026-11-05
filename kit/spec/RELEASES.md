@@ -17,6 +17,25 @@ The agents' source stays in their private repositories. What a PC installs is a 
 - **No document goes** (kit 2.134.0, `isDoc`): not a `.md` anywhere in the zip, the kit's own pages in `src\kit\spec\` and the READMEs beside its vendored builds included. They're for whoever works on the agent, and nothing reads them at run time (the spec part's `.json` files still go). A license or notice file written as `.md` (`LICENSE.md`) still goes.
 - **`CHANGELOG.md` goes, cut to its newest 20 entries** (kit 2.143.0, notes.ts's `releaseChangelog`): its opening and those entries, at the zip's top level, which the About view's **What's new** reads (`node/whats-new.ts`). The whole history (hundreds of KB) stays in the repository.
 - **`THIRD-PARTY-NOTICES.txt`** goes at the zip's top level (kit 2.134.0), below.
+- Then the server's code is **built as V8 bytecode** (kit 2.152.0), below: no module's source goes, minified or not.
+
+## Bytecode: `node/bytecode.ts` (kit 2.152.0)
+
+Minified code is still code anyone can read. So after minify.ts, `release.ts` has V8, the engine inside Node.js, compile each module the server runs, and the release carries what V8 keeps of it (its code cache, bytecode) in place of its source. Since kit 2.152.0, every release the kit builds, and Manor's and Reeve's, which call `buildBytecode` too.
+
+- **Which modules:** every `.js` under `src\` but a `web` folder's (`isServerModule`): the browser runs those, so they stay minified JavaScript (`src\web\page.js`, `src\kit\web\`, Manor's `web\`). PowerShell scripts, JSON and the rest are as they were.
+- **CommonJS first:** V8's cache is of a script, and an ES module can't be run from one, so esbuild turns each module into CommonJS (`toCommonJs`): `import.meta.url`, `.dirname` and `.filename` are the module's own, and its exports' names are noted on its stub, as esbuild notes them, so an `import()` of it still has its named exports. `src\package.json` says `"type": "commonjs"` from then on.
+- **Top-level await**, which CommonJS doesn't have (a CLI's `switch`, a script block at a module's end): each run of statements from one that awaits goes into an async function of its own, chained after the one before, in order (`withoutTopLevelAwait`, esbuild its parser). An `await import(x)` in a declaration becomes a plain `require` of x. Any other await in a declaration (`const x = await f()` at the top) isn't built, and the build says where: move it into the code that uses it.
+- **`import.meta.resolve`** has no CommonJS form: a module that uses it isn't built.
+- **Each module's `.js` is a one-line stub** that hands its module to the kit's loader, `src\kit\run-bytecode.cjs`. Beside it is its bytecode for each Node.js and processor it runs on: `cli.arm64-v22.23.3.jsc`, `cli.x64-v22.23.3.jsc`. The entry stubs (`src\cli.ts`) `require` their module, so `node src\cli.ts` still starts the agent.
+- **Compiled whole**, every function at once (`--no-lazy`) with its source positions, so V8 never needs the source: a stack trace still says each file, line and column, and the names are kept (`keepNames`).
+- **For the Node.js the staff run on:** V8's cache is good only for the V8 that made it, on its processor. A published release is built for `RUNTIME_NODE` (Node.js 22.23.3, what Castellan's setup brings: Manor's `NodeRuntime.cs`), for Arm64 and x64 (`BYTECODE_ARCHES`), each by that Node.js itself: the running one when it's that one, else one downloaded from nodejs.org once, checked against its `SHASUMS256.txt` and `NODE_PINS`, and kept in `%USERPROFILE%\.steward\node` (`KIT_NODES` names another folder). **An Arm PC builds both** (it runs x64 programs); an x64 PC can't run Arm64's Node.js, so it can't publish: `Not built: ... Release it from a PC that runs both`. A release that isn't published is built for the Node.js building it; `npm run release -- --as-published` builds it for both, as `--publish` would, and publishes nothing.
+- **Checked before it's zipped:** V8 takes each cache back once as it's made, and then each Node.js loads every module but the entry stubs' (`smokeTest`), in a process whose home, AppData, the agent's data folder and its own folder are a temporary folder's. A module that can't load from its bytecode stops the release, naming it, and so does one that ends the process as it loads: a script that does its work whenever it's loaded, not only when Node starts it, would end the check with the modules after it unloaded (outside-run.ts checks it's the script Node started).
+- **A function's source** (`fn.toString()`) is the stand-in's: blank. Nothing of the server's should read it.
+- **A V8 flag set as the code runs** (`v8.setFlagsFromString('--expose-gc')`, as Reeve's MCP server does) changes the hash V8 checks a cache's flags by: the loader reads it again and tries once more.
+- **Installing** (install.ts) keeps only the bytecode for the Node.js installing it (`keepOwnBytecode`), which the agent's task runs. On another Node.js nothing is installed or changed: `This release's code runs on Node.js v22.23.3 for arm64 or x64, and this is Node.js ... Nothing was changed.` Run from a Node.js it has no bytecode for, the loader says the same of the module.
+- `release.json` says `"form": "bytecode"` and `"bytecode": { "node": ["v22.23.3"], "arch": ["arm64", "x64"] }`.
+- **What's still readable:** the browser's code (as any web page's), the signed PowerShell scripts (Windows' Smart App Control runs only signed ones, and a signature is over the text), `tools/kit.ts` (the kit is public), the strings in the bytecode, and the C# helpers a few agents compile on the PC. The bytecode is V8's own format, with no source in it; it isn't encryption, and a determined reader with V8's tools can still list what a function does, as with any compiled program.
 
 ## Notices: `node/notices.ts`
 
@@ -33,7 +52,7 @@ Every release carries `THIRD-PARTY-NOTICES.txt`, made by `release.ts` from what 
 - native files when kit.json's `native` lists no `notices`.
 
 Put the maker's license (and a `NOTICE` saying what you changed, for a modified build) beside what you carry.
-- `release.json` says `"form": "minified"`. `npm run release -- --readable` builds without minifying, to look into on this PC (`"form": "readable"`); it is never published.
+- `release.json` says `"form": "bytecode"` (above; `"minified"` before kit 2.152.0, or when it has no server module). `npm run release -- --readable` builds without minifying or bytecode, to look into on this PC (`"form": "readable"`); it is never published.
 - A published release's `release.json` says whether the Exchequer sells the agent, as its list says then (`"sold": true` or `false`, from `saleOf`; kit 2.110.0). Since kit 2.113.0 the license check (license-check.ts) doesn't read it: every agent but Manor and Heiward needs a license for its PC, sold or not. When the Exchequer can't say, there's no `sold`.
 
 ## Public: `Jcollier0120/Manor-releases`

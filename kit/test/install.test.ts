@@ -883,8 +883,13 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   assert.deepEqual(noticeHeadings(notices), ['src\\kit\\geniex', 'src\\kit\\openvino']);
   assert.match(notices, /BSD 3-Clause License[\s\S]*not Qualcomm's release/);
   assert.match(r.stdout, /THIRD-PARTY-NOTICES\.txt: src\\kit\\geniex, src\\kit\\openvino/);
-  assert.equal(readFileSync(path.join(built, 'src', 'cli.ts'), 'utf8'), "import './cli.js';\n");
-  assert.equal(JSON.parse(readFileSync(path.join(built, 'release.json'), 'utf8')).form, 'minified');
+  // Its code is V8 bytecode for the Node.js that built it (bytecode.ts): each module's .js is a stub, and no source.
+  assert.equal(readFileSync(path.join(built, 'src', 'cli.ts'), 'utf8'), "require('./cli.js');\n");
+  const builtRelease = JSON.parse(readFileSync(path.join(built, 'release.json'), 'utf8'));
+  assert.equal(builtRelease.form, 'bytecode');
+  assert.deepEqual(builtRelease.bytecode, { node: [process.version], arch: [process.arch] });
+  assert.match(readFileSync(path.join(built, 'src', 'cli.js'), 'utf8'), /^require\("\.\/kit\/run-bytecode\.cjs"\)/);
+  assert.ok(existsSync(path.join(built, 'src', `cli.${process.arch}-${process.version}.jsc`)));
   assert.match(r.stdout, /built with esbuild \d+\.\d+\.\d+: \d+ TypeScript/);
   const ran = spawnSync(process.execPath, [path.join(built, 'src', 'cli.ts'), 'status', '--json'], { encoding: 'utf8', windowsHide: true, env: { ...process.env, FIXTURE_HOME: path.join(tmp, 'built-home') } });
   assert.equal(ran.status, 0, ran.stderr);
