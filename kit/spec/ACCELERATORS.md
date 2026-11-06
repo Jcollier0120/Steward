@@ -244,6 +244,111 @@ Measured on the Snapdragon X2 Elite (the owner's laptop, GenieX with Qwen3-VL-2B
 
 **How busy each accelerator was** (token-tally.ts' `busyToday`): every agent's requests, embeddings included from kit 2.85.0, counted by accelerator and the PC's own day; the work status gives each accelerator's line its `today` ([WORK-STATUS.md](WORK-STATUS.md)).
 
+## Add-ons (2026-11-06)
+
+An add-on is a LoRA adapter: a few megabytes of weights trained for one staff member's task, applied over the shared model at request time, so one server serves the model as it is and any number of add-ons. The Warrener's naming and filing is the first. **The owner's rule (2026-11-06): an add-on runs where its model runs. On a PC with an NPU it stays on the NPU**, and one whose work would fall back to the processor is brought onto the NPU, never shipped there.
+
+| Accelerator | The add-on on it | What it costs | The route |
+|---|---|---|---|
+| Snapdragon X2's NPU (Hexagon v81) | All of it on the NPU, its answers as on the processor | Reads 15% slower and writes 22% slower while it's on; 26 MB more on the NPU (rank 32, F16, on q, k, v and o) | llama-server on the Hexagon, `--lora <file> --lora-init-without-apply`, each request's own `lora`. Not GenieX, which takes none |
+
+The other accelerators get their row when they're measured.
+
+### The Snapdragon X2's NPU
+
+Measured 2026-11-06 on a Snapdragon X2 Elite Extreme (X2E94100, 18 cores, 48 GB) and its Hexagon v81 NPU by the Steward's `tools/addon-npu` (its README says how). Every NPU run was in the NPU's turn, one server at a time on a private port, on at most 8 of the processor's cores. The setup:
+
+- llama.cpp b11645's Windows Arm64 build with GenieX 0.9.3's llama.cpp libraries over it (the NPU embedding server's, as setup lays it out), `--device HTP0 -ngl 99 -c 2560`, with the kit's pinned Qwen3-VL-2B-Instruct Q4_0 (npu-vendors.json).
+- The add-ons were throwaways: random numbers on the language model's q, k, v and o projections, each change 5% of its weight's size, made in Hugging Face's PEFT layout and converted by b11645's `convert_lora_to_gguf.py` (b11734's writes the same bytes). A trained add-on of the same rank has the same shapes, so the same work.
+
+**GenieX takes no add-on.**
+
+- `geniex serve` has no option for one.
+- Its own code never loads one. The llama.cpp library it carries has llama.cpp's adapter functions, but nothing of GenieX's calls them. Its QAIRT libraries have Qualcomm Genie's own adapters, for Genie's own model format: a last resort, not tried.
+- `/lora-adapters` is a 404, and a request's `lora` field (llama-server's form, or any other name) is taken and ignored: no adapter is loaded to apply.
+
+So an add-on on the NPU means llama-server on the Hexagon, the server the NPU's embeddings already run on.
+
+**Where it runs: all of it on the NPU.**
+
+- Every add-on tensor is in the NPU's memory (112 for each add-on), and every op of it (each projection's two matmuls, its scale and its add) is scheduled on HTP0 (`GGML_SCHED_DEBUG=2`).
+- The graph keeps the two splits it has without one. The only processor nodes are the two embedding lookups, as without an add-on.
+- The processor's time is the same with and without one: 22–25 ms for each token written, the server's threads waiting on the NPU. So none of the add-on's work falls back.
+
+The NPU's own time (`GGML_HEXAGON_PROFILE=1`) for a 468-token Warrener prompt, and for each written token:
+
+| | The prompt | The add-on's share | Each token written | The add-on's share |
+|---|---|---|---|---|
+| No add-on | 190 ms | | 8.5 ms | |
+| Rank 16, F16 | 439 ms | 254 ms | 11.1 ms | 2.5 ms |
+| Rank 32, F16 | 217 ms | 31 ms | 11.0 ms | 2.5 ms |
+| Rank 64, F16 | 219 ms | 33 ms | 11.0 ms | 2.6 ms |
+
+The NPU's matrix units (HMX) take a matmul whose inner size is a multiple of 32. A rank-16 add-on's second matmul (inner size 16) runs on the vector units (HVX) instead: 230 ms of the prompt's 439. So an add-on is rank 32 or more, in steps of 32. A rank-16 one padded with zeros to 32 would give the same answers; that wasn't measured.
+
+**What it costs.** llama-server's own timings, the median of 3 rounds: reading a 1,500-token prompt, writing 128 tokens, and a Warrener name (its prompt about 450 tokens). The memory is read after them:
+
+| | Reads, tokens a second | Writes, tokens a second | A name | On the NPU | Working set |
+|---|---|---|---|---|---|
+| No add-on | 3,001 | 71.6 | 344 ms | 1,411 MB | 1,796 MB |
+| Rank 32, F16, on | 2,565 | 55.8 | 476 ms | 1,437 MB | 1,826 MB |
+| Rank 32, F16, loaded and off | 3,010 | 71.7 | 364 ms | | |
+| Rank 64, F16, on | 2,522 | 55.3 | 437 ms | 1,461 MB | 1,850 MB |
+| Rank 16, F16, on | 1,124 | 56.2 | 718 ms | 1,425 MB | 1,814 MB |
+
+An add-on that's loaded but off is left out of the graph: scale 0 in a request, or a request without `lora` to a server started with `--lora-init-without-apply`. The model then runs at its own speed for every other staff member's requests. A server with one started in 1.8–2.1 s, against 1.8 s without.
+
+**Its answers: as on the processor, in F16.**
+
+- **The Warrener's names.** Its naming prompt, on 8 made-up documents, named greedily on the NPU and on the processor with the same add-on (the reference):
+  - rank 32 named 7 of 8 word for word as the processor did, the same as the model without an add-on (7 of 8);
+  - rank 16 named 7 of 8 the same, rank 64 named 5;
+  - every folder was the processor's, and every difference was in the wording ("Lease 2026" for "Lease Agreement");
+  - the add-on changed 7 of the 8 names, on both.
+- **The model's odds** for the name's first token, every document with the add-on off and then on:
+  - the NPU moved them by 102% of the processor's change at ranks 32 and 64, and 80% at rank 16;
+  - the gap between the NPU's change and the processor's was within the NPU's own rounding of the model alone (0.35 and 0.27 apart on average, where the model alone is 0.27 and 0.26 apart);
+  - keeping every matmul off the matrix units (`GGML_HEXAGON_MM_SELECT=1`) gave the same, 96–99%;
+  - an add-on switched off left nothing behind: the odds were the same as before it was on.
+
+**Not in Q8_0, on b11645.**
+
+- Converted to Q8_0, the add-on's work is placed on the NPU as in F16 and costs the same, but its answers are wrong. Its odds are other words' ("hes", "vic", where the processor's is "receipt"), and its names are a run of "!", the sign of NaN.
+- It leaves them behind: after a request with it on, a request with it off writes "!" after its first token. The first token comes from the prompt, read afresh. The tokens after it look to be reading the NaNs it wrote, still in the KV cache's spare cells: an add-on loaded but never switched on leaves nothing.
+- A rank-16 Q8_0 add-on took the NPU down (`dsp-rsp INTERNAL-ERROR`), and the server exited.
+- Keeping matmuls off the matrix units, or the backend's op fusion off (`GGML_HEXAGON_OPFUSION=0`), doesn't help.
+
+So an add-on ships in F16: rank 32 is 26 MB.
+
+**Switching it on and off.**
+
+- **Per request** (`"lora": [{ "id": 0, "scale": 1 }]` in the request). A request whose add-ons differ from its slot's last request reads its whole prompt again: 451 tokens, 197 ms switched off and 226 ms on. Its answer is the same, byte for byte, as with the cache off. The same add-on again reads only what's new (18–22 ms here).
+- **Never through `POST /lora-adapters`.** It changes the add-on in 1 ms, but the next request reuses the prompt that was read with the one before, and answers differently from the same request with the cache off. b11734's CUDA build does the same (an RTX 4080 SUPER, 2026-11-06).
+
+For the Warrener, whose every document is a new prompt, a switch costs nothing it didn't already pay. For a staff member whose requests share a long start, the first request after another's add-on reads that start again.
+
+**The route against GenieX.** The kit's NPU chat runs on GenieX today, and an add-on needs llama-server on the Hexagon. Each was measured alone, without an add-on: GenieX as the kit starts it (`--compute npu --nctx 2560`, with its environment), and llama-server as above with the 2B's F16 projector (`--mmproj <file> --image-max-tokens 1024`):
+
+| | GenieX 0.9.3 | llama-server b11645 on the Hexagon |
+|---|---|---|
+| Reads, tokens a second | 2,943 | 2,986 |
+| Writes, tokens a second | 71.2 | 72.0 |
+| A name (its first token) | 364 ms (160 ms) | 357 ms (145 ms) |
+| The NPU benchmark's 24 quality items | 22 | 22, missing the same two |
+| Its 4 pictures | 4: the first in 1.04 s, then 0.26–0.29 s | 4: the first in 0.35 s, then 0.20–0.24 s |
+| Ready | answers in 2.1 s (it loads the model with the first request) | 3.1 s, the projector loaded |
+| On the NPU, after chat / after pictures | 1,497 / 2,454 MB | 1,411 / 2,347 MB |
+| Working set, after chat / after pictures | 1,699 / 2,708 MB | 2,590 / 2,796 MB |
+
+So the move costs nothing in speed, answers or pictures. The projector runs on the NPU, apart from its one UPSCALE op (llama.cpp warns of it at the start).
+
+**For the Warrener's pilot:**
+
+- One llama-server on the Hexagon serves the NPU's chat and pictures, with its add-ons loaded at the start (`--lora <file> --lora-init-without-apply`, F16, rank 32).
+- The Warrener's requests carry its add-on (`lora`). Everyone else's carry none.
+- No backend patch, no merged copy (the add-on folded into the model) and no Genie adapter: the add-on runs on the NPU as it is.
+- Not one server per add-on: each would hold another 1.4 GB of the NPU.
+
 ## Games
 
 A gaming desktop is for games first. While a game or another full-screen 3D program uses a graphics card, background work doesn't run on that card: it goes to another accelerator, or waits. A request someone is waiting on still may. A card counts as in use by a game while any other program's 3D engine on it is over 25% (Windows' `GPU Engine` counters, by the card's LUID), checked at most every 15 seconds. Heiward's ThreeDWatch does the same for its scans.
