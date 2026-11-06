@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.304
+
+**The kit's accelerators spec says where a LoRA add-on runs on a Snapdragon X2's NPU, and what it costs.**
+
+### What's new
+
+- **Add-ons**, a new section of the kit's accelerators spec. On a Snapdragon X2, an add-on for the NPU's Qwen3-VL-2B runs entirely on the NPU through llama.cpp's llama-server, with its answers as on the processor. While it's on, reading is 15% slower and writing 22% slower, and it takes 26 MB more of the NPU (rank 32, F16). The model runs at its own speed for every request without it. GenieX takes no add-on, and llama-server on the NPU matches it in speed, answers and pictures. An add-on must be F16 and rank 32 or more, and is switched per request, never through `/lora-adapters`.
+- The Steward's `tools/addon-npu` holds the test that measured it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.303
 
 **The Steward hands kit 2.152.1 out: after a sleep, a lock isn't taken from a holder that's still working, and a model server's start isn't failed.**
