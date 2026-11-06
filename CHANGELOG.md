@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.303
+
+**The Steward hands kit 2.152.1 out: after a sleep, a lock isn't taken from a holder that's still working, and a model server's start isn't failed.**
+
+### What changed
+
+- **Kit 2.152.1** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a lock's holder is judged by the PC's awake time since it took the lock, read from Windows' event log only for a holder already 5 minutes old by the clock. A model server's 30 s start wait counts awake time too.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.302
 
 **The Steward hands kit 2.152.0 out, and runs on it: the staff's releases carry no source code, only compiled bytecode.**

@@ -9,6 +9,7 @@ import path from 'node:path';
 import * as core from './core/index.js';
 import type { Action, Result, Step } from './core/index.js';
 import { RULES } from './rules.ts';
+import { asleepSince, recentSleeps, type Sleeps } from './slept.ts';
 
 /**
  * The NPU queue: first come, first served turns on the machine-wide NPU lock. Every NPU user on this
@@ -272,9 +273,30 @@ function mtimeOf(file: string): number | null {
   }
 }
 
-/** The disk below `base`, the wall clock and timers. */
+/** The disk below `base`, the wall clock and timers; another process's owner.json is read by its awake time (awakeOwner). */
 export function onDisk(base: string, onNote?: (text: string) => void): DriveEnv {
-  return { perform: (a) => performOnDisk(base, a, onNote), clock: Date.now, sleep };
+  return { perform: (a) => awakeOwner(a, performOnDisk(base, a, onNote)), clock: Date.now, sleep };
+}
+
+/** A holder this old by the clock (ms) has the PC's sleeps since it took its lock looked up (awakeOwner). */
+export const AWAKE_OWNER_MS = 5 * 60_000;
+
+/**
+ * Another process's owner.json as the core's stale rule should judge it: its `since` moved on by the time the PC was
+ * asleep or off since then (slept.ts, kit 2.152.1). The core evicts a holder that has overstayed its staleMs (10 min by
+ * default) even while its process lives, and by the clock a sleep was all overstay: after two days asleep, a Reeve
+ * round would take the runner lock from the runner still at its jobs. The log is read only for a holder already
+ * AWAKE_OWNER_MS old, and not again for RECENT_SLEEPS_MS; unread, the clock judges as before. This process's own
+ * owner.json is never moved: its release frees the lock only while owner.json names it as it wrote it.
+ */
+export async function awakeOwner(a: Action, r: Result, o: { now?: number; sleeps?: (since: number) => Promise<Sleeps | null> } = {}): Promise<Result> {
+  if (a.op !== 'read' || a.path.at(-1) !== 'owner.json' || !r || !('text' in r)) return r;
+  const owner = core.readOwner(r.text);
+  const now = o.now ?? Date.now();
+  if (!owner || owner.pid === process.pid || now - owner.since < AWAKE_OWNER_MS) return r;
+  const s = await (o.sleeps ?? recentSleeps)(owner.since);
+  const asleep = s ? asleepSince(s, owner.since, now) : 0;
+  return asleep > 0 ? { text: core.ownerText({ pid: owner.pid, since: owner.since + asleep }) } : r;
 }
 
 /**

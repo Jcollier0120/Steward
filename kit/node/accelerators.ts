@@ -12,6 +12,7 @@ import { lineState, queueDirFor, readLine, slotDirs, type Lane } from './npu-que
 import { powershell, psQuote } from './ps.ts';
 import { samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
+import { awakeTimeout } from './slept.ts';
 import { trimWorkingSet } from './working-set.ts';
 
 /**
@@ -1049,15 +1050,22 @@ function changingUnder(ep: Endpoint, card?: Pick<Accelerator, 'id' | 'kind' | 'n
   return acc ? { acc, work: holds[acc.id] } : null;
 }
 
-/** Waits until a busy server answers /v1/models; AcceleratorDown when it stops answering, or is still busy after `ms`. */
+/**
+ * Waits until a busy server answers /v1/models; AcceleratorDown when it stops answering, or is still busy after `ms` of
+ * the PC's awake time (slept.ts, kit 2.152.1).
+ */
 async function untilReady(baseUrl: string, ms: number, o: { listsWhenLoaded?: boolean } = {}): Promise<void> {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 250));
-    const state = await probe(baseUrl, Math.max(250, Math.min(PROBE_MS, deadline - Date.now())), o);
-    if (state === 'ready') return;
-    if (state === 'down') throw new AcceleratorDown(core.say.connectionRefused('/v1/models', baseUrl, 'it stopped answering while busy'));
-    if (Date.now() >= deadline) throw new AcceleratorDown(core.say.stillBusy(baseUrl, Math.round(ms / 1000)));
+  const budget = awakeTimeout(() => {}, ms).unref();
+  try {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 250));
+      const state = await probe(baseUrl, Math.max(250, Math.min(PROBE_MS, budget.left())), o);
+      if (state === 'ready') return;
+      if (state === 'down') throw new AcceleratorDown(core.say.connectionRefused('/v1/models', baseUrl, 'it stopped answering while busy'));
+      if (budget.left() === 0) throw new AcceleratorDown(core.say.stillBusy(baseUrl, Math.round(ms / 1000)));
+    }
+  } finally {
+    budget.clear();
   }
 }
 
@@ -1146,29 +1154,35 @@ async function startOnce(ep: Endpoint, waitMs: number, readyMs: number, o: Start
   } finally {
     if (log !== undefined) closeSync(log);
   }
-  const deadline = Date.now() + waitMs;
+  // Of the PC's awake time (slept.ts, kit 2.152.1): in a maintenance wake on 2026-11-04 the PC slept again while
+  // ovms.exe started, and at the next wake the Intel AI Boost was marked failed, "didn't answer within 30 s".
+  const budget = awakeTimeout(() => {}, waitMs).unref();
   const lists = { listsWhenLoaded: listsWhenLoaded(ep.startCommand) };
   // Once its model has loaded, in the background: the request that started it goes on at once (working-set.ts).
   const loaded = () => {
     if (pid && trimmedOnceLoaded(ep.startCommand)) void trimLoaded(pid, program, ep.baseUrl, o.logFile);
     if (pid && /^llama-server\.exe$/i.test(program) && cpuVariants(path.dirname(cmd)) > 1) void keepLoadedVariant(pid, path.dirname(cmd), ep.baseUrl, o.logFile);
   };
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 250));
-    if (spawnError) throw await blockedFirst(cmd, startedAt, core.say.couldNotStart(cmd, spawnError.message), o.readBlocks, null);
-    const state = await probe(ep.baseUrl, 2000, lists);
-    if (state === 'ready') {
-      loaded();
-      return { started: true, waited: false };
+  try {
+    while (budget.left() > 0) {
+      await new Promise((r) => setTimeout(r, 250));
+      if (spawnError) throw await blockedFirst(cmd, startedAt, core.say.couldNotStart(cmd, spawnError.message), o.readBlocks, null);
+      const state = await probe(ep.baseUrl, 2000, lists);
+      if (state === 'ready') {
+        loaded();
+        return { started: true, waited: false };
+      }
+      if (state === 'busy') {
+        await untilReady(ep.baseUrl, readyMs, lists);
+        loaded();
+        return { started: true, waited: true };
+      }
+      // GenieX exits at once (code 0) when another server holds its port: it is down only if nothing answers.
+      if (apart && exited === undefined && !alive(apart)) exited = null;
+      if (exited !== undefined) throw await blockedFirst(cmd, startedAt, core.say.exitedWhileStarting(program, exited, ep.baseUrl), o.readBlocks, exited);
     }
-    if (state === 'busy') {
-      await untilReady(ep.baseUrl, readyMs, lists);
-      loaded();
-      return { started: true, waited: true };
-    }
-    // GenieX exits at once (code 0) when another server holds its port: it is down only if nothing answers.
-    if (apart && exited === undefined && !alive(apart)) exited = null;
-    if (exited !== undefined) throw await blockedFirst(cmd, startedAt, core.say.exitedWhileStarting(program, exited, ep.baseUrl), o.readBlocks, exited);
+  } finally {
+    budget.clear();
   }
   throw new AcceleratorDown(core.say.didNotAnswer(program, ep.baseUrl, Math.round(waitMs / 1000)));
 }

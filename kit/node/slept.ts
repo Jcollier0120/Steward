@@ -297,3 +297,34 @@ export async function readSleeps(since: number, o: { now?: number; query?: (ms: 
     return null;
   }
 }
+
+/**
+ * How long the PC was asleep or off from `since` to `now` (ms), with an open standby session (standbySince) counted as
+ * asleep from its start: until its 507, nothing says how much of it the PC slept. What a lock holder's age leaves out
+ * (npu-queue.ts's awakeOwner, kit 2.152.1).
+ */
+export function asleepSince(s: Sleeps, since: number, now: number): number {
+  if (s.standbySince === null) return sleptIn(s.spans, since, now);
+  return sleptIn(s.spans, since, s.standbySince) + Math.max(0, now - Math.max(since, s.standbySince));
+}
+
+/** How long one reading of recentSleeps is used again (ms): a lock's waiter looks at its holder every 150 ms. */
+export const RECENT_SLEEPS_MS = 30_000;
+
+let recent: { at: number; since: number; sleeps: Promise<Sleeps | null> } | null = null;
+let recentRead: ((since: number) => Promise<Sleeps | null>) | null = null;
+
+/** For tests, as setAwakeClock: what recentSleeps reads in place of the event log (null: the log), read afresh. */
+export function setRecentSleeps(read: ((since: number) => Promise<Sleeps | null>) | null): void {
+  recentRead = read;
+  recent = null;
+}
+
+/** readSleeps since `since`, read again only once RECENT_SLEEPS_MS old, or to go further back. Null as readSleeps's. */
+export function recentSleeps(since: number, now = Date.now()): Promise<Sleeps | null> {
+  if (!recent || now < recent.at || now - recent.at > RECENT_SLEEPS_MS || since < recent.since) {
+    const from = recent ? Math.min(since, recent.since) : since;
+    recent = { at: now, since: from, sleeps: recentRead ? recentRead(from) : readSleeps(from, { now }) };
+  }
+  return recent.sleeps;
+}

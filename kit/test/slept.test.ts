@@ -322,6 +322,32 @@ test('sleptIn counts each moment once, and only inside the stretch asked', () =>
   assert.equal(S.sleptIn([], 0, 1000), 0);
 });
 
+test('asleepSince: the stretches since a time, and a standby session still open counted asleep from its start', () => {
+  const spans = [{ from: T('2026-11-05T10:00:00Z'), to: T('2026-11-05T12:00:00Z'), kind: 'standby' as const }];
+  const [since, now] = [T('2026-11-05T11:00:00Z'), T('2026-11-05T13:00:00Z')];
+  assert.equal(S.asleepSince({ spans, standbySince: null }, since, now), HOUR);
+  assert.equal(S.asleepSince({ spans, standbySince: T('2026-11-05T12:30:00Z') }, since, now), HOUR + 30 * MIN);
+  assert.equal(S.asleepSince({ spans: [], standbySince: T('2026-11-05T10:00:00Z') }, since, now), 2 * HOUR, 'open since before: all of it');
+});
+
+test('recentSleeps reads the log once for a while: again once RECENT_SLEEPS_MS old, or to go further back', async () => {
+  const asked: number[] = [];
+  S.setRecentSleeps(async (since) => (asked.push(since), { spans: [], standbySince: null }));
+  try {
+    const now = Date.now();
+    await S.recentSleeps(now - HOUR, now);
+    await S.recentSleeps(now - HOUR, now + SEC);
+    assert.deepEqual(asked, [now - HOUR]);
+    await S.recentSleeps(now - 2 * HOUR, now + 2 * SEC);
+    assert.deepEqual(asked, [now - HOUR, now - 2 * HOUR], 'further back: read again');
+    await S.recentSleeps(now - HOUR, now + 2 * SEC + S.RECENT_SLEEPS_MS + 1);
+    assert.deepEqual(asked, [now - HOUR, now - 2 * HOUR, now - 2 * HOUR], 'old: read again, as far back as before');
+  } finally {
+    S.setRecentSleeps(null);
+  }
+  assert.equal(await S.recentSleeps(Date.now() - HOUR), null, 'never the real log under node --test');
+});
+
 test('readSleeps asks the log for the stretch since, LOOK_BACK_MS at most; null when it cannot be read', async () => {
   const asked: number[] = [];
   const now = T('2026-11-05T16:00:00Z');
