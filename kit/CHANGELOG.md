@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.152.1
+
+**A lock's holder and a starting model server are judged by the time the PC was awake, so a sleep no longer evicts a live holder or fails a server's start.**
+
+### What changed
+
+- **node/npu-queue.ts**: `awakeOwner` (new), used by `onDisk`, so by every lock and accelerator turn the node part takes. When another process's `owner.json` is read and its `since` is `AWAKE_OWNER_MS` (5 min) old or more, `since` moves on by the PC's sleeps and times off since then, and the core's stale rule judges the holder's awake age. Before, a holder that slept past its `staleMs` was evicted at the wake while its process still lived: after two days asleep, a Reeve round would take the runner lock from the runner still at its jobs. A standby session still open counts as asleep. With the log unread, the clock judges as before. A holder's own `owner.json` is never moved, so its release matches as before.
+- **node/slept.ts**: `asleepSince(sleeps, since, now)` and `recentSleeps(since)` (new). recentSleeps reads the log at most once in `RECENT_SLEEPS_MS` (30 s), and again to go further back. `setRecentSleeps` is for tests.
+- **node/accelerators.ts**: a server's start wait (`START_WAIT_MS`, 30 s) and the wait for a busy one to load count the PC's awake time (`awakeTimeout`). In a maintenance wake on 2026-11-04, the PC slept again while ovms.exe started, and the Intel AI Boost was marked failed for "didn't answer within 30 s".
+- **spec/NPU-QUEUE.md**, **spec/ACCELERATORS.md**: say so.
+
+### What an agent must do
+
+- Nothing.
+
 ## 2.152.0
 
 **A release carries no source: the server's code is V8 bytecode, built for the Node.js the staff run on, on Arm64 and x64.**

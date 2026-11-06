@@ -225,6 +225,44 @@ test('the plain lock lets go only while owner.json still names it, and evicts a 
   await assert.rejects(withLock(lockDir, async () => withLock(lockDir, async () => {}, { waitMs: 200 })), (e: Error) => e instanceof LockTimeout && e.message === `timed out after 200 ms waiting for ${lockDir}`);
 });
 
+test("a live holder isn't overstayed by the PC's sleeps: its age is the time the PC was awake (kit 2.152.1)", async () => {
+  const { awakeOwner, AWAKE_OWNER_MS } = await import('./fixture/src/kit/npu-queue.ts');
+  const { setRecentSleeps } = await import('./fixture/src/kit/slept.ts');
+  const DAY = 24 * 60 * 60_000;
+  const now = Date.now();
+  const since = now - 2 * DAY;
+  const read = { op: 'read' as const, path: ['npu', 'owner.json'] };
+  const owner = (pid: number, at: number) => ({ text: JSON.stringify({ pid, since: at }) });
+  const other = owner(process.ppid, since);
+  // The lid shut all but a minute either side: two minutes awake.
+  const asleep = async () => ({ spans: [{ from: since + 60_000, to: now - 60_000, kind: 'standby' as const }], standbySince: null });
+  assert.deepEqual(await awakeOwner(read, other, { now, sleeps: asleep }), owner(process.ppid, now - 120_000));
+  assert.deepEqual(await awakeOwner(read, other, { now, sleeps: async () => ({ spans: [], standbySince: since + 60_000 }) }), owner(process.ppid, now - 60_000), 'a standby session still open: asleep since it began');
+  const mine = owner(process.pid, since);
+  assert.equal(await awakeOwner(read, mine, { now, sleeps: asleep }), mine, "this process's own: never moved, or its release would let nothing go");
+  let asked = 0;
+  const young = owner(process.ppid, now - AWAKE_OWNER_MS + 1000);
+  assert.equal(await awakeOwner(read, young, { now, sleeps: async () => (asked++, null) }), young);
+  assert.equal(asked, 0, 'a holder younger than AWAKE_OWNER_MS: the log is never read');
+  assert.equal(await awakeOwner(read, other, { now, sleeps: async () => null }), other, 'the log unread: the clock, as before');
+  const ticket = { text: 'x' };
+  assert.equal(await awakeOwner({ op: 'read', path: ['npu.queue', 'a.ticket'] }, ticket, { now, sleeps: asleep }), ticket);
+
+  // The plain lock on a real disk: a live holder that took it two days ago, with the PC asleep nearly all of that.
+  const lockDir = scratch();
+  mkdirSync(lockDir, { recursive: true });
+  writeFileSync(path.join(lockDir, 'owner.json'), other.text);
+  setRecentSleeps(asleep);
+  try {
+    await assert.rejects(withLock(lockDir, async () => {}, { waitMs: 300 }), LockTimeout, 'held: two minutes awake is no overstay');
+  } finally {
+    setRecentSleeps(null);
+  }
+  let ran = false;
+  await withLock(lockDir, async () => void (ran = true), { waitMs: 2000 });
+  assert.equal(ran, true, 'by the clock alone it overstayed, and is taken over as before');
+});
+
 test("a turn's notes: waiting behind others, and taking over from a holder that died", async () => {
   const lockDir = scratch();
   mkdirSync(lockDir, { recursive: true });
