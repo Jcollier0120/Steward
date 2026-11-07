@@ -15,7 +15,19 @@
  *   and on the processor: how much of the processor's change the NPU makes, and whether an add-on switched off leaves
  *   anything behind (a Q8_0 add-on does, on b11645: kit/spec/ACCELERATORS.md);
  * - geniex: the kit's chat route (`geniex serve`) against the llama-server route without an add-on: speed, memory, the
- *   kit benchmark's 24 quality items and 4 pictures, and whether GenieX takes a per-request `lora` field.
+ *   kit benchmark's 24 quality items and 4 pictures, and whether GenieX takes a per-request `lora` field;
+ * - memory: the llama-server route as the kit runs it (projector and add-ons loaded at the start), with each projector
+ *   (`--mmproj` and every `--mmproj-alt`): what it holds loaded, after chat, after pictures, and after each a trim of
+ *   its working set (working-set.ts), with the speed and the pictures before and after;
+ * - leak: whether llama-server on the Hexagon carries anything from one request to the next that shares its start
+ *   (GenieX's `prefix-leak`): the Warrener's names and the quality items asked in a row with the prompt cache on, again
+ *   in the other order, and each alone with it off, compared word for word;
+ * - cpu: the processor the chat server keeps busy, idle, writing, reading and naming, with llama-server's own threads
+ *   and with fewer, not polling: GenieX keeps it near idle;
+ * - kit: the route as this kit runs it (kit 2.152.2), from the kit's own code: the X2's chatServer command and
+ *   environment (routeFor, npuEntry) with the add-ons loaded, its working set trimmed once loaded, and every request
+ *   the kit's (chatBody, visionBody, fitPicture, addonFor): the NPU benchmark's 24 quality items and 4 pictures with
+ *   the add-ons held at 0, the speed, the Warrener's names with its add-on applied, and the memory.
  *
  * Each block runs in the NPU's turn (the kit's NPU line, background lane), so the staff's own requests wait for it
  * rather than run beside it. It starts only servers of its own, on its own ports, and stops each one; the installed
@@ -23,8 +35,8 @@
  *
  *   node tools/addon-npu/addon-test.ts --hex <llama.cpp Hexagon folder> --model <2B GGUF> --mmproj <projector GGUF>
  *     --lora r32-f16=<file> [--lora name=<file> ...] --out <folder>
- *     [--phases placement,speed,switch,answers,odds,geniex] [--geniex <geniex.exe>] [--port 28601] [--threads 8]
- *     [--runs 3] [--hex-env NAME=value ...]
+ *     [--phases placement,speed,switch,answers,odds,geniex,memory,leak,cpu,defaults,footprint,crash,kit] [--geniex <geniex.exe>] [--port 28601]
+ *     [--threads 8] [--runs 3] [--hex-env NAME=value ...] [--mmproj-alt name=<projector GGUF> ...] [--lora-style init|scaled0]
  *
  * README.md beside this file says how to make the throwaway add-ons (make_lora.py) and run it.
  */
@@ -35,6 +47,10 @@ import path from 'node:path';
 import { grade, picturePng, promptOf, SUITE } from '../../src/kit/npu-bench.ts';
 import { npuLockDir } from '../../src/kit/lock.ts';
 import { withNpuTurn } from '../../src/kit/npu-queue.ts';
+import { trimWorkingSet } from '../../src/kit/working-set.ts';
+import { chatBody, fitPicture, visionBody } from '../../src/kit/accelerators.ts';
+import { addonFor } from '../../src/kit/addons.ts';
+import { NPU_CATALOG, npuEntry, pinnedRoute, routeFor } from '../../src/kit/npu-vendors.ts';
 
 // ------------------------------------------------------------------------------------------------ options
 
@@ -42,6 +58,10 @@ interface Options {
   hex: string;
   model: string;
   mmproj: string | null;
+  /** More projectors for the memory phase, each named (`--mmproj-alt q8=<file>`). */
+  mmprojAlts: { name: string; file: string }[];
+  /** The crash phase's cases to run, by name (`--only a,b`); all when none. */
+  only: string[];
   loras: { name: string; file: string }[];
   out: string;
   phases: Set<string>;
@@ -55,7 +75,7 @@ interface Options {
 }
 
 function parseArgs(argv: string[]): Options {
-  const o: Options = { hex: '', model: '', mmproj: null, loras: [], out: '', phases: new Set(['placement', 'speed', 'switch', 'answers', 'odds', 'geniex']), geniex: null, port: 28601, threads: 8, runs: 3, ctx: 2560, hexEnv: {} };
+  const o: Options = { hex: '', model: '', mmproj: null, mmprojAlts: [], only: [], loras: [], out: '', phases: new Set(['placement', 'speed', 'switch', 'answers', 'odds', 'geniex']), geniex: null, port: 28601, threads: 8, runs: 3, ctx: 2560, hexEnv: {} };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => {
@@ -66,7 +86,15 @@ function parseArgs(argv: string[]): Options {
     if (a === '--hex') o.hex = v();
     else if (a === '--model') o.model = v();
     else if (a === '--mmproj') o.mmproj = v();
-    else if (a === '--lora') {
+    else if (a === '--only') o.only = v().split(',').filter(Boolean);
+    else if (a === '--lora-style') {
+      const st = v();
+      if (st !== 'init' && st !== 'scaled0') throw new Error(`--lora-style is init or scaled0, not ${st}`);
+      loraStyle = st;
+    } else if (a === '--mmproj-alt') {
+      const [name, ...rest] = v().split('=');
+      o.mmprojAlts.push({ name, file: rest.join('=') });
+    } else if (a === '--lora') {
       const [name, ...rest] = v().split('=');
       o.loras.push({ name, file: rest.join('=') });
     } else if (a === '--out') o.out = v();
@@ -177,7 +205,13 @@ function cpuArgs(o: Options, extra: string[] = []): { exe: string; env: Record<s
   };
 }
 
-const loraArgs = (files: string[]) => files.flatMap((f) => ['--lora', f]).concat(files.length ? ['--lora-init-without-apply'] : []);
+/**
+ * How a server loads its add-ons (`--lora-style`): `init`, each with --lora and --lora-init-without-apply; `scaled0`,
+ * each at scale 0 with --lora-scaled (b11645's --lora-init-without-apply leaves a request without a `lora` field at 1).
+ */
+let loraStyle: 'init' | 'scaled0' = 'init';
+const loraArgs = (files: string[]) =>
+  !files.length ? [] : loraStyle === 'scaled0' ? ['--lora-scaled', files.map((f) => `${f}:0`).join(',')] : [...files.flatMap((f) => ['--lora', f]), '--lora-init-without-apply'];
 
 // ------------------------------------------------------------------------------------------------ memory
 
@@ -247,7 +281,16 @@ interface Timings {
 
 const tps = (n: number, ms: number) => (ms > 0 ? (n * 1000) / ms : 0);
 
+/**
+ * A turn of the event loop before each request, so a keep-alive socket the server closed meanwhile is seen closed first.
+ * llama-server closes one after 5 s idle; the meter's PowerShell (execFileSync) holds this process for longer, and a
+ * request sent the moment it returns went out on the closed socket: `fetch failed`, which read as the server dying (the
+ * crash phase's name-blocked case: a 4 s execFileSync sleep twice, 3 of 3; the same sleep as a child process, 0 of 3).
+ */
+const settled = () => new Promise<void>((r) => setTimeout(r, 20));
+
 async function post(url: string, body: unknown, timeoutMs = 300_000): Promise<{ status: number; json: any; text: string; ms: number }> {
+  await settled();
   const t0 = performance.now();
   const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
   const text = await r.text();
@@ -281,6 +324,7 @@ async function complete(s: Server, prompt: string, n: number, lora: Lora): Promi
 
 /** A streamed OpenAI chat request (any server): the time to its first token and to its last, by the clock here. */
 async function streamed(base: string, body: Record<string, unknown>): Promise<Timings & { usage: any; raw: string[] }> {
+  await settled();
   const t0 = performance.now();
   const r = await fetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, stream: true, stream_options: { include_usage: true } }), signal: AbortSignal.timeout(300_000) });
   if (r.status !== 200) throw new Error(`${base}: ${r.status} ${(await r.text()).slice(0, 300)}`);
@@ -815,7 +859,7 @@ async function qualityAndPictures(base: string, model: string | undefined, pictu
   return { quality, pictures };
 }
 
-async function routeSpeed(base: string, model: string | undefined, nonce: boolean, runs: number): Promise<{ readTps: number; genTps: number; nameWallMs: number; nameFirstTokenMs: number; raw: string[] }> {
+async function routeSpeed(base: string, model: string | undefined, nonce: boolean, runs: number, extra: Record<string, unknown> = {}): Promise<{ readTps: number; genTps: number; nameWallMs: number; nameFirstTokenMs: number; raw: string[] }> {
   const reads: number[] = [];
   const gens: number[] = [];
   const walls: number[] = [];
@@ -824,15 +868,15 @@ async function routeSpeed(base: string, model: string | undefined, nonce: boolea
   for (let r = 0; r < runs; r++) {
     const tag = `${Date.now().toString(36)}-${r}`;
     const sys = (content: string) => ({ role: 'system', content: nonce ? `${tag} ${content}` : content });
-    const read = await streamed(base, { ...(model ? { model } : {}), messages: [sys('You count lines.'), { role: 'user', content: readPromptOf(1500, tag) }], max_tokens: 8, temperature: 0 });
+    const read = await streamed(base, { ...(model ? { model } : {}), messages: [sys('You count lines.'), { role: 'user', content: readPromptOf(1500, tag) }], max_tokens: 8, temperature: 0, ...extra });
     reads.push(tps(read.promptTokens, read.firstTokenMs ?? read.wallMs));
-    const gen = await streamed(base, { ...(model ? { model } : {}), messages: [sys('You write stories.'), { role: 'user', content: `[${tag}] Write a long story, at least 400 words, about a steward who keeps a manor's cellar.` }], max_tokens: 128, temperature: 0 });
+    const gen = await streamed(base, { ...(model ? { model } : {}), messages: [sys('You write stories.'), { role: 'user', content: `[${tag}] Write a long story, at least 400 words, about a steward who keeps a manor's cellar.` }], max_tokens: 128, temperature: 0, ...extra });
     gens.push(tps(Math.max(0, gen.genTokens - 1), gen.genMs));
     raw = gen.raw;
     for (const d of DOCS.slice(0, 3)) {
       const msgs = namePrompt(d.file, d.how, d.text);
       msgs[0].content = `${tag} ${msgs[0].content}`;
-      const t = await streamed(base, { ...(model ? { model } : {}), messages: msgs, max_tokens: 60, temperature: 0 });
+      const t = await streamed(base, { ...(model ? { model } : {}), messages: msgs, max_tokens: 60, temperature: 0, ...extra });
       walls.push(t.wallMs);
       firsts.push(t.firstTokenMs ?? t.wallMs);
     }
@@ -894,6 +938,466 @@ async function geniexPhase(o: Options, results: any): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------------------------------------------ memory
+
+const mb = (m: Memory) => ({ workingSetMb: Math.round(m.workingSetMb), privateMb: Math.round(m.privateMb), npuMb: m.npuMb === null ? null : Math.round(m.npuMb), availableMb: Math.round(m.availableMb) });
+
+/** Its working set handed back to Windows, as the kit does a server's (working-set.ts), and how long that took. */
+async function trimmed(pid: number): Promise<{ said: string | null; ms: number; after: ReturnType<typeof mb> }> {
+  const t0 = performance.now();
+  const said = await trimWorkingSet(pid);
+  const ms = performance.now() - t0;
+  return { said, ms: Math.round(ms), after: mb(memoryOf(pid)) };
+}
+
+/** The 4 pictures alone: pass and time, for the before and after of a trim. */
+async function picturesOnly(base: string, dir: string): Promise<{ pass: number; ms: number[] }> {
+  const ms: number[] = [];
+  let pass = 0;
+  for (const v of SUITE.vision) {
+    const png = picturePng(v.image);
+    writeFileSync(path.join(dir, `${v.id}.png`), png);
+    const r = await post(`${base}/v1/chat/completions`, { messages: [{ role: 'system', content: 'You answer questions about images briefly and literally.' }, { role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}` } }, { type: 'text', text: v.prompt }] }], max_tokens: v.maxTokens, temperature: 0, stream: false });
+    ms.push(Math.round(r.ms));
+    if (grade(v.grade, r.json?.choices?.[0]?.message?.content ?? '')) pass++;
+  }
+  return { pass, ms };
+}
+
+/** The Warrener's names with the first add-on on: their time and text. */
+async function namesWithAddon(s: Server): Promise<{ medianMs: number; texts: string[] }> {
+  const ms: number[] = [];
+  const texts: string[] = [];
+  for (const d of DOCS) {
+    const t = await chat(s, namePrompt(d.file, d.how, d.text), 60, [{ id: 0, scale: 1 }]);
+    ms.push(t.wallMs);
+    texts.push(t.text);
+  }
+  return { medianMs: Math.round(median(ms)), texts };
+}
+
+async function memoryPhase(o: Options, results: any): Promise<void> {
+  if (!o.mmproj) throw new Error('the memory phase needs --mmproj');
+  const dir = path.join(o.out, 'pictures');
+  mkdirSync(dir, { recursive: true });
+  results.memory = {};
+  for (const p of [{ name: 'f16', file: o.mmproj }, ...o.mmprojAlts]) {
+    const h = hexArgs(o, ['--mmproj', p.file, '--image-max-tokens', '1024', ...loraArgs(o.loras.map((l) => l.file))]);
+    const r = await inNpuTurn(`add-on test: memory, projector ${p.name}`, () =>
+      withServer(`memory-${p.name}`, h.exe, h.args, h.env, o, '/health', async (s) => {
+        await complete(s, 'Hello', 4, undefined);
+        const loaded = mb(memoryOf(s.pid));
+        const loadedTrim = await trimmed(s.pid);
+        const speed = await routeSpeed(s.base, undefined, false, o.runs);
+        const afterChat = mb(memoryOf(s.pid));
+        const afterChatTrim = await trimmed(s.pid);
+        const speedAfterTrim = await routeSpeed(s.base, undefined, false, o.runs);
+        const afterChatAgain = mb(memoryOf(s.pid));
+        const addon = o.loras.length ? await namesWithAddon(s) : null;
+        const afterAddon = mb(memoryOf(s.pid));
+        const qp = await qualityAndPictures(s.base, undefined, false, false, dir);
+        const afterPictures = mb(memoryOf(s.pid));
+        const afterPicturesTrim = await trimmed(s.pid);
+        const picturesAfterTrim = await picturesOnly(s.base, dir);
+        const afterPicturesAgain = mb(memoryOf(s.pid));
+        const chatAfterPictures = await routeSpeed(s.base, undefined, false, 1);
+        const afterPicturesChat = mb(memoryOf(s.pid));
+        return {
+          projector: path.basename(p.file),
+          readyMs: s.readyMs,
+          speed: { readTps: Math.round(speed.readTps), genTps: +speed.genTps.toFixed(1), nameMs: Math.round(speed.nameWallMs) },
+          speedAfterTrim: { readTps: Math.round(speedAfterTrim.readTps), genTps: +speedAfterTrim.genTps.toFixed(1), nameMs: Math.round(speedAfterTrim.nameWallMs) },
+          speedAfterPictures: { readTps: Math.round(chatAfterPictures.readTps), genTps: +chatAfterPictures.genTps.toFixed(1), nameMs: Math.round(chatAfterPictures.nameWallMs) },
+          addon,
+          quality: qp.quality.filter((x) => x.pass).length,
+          qualityMisses: qp.quality.filter((x) => !x.pass).map((x) => x.id),
+          pictures: qp.pictures.filter((x) => x.pass).length,
+          picturesMs: qp.pictures.map((x) => Math.round(x.ms)),
+          picturesAnswers: qp.pictures.map((x) => x.answer),
+          picturesAfterTrim,
+          memory: { loaded, loadedTrim, afterChat, afterChatTrim, afterChatAgain, afterAddon, afterPictures, afterPicturesTrim, afterPicturesAgain, afterPicturesChat },
+        };
+      }),
+    );
+    results.memory[p.name] = r;
+    const m = r.memory;
+    say(`memory ${p.name}: ready ${r.readyMs} ms; WS loaded ${m.loaded.workingSetMb} -> trimmed ${m.loadedTrim.after.workingSetMb}; after chat ${m.afterChat.workingSetMb} -> trimmed ${m.afterChatTrim.after.workingSetMb} -> chat again ${m.afterChatAgain.workingSetMb}; with the add-on ${m.afterAddon.workingSetMb}; after pictures ${m.afterPictures.workingSetMb} -> trimmed ${m.afterPicturesTrim.after.workingSetMb} -> pictures again ${m.afterPicturesAgain.workingSetMb} -> chat ${m.afterPicturesChat.workingSetMb}; private ${m.afterPictures.privateMb}; NPU ${m.afterChat.npuMb}/${m.afterPictures.npuMb} MB; speed ${JSON.stringify(r.speed)} after trim ${JSON.stringify(r.speedAfterTrim)}; quality ${r.quality}/24, pictures ${r.pictures}/4 (${r.picturesAfterTrim.pass}/4 after trim, ${r.picturesAfterTrim.ms.join('/')} ms against ${r.picturesMs.join('/')})`);
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ leak
+
+type Ask = { key: string; messages: { role: string; content: string }[]; maxTokens: number; lora: Lora };
+
+/** Each ask in turn with the prompt cache as `cache` says, the text of each answer by its key. */
+async function askAll(s: Server, asks: Ask[], cache: boolean): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const a of asks) out[a.key] = (await chat(s, a.messages, a.maxTokens, a.lora, { cache_prompt: cache })).text;
+  return out;
+}
+
+async function leakPhase(o: Options, results: any): Promise<void> {
+  const asks: Ask[] = [];
+  for (const d of DOCS) asks.push({ key: `name:${d.file}`, messages: namePrompt(d.file, d.how, d.text), maxTokens: 60, lora: undefined });
+  // The same document asked one more thing: it shares the whole document with the name's request, the strongest case.
+  for (const d of DOCS.slice(0, 4)) {
+    const base = namePrompt(d.file, d.how, d.text);
+    asks.push({ key: `again:${d.file}`, messages: [base[0], { role: 'user', content: `${base[1].content}\nThen say in one line who it is from.` }], maxTokens: 80, lora: undefined });
+  }
+  for (const q of SUITE.quality) asks.push({ key: `quality:${q.id}`, messages: [{ role: 'user', content: promptOf(SUITE, q) }], maxTokens: q.maxTokens, lora: undefined });
+  if (o.loras.length) for (const d of DOCS) asks.push({ key: `addon:${d.file}`, messages: namePrompt(d.file, d.how, d.text), maxTokens: 60, lora: [{ id: 0, scale: 1 }] });
+  const h = hexArgs(o, [...(o.mmproj ? ['--mmproj', o.mmproj, '--image-max-tokens', '1024'] : []), ...loraArgs(o.loras.map((l) => l.file))]);
+  const r = await inNpuTurn('add-on test: prefix leak', () =>
+    withServer('leak', h.exe, h.args, h.env, o, '/health', async (s) => {
+      await complete(s, 'Hello', 4, undefined);
+      const alone = await askAll(s, asks, false);
+      const inRow = await askAll(s, asks, true);
+      const reversed = await askAll(s, [...asks].reverse(), true);
+      const twice = await askAll(s, asks, true);
+      const aloneAgain = await askAll(s, asks, false);
+      return { alone, inRow, reversed, twice, aloneAgain };
+    }),
+  );
+  const differ = (a: Record<string, string>, b: Record<string, string>) => Object.keys(a).filter((k) => a[k] !== b[k]);
+  results.leak = {
+    asks: asks.length,
+    aloneVsAloneAgain: differ(r.alone, r.aloneAgain),
+    inRowVsAlone: differ(r.inRow, r.alone),
+    reversedVsAlone: differ(r.reversed, r.alone),
+    twiceVsAlone: differ(r.twice, r.alone),
+    examples: [...new Set([...differ(r.inRow, r.alone), ...differ(r.reversed, r.alone)])].slice(0, 8).map((k) => ({ key: k, alone: r.alone[k], inRow: r.inRow[k], reversed: r.reversed[k] })),
+    raw: r,
+  };
+  const l = results.leak;
+  say(`leak: ${l.asks} asks; alone vs alone again ${l.aloneVsAloneAgain.length} differ; in a row (cache on) vs alone ${l.inRowVsAlone.length}; reversed ${l.reversedVsAlone.length}; twice ${l.twiceVsAlone.length}${l.inRowVsAlone.length ? `: ${l.inRowVsAlone.join(', ')}` : ''}`);
+}
+
+// ------------------------------------------------------------------------------------------------ cpu
+
+/** Processor time `pid` used while `fn` ran, as cores busy (its seconds over the wall's). */
+async function coresBusy<T>(pid: number, fn: () => Promise<T>): Promise<{ result: T; cores: number; wallMs: number }> {
+  const c0 = memoryOf(pid).cpuSeconds;
+  const t0 = performance.now();
+  const result = await fn();
+  const wallMs = performance.now() - t0;
+  return { result, cores: +((memoryOf(pid).cpuSeconds - c0) / (wallMs / 1000)).toFixed(2), wallMs: Math.round(wallMs) };
+}
+
+/** The chat server as the kit would run it, with each set of processor arguments: its speed and the processor it keeps busy. */
+async function cpuPhase(o: Options, results: any): Promise<void> {
+  const variants: { name: string; args: string[] }[] = [
+    { name: 'default', args: [] },
+    { name: 't8', args: ['-t', '8', '-tb', '8'] },
+    { name: 't4-poll0', args: ['-t', '4', '-tb', '4', '--poll', '0'] },
+    { name: 't2-poll0', args: ['-t', '2', '-tb', '2', '--poll', '0'] },
+    { name: 't1-poll0', args: ['-t', '1', '-tb', '1', '--poll', '0'] },
+  ];
+  results.cpu = {};
+  for (const v of variants) {
+    const h = hexArgs(o, [...(o.mmproj ? ['--mmproj', o.mmproj, '--image-max-tokens', '1024'] : []), ...loraArgs(o.loras.map((l) => l.file))]);
+    // hexArgs sets -t/-tb to --threads: the variant's own in their place, or none for llama-server's default.
+    const args = h.args.filter((a, i, all) => !(a === '-t' || a === '-tb' || all[i - 1] === '-t' || all[i - 1] === '-tb'));
+    let exitCode: number | null = null;
+    const r = await inNpuTurn(`add-on test: processor, ${v.name}`, () =>
+      withServer(`cpu-${v.name}`, h.exe, [...args, ...v.args], h.env, o, '/health', async (s) => {
+        s.child.once('exit', (code) => (exitCode = code));
+        await complete(s, 'Hello', 4, undefined);
+        const idle = await coresBusy(s.pid, async () => {
+          // An idle stretch, timed: what the server's threads use with nothing asked.
+          const end = Date.now() + 10_000;
+          while (Date.now() < end) await sleep(500);
+        });
+        const write = await coresBusy(s.pid, () => complete(s, 'Once upon a time', 256, undefined));
+        const read = await coresBusy(s.pid, () => complete(s, readPromptOf(1500, `cpu-${v.name}`), 1, undefined));
+        const names = await coresBusy(s.pid, async () => {
+          const ms: number[] = [];
+          for (const d of DOCS) ms.push((await chat(s, namePrompt(d.file, d.how, d.text), 60, undefined, { cache_prompt: false })).wallMs);
+          return median(ms);
+        });
+        const addon = o.loras.length ? await coresBusy(s.pid, () => namesWithAddon(s)) : null;
+        return {
+          idleCores: idle.cores,
+          writeTps: +tps(write.result.genTokens, write.result.genMs).toFixed(1),
+          writeCores: write.cores,
+          readTps: Math.round(tps(read.result.promptTokens, read.result.promptMs)),
+          readCores: read.cores,
+          nameMs: Math.round(names.result),
+          namesCores: names.cores,
+          ...(addon ? { addonNameMs: addon.result.medianMs, addonCores: addon.cores } : {}),
+        };
+      }),
+    ).catch((e: Error) => {
+      // A server that died mid-test: what it was doing, as its log's last lines say, and its exit code.
+      const log = readFileSync(path.join(o.out, `cpu-${v.name}.log`), 'utf8').trim().split(/\r?\n/).slice(-4);
+      return { crashed: e.message, exitCode, log };
+    });
+    results.cpu[v.name] = r;
+    if ('crashed' in r) {
+      say(`cpu ${v.name}: the server died (${r.crashed}; exit ${r.exitCode}): ${r.log.join(' / ').slice(0, 400)}`);
+      continue;
+    }
+    say(`cpu ${v.name}: idle ${r.idleCores} cores; writes ${r.writeTps} t/s at ${r.writeCores} cores; reads ${r.readTps} t/s at ${r.readCores}; a name ${r.nameMs} ms at ${r.namesCores}${r.addonNameMs ? `; with the add-on ${r.addonNameMs} ms at ${r.addonCores}` : ''}`);
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ defaults
+
+/**
+ * What a request without a `lora` field gets on a server that loaded add-ons with --lora-init-without-apply: the add-ons
+ * off (as an explicit scale 0 gives), or on at their file's scale. Its answers and speed against an explicit 0, an
+ * explicit 1, and a server with no add-on.
+ */
+async function defaultsPhase(o: Options, results: any): Promise<void> {
+  if (!o.loras.length) throw new Error('the defaults phase needs --lora');
+  const run = async (s: Server, lora: Lora) => {
+    const texts: string[] = [];
+    for (const d of DOCS) texts.push((await chat(s, namePrompt(d.file, d.how, d.text), 60, lora, { cache_prompt: false })).text);
+    const w = await complete(s, 'Once upon a time', 128, lora);
+    return { texts, writeTps: +tps(w.genTokens, w.genMs).toFixed(1) };
+  };
+  const zeros = o.loras.map((_, id) => ({ id, scale: 0 }));
+  const h = hexArgs(o, loraArgs(o.loras.map((l) => l.file)));
+  const withAddons = await inNpuTurn('add-on test: lora defaults', () =>
+    withServer('defaults-addons', h.exe, h.args, h.env, o, '/health', async (s) => {
+      await complete(s, 'Hello', 4, zeros);
+      const listed = await (await fetch(`${s.base}/lora-adapters`)).json();
+      const none = await run(s, undefined);
+      const off = await run(s, zeros);
+      const on = await run(s, [{ id: 0, scale: 1 }, ...zeros.slice(1)]);
+      const noneAgain = await run(s, undefined);
+      return { listed, none, off, on, noneAgain };
+    }),
+  );
+  const b = hexArgs(o);
+  const base = await inNpuTurn('add-on test: lora defaults, base', () =>
+    withServer('defaults-base', b.exe, b.args, b.env, o, '/health', async (s) => {
+      await complete(s, 'Hello', 4, undefined);
+      return run(s, undefined);
+    }),
+  );
+  const same = (a: string[], c: string[]) => a.filter((t, i) => t === c[i]).length;
+  results.defaults = {
+    listed: withAddons.listed,
+    writeTps: { base: base.writeTps, none: withAddons.none.writeTps, off: withAddons.off.writeTps, on: withAddons.on.writeTps },
+    sameAsBase: { none: same(withAddons.none.texts, base.texts), off: same(withAddons.off.texts, base.texts), on: same(withAddons.on.texts, base.texts), noneAgain: same(withAddons.noneAgain.texts, base.texts) },
+    sameAsOn: { none: same(withAddons.none.texts, withAddons.on.texts) },
+    texts: { base: base.texts, none: withAddons.none.texts, off: withAddons.off.texts, on: withAddons.on.texts },
+  };
+  const r = results.defaults;
+  say(`defaults: /lora-adapters ${JSON.stringify(r.listed)}; writes base ${r.writeTps.base}, no field ${r.writeTps.none}, scale 0 ${r.writeTps.off}, scale 1 ${r.writeTps.on} t/s; names like the base's (of ${DOCS.length}): no field ${r.sameAsBase.none}, scale 0 ${r.sameAsBase.off}, scale 1 ${r.sameAsBase.on}; no field like scale 1: ${r.sameAsOn.none}`);
+}
+
+// ------------------------------------------------------------------------------------------------ footprint
+
+/** The PC's available memory, the median of five looks a quarter-second apart (the manor's own work moves it). */
+async function availableNow(): Promise<number> {
+  const looks: number[] = [];
+  for (let i = 0; i < 5; i++) {
+    const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', '[int64](Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1024'], { encoding: 'utf8' });
+    looks.push(Number(out.trim()) / 2 ** 20);
+    await sleep(250);
+  }
+  return Math.round(median(looks));
+}
+
+/**
+ * What each chat server costs the PC, by the PC's available memory (a second reading beside the process's own
+ * counters): before it starts, once it answered, after a chat, after the trim, after pictures and a trim, and once it
+ * stopped. llama-server with each projector and the add-on loaded, then GenieX as the kit runs it.
+ */
+async function footprintPhase(o: Options, results: any): Promise<void> {
+  const dir = path.join(o.out, 'pictures');
+  mkdirSync(dir, { recursive: true });
+  results.footprint = {};
+  const zeros = o.loras.map((_, id) => ({ id, scale: 0 }));
+  const chatOnce = async (base: string, model?: string) => {
+    for (const d of DOCS.slice(0, 3)) await post(`${base}/v1/chat/completions`, { ...(model ? { model } : {}), messages: namePrompt(d.file, d.how, d.text), max_tokens: 60, temperature: 0, ...(model ? {} : { lora: zeros }) });
+  };
+  const runs: { name: string; start: () => { exe: string; args: string[]; env: Record<string, string>; ready: string; model?: string } }[] = [];
+  for (const p of [{ name: 'f16', file: o.mmproj }, ...o.mmprojAlts]) {
+    if (!p.file) continue;
+    runs.push({ name: `llama-server-${p.name}`, start: () => ({ ...hexArgs(o, ['--mmproj', p.file!, '--image-max-tokens', '1024', ...loraArgs(o.loras.map((l) => l.file))]), ready: '/health' }) });
+  }
+  if (o.geniex) {
+    const model = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
+    runs.push({ name: 'geniex', start: () => ({ exe: o.geniex!, args: ['serve', '--skip-update', '--host', `127.0.0.1:${o.port}`, '--keepalive', '3600', '--compute', 'npu', '--nctx', String(o.ctx)], env: { GENIEX_CLOCK_KEEPER_THREADS: '0', GENIEX_IMAGE_MAX_TOKENS: '1024' }, ready: '/v1/models', model }) });
+  }
+  for (const r of runs) {
+    const st = r.start();
+    const out = await inNpuTurn(`add-on test: footprint, ${r.name}`, async () => {
+      const before = await availableNow();
+      const inside = await withServer(`footprint-${r.name}`, st.exe, st.args, st.env, o, st.ready, async (s) => {
+        await chatOnce(s.base, st.model);
+        const chatted = { available: await availableNow(), ...mb(memoryOf(s.pid)) };
+        const trim = st.model ? null : await trimmed(s.pid);
+        const chattedTrimmed = trim ? { available: await availableNow(), ...trim.after } : null;
+        await qualityAndPictures(s.base, st.model, !!st.model, !!st.model, dir);
+        const pictured = { available: await availableNow(), ...mb(memoryOf(s.pid)) };
+        const trim2 = st.model ? null : await trimmed(s.pid);
+        const picturedTrimmed = trim2 ? { available: await availableNow(), ...trim2.after } : null;
+        return { chatted, chattedTrimmed, pictured, picturedTrimmed };
+      });
+      const after = await availableNow();
+      return { before, ...inside, after };
+    });
+    results.footprint[r.name] = out;
+    const cost = (x: { available: number } | null) => (x ? out.before - x.available : null);
+    say(`footprint ${r.name}: available ${out.before} MB before; costs after chat ${cost(out.chatted)} MB (WS ${out.chatted.workingSetMb}, NPU ${out.chatted.npuMb}), trimmed ${cost(out.chattedTrimmed)}; after pictures ${cost(out.pictured)} (WS ${out.pictured.workingSetMb}, NPU ${out.pictured.npuMb}), trimmed ${cost(out.picturedTrimmed)}; ${out.before - out.after} MB once stopped`);
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ kit
+
+/**
+ * The route as this kit runs it: the X2's chatServer command from the kit's own routeFor and npuEntry, its program and
+ * libraries swapped for --hex's (the same build with the same GenieX libraries over it, as setup lays them out) and its
+ * port for --port, with --lora's add-ons loaded. Every request is the kit's own body, so the add-ons it doesn't apply
+ * go at 0, and no nonce (its quirks are none).
+ */
+async function kitPhase(o: Options, results: any): Promise<void> {
+  const dir = path.join(o.out, 'pictures');
+  mkdirSync(dir, { recursive: true });
+  const route = routeFor(pinnedRoute(NPU_CATALOG.routes.qualcomm, 'snapdragon-x2'), 'snapdragon-x2');
+  if (!route.chatServer) throw new Error("this kit's X2 route has no chatServer");
+  const tools = path.join(os.tmpdir(), 'addon-test-tools');
+  const e = npuEntry(route, { tools, exe: 'geniex.exe', port: o.port, addons: o.loras.map((l) => l.file) });
+  const cmd = [...e.chat!.startCommand!];
+  const own = path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon');
+  if (path.dirname(cmd[0]) !== own) throw new Error(`the kit's chat server isn't the embedding server's build: ${cmd[0]}`);
+  cmd[0] = path.join(o.hex, 'llama-server.exe');
+  const env = Object.fromEntries(Object.entries(e.chat!.env ?? {}).map(([k, v]) => [k, v === own ? o.hex : v]));
+  const acc = { id: 'npu', kind: 'npu', quirks: e.quirks ?? [], vision: e.vision } as any;
+  const ep = { baseUrl: `http://127.0.0.1:${o.port}`, model: e.chat!.model, startCommand: cmd } as any;
+  const zeros = (chatBody(acc, ep, [{ role: 'user', content: 'Hi' }], 1) as any).lora ?? [];
+  const r = await inNpuTurn('add-on test: the kit route', async () => {
+    const before = await availableNow();
+    const inside = await withServer('kit-route', cmd[0], cmd.slice(1), env, o, '/health', async (s) => {
+      const url = `${s.base}/v1/chat/completions`;
+      // The kit's warm-up, then its trim once loaded (accelerators.ts' trimmedOnceLoaded).
+      await post(url, chatBody(acc, ep, [{ role: 'user', content: 'Hi' }], 1));
+      const loaded = mb(memoryOf(s.pid));
+      const trim = await trimmed(s.pid);
+      const speed = await routeSpeed(s.base, undefined, false, o.runs, { lora: zeros });
+      const chatted = { available: await availableNow(), ...mb(memoryOf(s.pid)) };
+      const quality: { id: string; pass: boolean; mustPass: boolean; ms: number; answer: string }[] = [];
+      for (const q of SUITE.quality) {
+        const a = await post(url, chatBody(acc, ep, [{ role: 'user', content: promptOf(SUITE, q) }], q.maxTokens));
+        const answer = a.json?.choices?.[0]?.message?.content ?? `(${a.status}) ${a.text.slice(0, 200)}`;
+        quality.push({ id: q.id, pass: grade(q.grade, answer), mustPass: !!q.mustPass, ms: Math.round(a.ms), answer: answer.slice(0, 200) });
+      }
+      const pictures: { id: string; pass: boolean; ms: number; answer: string }[] = [];
+      for (const v of SUITE.vision) {
+        const file = path.join(dir, `${v.id}.png`);
+        writeFileSync(file, picturePng(v.image));
+        const a = await post(url, visionBody(acc, ep, await fitPicture(acc, file), v.prompt, v.maxTokens));
+        const answer = a.json?.choices?.[0]?.message?.content ?? `(${a.status}) ${a.text.slice(0, 200)}`;
+        pictures.push({ id: v.id, pass: grade(v.grade, answer), ms: Math.round(a.ms), answer: answer.slice(0, 120) });
+      }
+      const pictured = { available: await availableNow(), ...mb(memoryOf(s.pid)) };
+      // The Warrener's names with its add-on applied, as the kit applies it for its job.
+      const job = addonFor('warrener.name', { startCommand: cmd, onNpu: true, pcHasNpu: true });
+      const names: { ms: number; text: string }[] = [];
+      if (job?.lora) {
+        for (const d of DOCS) {
+          const a = await post(url, { ...chatBody(acc, ep, namePrompt(d.file, d.how, d.text) as any, 60), lora: job.lora });
+          names.push({ ms: Math.round(a.ms), text: a.json?.choices?.[0]?.message?.content ?? '' });
+        }
+      }
+      const speedOn = job?.lora ? await routeSpeed(s.base, undefined, false, o.runs, { lora: job.lora }) : null;
+      return { readyMs: s.readyMs, command: cmd, env, loaded, trim, speed, speedOn, chatted, quality, pictures, pictured, addon: job?.use ?? null, names };
+    });
+    return { before, ...inside, after: await availableNow() };
+  });
+  results.kit = r;
+  const sp = (x: { readTps: number; genTps: number; nameWallMs: number } | null) => (x ? `reads ${x.readTps.toFixed(0)} t/s, writes ${x.genTps.toFixed(1)} t/s, a name ${x.nameWallMs.toFixed(0)} ms` : 'not run');
+  say(`kit route: ready ${r.readyMs} ms; ${sp(r.speed)}; with the add-on ${sp(r.speedOn)}; quality ${r.quality.filter((x) => x.pass).length}/${r.quality.length} (wrong: ${r.quality.filter((x) => !x.pass).map((x) => x.id).join(', ') || 'none'}), pictures ${r.pictures.filter((x) => x.pass).length}/${r.pictures.length} (${r.pictures.map((x) => x.ms).join('/')} ms)`);
+  say(`kit route memory: WS loaded ${r.loaded.workingSetMb} -> trimmed ${r.trim.after.workingSetMb}; after chat WS ${r.chatted.workingSetMb}, NPU ${r.chatted.npuMb}, ${r.before - r.chatted.available} MB less available; after pictures WS ${r.pictured.workingSetMb}, NPU ${r.pictured.npuMb}, ${r.before - r.pictured.available} MB less available; ${r.before - r.after} MB once stopped; add-on ${JSON.stringify(r.addon)}, names ${r.names.map((n) => n.text).join(' | ')}`);
+}
+
+// ------------------------------------------------------------------------------------------------ crash
+
+/**
+ * What "killed" llama-server on the Hexagon after a long read: the processor phase's server died, whatever its threads,
+ * at the chat that followed a 1,413-token /completion read (n_predict 1, cache_prompt false). Each case on a fresh
+ * server, one thing changed at a time: whether it lives, and its exit code and last log lines where it doesn't. Found
+ * (2026-11-06): nothing killed it. This process, held over 5 s by the meter's execFileSync, sent its next request on a
+ * keep-alive socket the server had closed (fetch failed), and withServer's stop then ended the server (taskkill: exit
+ * 1). The name-blocked and name-ps cases show it; requests now wait a turn of the event loop first (settled).
+ */
+async function crashPhase(o: Options, results: any): Promise<void> {
+  type Step = (s: Server) => Promise<unknown>;
+  const longRead = (n: number): Step => (s) => complete(s, readPromptOf(1500, 'crash'), n, undefined);
+  const longChat: Step = (s) => chat(s, [{ role: 'user', content: readPromptOf(1500, 'crash') }], 8, undefined);
+  const longChatNoCache: Step = (s) => chat(s, [{ role: 'user', content: readPromptOf(1500, 'crash') }], 8, undefined, { cache_prompt: false });
+  const name = (cache: boolean): Step => (s) => chat(s, namePrompt(DOCS[0].file, DOCS[0].how, DOCS[0].text), 60, undefined, cache ? {} : { cache_prompt: false });
+  const shortRead: Step = (s) => complete(s, readPromptOf(300, 'crash'), 1, undefined);
+  const full = [...(o.mmproj ? ['--mmproj', o.mmproj, '--image-max-tokens', '1024'] : []), ...loraArgs(o.loras.map((l) => l.file))];
+  const idle: Step = async () => {
+    const end = Date.now() + 10_000;
+    while (Date.now() < end) await sleep(500);
+  };
+  const write: Step = (s) => complete(s, 'Once upon a time', 256, undefined);
+  const meter: Step = async (s) => memoryOf(s.pid);
+  const pause: Step = () => sleep(6_000);
+  // The meter's two halves apart: Windows' GPU Process Memory counters for the server's process, and its process figures.
+  const counter: Step = async (s) => execFileSync('powershell.exe', ['-NoProfile', '-Command', `$ErrorActionPreference = 'SilentlyContinue'; (Get-Counter '\\GPU Process Memory(pid_${s.pid}_*)\\Shared Usage','\\GPU Process Memory(pid_${s.pid}_*)\\Dedicated Usage').CounterSamples.Count`], { encoding: 'utf8' });
+  const proc: Step = async (s) => execFileSync('powershell.exe', ['-NoProfile', '-Command', `$ErrorActionPreference = 'SilentlyContinue'; $p = Get-Process -Id ${s.pid}; $os = Get-CimInstance Win32_OperatingSystem; '{0} {1}' -f $p.WorkingSet64, $os.FreePhysicalMemory`], { encoding: 'utf8' });
+  // As long as the meter, in a child process that doesn't block this one (execFileSync does).
+  const pauseAsync: Step = () => new Promise<void>((r) => { const t = spawn('powershell.exe', ['-NoProfile', '-Command', 'Start-Sleep -Seconds 4'], { stdio: 'ignore', windowsHide: true }); t.once('exit', () => r()); });
+  const blocked: Step = async () => execFileSync('powershell.exe', ['-NoProfile', '-Command', 'Start-Sleep -Seconds 4'], { stdio: 'ignore' });
+  const all: { name: string; extra: string[]; steps: Step[] }[] = [
+    { name: 'name-counter', extra: full, steps: [name(true), counter, counter, name(true), counter, counter, name(false)] },
+    { name: 'name-proc', extra: full, steps: [name(true), proc, proc, name(true), proc, proc, name(false)] },
+    { name: 'name-blocked', extra: full, steps: [name(true), blocked, blocked, name(true), blocked, blocked, name(false)] },
+    { name: 'name-ps', extra: full, steps: [name(true), pauseAsync, pauseAsync, name(true), pauseAsync, pauseAsync, name(false)] },
+    { name: 'read-pause', extra: full, steps: [longRead(1), pause, name(false)] },
+    { name: 'chat-pause', extra: full, steps: [longChat, pause, name(true)] },
+    { name: 'read-meter', extra: full, steps: [longRead(1), meter, name(false)] },
+    { name: 'meter-twice', extra: full, steps: [longRead(1), meter, meter, name(false)] },
+    { name: 'chat-meter', extra: full, steps: [longChat, meter, meter, name(true)] },
+    { name: 'name-meter', extra: full, steps: [name(true), meter, meter, name(true), meter, meter, name(false)] },
+    { name: 'cpu-seq', extra: full, steps: [idle, write, longRead(1), name(false)] },
+    { name: 'cpu-seq-meter', extra: full, steps: [meter, idle, meter, meter, write, meter, meter, longRead(1), meter, meter, name(false)] },
+    { name: 'write-read', extra: full, steps: [write, longRead(1), name(false)] },
+    { name: 'idle-read', extra: full, steps: [idle, longRead(1), name(false)] },
+    { name: 'as-cpu', extra: full, steps: [longRead(1), name(false)] },
+    { name: 'name-cached', extra: full, steps: [longRead(1), name(true)] },
+    { name: 'bare', extra: [], steps: [longRead(1), name(false)] },
+    { name: 'mmproj-only', extra: o.mmproj ? ['--mmproj', o.mmproj, '--image-max-tokens', '1024'] : [], steps: [longRead(1), name(false)] },
+    { name: 'read-4', extra: full, steps: [longRead(4), name(false)] },
+    { name: 'short-read', extra: full, steps: [shortRead, name(false)] },
+    { name: 'chat-read', extra: full, steps: [longChat, name(true)] },
+    { name: 'chat-read-nocache', extra: full, steps: [longChatNoCache, name(false)] },
+    { name: 'chat-read-twice', extra: full, steps: [longChat, longChat, name(true), longChat] },
+  ];
+  const cases = o.only.length ? all.filter((c) => o.only.includes(c.name)) : all;
+  results.crash = {};
+  for (const c0 of cases) for (let rep = 0; rep < o.runs; rep++) {
+    const c = o.runs > 1 ? { ...c0, name: `${c0.name}-${rep + 1}` } : c0;
+    const h = hexArgs(o, c.extra);
+    let exitCode: number | null = null;
+    const done: number[] = [];
+    const r = await inNpuTurn(`add-on test: crash, ${c.name}`, () =>
+      withServer(`crash-${c.name}`, h.exe, h.args, h.env, o, '/health', async (s) => {
+        s.child.once('exit', (code) => (exitCode = code));
+        await complete(s, 'Hello', 4, undefined);
+        for (const [i, step] of c.steps.entries()) {
+          await step(s);
+          done.push(i);
+        }
+        // Still answering after them?
+        await complete(s, 'Hello', 4, undefined);
+        return { lived: true, steps: done.length };
+      }),
+    ).catch((e: Error) => {
+      const log = readFileSync(path.join(o.out, `crash-${c.name}.log`), 'utf8').trim().split(/\r?\n/).slice(-3);
+      return { lived: false, steps: done.length, error: e.message.slice(0, 200), exitCode, log };
+    });
+    results.crash[c.name] = r;
+    say(`crash ${c.name}: ${r.lived ? 'lived' : `died after step ${r.steps} (exit ${(r as any).exitCode}; ${(r as any).error})`}`);
+  }
+}
+
 // ------------------------------------------------------------------------------------------------ main
 
 const say = (line: string) => console.log(line);
@@ -906,7 +1410,7 @@ async function main(): Promise<void> {
   results.pc = { cpu: os.cpus()[0]?.model, cores: os.cpus().length, memoryGb: os.totalmem() / 2 ** 30, at: new Date().toISOString() };
   results.options = { ...o, phases: [...o.phases] };
   const save = () => writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
-  const phases: [string, (o: Options, r: any) => Promise<void>][] = [['placement', placement], ['speed', speed], ['switch', switching], ['answers', answersPhase], ['odds', oddsPhase], ['geniex', geniexPhase]];
+  const phases: [string, (o: Options, r: any) => Promise<void>][] = [['placement', placement], ['speed', speed], ['switch', switching], ['answers', answersPhase], ['odds', oddsPhase], ['geniex', geniexPhase], ['memory', memoryPhase], ['leak', leakPhase], ['defaults', defaultsPhase], ['footprint', footprintPhase], ['cpu', cpuPhase], ['crash', crashPhase], ['kit', kitPhase]];
   for (const [name, fn] of phases) {
     if (!o.phases.has(name)) continue;
     say(`-- ${name}`);

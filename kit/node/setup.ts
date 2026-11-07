@@ -17,6 +17,7 @@ import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
 import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, fallbackDevices, generationOf, installedVersion, isPulled, type MakerTerms, NPU_CATALOG, type NpuCatalog, type NpuMeasured, type NpuOffNpuFile, type NpuPlan, type NpuRoute, type NpuSignedCatalog, npuEntry, npuMemoryFit, npuRerank, npuTerms, pinnedRoute, plannedAt, planNpu, type PowerToolCheck, rerankFits, routeEnv, routeFor, runProgram, runsRoute, sha256File, smallPc, testImage, workOrderFor } from './npu-vendors.ts';
+import { checkAddon, wantedAddons } from './addons.ts';
 import { inAppData, type OutsideJob, type OutsideSetupResult, OutsideUnavailable, packagedOutsideTests, runOutside } from './outside.ts';
 import { RETIRED_GRACE_MS } from './retired.ts';
 import type { StageDeps } from './set-up-again.ts';
@@ -1058,6 +1059,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
       // Its generation's fallback (the first-generation X Elite's Qwen3-VL-4B), set up only should its own models fail.
       const fallback = npu && generic && generationOf(generic, det.generation)?.fallback ? plan(true) : null;
       if (npu && fallback && npuMemoryFit(fallback.route, o.detection.ramBytes).chat) npu.fallback = fallback;
+      // Its chat on the route's own server (GenieX's), should llama-server's on the Hexagon fail: planNpu's ownServer.
       if (!fit.embed && route?.embedServer) {
         npuNote = `${det.label} (npu): its embeddings not set up: ${fit.why}. The graphics card or the processor makes them.`;
         npuPlain = npuNoteFor(det.label, 'embed', fit.why!);
@@ -1289,6 +1291,14 @@ export function describePlan(p: SetupPlan): string[] {
     if (n.runtime) lines.push(`  get  ${n.runtime.what} (${mb(n.runtime.size)}, SHA-256 pinned), beside ${path.win32.basename(n.exe)}: no administrator`);
     if (n.patch) lines.push(`  ${n.patch.have ? 'have' : 'get '} ${n.patch.what.split(':')[0]} (${mb(n.patch.patched.size)}, SHA-256 pinned), in place of the server's own ${n.patch.file}`);
     for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
+    if (n.chat && n.route.chatServer?.program) {
+      const p = n.route.chatServer.program;
+      // Its program the embedding server's build: downloaded once, for both, where the embeddings' download brings it.
+      const withEmbed = !n.chat.download && !!n.embed?.download && n.embed.folder === n.chat.folder;
+      const how = n.chat.download ? `get  ${p.server} ${p.version} for chat and pictures on ${n.port} (${mb(n.chat.download.size)}, SHA-256 pinned)` : withEmbed ? `get  ${p.server} ${p.version} for chat and pictures on ${n.port} (the embeddings' download)` : `have ${p.server} ${p.version} for chat and pictures on ${n.port}`;
+      lines.push(`  ${how}, over ${n.route.server}'s libraries${n.ownServer ? `; ${n.route.server}'s own chat should it not answer properly` : ''}`);
+    }
+    for (const a of n.addons ?? []) lines.push(`  ${a.download ? 'get ' : 'have'} the add-on ${a.pin.id} (${mb(a.pin.size)}, SHA-256 pinned), for ${a.pin.jobs.join(', ')}`);
     const fb = n.fallback?.models;
     if (fb?.length) lines.push(`  should it not answer properly on this NPU: ${fb.map((m) => `${m.id} (${m.have ? 'here already' : mb(m.size)})`).join(', ')} in its place`);
     if (n.embed) {
@@ -1853,6 +1863,53 @@ async function setUpNpuEmbed(n: NpuPlan, tools: string, io: NpuIo, env: NodeJS.P
   return null;
 }
 
+/**
+ * The NPU's chat server (the route's chatServer: llama-server on the Hexagon, kit 2.152.2), set up: its program's zip
+ * downloaded and unpacked unless it's there (the embedding server's, which setUpNpuEmbed may have put there already),
+ * the route's server's libraries copied over it, its model's files where the route's server pulled them, and the model's
+ * add-ons (n.addons) downloaded unless they're here, each checked against its pinned size and SHA-256. Its `why` is null
+ * when it's ready, else what failed; `addons` the files that passed, in the catalog's order. An add-on that fails its
+ * check is left out, and said: the chat server runs without it.
+ */
+async function setUpNpuChat(n: NpuPlan, tools: string, io: NpuIo, shared = false): Promise<{ why: string | null; addons: string[] }> {
+  const c = n.chat!;
+  const p = n.route.chatServer!.program!;
+  const exists = io.exists ?? existsSync;
+  const progress = (what: string) => (done: number, total: number) => io.log(`  ${what}: ${mb(done)} of ${mb(total)}`);
+  try {
+    if (c.download && !exists(c.exe)) {
+      io.log(`downloading ${p.server} ${p.version} for the NPU's chat (${mb(c.download.size)})`);
+      await (io.download ?? download)(c.download, progress(c.download.what));
+      (io.unpack ?? unpack)(c.download.dest, c.folder);
+      rmSync(c.download.dest, { force: true });
+    }
+    if (!exists(c.exe)) return { why: `${c.exe} isn't there`, addons: [] };
+    if (c.overlay) {
+      const copied = (io.overlay ?? overlayFiles)(c.overlay.from, c.folder, c.overlay.files);
+      if (copied) io.log(`copied ${copied} of the NPU server's files into ${c.folder}`);
+    }
+    for (const f of [c.model, c.mmproj]) if (f && !exists(f)) return { why: `${f} isn't there`, addons: [] };
+  } catch (err: any) {
+    return { why: String(err?.message ?? err).split(/\r?\n/)[0], addons: [] };
+  }
+  const addons: string[] = [];
+  for (const a of n.addons ?? []) {
+    try {
+      if (a.download && !(shared && exists(a.file))) {
+        io.log(`downloading the add-on ${a.pin.id} (${mb(a.pin.size)})`);
+        mkdirSync(path.dirname(a.file), { recursive: true });
+        await (io.download ?? download)(a.download, progress(a.pin.file));
+      }
+      const bad = await checkAddon(a, io.hash);
+      if (bad) io.log(`the add-on ${a.pin.id} isn't used: ${bad}`);
+      else addons.push(a.file);
+    } catch (err: any) {
+      io.log(`the add-on ${a.pin.id} isn't used: ${String(err?.message ?? err).split(/\r?\n/)[0]}`);
+    }
+  }
+  return { why: null, addons };
+}
+
 /** The last lines of a program's output, for a problem's line. */
 const tail = (out: string) => out.trim().split(/\r?\n/).slice(-3).join(' / ').slice(0, 300);
 
@@ -1953,6 +2010,13 @@ export interface NpuSetup {
    */
   fellBack?: { route: NpuRoute; models: string[]; failed: NpuFailStep; problems: string[] };
   /**
+   * Its chat server (llama-server on the Hexagon, kit 2.152.2) failed, so the route's own server chats (NpuPlan's
+   * ownServer: GenieX): the step that failed and why. The entry, note and speeds are the route's own server's.
+   */
+  ownServer?: { failed: NpuFailStep; problems: string[] };
+  /** Its chat server's program failed to be set up (setUpNpuChat), before any test: the route's own server is tried. */
+  chatProgram?: boolean;
+  /**
    * What Windows' application control blocked of its servers as setup started them (kit 2.104.0), file by file: its
    * model server's (then it has no entry, `failed` is `not-supported`, and the note says Windows blocks it), or its
    * embedding server's alone (the entry keeps chat). Kept in blocked.json (rememberBlocked).
@@ -2012,18 +2076,42 @@ function nowHere(n: NpuPlan, tools: string, exists: (p: string) => boolean): Npu
 export async function setUpNpu(n: NpuPlan, tools: string, given: NpuIo): Promise<NpuSetup> {
   // Its catalogs asked for once, whichever models it tries.
   const io = { ...given, catalogs: catalogsOnce(given) };
-  if (!n.fallback) return setUpNpuOnce(n, tools, io);
+  if (n.chat && n.ownServer) {
+    // Its chat on llama-server first (kit 2.152.2), then on the route's own server, which keeps the generation's fallback.
+    const first = await setUpNpuModels({ ...n, ownServer: undefined, fallback: undefined }, tools, io, { seeRed: true });
+    if (first.entry || !(first.chatProgram || (first.failed && FALLBACK_STEPS.includes(first.failed) && first.failed !== 'pull' && first.failed !== 'checksum'))) return first;
+    io.log(`llama-server's chat didn't work on this NPU (${first.problems.join('; ')}): ${n.route.server}'s own chat in its place`);
+    await stopTried(n, tools, io);
+    const second = await setUpNpuModels(nowHere({ ...n.ownServer, port: n.port, fallback: n.fallback }, tools, io.exists ?? existsSync), tools, io);
+    if (!second.entry) return first;
+    return { ...second, ownServer: { failed: first.failed ?? 'install', problems: first.problems } };
+  }
+  return setUpNpuModels(n, tools, io);
+}
+
+/** The NPU's chat server as `n` would start it, stopped (between setup's tries), in the NPU's turn; never throws. */
+async function stopTried(n: NpuPlan, tools: string, io: NpuIo): Promise<void> {
+  let chat: Endpoint | undefined;
+  try {
+    chat = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p) }).chat;
+  } catch {}
+  const program = chat?.startCommand?.[0] ? expandEnv(chat.startCommand[0]) : n.exe;
+  try {
+    if (chat?.baseUrl) await inNpuTurn(false, async () => (io.stopServer ?? (async (p: string, at: string) => (await import('./keeper.ts')).stopServerAt(p, at)))(program, chat!.baseUrl!), { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 });
+  } catch (e: any) {
+    io.log(`${path.win32.basename(program)} couldn't be stopped (${String(e?.message ?? e).split(/\r?\n/)[0]}): the next try starts its own when it can`);
+  }
+}
+
+/** setUpNpu's tries of one server: the plan's models, then its generation's fallback (NpuPlan.fallback) should they fail. */
+async function setUpNpuModels(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: boolean } = {}): Promise<NpuSetup> {
+  if (!n.fallback) return setUpNpuOnce(n, tools, io, o);
   const first = await setUpNpuOnce(n, tools, io, { seeRed: true });
   if (first.entry || !first.failed || !FALLBACK_STEPS.includes(first.failed)) return first;
   const was = n.models.map((m) => m.id).join(', ');
   const then = n.fallback.models.map((m) => m.id).join(', ');
   io.log(`${was} didn't work on this NPU (${first.problems.join('; ')}): setting up ${then} in its place`);
-  const base = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p) }).chat?.baseUrl;
-  try {
-    if (base) await inNpuTurn(false, async () => (io.stopServer ?? (async (program: string, at: string) => (await import('./keeper.ts')).stopServerAt(program, at)))(n.exe, base), { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 });
-  } catch (e: any) {
-    io.log(`${n.route.server}'s server for ${was} couldn't be stopped (${String(e?.message ?? e).split(/\r?\n/)[0]}): the next try starts its own when it can`);
-  }
+  await stopTried(n, tools, io);
   const second = await setUpNpuOnce(nowHere({ ...n.fallback, port: n.port }, tools, io.exists ?? existsSync), tools, io);
   if (!second.entry) {
     io.log(`${then} didn't work on this NPU either: ${second.problems.join('; ')}`);
@@ -2158,8 +2246,16 @@ async function setUpNpuOnce(n: NpuPlan, tools: string, io: NpuIo, o: { seeRed?: 
       failed = 'embed';
     } else embedAt = { exe: n.embed.exe, model: n.embed.model, ...(n.embed.turn ? { turn: n.embed.turn } : {}) };
   }
-  const entry = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p), embed: embedAt });
-  io.log(`asking ${n.route.server} a test question on the NPU (its first load can take a minute or more)`);
+  // Its chat server (llama-server on the Hexagon), where the route runs its chat there: its failure leaves the route's
+  // own server to setUpNpu's next try.
+  let addons: string[] = [];
+  if (n.chat) {
+    const c = await inSharedTools(tools, io.log, (shared) => setUpNpuChat(n, tools, io, shared));
+    if (c.why) return { ...fail(`llama-server, its chat server, couldn't be set up: ${c.why}`, 'install'), chatProgram: true };
+    addons = c.addons;
+  }
+  const entry = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p), embed: embedAt, addons });
+  io.log(`asking ${n.chat ? 'llama-server' : n.route.server} a test question on the NPU (its first load can take a minute or more)`);
   // Whether the test started the server: its time to the answers is a cold start only then (the report's coldMs).
   let started = undefined as boolean | undefined;
   const t0 = now();
@@ -2291,6 +2387,8 @@ export interface NpuRefreshRecord {
   retryAt?: string;
   /** The NPU's own embeddings, offered by a look and refused (kit 2.86.0): kept in every later record until they're taken up. */
   embedOffer?: NpuEmbedOffer;
+  /** The add-ons wanted here at this look, by id (kit 2.152.2, addons.ts' wantedAddons): another set looks again. */
+  addons?: string[];
 }
 
 /**
@@ -3065,7 +3163,7 @@ export function writesAppData(plan: SetupPlan, env: NodeJS.ProcessEnv = process.
   const add = (what: string, p: string | null | undefined) => {
     if (p && inAppData(p, env) && !out.some((x) => x.endsWith(`(${p})`))) out.push(`${what} (${p})`);
   };
-  for (const n of [plan.npu, plan.npu?.fallback]) {
+  for (const n of [plan.npu, plan.npu?.fallback, plan.npu?.ownServer]) {
     if (!n) continue;
     const server = `${n.route.server} ${n.route.version}`;
     if (!n.installed && n.download && n.route.install.kind === 'inno') out.push(`${server}'s installer, which installs it for this user (${path.dirname(n.exe)})`);
@@ -3073,6 +3171,8 @@ export function writesAppData(plan: SetupPlan, env: NodeJS.ProcessEnv = process.
     add(`${n.route.server}'s runtime`, n.runtime?.into);
     if (n.patch) add(`Castellan's build of ${n.route.server}'s ${n.patch.file}`, path.join(expandRoute(n.patch.folder, { tools, env }), n.patch.file));
     if (n.embed && (n.embed.download || n.embed.server.overlay)) add(`${n.embed.server.server}, for the NPU's embeddings`, n.embed.folder);
+    if (n.chat && (n.chat.download || n.chat.overlay)) add(`llama-server, for the NPU's chat`, n.chat.folder);
+    for (const a of n.addons ?? []) if (a.download) add(`the add-on ${a.pin.id}`, a.file);
     add(`the NPU's embedding model`, n.embed?.modelDownload?.dest);
     for (const m of n.models.filter((m) => !m.have)) add(m.id, m.present ? expandRoute(m.present, { tools, env }) : null);
   }
@@ -3312,7 +3412,13 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     return { code: 1, plan };
   }
   // The NPU's command is this kit's now: a keeper on an older kit leaves it alone (npu-refresh.ts).
-  if (entries.some((e) => e.kind === 'npu')) rememberNpuRefresh(configFile, { kit: kitVersion(), at: new Date().toISOString(), did: 'set-up' });
+  if (entries.some((e) => e.kind === 'npu')) {
+    let addons: string[] = [];
+    try {
+      addons = wantedAddons({ tools: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists }).map((w) => w.pin.id);
+    } catch {}
+    rememberNpuRefresh(configFile, { kit: kitVersion(), at: new Date().toISOString(), did: 'set-up', ...(addons.length ? { addons } : {}) });
+  }
   // Who signed each program file the servers now run, for a round of signing (signatures.ts, kit 2.108.0).
   const signaturesAt = o.signaturesFile !== undefined ? o.signaturesFile : o.detection ? null : signaturesFile();
   if (signaturesAt) await rememberSignatures(raw, signaturesAt, { env: o.env, sac: detection.smartAppControl ?? null });

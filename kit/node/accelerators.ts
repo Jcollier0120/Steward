@@ -3,6 +3,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import { addonsOff } from './addons.ts';
 import { alive, startApart } from './apart.ts';
 import { type Block, blockedExit, blockedExitSay, blockedIn, blockedSay, cpuVariants, keepCpuVariant, loadedCpuVariant, type ReadLog, type SacState, smartAppControlOutsideTests } from './app-control.ts';
 import * as core from './core/index.js';
@@ -861,10 +862,18 @@ export function reportsLoaded(startCommand: string[] | undefined): boolean {
  * Whether a server this kit starts has its working set handed back to Windows once its model has loaded (working-set.ts,
  * kit 2.80.1): FastFlowLM's, which keeps its model's lookup tables in ordinary private memory and reads one row
  * of them a token. qwen3.5:2b's working set went from 3,814 MB to 171 MB, decoding as fast as before.
+ * And llama-server's chat on a Snapdragon's Hexagon (`--device HTP0`, kit 2.152.2), whose model, projector and add-ons
+ * are read into the process at its start and then live on the NPU: on the X2 Elite Extreme (b11645, 2026-11-06) its
+ * working set went from 2,574 MB to 91, the PC's available memory rose 232 MB after a chat, and it read and wrote as fast.
+ * Not its embedding server or reranker, which weren't measured so.
  */
 export function trimmedOnceLoaded(startCommand: string[] | undefined): boolean {
   const exe = startCommand?.[0];
-  return !!exe && /^flm(\.exe)?$/i.test(path.win32.basename(expandEnv(exe)));
+  if (!exe) return false;
+  const name = path.win32.basename(expandEnv(exe));
+  if (/^flm(\.exe)?$/i.test(name)) return true;
+  const d = startCommand!.indexOf('--device');
+  return /^llama-server(\.exe)?$/i.test(name) && d > 0 && /^HTP\d/i.test(startCommand![d + 1] ?? '') && !startCommand!.includes('--embeddings') && !startCommand!.includes('--reranking');
 }
 
 /**
@@ -1274,8 +1283,15 @@ export function chatBody(acc: Accelerator, ep: Endpoint, messages: ChatMessage[]
     msgs = msgs[0]?.role === 'system' ? [{ ...msgs[0], content: `${n} ${msgs[0].content}` }, ...msgs.slice(1)] : [{ role: 'system', content: n }, ...msgs];
   }
   if (thinks(ep.model)) msgs = msgs.map((m, i) => (i === msgs.length - 1 ? { ...m, content: `${m.content}\n/no_think` } : m));
-  return { model: ep.model, messages: msgs, max_tokens: maxTokens, temperature: 0, stream: false };
+  return { model: ep.model, messages: msgs, max_tokens: maxTokens, temperature: 0, stream: false, ...offAddons(acc, ep) };
 }
+
+/**
+ * The add-ons of the server that answers, each off (addons.ts' addonsOff): a request names them all, or llama.cpp b11645
+ * applies each at its load scale. A request that applies one (npu.ts' addonOn) sends its own `lora` over this. Nothing
+ * for a server that carries none, which is every server but the one setup loaded them into.
+ */
+const offAddons = (acc: Accelerator, ep: Endpoint) => addonsOff(ep.startCommand ?? acc.chat?.startCommand);
 
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
 
@@ -1443,5 +1459,6 @@ export function visionBody(acc: Accelerator, ep: Endpoint, image: string, questi
     max_tokens: maxTokens,
     temperature: 0,
     stream: false,
+    ...offAddons(acc, ep),
   };
 }

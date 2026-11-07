@@ -55,6 +55,7 @@ import { tallyRequest } from './token-tally.ts';
 import { LockTimeout, lineSnapshot, QueueFull, queueSnapshot, withAcceleratorTurn, type Lane } from './npu-queue.ts';
 import { RULES } from './rules.ts';
 import { coldStartMsOf, routeOfServer, smallPc } from './npu-vendors.ts';
+import { addonFor, type AddonUse } from './addons.ts';
 
 export { npuLockDir };
 export { noteLabel, reeveHome, theAccelerator, theName, type NoteKind, type Accelerator, type AcceleratorConfig, type AcceleratorRef, type ChatMessage } from './accelerators.ts';
@@ -97,6 +98,11 @@ export interface NpuAnswer {
   accelerator: AcceleratorRef;
   /** The accelerator tried first, when it failed and the request went to this one. */
   fellBackFrom?: AcceleratorRef & { reason: string };
+  /**
+   * The add-on its job asked for (AskOptions.job): which, and whether it was applied to this answer, so a cache can key
+   * by it (the add-on's id when applied, the model alone when not). Only on a request that named a job.
+   */
+  addon?: AddonUse;
 }
 
 export interface Embeddings {
@@ -136,6 +142,21 @@ export interface AskOptions {
    * even while only FastFlowLM was up).
    */
   batch?: number;
+  /**
+   * The job this request does, as its staff member names it (`warrener.name`): where the kit pins an add-on for the job
+   * (spec/addons.json) and the server that answers carries it, the request runs with it (spec/ACCELERATORS.md, Add-ons),
+   * and the answer says so (NpuAnswer.addon). On a PC with an NPU only the NPU applies one; elsewhere the request runs
+   * without it. Without a job a request runs exactly as before.
+   */
+  job?: string;
+  /**
+   * chat: the messages to send in `messages`' place where the job's add-on isn't applied to this request (no add-on
+   * pinned for it, a server that doesn't carry it, an NPU whose route can't apply one, a graphics card on a PC with an
+   * NPU). The kit picks one or the other once it knows which server answers: the Warrener's plain naming prompt is
+   * better with its add-on and worse without it than its earlier one (42 real documents on the X2's NPU, 2026-11-06),
+   * so it sends both. The answer's `addon.applied` says which was sent. Only with a job.
+   */
+  withoutAddon?: ChatMessage[];
 }
 
 /** A resting model being woken for a request (AskOptions.onWaking). */
@@ -405,6 +426,25 @@ export class Npu {
     return Math.max(...(list.length ? list : serving).map((a) => core.capFor(a, work))) - maxTokens;
   }
 
+  /**
+   * What a request for `job` would get now, sending nothing (kit 2.152.2): addons.ts' addonFor on the accelerator that
+   * would take it, the first of the candidates as budget() orders them (all of them, when none could take it now). For
+   * a caller that looks its answers up before asking (the Warrener's cache): it keys the lookup by this, and stores each
+   * answer by the answer's own `addon`, which says what did happen, so a wrong guess costs one ask, never a wrong
+   * answer. `promptTokens`, where known, leaves out an accelerator too small for the prompt. Null without a job, or
+   * with nothing that serves the work.
+   */
+  addonFor(job: string | undefined, work: 'chat' | 'vision' = 'chat', promptTokens = 0): AddonUse | null {
+    if (!job) return null;
+    const serving = this.accelerators.filter((a) => serves(a, work));
+    if (!serving.length) return null;
+    const games = readGames();
+    const workOrder = 'error' in this.cfg ? null : this.cfg.workOrder;
+    const { list } = candidates(serving, { work, tokens: promptTokens, lane: 'background' }, { failure: readFailure, games: gamesStale(games) ? null : games, call: npuCallNow(), driver: driverHoldsNow(serving), deferredMs, workOrder });
+    const acc = (list.length ? list : serving)[0];
+    return this.addonOn(acc, acc[work]!, job)?.use ?? null;
+  }
+
   /** Whether any chat server is running (ready, or busy loading or answering), without starting one. */
   async reachable(): Promise<boolean> {
     for (const a of this.accelerators) if (serves(a, 'chat') && (await probe(a.chat!.baseUrl)) !== 'down') return true;
@@ -418,10 +458,14 @@ export class Npu {
    */
   async chat(messages: ChatMessage[], opts: AskOptions = {}): Promise<NpuAnswer> {
     const maxTokens = opts.maxTokens ?? 300;
-    const promptTokens = core.chatTokens(RULES, messages);
+    const other = opts.job && opts.withoutAddon?.length ? opts.withoutAddon : null;
+    // The larger of the two, whichever is sent: the accelerator is chosen before the add-on is known.
+    const promptTokens = Math.max(core.chatTokens(RULES, messages), other ? core.chatTokens(RULES, other) : 0);
     return this.ask('chat', promptTokens, maxTokens, opts, async (acc, ep, timeoutMs, loading) => {
-      const { json, ms } = await postJson(ep, '/v1/chat/completions', chatBody(acc, ep, messages, maxTokens), timeoutMs, { loading });
-      return answerOf(json, ep.model, ms);
+      const a = this.addonOn(acc, ep, opts.job);
+      const sent = other && !a?.use.applied ? other : messages;
+      const { json, ms } = await postJson(ep, '/v1/chat/completions', { ...chatBody(acc, ep, sent, maxTokens), ...(a?.lora ? { lora: a.lora } : {}) }, timeoutMs, { loading });
+      return { ...answerOf(json, ep.model, ms), ...(a ? { addon: a.use } : {}) };
     });
   }
 
@@ -437,9 +481,20 @@ export class Npu {
     // The picture counts what it's fitted to on each accelerator (its vision's pictureTokens), else 400 (rules.json's
     // imageTokens: the Snapdragon X's Qwen3-VL-4B reads every picture as a fixed 256).
     return this.ask('vision', (a) => core.visionTokens(RULES, question, a), maxTokens, opts, async (acc, ep, timeoutMs, loading) => {
-      const { json, ms } = await postJson(ep, '/v1/chat/completions', visionBody(acc, ep, await fitPicture(acc, image), question, maxTokens), timeoutMs, { loading });
-      return answerOf(json, ep.model, ms);
+      const a = this.addonOn(acc, ep, opts.job);
+      const { json, ms } = await postJson(ep, '/v1/chat/completions', { ...visionBody(acc, ep, await fitPicture(acc, image), question, maxTokens), ...(a?.lora ? { lora: a.lora } : {}) }, timeoutMs, { loading });
+      return { ...answerOf(json, ep.model, ms), ...(a ? { addon: a.use } : {}) };
     });
+  }
+
+  /**
+   * The add-on a request for `job` gets on `acc` (addons.ts' addonFor): from the `--lora` files its server starts with,
+   * its chat endpoint's where this kind shares that server. On a PC with an NPU in config.json, only the NPU applies one.
+   */
+  private addonOn(acc: Accelerator, ep: Endpoint, job: string | undefined) {
+    if (!job) return null;
+    const pcHasNpu = !('error' in this.cfg) && this.cfg.accelerators.some((a) => a.kind === 'npu');
+    return addonFor(job, { startCommand: ep.startCommand ?? acc.chat?.startCommand, onNpu: acc.kind === 'npu', pcHasNpu });
   }
 
   /** Embeddings for `texts`, in their order, from one accelerator's embedding model. */

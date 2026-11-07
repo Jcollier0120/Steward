@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { type AcceleratorEntry, type Endpoint, OWN_MEMORY_GB, type Quirk, type ServeKind } from './accelerator-config.ts';
 import type { WorkOrder } from './accelerators.ts';
+import { addonArgs, type WantedAddon, wantedAddons } from './addons.ts';
 
 /**
  * The NPU on every Copilot+ PC (spec/NPU-VENDORS.md): which maker's NPU this is and which generation, whether the
@@ -136,6 +137,12 @@ export interface NpuRoute {
   embeddings?: string;
   /** Its embeddings' own server, when the route's server serves none (GenieX's): set up and started beside it. */
   embedServer?: NpuEmbedServer;
+  /**
+   * Its chat and pictures' own server, in place of the route's (`install`), as its version says (NpuServerVersion's
+   * chatServer, set by routeFor): llama-server on the Snapdragon's Hexagon. The route's server is still installed, for
+   * its models and the libraries the program loads.
+   */
+  chatServer?: NpuChatServer;
   /** Its reranker (kit 2.100.0), when asked for: its embedding server's program started a third time (NpuRerankServer). */
   rerankServer?: NpuRerankServer;
   /**
@@ -307,7 +314,43 @@ export interface NpuServerVersion {
    * named by another generation's id gets that one's build (the first-generation X Elite the X2's: the same file).
    */
   pluginPatch?: Record<string, NpuPluginPatch | string>;
+  /**
+   * Its chat and pictures on llama.cpp's llama-server in place of the route's own server (kit 2.153: GenieX 0.9.3's
+   * Qwen3-VL-2B on the Hexagon, which carries the model's add-ons, spec/ACCELERATORS.md's Add-ons): the program its
+   * embedding server runs at this version, over the same libraries (NpuChatServer). routeFor sets it as the route's
+   * `chatServer`, unless told `ownServer` (a PC whose NPU failed its test on it keeps the route's own server).
+   */
+  chatServer?: NpuChatServer;
   basis: string;
+}
+
+/**
+ * The NPU's chat and pictures on llama-server (NpuServerVersion.chatServer): its arguments and environment, and what
+ * changes with it. Its program is its version's embedding server's (`program`, set by routeFor): the same build, folder,
+ * download and overlay of the route's server's libraries, so a PC that embeds on the NPU has it already.
+ */
+export interface NpuChatServer {
+  /** The route's models it serves, by id: the X2's Qwen3-VL-2B, its files the route's offNpu ones (GenieX's own copies). */
+  models: string[];
+  /**
+   * The generations it serves, by id: those it was measured on (the X2, by the Steward's tools/addon-npu, kit 2.152.2). Another generation
+   * on the same models (the first-generation X Elite's 2B) keeps the route's own server until it's measured.
+   */
+  generations: string[];
+  /**
+   * Its arguments: {port}, {model} (the chat model's id), {file} (its GGUF), {mmproj} (its projector), {pictureTokens}
+   * (its vision model's) and {tools} filled in. Setup puts the add-ons it loads after them (addons.ts' addonArgs).
+   */
+  serve: string[];
+  /** Its environment over its program's (ADSP_LIBRARY_PATH): LLAMA_ARG_CACHE_RAM 0, no prompt cache kept in memory beside its slot's. */
+  env?: Record<string, string>;
+  /** The quirks its requests need, in the route's place: none (no prefix leak, so no nonce; pictures as data: URLs). */
+  quirks: Quirk[];
+  /** Its start to a first answer, in the route's idleStop's chat place. */
+  coldStartMs: number;
+  basis: string;
+  /** Its program: the embedding server's at this version (routeFor). */
+  program?: Pick<NpuEmbedServer, 'server' | 'version' | 'download' | 'into' | 'exe' | 'overlay' | 'env'>;
 }
 
 /**
@@ -821,28 +864,60 @@ export function embedPaths(route: NpuRoute, tools: string, env?: Record<string, 
 }
 
 /**
+ * Where a route's chat server (NpuRoute.chatServer) and its model's files are, once set up: its program's folder and
+ * llama-server, and the chat model's GGUF and its projector as the route's offNpu has them, each where `present` says
+ * (GenieX's own copy of the very file, which its pull put there) or in the tools home's models folder. Null without one.
+ * `raw` keeps a `present` path's %VARS% (for a startCommand, which the starter expands).
+ */
+export function chatPaths(route: NpuRoute, tools: string, env?: Record<string, string | undefined>, raw = false): { folder: string; exe: string; model: string; mmproj: string | null } | null {
+  const cs = route.chatServer;
+  const chat = firstModel(route, 'chat');
+  if (!cs?.program?.exe || !chat) return null;
+  const exe = expandRoute(cs.program.exe, { tools, env });
+  const folder = cs.program.into ? expandRoute(cs.program.into, { tools, env }) : path.dirname(exe);
+  const files = route.offNpu?.models[chat.id]?.files ?? [];
+  const where = (f: NpuOffNpuFile | undefined) => (!f ? null : f.present ? (raw && !f.present.includes('{tools}') ? f.present : expandRoute(f.present, { tools, env })) : path.join(tools, 'models', f.file));
+  const model = where(files.find((f) => f.role === 'model'));
+  if (!model) return null;
+  return { folder, exe, model, mmproj: firstModel(route, 'vision') ? where(files.find((f) => f.role === 'mmproj')) : null };
+}
+
+/**
  * The config.json entry for the NPU on this route: one server on its port, chat and every other kind it serves, the
  * route's caps (per kind where they differ), its own timeouts, quirks, and its vision model's pictureTokens where it
  * has one. A kind on the chat model's server shares it
  * (no baseUrl of its own); its startCommand starts it with the chat model, and that model's own arguments after the
  * route's. `exe` is written as setup found it. The route's embedding server, when it has one and `embed` says where
- * setup put it, is the embed endpoint, on its own port.
+ * setup put it, is the embed endpoint, on its own port. A route with a chatServer (routeFor) runs its chat and pictures
+ * on that llama-server instead, on the route's port, with its quirks, and the add-ons `addons` names (their files, in
+ * the catalog's order: addons.ts' wantedAddons) loaded at its start; its `exe` is then the program's, not `o.exe`.
  */
-export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?: number; portable?: (p: string) => string; embed?: { exe: string; model: string; turn?: string }; rerank?: { file: string; model: string; port?: number } }): AcceleratorEntry {
+export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?: number; portable?: (p: string) => string; embed?: { exe: string; model: string; turn?: string }; rerank?: { file: string; model: string; port?: number }; addons?: string[] }): AcceleratorEntry {
   const port = o.port ?? route.port;
   const keep = o.portable ?? ((p: string) => p);
   const chat = firstModel(route, 'chat');
   if (!chat) throw new Error(`${route.server}: no chat model`);
   const baseUrl = `http://127.0.0.1:${port}${route.baseUrlPath ?? ''}`;
-  const startCommand = [keep(o.exe), ...[...route.serve, ...(chat.serve ?? [])].map((a) => {
-    const x = expandRoute(a, { tools: o.tools, port, model: chat.id });
-    return a.includes('{tools}') ? keep(x) : x;
-  })];
-  const cap = (k: ServeKind) => (route.caps[k] && route.caps[k] !== route.maxContextTokens ? { maxContextTokens: route.caps[k] } : {});
-  // The server's own picture cap, from its vision model's (pictureTokensEnv).
+  const cs = route.chatServer;
+  const own = chatPaths(route, o.tools, undefined, true);
+  if (cs && !own) throw new Error(`${route.server}: its chat server's program or its model's files aren't known`);
+  // The server's own picture cap, from its vision model's (pictureTokensEnv; llama-server's --image-max-tokens).
   const pictures = firstModel(route, 'vision')?.pictureTokens;
+  const startCommand =
+    cs && own
+      ? [keep(own.exe), ...chatServerArgs(cs, { tools: o.tools, port, model: chat.id, file: own.model, mmproj: own.mmproj, pictureTokens: pictures, keep }), ...addonArgs((o.addons ?? []).map(keep))]
+      : [
+          keep(o.exe),
+          ...[...route.serve, ...(chat.serve ?? [])].map((a) => {
+            const x = expandRoute(a, { tools: o.tools, port, model: chat.id });
+            return a.includes('{tools}') ? keep(x) : x;
+          }),
+        ];
+  const cap = (k: ServeKind) => (route.caps[k] && route.caps[k] !== route.maxContextTokens ? { maxContextTokens: route.caps[k] } : {});
   const capEnv = route.pictureTokensEnv && pictures ? { [route.pictureTokensEnv]: String(pictures) } : undefined;
-  const env = capEnv ? { ...routeEnv(route, o.tools, keep), ...capEnv } : routeEnv(route, o.tools, keep);
+  const ownEnv = capEnv ? { ...routeEnv(route, o.tools, keep), ...capEnv } : routeEnv(route, o.tools, keep);
+  // llama-server's: its program's environment (ADSP_LIBRARY_PATH) and its own, none of the route's server's.
+  const env = cs ? toolsEnv({ ...cs.program?.env, ...cs.env }, o.tools, keep) : ownEnv;
   const server = { startCommand, ...(env ? { env } : {}) };
   const e: AcceleratorEntry = { id: 'npu', kind: 'npu', slots: 1, maxContextTokens: route.maxContextTokens, quirks: [...route.quirks] };
   e.chat = { baseUrl, model: chat.id, ...server, ...cap('chat') };
@@ -857,8 +932,8 @@ export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?
       return a.includes('{file}') || a.includes('{tools}') ? keep(x) : x;
     });
     // The route's own program, started a second time, needs the route's environment as the first does.
-    const own = es.env ? Object.fromEntries(Object.entries(es.env).map(([k, v]) => [k, v.includes('{tools}') ? keep(v.replace(/\{tools\}/g, o.tools)) : v])) : {};
-    const all = { ...(es.download ? {} : env ?? {}), ...own };
+    const esEnv = toolsEnv(es.env, o.tools, keep) ?? {};
+    const all = { ...(es.download ? {} : ownEnv ?? {}), ...esEnv };
     const embedEnv = Object.keys(all).length ? all : undefined;
     // On the processor's graphics (embedTurn), it answers in the graphics' turn, beside the NPU's chat.
     e.embed = { baseUrl: `http://127.0.0.1:${es.port}`, model: es.model.id, startCommand: [keep(o.embed.exe), ...args], ...(embedEnv ? { env: embedEnv } : {}), ...cap('embed'), ...(o.embed.turn ? { turn: o.embed.turn } : {}) };
@@ -868,6 +943,33 @@ export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?
   if (rerank) e.rerank = rerank;
   if (Object.keys(route.timeouts).length) e.timeouts = { ...route.timeouts };
   return e;
+}
+
+/** An environment's {tools} filled in, each such path kept portable; undefined for none. */
+function toolsEnv(env: Record<string, string> | undefined, tools: string, keep: (p: string) => string): Record<string, string> | undefined {
+  if (!env || !Object.keys(env).length) return undefined;
+  return Object.fromEntries(Object.entries(env).map(([k, v]) => [k, v.includes('{tools}') ? keep(v.replace(/\{tools\}/g, tools)) : v]));
+}
+
+/**
+ * A chat server's arguments (NpuChatServer.serve) filled in: {port}, {model}, {file}, {mmproj}, {pictureTokens} and
+ * {tools}, a path kept portable. Without a projector (no vision model), --mmproj and --image-max-tokens are left out.
+ */
+export function chatServerArgs(cs: Pick<NpuChatServer, 'serve'>, v: { tools: string; port: number; model: string; file: string; mmproj: string | null; pictureTokens?: number; keep?: (p: string) => string }): string[] {
+  const keep = v.keep ?? ((p: string) => p);
+  const out: string[] = [];
+  for (let i = 0; i < cs.serve.length; i++) {
+    const a = cs.serve[i];
+    const next = cs.serve[i + 1] ?? '';
+    // A flag whose value is a projector or a picture cap there isn't: both dropped.
+    if (a.startsWith('-') && ((next.includes('{mmproj}') && !v.mmproj) || (next.includes('{pictureTokens}') && (!v.mmproj || !v.pictureTokens)))) {
+      i++;
+      continue;
+    }
+    const x = expandRoute(a.replace(/\{mmproj\}/g, v.mmproj ?? '').replace(/\{pictureTokens\}/g, String(v.pictureTokens ?? '')), { tools: v.tools, port: v.port, model: v.model, file: v.file });
+    out.push(/\{(file|mmproj|tools)\}/.test(a) ? keep(x) : x);
+  }
+  return out;
 }
 
 /**
@@ -910,11 +1012,37 @@ export function embedTurn(route: NpuRoute, cards: readonly GraphicsCard[]): stri
   return (intel.find((c) => c.memoryGb < OWN_MEMORY_GB) ?? intel[0])?.id;
 }
 
-/** Whether a configured NPU entry runs this route's server (its chat endpoint's program). */
+/** Whether two folders are one, by Windows' rules (case, slashes, a trailing separator). */
+const samePlace = (a: string, b: string) => path.win32.normalize(a).replace(/\\+$/, '').toLowerCase() === path.win32.normalize(b).replace(/\\+$/, '').toLowerCase();
+
+/**
+ * Whether a configured NPU entry runs this route's server (its chat endpoint's program): the route's own, or the
+ * llama-server one of its versions runs its chat on (chatServerExes), by its folder and name.
+ */
 export function runsRoute(entry: { chat?: { startCommand?: string[] } } | undefined, route: NpuRoute, tools: string): boolean {
   const exe = entry?.chat?.startCommand?.[0];
   if (!exe) return false;
-  return path.win32.basename(expandRoute(exe, { tools })).toLowerCase() === path.win32.basename(serverExe(route, tools)).toLowerCase();
+  const name = path.win32.basename(expandRoute(exe, { tools })).toLowerCase();
+  return name === path.win32.basename(serverExe(route, tools)).toLowerCase() || isChatServerOf(route, exe);
+}
+
+/**
+ * The programs a route's versions run its chat on (NpuServerVersion.chatServer: their embedding server's), as their
+ * last two path parts (`b11645-hexagon\llama-server.exe`), so wherever the tools home is.
+ */
+function chatServerExes(route: NpuRoute): string[] {
+  const out: string[] = [];
+  for (const v of route.versions ?? []) {
+    const exe = v.chatServer ? (v.embedServer?.exe ?? route.embedServer?.exe) : undefined;
+    if (exe) out.push(path.win32.normalize(exe).split('\\').slice(-2).join('\\').toLowerCase());
+  }
+  return out;
+}
+
+/** Whether a program is the llama-server one of a route's versions runs its chat on (chatServerExes). */
+export function isChatServerOf(route: NpuRoute, program: string): boolean {
+  const tail = path.win32.normalize(program).split('\\').slice(-2).join('\\').toLowerCase();
+  return chatServerExes(route).includes(tail);
 }
 
 /**
@@ -1005,9 +1133,13 @@ function ownModels(route: NpuRoute): boolean {
  * route's own, as npu-vendors.json has them (ownModels). Told `fallback`, the route's own models its generation falls
  * back to (NpuGeneration.fallback) in place of its own: what setup tries when those fail, and what a PC set up with them
  * keeps running. Then what the route's server version changes (`versions`, by serverVersionOf): a model's own
- * arguments, its embedding server's build. The route itself when none of these apply.
+ * arguments, its embedding server's build, and its chat's server (`chatServer`, when every chat and vision model is
+ * one it serves): llama-server, in the place of the route's own server, with its quirks and cold start. Told
+ * `ownServer`, the route's own server keeps them (GenieX's chat on a PC whose NPU failed llama-server's test). Only at
+ * the version its entry names, for the generations it names (chatServer.generations): a later GenieX the Smith's Use it
+ * left keeps its own chat, as tried. The route itself when none of these apply.
  */
-export function routeFor(route: NpuRoute, generation: string | null | undefined, small = false, o: { fallback?: boolean } = {}): NpuRoute {
+export function routeFor(route: NpuRoute, generation: string | null | undefined, small = false, o: { fallback?: boolean; ownServer?: boolean } = {}): NpuRoute {
   const g = generationOf(route, generation);
   const own = ownModels(route);
   const fallback = own && o.fallback && g?.fallback ? route.models.filter((m) => g.fallback!.models.includes(m.id)) : [];
@@ -1021,6 +1153,18 @@ export function routeFor(route: NpuRoute, generation: string | null | undefined,
     // added (playedRoute's GGML_HEXAGON_ARCH, for a played X Elite's GenieX 0.9.3).
     const es = route.embedServer && v.embedServer ? { ...route.embedServer, ...v.embedServer, ...(v.embedServer.env ? { env: { ...route.embedServer.env, ...v.embedServer.env } } : {}) } : null;
     route = { ...route, models, ...(es ? { embedServer: es } : {}) };
+    const program = es ?? route.embedServer;
+    const cs = v.chatServer;
+    const served = (m: NpuModel) => !m.kinds.some((k) => k === 'chat' || k === 'vision') || !!cs?.models.includes(m.id);
+    if (cs && !o.ownServer && compareVersions(v.version, route.version) === 0 && !!generation && cs.generations.includes(generation) && program?.download && program.exe && route.models.some((m) => m.kinds.includes('chat')) && route.models.every(served)) {
+      const { server, version, download, into, exe, overlay, env } = program;
+      route = {
+        ...route,
+        chatServer: { ...cs, program: { server, version, download, into, exe, overlay, env } },
+        quirks: [...cs.quirks],
+        ...(route.idleStop ? { idleStop: { ...route.idleStop, coldStartMs: { ...route.idleStop.coldStartMs, chat: cs.coldStartMs } } } : {}),
+      };
+    }
   }
   if (!g || (!g.timeouts && !g.caps && !g.maxContextTokens && !g.args && !g.embedArgs && !g.memoryGb)) return route;
   const replaced = (args: string[], values: Record<string, string> | undefined) => {
@@ -1178,8 +1322,9 @@ export const smallPc = (ramBytes: number | null | undefined, rule: NpuIdleStop =
 
 /**
  * The route a configured NPU server runs, by its program and kind: the route's own program (GenieX, ovms, flm), or for
- * embeddings its embedding server's (llama-server on the Snapdragon; Intel's is ovms again). Null for a program no route
- * runs (npu-embed's Python, a server set up by hand).
+ * embeddings its embedding server's (llama-server on the Snapdragon; Intel's is ovms again), or for chat and pictures
+ * the llama-server one of its versions runs them on (isChatServerOf: the Snapdragon's, kit 2.152.2), its chat's cold
+ * start then that server's. Null for a program no route runs (npu-embed's Python, a server set up by hand).
  */
 export function routeOfServer(program: string, kind: ServeKind, catalog: NpuCatalog = NPU_CATALOG): NpuRoute | null {
   const name = (p: string) => path.win32.basename(p).toLowerCase();
@@ -1187,6 +1332,10 @@ export function routeOfServer(program: string, kind: ServeKind, catalog: NpuCata
   for (const r of Object.values(catalog.routes)) {
     const own = name(r.install.exe);
     if (kind === 'embed' && r.embedServer ? name(r.embedServer.exe ?? r.install.exe) === wanted : own === wanted) return r;
+    if (kind !== 'embed' && isChatServerOf(r, program)) {
+      const cs = [...(r.versions ?? [])].reverse().find((v) => v.chatServer)?.chatServer;
+      return cs && r.idleStop ? { ...r, idleStop: { ...r.idleStop, coldStartMs: { ...r.idleStop.coldStartMs, chat: cs.coldStartMs } } } : r;
+    }
   }
   return null;
 }
@@ -1305,15 +1454,32 @@ export interface NpuPlan {
    * model downloaded as a file, or pulled by the route's program: the arguments that pull it).
    */
   embed: (ReturnType<typeof embedPaths> & { server: NpuEmbedServer; download: NpuDownload | null; modelDownload: NpuDownload | null; modelPull: string[] | null; turn?: string }) | null;
+  /**
+   * The route's chat server, when it has one (NpuRoute.chatServer): where its program and its model's files are, its zip
+   * unless it's here or the embedding server's `download` brings the same one, and the overlay of the route's server's
+   * libraries its folder needs (setup copies them, as an embedding server's).
+   */
+  chat: (NonNullable<ReturnType<typeof chatPaths>> & { download: NpuDownload | null; overlay?: { from: string; files: string[] }; into: string }) | null;
+  /**
+   * The model's add-ons the chat server loads (addons.ts' wantedAddons: each pinned one whose staff member is hired here),
+   * each with its download unless its file is here. None without a chat server: only llama-server on the Hexagon applies one.
+   */
+  addons: (WantedAddon & { download: NpuDownload | null })[];
   /** The route's power tool, its path expanded, when it has one. */
   powerTool?: NpuPowerTool;
-  /** Bytes still to download: the server's, its runtime's and the models', the embedding server's included. */
+  /** Bytes still to download: the server's, its runtime's and the models', the embedding server's, the chat server's and the add-ons' included. */
   downloadBytes: number;
   /**
    * What setup sets up if this plan's models fail (its generation's `fallback`: the first-generation X Elite's Qwen3-VL-4B
    * where its 2B fails), planned the same way; setup's planSetup adds it.
    */
   fallback?: NpuPlan;
+  /**
+   * What setUpNpu sets up if this plan's chat server (`chat`: llama-server on the Hexagon) fails: the route's own server
+   * chatting, as before kit 2.152.2 (routeFor's `ownServer`), with this plan's `fallback` after it. planNpu adds it to
+   * every plan with a chat server, so each caller keeps it: setup's, and the Smith's tries of a model.
+   */
+  ownServer?: NpuPlan;
 }
 
 /**
@@ -1342,6 +1508,12 @@ export function planNpu(o: {
   serverVersion?: string | null;
   /** Its generation's fallback models in place of its own (routeFor's `fallback`): a PC set up with them, or setup's second try. */
   fallback?: boolean;
+  /** Its chat on the route's own server, not its version's chatServer (routeFor's `ownServer`): setup's try after llama-server's failed. */
+  ownServer?: boolean;
+  /** A file's size, or null where there's none (the add-ons' check; statSync's by default). */
+  size?: (p: string) => number | null;
+  /** The add-ons wanted here, by id (the refresh's own look, so its record and its plan agree): left out, addons.ts' wantedAddons'. */
+  addons?: readonly string[];
 }): NpuPlan | null {
   if (!o.support.supported || !o.support.vendor) return null;
   const exists = o.exists ?? existsSync;
@@ -1352,7 +1524,7 @@ export function planNpu(o: {
   const pinned = pinnedRoute(given, o.support.generation);
   // An older version than the pin, where its program stays in one place (GenieX's): the pin installed over it (kit 2.115.0).
   const older = o.serverVersion !== undefined && olderThanPin(pinned, o.serverVersion);
-  const generic = routeFor(o.serverVersion === undefined ? given : plannedAt(pinned, o.serverVersion), o.support.generation, o.small, { fallback: o.fallback });
+  const generic = routeFor(o.serverVersion === undefined ? given : plannedAt(pinned, o.serverVersion), o.support.generation, o.small, { fallback: o.fallback, ownServer: o.ownServer });
   const route: NpuRoute = o.noEmbed ? { ...generic, embedServer: undefined, models: generic.models.filter((m) => !(m.kinds.length === 1 && m.kinds[0] === 'embed')) } : generic;
   const exe = serverExe(route, o.tools, o.env);
   const installed = exists(exe) && !older;
@@ -1382,6 +1554,22 @@ export function planNpu(o: {
     const turn = embedTurn(route, o.cards ?? []);
     embed = { ...p, server: es, download: zip, modelDownload: model, modelPull: pull, ...(turn ? { turn } : {}) };
   }
+  // The chat server: its program the embedding server's build, downloaded once whichever needs it.
+  let chat: NpuPlan['chat'] = null;
+  const cp = route.chatServer?.program ? chatPaths(route, o.tools, o.env) : null;
+  if (cp && route.chatServer?.program) {
+    const d = route.chatServer.program.download;
+    const byEmbed = !!embed?.download && !!d && embed.download.url === d.url && samePlace(embed.folder, cp.folder);
+    const zip = !d || exists(cp.exe) || byEmbed ? null : { what: d.file, url: d.url, size: d.size, sha256: d.sha256, dest: path.join(o.downloadsDir, d.file), have: false };
+    const overlay = route.chatServer.program.overlay ?? route.embedServer?.overlay;
+    chat = { ...cp, download: zip, into: cp.folder, ...(overlay ? { overlay: { from: expandRoute(overlay.from, { tools: o.tools, env: o.env }), files: [...overlay.files] } } : {}) };
+  }
+  const size = o.size ?? ((p: string) => statSync(p, { throwIfNoEntry: false })?.size ?? null);
+  const addons: NpuPlan['addons'] = chat
+    ? wantedAddons({ tools: o.tools, env: o.env, exists, size })
+        .filter((w) => !o.addons || o.addons.includes(w.pin.id))
+        .map((w) => ({ ...w, download: w.have ? null : { what: w.pin.file, url: w.pin.url, size: w.pin.size, sha256: w.pin.sha256, dest: w.file, have: false } }))
+    : [];
   const downloadBytes =
     (download ? download.size : 0) +
     (build ? build.files.size + build.signed.size : 0) +
@@ -1390,10 +1578,19 @@ export function planNpu(o: {
     models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0) +
     (embed?.download?.size ?? 0) +
     (embed?.modelDownload?.size ?? 0) +
-    (embed?.modelPull ? embed.server.model.size : 0);
+    (embed?.modelPull ? embed.server.model.size : 0) +
+    (chat?.download?.size ?? 0) +
+    addons.reduce((n, a) => n + (a.download?.size ?? 0), 0);
   const powerTool = route.powerTool ? { ...route.powerTool, exe: expandRoute(route.powerTool.exe, { tools: o.tools, env: o.env }) } : undefined;
   const catalogs = (route.catalogs ?? []).filter((c) => c.serverVersion === route.version);
-  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, build, runtime, patch, catalogs, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
+  const plan: NpuPlan = { vendor: o.support.vendor, route, support: o.support, exe, installed, download, build, runtime, patch, catalogs, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, chat, addons, ...(powerTool ? { powerTool } : {}), downloadBytes };
+  // Its chat on the route's own server (GenieX's), set up only should llama-server's fail: nothing of it is counted in
+  // downloadBytes, as it downloads only what llama-server's left out.
+  if (chat && !o.ownServer) {
+    const own = planNpu({ ...o, ownServer: true });
+    if (own && !own.chat) plan.ownServer = own;
+  }
+  return plan;
 }
 
 /**

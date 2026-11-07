@@ -85,7 +85,7 @@ llama.cpp's builds and the models go into the accelerators' folder (`servers\`, 
 
 | Accelerator | Server | Notes |
 |---|---|---|
-| Snapdragon NPU | GenieX (chat, vision) | Installed by setup (NPU-VENDORS.md); npu-embed (embeddings) where Reeve set it up |
+| Snapdragon NPU | X2: llama.cpp `llama-server` on the Hexagon (chat, vision; kit 2.152.2), with GenieX's own chat should its test fail. X Elite: GenieX (chat, vision) | Installed by setup (NPU-VENDORS.md); llama-server on the Hexagon (embeddings) |
 | Intel Core Ultra NPU | OpenVINO Model Server (chat) | Installed by setup (NPU-VENDORS.md) |
 | AMD Ryzen AI 300 NPU (XDNA 2) | FastFlowLM (chat, vision) | Installed by setup (NPU-VENDORS.md) |
 | NVIDIA | llama.cpp `llama-server`, CUDA build | One server per card, pinned with `--device CUDAn` |
@@ -250,7 +250,9 @@ An add-on is a LoRA adapter: a few megabytes of weights trained for one staff me
 
 | Accelerator | The add-on on it | What it costs | The route |
 |---|---|---|---|
-| Snapdragon X2's NPU (Hexagon v81) | All of it on the NPU, its answers as on the processor | Reads 15% slower and writes 22% slower while it's on; 26 MB more on the NPU (rank 32, F16, on q, k, v and o) | llama-server on the Hexagon, `--lora <file> --lora-init-without-apply`, each request's own `lora`. Not GenieX, which takes none |
+| Snapdragon X2's NPU (Hexagon v81) | All of it on the NPU, its answers as on the processor | The Warrener's `warrener-r1-qv` (F16, on q and v): reads 9% slower and writes 13% slower while it's on, and 14 MB more on the NPU. A throwaway rank 32 on q, k, v and o: 15% and 22% slower, 26 MB | llama-server on the Hexagon, `--lora <file> --lora-init-without-apply`, each request's own `lora` (kit 2.152.2, below). Not GenieX, which takes none |
+| Intel's and AMD's NPUs | None yet: their servers (OpenVINO Model Server, FastFlowLM) take no add-on | | A request with a job runs on the NPU without it |
+| A graphics card or the processor | Only on a PC with no NPU | | llama-server, as on the Hexagon. Setup doesn't load add-ons there yet |
 
 The other accelerators get their row when they're measured.
 
@@ -296,7 +298,7 @@ The NPU's matrix units (HMX) take a matmul whose inner size is a multiple of 32.
 | Rank 64, F16, on | 2,522 | 55.3 | 437 ms | 1,461 MB | 1,850 MB |
 | Rank 16, F16, on | 1,124 | 56.2 | 718 ms | 1,425 MB | 1,814 MB |
 
-An add-on that's loaded but off is left out of the graph: scale 0 in a request, or a request without `lora` to a server started with `--lora-init-without-apply`. The model then runs at its own speed for every other staff member's requests. A server with one started in 1.8–2.1 s, against 1.8 s without.
+An add-on that's loaded but off is left out of the graph: scale 0 in a request. The model then runs at its own speed for every other staff member's requests. A request without `lora` isn't the same: b11645 runs it at each add-on's load scale, 1, even on a server started with `--lora-init-without-apply` (that flag sets the scale it's loaded at, which a request without `lora` then uses). So the kit's every request to a server that loaded add-ons names each one, at 0 but the one it applies (kit 2.152.2). A server with one started in 1.8–2.1 s, against 1.8 s without.
 
 **Its answers: as on the processor, in F16.**
 
@@ -345,9 +347,82 @@ So the move costs nothing in speed, answers or pictures. The projector runs on t
 **For the Warrener's pilot:**
 
 - One llama-server on the Hexagon serves the NPU's chat and pictures, with its add-ons loaded at the start (`--lora <file> --lora-init-without-apply`, F16, rank 32).
-- The Warrener's requests carry its add-on (`lora`). Everyone else's carry none.
+- The Warrener's requests carry its add-on (`lora`). Everyone else's carry it at 0 (above).
 - No backend patch, no merged copy (the add-on folded into the model) and no Genie adapter: the add-on runs on the NPU as it is.
 - Not one server per add-on: each would hold another 1.4 GB of the NPU.
+
+### The kit's route (kit 2.152.2)
+
+**What runs where.** On a Snapdragon X2 with the GenieX 0.9.3 the kit pins, the NPU's chat and pictures run on llama-server on the Hexagon, the route's `chatServer` (NPU-VENDORS.md). It's the embedding server's own build, llama.cpp b11645 for Windows Arm64, in the same folder, with GenieX 0.9.3's llama.cpp libraries copied over it. Its command:
+
+```
+llama-server.exe --host 127.0.0.1 --port 18181 --device HTP0 -ngl 99 -m <the 2B's Q4_0> --mmproj <its F16 projector>
+  --image-max-tokens 1024 -c 2560 --parallel 1 -t 4 -tb 4 --poll 0 --alias unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0
+  [--lora <add-on> --lora-init-without-apply ...]
+```
+
+Its environment has `ADSP_LIBRARY_PATH` (the folder) and `LLAMA_ARG_CACHE_RAM=0`. The model files are GenieX's own copies, in its cache, so nothing new is downloaded for them. The NPU's queue, its turn, its gentle pace and its resting are as they were.
+
+- **Only where it was measured.** The X2, at exactly GenieX 0.9.3 (routeFor). A later GenieX the Smith's Use it put on a PC keeps its own chat, as does the first-generation X Elite, until each is measured.
+- **No nonce.** GenieX's every request gets a nonce (`prefix-leak`), because its server let a shared prefix leak from one request into the next. llama-server doesn't: 44 asks with and without one, none different. So it gets none (`quirks: []`), and a slot's prompt cache is reused. In the pilot, the nonce alone changed 57 of 120 answers.
+- **`--poll 0`.** At llama.cpp's default (`--poll 50`), the server's threads spin while they wait on the NPU: 4.26 of the processor's cores busy, against 0.04 with `--poll 0`, at the same speed. `-t 4 -tb 4` is as fast as the default thread count on the X2's 18 cores.
+- **Ready** in 4 s from a stopped server (`coldStartMs`, the slowest measured rounded up), the projector loaded.
+
+**Measured as this kit runs it** (`tools/addon-npu`'s `kit` phase, 2026-11-06, on the same X2): the command from the kit's own routeFor and npuEntry with the Warrener's add-on loaded, and every request the kit's own (chatBody, visionBody), so the add-on is held at 0 but where its job applies it. Against GenieX as the kit ran it before (above):
+
+| | GenieX 0.9.3 | The kit's route |
+|---|---|---|
+| Reads, tokens a second | 2,943 | 2,997 |
+| Writes, tokens a second | 71.2 | 71.6 |
+| A name | 364 ms | 361 ms |
+| The NPU benchmark's 24 quality items | 22 | 22 (time and apples wrong) |
+| Its 4 pictures | 4 | 4, in 0.20–0.44 s |
+| Ready | 2.1 s | 2.6 s |
+| On the NPU, after chat / after pictures | 1,497 / 2,454 MB | 1,411 / 2,347 MB |
+| Working set after a chat, trimmed | 1,699 MB (not trimmed) | 87 MB |
+
+With the Warrener's add-on applied, it read 2,747 tokens a second and wrote 62.5, and the names came back in its own form (`NAME:` and `FOLDER:`).
+
+**Memory.** Measured on the same X2 (48 GB) with nothing else on the NPU: the PC's available memory with the server up, against none. The server's own counters agree: after a chat its working set was 2,574 MB, against 2,618 MB less available.
+
+| | After a chat | After pictures |
+|---|---|---|
+| GenieX 0.9.3 | 1,623 MB | 2,662 MB |
+| llama-server, F16 projector | 2,618 MB | 2,601 MB |
+| llama-server, F16 projector, trimmed (what the kit runs) | 2,386 MB | 2,550 MB |
+| llama-server, Q8_0 projector, trimmed | 2,258 MB | 2,325 MB |
+| The kit's route, as below (a second run) | 2,218 MB | 2,411 MB |
+
+- **Why it's more after a chat:** llama-server loads the projector at its start and keeps it, ready for a picture. GenieX loads its picture encoder with the first picture and frees it after 60 s without one. After pictures the two are about the same.
+- **The trim.** Once the server has loaded, the kit trims its working set (accelerators.ts' `trimmedOnceLoaded`, as for FastFlowLM): from 2,574 MB to 91 MB after a chat. What it held is the model's files, read again from the disk cache as needed, so the PC has 232 MB more available after a chat and the server answers at the same speed. The NPU holds 1,411–1,425 MB after a chat either way.
+- **Q8_0's projector** would give back another 130–230 MB, at the cost of a 445 MB download beside the F16 one GenieX's cache already has. Not taken: the 2B's pictures were measured with the F16 one.
+
+**Setup.** On a new X2, setup lays the build out once for both servers (one download), copies GenieX's libraries over it, starts the chat server and tests it, its test picture seen red. If the test fails, llama-server is stopped, GenieX's own chat is set up and tested in its place (`ownServer`), and the log says so. GenieX stays installed either way: both servers load its libraries.
+
+**A PC set up before** (on GenieX's chat) moves at the keeper's next look, as when the NPU's pins change (npu-refresh.ts), once for each kit. GenieX and the embedding server are stopped, GenieX's libraries are copied over llama-server's folder, the same test runs, and only then is the new command written. It waits until nobody uses the NPU, and holds the NPU's turn throughout, so no request meets a stopped server. If the test fails, or the libraries can't be copied, GenieX's command stays and the next request starts it again. A test that failed for its server (it didn't start, say) is tried again an hour later, three tests in all. A PC without the build yet (one whose NPU makes no embeddings of its own) is left for setup.
+
+**The contract.** A request may name its job (`AskOptions.job`, such as `warrener.name`). The kit maps it to its pinned add-on (spec/addons.json) and to the server that answers:
+
+- On the NPU, where its server loaded the add-on, the add-on is applied: `lora` with it at 1 and every other at 0.
+- **The owner's rule: on a PC with an NPU, an add-on stays on the NPU.** A graphics card or the processor there never applies one. Where the NPU's route can't apply one (Intel's and AMD's for now), the request runs on the NPU without it. On a PC with no NPU, any llama-server that loaded it applies it.
+- A request without a job runs exactly as before, with every add-on its server loaded at 0.
+- The answer says what happened: `addon: { job, id, applied, why? }`, so a caller can key its cache by it. `why` is one of: no add-on pinned for the job, a server that doesn't carry it, the NPU's server that doesn't, or a card or processor on a PC with an NPU.
+- `withoutAddon`, for chat: the messages to send where the add-on isn't applied. The Warrener's plain prompt names better than its earlier one with the add-on, and worse without it. The accelerator is chosen by the longer of the two.
+- Never `POST /lora-adapters`, which changes every slot's add-ons and reuses a prompt read with others.
+
+**The pins** (spec/addons.json, addons.ts): each add-on's staff member, jobs, file, size, SHA-256, download, type and `published`. F16 only: Q8_0 gives NaN on the Hexagon (above). Setup downloads a published add-on like a model, its hash checked, into the tools home's `models\addons\`, once its staff member is hired (its app installed), and the chat server loads it at its start. The keeper's look sees a staff member hired since, and adds the add-on the same way, after the same test. A file that isn't the pinned one isn't loaded, and the look says so. Whether every PC should get every add-on is the owner's to decide; with one add-on, it's moot.
+
+- `warrener-r1-qv`: the Warrener's naming (`warrener.name`), `warrener-r1-qv-f16.gguf`, 12,853,088 bytes, in Manor-releases' public `addon-warrener-r1`. The owner OKed publishing it once the Warrener's check on 42 real documents passed (2026-11-06): 38 folders and 23 names right with it, against 26 and 10 for the same prompt without it, and 34 and 10 for the Warrener's earlier prompt.
+
+**Switching and its cost**, for the Warrener's add-on: a request whose add-ons differ from its slot's last one reads its whole prompt again (451 tokens, 197–226 ms). While it's on, reading is 9% slower and writing 13% slower, and it takes 14 MB more on the NPU. Every request without it runs at the model's own speed.
+
+**Not yet:**
+
+- Manor's Accelerators page doesn't list the add-ons each accelerator has (a later Manor change).
+- Setup doesn't load add-ons on a graphics card or the processor of a PC with no NPU. The request side applies them there already.
+- A request that finds llama-server's idle connection closed (after its 5 s keep-alive) fails once, as on a card or the processor today (`AcceleratorDown`). A retry on a fresh connection would spare it.
+- The NPU's embedding server could take `--poll 0` too.
+- The X Elite's Hexagon v73 isn't measured.
 
 ## Games
 

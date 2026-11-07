@@ -576,8 +576,9 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
   assert.deepEqual(snap.npu?.kinds, ['chat', 'vision', 'embed']);
   assert.equal(snap.npu?.downloadBytes, 13566094 + 639150592, "only its embedding server: Castellan's signed copy of llama.cpp's b11645 zip (for the X2's GenieX 0.9.3) and Qwen3-Embedding");
   assert.deepEqual(snap.targets.map((t) => [t.id, t.kinds]), [], 'the NPU makes the embeddings too: nothing for the processor');
-  assert.deepEqual(describePlan(snap).slice(2, 5), [
+  assert.deepEqual(describePlan(snap).slice(2, 6), [
     '  have unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0 (1.9 GB)',
+    "  get  llama.cpp b11645 for chat and pictures on 18181 (the embeddings' download), over GenieX's libraries; GenieX's own chat should it not answer properly",
     '  get  llama.cpp b11645 for embeddings on 18182 (14 MB, SHA-256 pinned)',
     '  get  Qwen3-Embedding-0.6B-Q8_0.gguf (639 MB)',
   ]);
@@ -648,7 +649,12 @@ test("every Snapdragon X2 runs Qwen3-VL-2B whatever its memory, its pictures on 
     const e = V.npuEntry(x2.npu!.route, { tools, exe: G });
     assert.equal(e.chat!.model, TWO_B, what);
     assert.deepEqual(e.vision, { model: TWO_B, pictureTokens: 1024 }, `${what}: GenieX's llama.cpp reads a picture at its own size, so the kit fits it within 1,024 tokens and counts it so`);
-    assert.deepEqual(e.chat!.startCommand, [G, 'serve', '--skip-update', '--host', '127.0.0.1:18181', '--keepalive', '3600', '--compute', 'npu', '--nctx', '2560'], `${what}: its language model on the Hexagon and its pictures' encoder on the Hexagon's second session (GenieX 0.9.1 on), a 2,560-token window`);
+    // From kit 2.152.2 its chat and pictures on llama-server on the Hexagon, the embedding server's build, as tools/addon-npu measured it.
+    assert.equal(e.chat!.startCommand![0], path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon', 'llama-server.exe'), what);
+    assert.deepEqual(e.chat!.startCommand!.slice(1, 9), ['--host', '127.0.0.1', '--port', '18181', '--device', 'HTP0', '-ngl', '99'], `${what}: its language model on the Hexagon`);
+    // GenieX's own, should llama-server's test fail: its language model on the Hexagon and its pictures' encoder on the
+    // Hexagon's second session (GenieX 0.9.1 on), a 2,560-token window.
+    assert.deepEqual(V.npuEntry(x2.npu!.ownServer!.route, { tools, exe: G }).chat!.startCommand, [G, 'serve', '--skip-update', '--host', '127.0.0.1:18181', '--keepalive', '3600', '--compute', 'npu', '--nctx', '2560'], what);
     // An X2 set up before with GenieX 0.8.0 (whose llama.cpp reads every picture as grey on the Hexagon, so its encoder
     // went on the Adreno): the pin's 0.9.3 put in its place (kit 2.115.0), with 0.9.3's command.
     const olderPlan = (await plan(NPU.x2, arm, [G], '0.8.0')).npu!;
@@ -659,8 +665,8 @@ test("every Snapdragon X2 runs Qwen3-VL-2B whatever its memory, its pictures on 
     assert.deepEqual(validateKeeperConfig({ accelerators: [e] }), [], what);
     // Its window holds whatever the kit lets through: a request at the route's cap, and a picture at its count with room
     // left under vision's cap for the question and the answer.
-    const nctx = Number(e.chat!.startCommand![e.chat!.startCommand!.indexOf('--nctx') + 1]);
-    assert.ok(nctx >= x2.npu!.route.maxContextTokens && nctx < 4096, `${what}: ${nctx}, under GenieX's default 4,096`);
+    const nctx = Number(e.chat!.startCommand![e.chat!.startCommand!.indexOf('-c') + 1]);
+    assert.ok(nctx >= x2.npu!.route.maxContextTokens && nctx < 4096, `${what}: ${nctx}, under 4,096`);
     assert.ok(e.vision!.pictureTokens! + 256 <= x2.npu!.route.caps.vision!, what);
     const pulled = await plan(NPU.x2, arm, [G, 'C:\\Users\\me\\.cache\\geniex\\models\\unsloth\\Qwen3-VL-2B-Instruct-GGUF\\geniex.json']);
     assert.equal(pulled.npu?.models[0].have, true, `${what}: pulled once its geniex.json is there`);
@@ -744,8 +750,9 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
     assert.equal(r.embedServer!.version, 'b11125', `${version}`);
   }
   // 0.9.0 on (until a later entry): no --vit-compute, so GenieX reads them on its second HTP session (HTP1).
+  // (GenieX's own chat: from kit 2.152.2 the X2's on the pinned 0.9.3 runs on llama-server, below.)
   for (const version of ['0.9.0', '0.9.1', '0.9.3', '0.10.2']) {
-    const r = V.routeFor(V.atVersion(q, version), 'snapdragon-x2');
+    const r = V.routeFor(V.atVersion(q, version), 'snapdragon-x2', false, { ownServer: true });
     assert.equal(r.version, version);
     assert.deepEqual(tail(r), ['--compute', 'npu', '--nctx', '2560'], version);
     assert.deepEqual(V.npuEntry(r, { tools, exe: G }).vision, { model: TWO_B, pictureTokens: 1024 }, `${version}: still fitted within 1,024 tokens`);
@@ -755,6 +762,12 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
     assert.deepEqual(r.embedServer!.overlay, q.embedServer!.overlay, `${version}: GenieX's same 13 files over it`);
     assert.deepEqual(r.embedServer!.serve, q.embedServer!.serve, `${version}: its arguments as before`);
   }
+  // llama-server's chat (kit 2.152.2): the X2's, on the 0.9.3 it was measured with alone, its libraries GenieX's. Another
+  // version (0.10.2, the Smith's Use it) keeps GenieX's own chat, as does the first-generation X, not measured.
+  assert.equal(V.routeFor(V.atVersion(q, '0.9.3'), 'snapdragon-x2').chatServer?.program?.version, 'b11645');
+  for (const version of ['0.9.0', '0.9.1', '0.10.2']) assert.equal(V.routeFor(V.atVersion(q, version), 'snapdragon-x2').chatServer, undefined, version);
+  assert.equal(V.routeFor(V.atVersion(q, '0.9.3'), 'snapdragon-x').chatServer, undefined);
+  assert.equal(V.routeFor(V.atVersion(q, '0.9.3'), 'snapdragon-x2', false, { ownServer: true }).chatServer, undefined);
   // The first-generation X's 2B runs as the X2's does at each version; its fallback, the QAIRT 4B, has no arguments of its own.
   assert.deepEqual(tail(V.routeFor(V.atVersion(q, '0.9.3'), 'snapdragon-x')), ['--compute', 'npu', '--nctx', '2560']);
   assert.ok(!V.npuEntry(V.routeFor(V.atVersion(q, '0.9.3'), 'snapdragon-x', false, { fallback: true }), { tools, exe: G }).chat!.startCommand!.includes('--compute'));
@@ -780,7 +793,7 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
   assert.equal(pinned.version, '0.9.3');
   assert.deepEqual(pinned.download, { file: 'geniex-cli-setup-windows-arm64-v0.9.3.exe', url: 'https://github.com/qualcomm/GenieX/releases/download/v0.9.3/geniex-cli-setup-windows-arm64-v0.9.3.exe', size: 70470238, sha256: '886d9f1a48cf6c1694338a13fc66be9d28e7fc5a3a5970d49b63de554a6ce17a' });
   assert.equal(q.version, '0.8.0', "the route's own stays 0.8.0");
-  assert.deepEqual(tail(V.routeFor(pinned, 'snapdragon-x2')), ['--compute', 'npu', '--nctx', '2560']);
+  assert.deepEqual(tail(V.routeFor(pinned, 'snapdragon-x2', false, { ownServer: true })), ['--compute', 'npu', '--nctx', '2560']);
   assert.equal(V.routeFor(pinned, 'snapdragon-x2').embedServer!.version, 'b11645');
   assert.equal(V.pluginPatchOf(pinned, 'snapdragon-x2')!.serverVersion, '0.9.3');
   assert.equal(V.pluginPatchOf(pinned, 'snapdragon-x2')!.patched.from, 'geniex/0.9.1/geniex_plugin.dll', "0.9.1's build, over 0.9.3's own");
@@ -814,7 +827,8 @@ test("a Snapdragon X2 running GenieX 0.9 reads its pictures on the Hexagon, and 
   assert.equal(p.embed!.download!.size, 13566094);
   assert.equal(p.embed!.download!.sha256, '763a9ca5dca307fa4732d08811d6e45ef4b9801c8037529a595730434fe6e1b5', "Castellan's signed copy (kit 2.108.0)");
   const e = V.npuEntry(p.route, { tools, exe: G, embed: { exe: p.embed!.exe, model: p.embed!.model } });
-  assert.deepEqual(e.chat!.startCommand!.slice(7), ['--compute', 'npu', '--nctx', '2560']);
+  assert.match(e.chat!.startCommand![0], /llama-server\.exe$/, "0.9.3's chat on llama-server (kit 2.152.2)");
+  assert.deepEqual(V.npuEntry(p.ownServer!.route, { tools, exe: G }).chat!.startCommand!.slice(7), ['--compute', 'npu', '--nctx', '2560'], "GenieX's own, should it fail");
   assert.equal(e.embed!.startCommand![0], p.embed!.exe);
   assert.deepEqual(e.embed!.env, { ADSP_LIBRARY_PATH: path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon') });
   assert.deepEqual(validateAccelerators({ accelerators: [e] }), []);
@@ -2488,4 +2502,87 @@ test('what chats in the NPU\'s place, in words; blocked.json written whole and c
 
   const { detect } = await import('./fixture/src/kit/detect.ts');
   if (process.platform === 'win32') assert.equal((await detect(async () => X64('AMD Ryzen AI 9 HX 370'), () => 'on')).smartAppControl, 'on');
+});
+
+test("an X2's chat and pictures set up on llama-server on the Hexagon (kit 2.152.2), the embedding server's own build over GenieX's libraries; GenieX's own chat in its place should its test fail; an X Elite keeps GenieX's", async () => {
+  const tools = path.join(home, 'npu-chat-server');
+  const TWO_B = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
+  // Its pulls are fakes that leave no files: the 2B's pins (the X2's, checked in the test above) left out of these plans.
+  const unpinned = <T extends { models: any[] } | null | undefined>(n: T): T => (n ? { ...n, models: n.models.map((m) => ({ ...m, pinned: undefined })) } : n);
+  const planned = async (npu = NPU.x2) => {
+    const n = (await planSetup({ detection: parseDetection(`${npu}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([]), serverVersion: async () => null })).npu!;
+    return { ...unpinned(n), ownServer: unpinned(n.ownServer), fallback: unpinned(n.fallback) };
+  };
+  const p = await planned();
+  assert.ok(p.chat, "the X2's chat on llama-server");
+  assert.equal(p.ownServer?.chat, null, "and GenieX's own, should it fail");
+  assert.equal(p.chat!.download, null, "its program the embedding server's zip, downloaded once");
+  assert.ok(p.chat!.overlay, "GenieX's libraries over it");
+  assert.equal((await planned(NPU.x1)).chat, null, 'the X Elite: not measured, so GenieX chats');
+  const hexagon = p.chat!.folder;
+  const pc = (said: (e: { chat?: { startCommand?: string[] } }) => string[]) => {
+    const w = fakeNpuIo();
+    const tests: string[] = [];
+    const stopped: string[] = [];
+    const logged: string[] = [];
+    const io = {
+      ...w.io,
+      log: (l: string) => void logged.push(l),
+      testNpu: async (e: { chat?: { model: string; startCommand?: string[] } }, t?: { seeRed?: boolean }) => (tests.push(`${path.win32.basename(e.chat!.startCommand![0])}${t?.seeRed ? ' (red)' : ''}`), said(e)),
+      stopServer: async (program: string, base: string) => void stopped.push(`${path.win32.basename(program)} ${base}`),
+    };
+    return { io, did: w.did, tests, stopped, logged };
+  };
+  const onLlama = (e: { chat?: { startCommand?: string[] } }) => /llama-server/i.test(e.chat?.startCommand?.[0] ?? '');
+
+  // It answers: llama-server's command, GenieX installed for its libraries (both servers load them), nothing of GenieX's chat.
+  const fine = pc(() => []);
+  const ok = await setUpNpu(p, tools, fine.io);
+  assert.deepEqual(ok.problems, []);
+  assert.equal(ok.ownServer, undefined);
+  assert.equal(ok.entry?.chat?.model, TWO_B);
+  const cmd = ok.entry!.chat!.startCommand!;
+  assert.equal(cmd[0], portablePath(path.join(hexagon, 'llama-server.exe')));
+  for (const a of ['--device', 'HTP0', '--mmproj', '--image-max-tokens', '--alias', TWO_B]) assert.ok(cmd.includes(a), `${a} in ${cmd.join(' ')}`);
+  assert.ok(!cmd.includes('--lora'), 'no add-on here: none pinned is published or in place');
+  assert.deepEqual(ok.entry?.quirks ?? [], []);
+  assert.equal(ok.entry?.chat?.env?.ADSP_LIBRARY_PATH !== undefined, true, 'the Hexagon backend finds its DSP libraries');
+  assert.deepEqual(fine.tests, ['llama-server.exe (red)'], 'tested once, its picture seen red, as where there is a fallback');
+  assert.equal(fine.did.filter((d) => /^download llama-.*\.zip$/.test(d)).length, 1, 'one download of the build for both its servers');
+  assert.ok(fine.did.some((d) => d.startsWith('overlay ') && d.endsWith(`into ${hexagon}`)), fine.did.join(', '));
+  assert.match(fine.logged.join('\n'), /asking llama-server a test question on the NPU/);
+
+  // Its test fails: llama-server stopped, GenieX's own chat set up and tested in its place, said in ownServer and the log.
+  const fell = pc((e) => (onLlama(e) ? ['vision answered "The picture is grey." about a red picture'] : []));
+  const r = await setUpNpu(await planned(), tools, fell.io);
+  assert.deepEqual(r.problems, []);
+  assert.match(r.entry!.chat!.startCommand![0], /geniex\.exe$/i);
+  assert.equal(r.entry?.chat?.model, TWO_B);
+  assert.equal(r.ownServer?.failed, 'test');
+  assert.match(r.ownServer!.problems.join(), /about a red picture/);
+  assert.deepEqual(fell.tests, ['llama-server.exe (red)', 'geniex.exe'], "GenieX's tested as an X2's was before: nothing behind it, so its picture isn't held to red");
+  assert.ok(fell.stopped.includes('llama-server.exe http://127.0.0.1:18181'), fell.stopped.join(', '));
+  assert.match(fell.logged.join('\n'), /llama-server's chat didn't work on this NPU \(.*\): GenieX's own chat in its place/);
+
+  // Both fail: llama-server's failure is the one said.
+  const neither = pc(() => ['chat gave no answer']);
+  const both = await setUpNpu(await planned(), tools, neither.io);
+  assert.equal(both.entry, undefined);
+  assert.equal(both.ownServer, undefined);
+
+  // A plan from planNpu alone (the Smith's try of a model, not planSetup's) carries the same fallback; one without a chat
+  // server none. A llama-server that can't be set up (its program not there after its zip) falls back as a failed test does.
+  const bare = (npu: string) => unpinned(V.planNpu({ support: parseNpus(npu, 'arm64')[0], tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk([]), serverVersion: null })!);
+  const own = bare(NPU.x2);
+  assert.ok(own.chat && own.ownServer && own.ownServer.chat === null, "planNpu's own plan: GenieX's chat behind llama-server's");
+  assert.equal(bare(NPU.x1).ownServer, undefined, 'none without a chat server');
+  const gone = pc(() => []);
+  const missing = { ...gone.io, exists: (f: string) => (/llama-server\.exe$/i.test(f) ? false : gone.io.exists(f)) };
+  const s = await setUpNpu({ ...own, ownServer: unpinned(own.ownServer) }, tools, missing);
+  // The embedding server is the same program, so only its embeddings are said: they go to the card or the processor.
+  assert.ok(s.problems.length && s.problems.every((p) => /its embedding server, couldn't be set up/.test(p)), s.problems.join('; '));
+  assert.match(s.entry!.chat!.startCommand![0], /geniex\.exe$/i, "GenieX's own chat in its place");
+  assert.equal(s.ownServer?.failed, 'install');
+  assert.match(s.ownServer!.problems.join(), /llama-server, its chat server, couldn't be set up: .*llama-server\.exe isn't there/);
+  assert.deepEqual(gone.tests, ['geniex.exe'], 'llama-server never started, so only GenieX is tested');
 });

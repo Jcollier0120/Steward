@@ -1,0 +1,22 @@
+{
+  "//": "The model's add-ons (LoRA adapters), pinned: ACCELERATORS.md, Add-ons. A request names its job (AskOptions.job); the kit applies the job's add-on where the server that answers has it loaded (addons.ts' addonFor). F16 only: Q8_0 add-ons give NaN on the Snapdragon's Hexagon (llama.cpp b11645). `published` is false until the file is up at `url`: until then setup downloads nothing, and a PC uses the add-on only where its file was put in place by hand, checked by its SHA-256.",
+  "version": 1,
+  "addons": [
+    {
+      "id": "warrener-r1-qv",
+      "staff": "warrener",
+      "jobs": ["warrener.name"],
+      "base": "Qwen3-VL-2B-Instruct",
+      "file": "warrener-r1-qv-f16.gguf",
+      "size": 12853088,
+      "sha256": "4ef01ba2cddc2cc0f9d06309e2bceb810fa52b6ee3b01e5adbc7567e84773553",
+      "url": "https://github.com/Jcollier0120/Manor-releases/releases/download/addon-warrener-r1/warrener-r1-qv-f16.gguf",
+      "published": true,
+      "type": "f16",
+      "rank": 32,
+      "targets": ["q", "v"],
+      "licence": "Castellan's own, trained on made-up documents; for Qwen3-VL-2B-Instruct (Apache-2.0)",
+      "basis": "The Warrener's naming add-on, round 1 (Warrener docs/ADDON-PILOT.md, 2026-11-06): rank 32 on the language model's q and v projections, F16, alpha 64, trained on made-up downloads' names and folders. On the Snapdragon X2's NPU (llama-server b11645 on the Hexagon) it took the Warrener's test set from 14 names of 120 to 106, and folders from 101 to 116; while it's on, reading 9% slower, writing 13% slower and 14 MB more on the NPU; switched off, nothing. On 42 real documents there (2026-11-06) it got 38 folders and 23 names right, against 26 and 10 for the same prompt without it and 34 and 10 for the Warrener's earlier prompt, with no format failures."
+    }
+  ]
+}

@@ -505,6 +505,46 @@
               "ADSP_LIBRARY_PATH": "{tools}\\servers\\llama.cpp\\b11645-hexagon"
             }
           },
+          "chatServer": {
+            "generations": ["snapdragon-x2"],
+            "models": [
+              "unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0"
+            ],
+            "serve": [
+              "--host",
+              "127.0.0.1",
+              "--port",
+              "{port}",
+              "--device",
+              "HTP0",
+              "-ngl",
+              "99",
+              "-m",
+              "{file}",
+              "--mmproj",
+              "{mmproj}",
+              "--image-max-tokens",
+              "{pictureTokens}",
+              "-c",
+              "2560",
+              "--parallel",
+              "1",
+              "-t",
+              "4",
+              "-tb",
+              "4",
+              "--poll",
+              "0",
+              "--alias",
+              "{model}"
+            ],
+            "env": {
+              "LLAMA_ARG_CACHE_RAM": "0"
+            },
+            "quirks": [],
+            "coldStartMs": 4000,
+            "basis": "llama.cpp b11645 on the Hexagon with GenieX 0.9.3's libraries over it (the embedding server's build), measured on the X2 Elite Extreme (2026-11-06, Steward tools/addon-npu and the NPU benchmark): as fast as GenieX (reads 2,986 tokens a second against 2,943, writes 72.0 against 71.2, a name in 357 ms against 364), the benchmark's 22 of 24 quality items as GenieX, its 4 pictures right, the first in 0.35 s against 1.04. No prefix leak (44 asks, none answered from another's prompt), so no nonce: a shared start is read once. --poll 0 keeps its threads from spinning while they wait on the NPU: 0.04 of a core writing, against 4.3 at its default and 2.0 at -t 8, at the same speed with 1, 2 or 4 threads; 4 for the projector's one processor op (UPSCALE). Its projector loads at its start, so after a chat, its working set trimmed as the kit trims it, it holds 0.6 to 0.8 GB more of the PC's memory than GenieX (2,218 to 2,386 MB less available, against 1,623), and after pictures about the same (2,411 to 2,550, against 2,662). Ready in 2.6 to 3.2 s, the projector loaded. Run as this kit runs it (its command with the Warrener's add-on loaded, every request the kit's own, the add-on held at 0): reads 2,997 tokens a second, writes 71.6, a name in 361 ms; 22 of the 24 quality items (time and apples wrong); the 4 pictures right in 0.20 to 0.44 s. With the add-on applied, reads 2,747 and writes 62.5."
+          },
           "pluginPatch": {
             "snapdragon-x2": {
               "what": "Castellan's build of GenieX's llama.cpp plugin for 0.9.1, which 0.9.3 runs as is: 0.9.3 carries the same llama.cpp (e467e5b) and plugin source, and loads the build over its own libraries. As 0.9.1's: the model file is mapped rather than read into memory, and its pages are released after load; the vision model reserves one logits row; the vision encoder loads with the first picture, on the Hexagon's second session, and is freed again after 60 s without one; GENIEX_IMAGE_MAX_TOKENS caps a picture's tokens; and with the model on the NPU, the processor's threads sleep while they wait for work rather than spin (GENIEX_PATCH_POLL)",
