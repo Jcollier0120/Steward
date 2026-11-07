@@ -2569,4 +2569,20 @@ test("an X2's chat and pictures set up on llama-server on the Hexagon (kit 2.152
   const both = await setUpNpu(await planned(), tools, neither.io);
   assert.equal(both.entry, undefined);
   assert.equal(both.ownServer, undefined);
+
+  // A plan from planNpu alone (the Smith's try of a model, not planSetup's) carries the same fallback; one without a chat
+  // server none. A llama-server that can't be set up (its program not there after its zip) falls back as a failed test does.
+  const bare = (npu: string) => unpinned(V.planNpu({ support: parseNpus(npu, 'arm64')[0], tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk([]), serverVersion: null })!);
+  const own = bare(NPU.x2);
+  assert.ok(own.chat && own.ownServer && own.ownServer.chat === null, "planNpu's own plan: GenieX's chat behind llama-server's");
+  assert.equal(bare(NPU.x1).ownServer, undefined, 'none without a chat server');
+  const gone = pc(() => []);
+  const missing = { ...gone.io, exists: (f: string) => (/llama-server\.exe$/i.test(f) ? false : gone.io.exists(f)) };
+  const s = await setUpNpu({ ...own, ownServer: unpinned(own.ownServer) }, tools, missing);
+  // The embedding server is the same program, so only its embeddings are said: they go to the card or the processor.
+  assert.ok(s.problems.length && s.problems.every((p) => /its embedding server, couldn't be set up/.test(p)), s.problems.join('; '));
+  assert.match(s.entry!.chat!.startCommand![0], /geniex\.exe$/i, "GenieX's own chat in its place");
+  assert.equal(s.ownServer?.failed, 'install');
+  assert.match(s.ownServer!.problems.join(), /llama-server, its chat server, couldn't be set up: .*llama-server\.exe isn't there/);
+  assert.deepEqual(gone.tests, ['geniex.exe'], 'llama-server never started, so only GenieX is tested');
 });

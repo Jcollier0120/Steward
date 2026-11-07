@@ -1059,11 +1059,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
       // Its generation's fallback (the first-generation X Elite's Qwen3-VL-4B), set up only should its own models fail.
       const fallback = npu && generic && generationOf(generic, det.generation)?.fallback ? plan(true) : null;
       if (npu && fallback && npuMemoryFit(fallback.route, o.detection.ramBytes).chat) npu.fallback = fallback;
-      // Its chat on the route's own server (GenieX's), set up only should llama-server's on the Hexagon fail (kit 2.152.2).
-      if (npu?.chat) {
-        const own = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed, cards: o.detection.cards, small, serverVersion: version, ownServer: true });
-        if (own && !own.chat) npu.ownServer = own;
-      }
+      // Its chat on the route's own server (GenieX's), should llama-server's on the Hexagon fail: planNpu's ownServer.
       if (!fit.embed && route?.embedServer) {
         npuNote = `${det.label} (npu): its embeddings not set up: ${fit.why}. The graphics card or the processor makes them.`;
         npuPlain = npuNoteFor(det.label, 'embed', fit.why!);

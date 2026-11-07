@@ -1475,8 +1475,9 @@ export interface NpuPlan {
    */
   fallback?: NpuPlan;
   /**
-   * What setup sets up if this plan's chat server (`chat`: llama-server on the Hexagon) fails: the route's own server
-   * chatting, as before kit 2.152.2 (routeFor's `ownServer`), with this plan's `fallback` after it. planSetup adds it.
+   * What setUpNpu sets up if this plan's chat server (`chat`: llama-server on the Hexagon) fails: the route's own server
+   * chatting, as before kit 2.152.2 (routeFor's `ownServer`), with this plan's `fallback` after it. planNpu adds it to
+   * every plan with a chat server, so each caller keeps it: setup's, and the Smith's tries of a model.
    */
   ownServer?: NpuPlan;
 }
@@ -1582,7 +1583,14 @@ export function planNpu(o: {
     addons.reduce((n, a) => n + (a.download?.size ?? 0), 0);
   const powerTool = route.powerTool ? { ...route.powerTool, exe: expandRoute(route.powerTool.exe, { tools: o.tools, env: o.env }) } : undefined;
   const catalogs = (route.catalogs ?? []).filter((c) => c.serverVersion === route.version);
-  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, build, runtime, patch, catalogs, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, chat, addons, ...(powerTool ? { powerTool } : {}), downloadBytes };
+  const plan: NpuPlan = { vendor: o.support.vendor, route, support: o.support, exe, installed, download, build, runtime, patch, catalogs, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, chat, addons, ...(powerTool ? { powerTool } : {}), downloadBytes };
+  // Its chat on the route's own server (GenieX's), set up only should llama-server's fail: nothing of it is counted in
+  // downloadBytes, as it downloads only what llama-server's left out.
+  if (chat && !o.ownServer) {
+    const own = planNpu({ ...o, ownServer: true });
+    if (own && !own.chat) plan.ownServer = own;
+  }
+  return plan;
 }
 
 /**
