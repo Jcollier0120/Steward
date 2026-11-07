@@ -333,7 +333,7 @@ export interface NpuChatServer {
   /** The route's models it serves, by id: the X2's Qwen3-VL-2B, its files the route's offNpu ones (GenieX's own copies). */
   models: string[];
   /**
-   * The generations it serves, by id: those it was measured on (the X2, Steward#500 and kit 2.152.2). Another generation
+   * The generations it serves, by id: those it was measured on (the X2, by the Steward's tools/addon-npu, kit 2.152.2). Another generation
    * on the same models (the first-generation X Elite's 2B) keeps the route's own server until it's measured.
    */
   generations: string[];

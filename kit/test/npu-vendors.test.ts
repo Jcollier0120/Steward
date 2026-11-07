@@ -649,7 +649,7 @@ test("every Snapdragon X2 runs Qwen3-VL-2B whatever its memory, its pictures on 
     const e = V.npuEntry(x2.npu!.route, { tools, exe: G });
     assert.equal(e.chat!.model, TWO_B, what);
     assert.deepEqual(e.vision, { model: TWO_B, pictureTokens: 1024 }, `${what}: GenieX's llama.cpp reads a picture at its own size, so the kit fits it within 1,024 tokens and counts it so`);
-    // From kit 2.152.2 its chat and pictures on llama-server on the Hexagon, the embedding server's build (Steward#500).
+    // From kit 2.152.2 its chat and pictures on llama-server on the Hexagon, the embedding server's build, as tools/addon-npu measured it.
     assert.equal(e.chat!.startCommand![0], path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon', 'llama-server.exe'), what);
     assert.deepEqual(e.chat!.startCommand!.slice(1, 9), ['--host', '127.0.0.1', '--port', '18181', '--device', 'HTP0', '-ngl', '99'], `${what}: its language model on the Hexagon`);
     // GenieX's own, should llama-server's test fail: its language model on the Hexagon and its pictures' encoder on the
