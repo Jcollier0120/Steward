@@ -427,6 +427,13 @@ With the Warrener's add-on applied, it read 2,747 tokens a second and wrote 62.5
 
 ### Intel's NPU
 
+**The cost that matters most: a loaded add-on slows every request, even while it's off.** With the Warrener's add-on loaded in the pipeline and switched off, every other staff member's requests write 27% slower (18.1 → 13.2 tokens a second) and read 7% slower (546 → 508), on the NPU 3720.
+
+- The cause is NPUW, the NPU plugin's LLM pipeline. It compiles each add-on's branch into the model, padded to `NPUW_LLM_MAX_LORA_RANK` (32 by default).
+- An add-on switched off only sets its alpha to 0. The branch still runs.
+- So the Snapdragon's way, one server with the add-on loaded and every other request at 0, would cost every staff member a quarter of the NPU's writing speed here.
+- The ways out are below: swapping pipelines, pairing them, or a larger maximum rank.
+
 Measured 2026-11-07 on a Core Ultra 5 225U (14 cores, 16 GB) and its NPU 3720 by the Steward's `tools/addon-npu` (`intel.ts`; its README says how). Every NPU run was in the NPU's turn, one block at a time, and the installed manor's servers were left alone. The setup:
 
 - The kit's Intel model, Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov, with the kit's NPU settings for the NPU 3720: `MAX_PROMPT_LEN` 2048, `NPUW_LLM_PREFILL_CHUNK_SIZE` 256 and `GENERATE_HINT` BEST_PERF (routeFor).
@@ -434,13 +441,6 @@ Measured 2026-11-07 on a Core Ultra 5 225U (14 cores, 16 GB) and its NPU 3720 by
 - The add-ons, in PEFT's layout (GenAI reads it directly, with no GGUF step):
   - the Warrener's trained `warrener-r1-qv`: F32, q and v, rank 32, lora_alpha 64;
   - a throwaway rank 32 on q, k, v and o (make_lora.py).
-
-**The cost that matters most: a loaded add-on slows every request, even while it's off.** With the Warrener's add-on loaded in the pipeline and switched off, every other staff member's requests write 27% slower (18.1 → 13.2 tokens a second) and read 7% slower (546 → 508).
-
-- The cause is NPUW, the NPU plugin's LLM pipeline. It compiles each add-on's branch into the model, padded to `NPUW_LLM_MAX_LORA_RANK` (32 by default).
-- An add-on switched off only sets its alpha to 0. The branch still runs.
-- So the Snapdragon's way, one server with the add-on loaded and every other request at 0, would cost every staff member a quarter of the NPU's writing speed here.
-- The ways out (swapping pipelines, or pairing them) are below.
 
 **The gap is OpenVINO Model Server's. GenAI takes add-ons on the NPU.**
 
@@ -464,7 +464,7 @@ Measured 2026-11-07 on a Core Ultra 5 225U (14 cores, 16 GB) and its NPU 3720 by
 **Where it runs: on the NPU.**
 
 - NPUW compiles the whole language model for the NPU alone, the add-on's branch included: its LLM pipelines' `NPUW_DEVICES` is NPU only.
-- The processor's time for each written token was the same with the add-on on and off: 5.5–6.8 ms. On the processor device it is 330–400 ms.
+- The processor's time for each written token was 4–10 ms in every run, with the add-on on or off and at every maximum rank. On the processor device it is 330–400 ms.
 - So none of the add-on's work falls back.
 
 **What it costs.** The median of 3 rounds: reading a 1,500-token prompt, writing 128 tokens, and a Warrener name (its prompt about 450 tokens). The memory was read after them:
@@ -476,6 +476,13 @@ Measured 2026-11-07 on a Core Ultra 5 225U (14 cores, 16 GB) and its NPU 3720 by
 | The Warrener's, on | 501 | 12.9 | 3,131 ms (986 ms) | 2,153 MB | 3,275 MB |
 | Rank 32 on q, k, v and o, loaded and off | 492 | 13.0 | 2,631 ms (999 ms) | 2,254 MB | 3,376 MB |
 | Rank 32 on q, k, v and o, on | 494 | 11.9 | 3,014 ms (1,007 ms) | 2,204 MB | 3,377 MB |
+
+- A name with the Warrener's add-on on is longer, in its own form (`NAME:` and `FOLDER:`). So that column is not only speed.
+- For reference, the processor (8 threads): reads 204 tokens a second, writes 21.4 and names in 2,870 ms without an add-on; with the Warrener's on, 210, 19.0 and 3,561 ms.
+- The graphics card: 621, 22.6 and 1,731 ms without an add-on. With the Warrener's loaded, every request failed in the GPU plugin (`The allocated input memory is necessary to set kernel arguments`, ocl_stream.cpp). The rank-32 throwaway on q, k, v and o ran there, its names 6 of 8 as on the processor.
+  - The GPU plugin runs an add-on only when it covers all four of q, k, v and o. q and v failed, and so did q, k and v.
+  - The Warrener's add-on with zero tensors added for k and o, which changes nothing in what it does, ran.
+  - This is a reference only: on a PC with an NPU, the add-on stays on the NPU.
 
 **The rank, and NPUW's maximum.** NPUW pads every add-on to `NPUW_LLM_MAX_LORA_RANK`. It refuses a larger one when a request applies it: "LoRA tensor low-rank size: 64 is larger than the maximum LoRA low-rank size 32".
 
@@ -493,13 +500,6 @@ Measured 2026-11-07 on a Core Ultra 5 225U (14 cores, 16 GB) and its NPU 3720 by
 - Reads were 5–7% slower at every maximum. Without an add-on the NPU holds 2,100 MB.
 - The branch's own arithmetic is small: rank 32 on q and v is about 6.4 million multiply-adds for each token over the 28 layers, against about 1.7 billion for the model. So the cost lies in how NPUW runs the branch, not in the work it does.
 - A maximum of 64 roughly halves the cost of an add-on loaded and off, for about 150 MB more on the NPU. It doesn't end the cost.
-
-- A name with the Warrener's add-on on is longer, in its own form (`NAME:` and `FOLDER:`). So that column is not only speed.
-- For reference, the processor (8 threads): reads 204 tokens a second, writes 21.4 and names in 2,870 ms without an add-on; with the Warrener's on, 210, 19.0 and 3,561 ms.
-- The graphics card: 621, 22.6 and 1,731 ms without an add-on. With the Warrener's loaded, every request failed in the GPU plugin (`The allocated input memory is necessary to set kernel arguments`, ocl_stream.cpp). The rank-32 throwaway on q, k, v and o ran there, its names 6 of 8 as on the processor.
-  - The GPU plugin runs an add-on only when it covers all four of q, k, v and o. q and v failed, and so did q, k and v.
-  - The Warrener's add-on with zero tensors added for k and o, which changes nothing in what it does, ran.
-  - This is a reference only: on a PC with an NPU, the add-on stays on the NPU.
 
 **Its answers: the Warrener's as on the processor.** Its naming prompt on 8 made-up documents, named greedily on the NPU and on the processor with the same add-on (the reference):
 
@@ -549,11 +549,11 @@ So the Warrener's adds 25–53 MB on the NPU. The working set is 2.9–3.4 GB ei
 | A name | 2,195 ms | 2,076 ms |
 | The NPU benchmark's 24 quality items | 22 (time and apples wrong) | 22, missing the same two |
 | Its 4 pictures | 4, in 0.94–1.09 s | 4, in 1.02–1.25 s |
-| Its first answer | 46.7 s, its own compile cache empty ⟨OVMS-WARM⟩ | 4.6 s, from the cache |
+| Its first answer | 6.3 s from its compile cache (46.7 s with it empty), answering on its port in 1.1 s | 4.6–7.3 s from the cache |
 | On the NPU, after chat / after pictures | 2,100 / 2,100 MB | 2,100 / 2,100 MB |
 | Working set, after chat / after pictures | 3,287 / 3,784 MB | 3,200 / 4,087 MB |
 
-So GenAI directly is as fast as the kit's server, answers the same, and holds the same on the NPU.
+A second run, both from their caches, gave the same: reads 447 against 499 tokens a second, writes 18.6 against 18.8, a name 2,410 against 2,189 ms, 22 quality items and 4 pictures each, and 2,100 MB on the NPU each. So GenAI directly is as fast as the kit's server, answers the same, and holds the same on the NPU.
 
 **The ways out of the loaded-and-off cost.** Measured with the Warrener's add-on, in one process (as a server of the kit's own would run them), from a full compile cache:
 
@@ -571,12 +571,11 @@ So GenAI directly is as fast as the kit's server, answers the same, and holds th
 - **One NPUW weights bank for both doesn't help.** `NPUW_WEIGHTS_BANK` was set to the same name for both pipelines.
   - NPUW shares a tensor only when it's the same one in memory (its data pointer), and each pipeline reads the model's weights itself. So the add-on's pipeline still added 2,016 MB on the NPU.
   - Worse, a closed pipeline's weights stay in the bank until the last pipeline using it goes. After the add-on's pipeline was made and closed, the base alone held 3,578 MB on the NPU, against 1,932 MB with its own bank.
-
 - **Keep the add-on loaded, with a maximum rank of 64** (`NPUW_LLM_MAX_LORA_RANK=64`, above). Every other request then writes 11–14% slower instead of 27–31%, for about 150 MB more on the NPU. It's cheaper, but not free.
 
 So:
 
-- **Swapping** keeps today's memory and every other request's speed. It costs about 10 s for each batch, and up to 7.6 s more for a chat that arrives during one.
+- **Swapping** keeps today's memory and every other request's speed. It costs about 10 s for each batch. A chat that arrives during one waits a swap back more than today, 4.5–7.6 s in all to its first token.
 - **Pairing** costs 2.1 GB, which a 16 GB PC doesn't have to spare, and it still slows the base's reading.
 - **A maximum of 64** costs every request a little, all the time.
 
