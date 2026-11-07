@@ -43,7 +43,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { npuLockDir } from '../../src/kit/lock.ts';
 import { withNpuTurn } from '../../src/kit/npu-queue.ts';
-import { answers as answersAt, DOCS, median, memoryOf, namePrompt, post, qualityAndPictures, readPromptOf, tps, until, type Memory } from './addon-test.ts';
+import { answers as answersAt, DOCS, FOLDERS, median, memoryOf, namePrompt, post, qualityAndPictures, readPromptOf, tps, until, type Memory } from './addon-test.ts';
 
 // ------------------------------------------------------------------------------------------------ options
 
@@ -423,6 +423,54 @@ const commonPrefix = (a: string, b: string) => {
   return i;
 };
 
+/**
+ * An answer read as the Warrener reads it (Warrener's rules.ts, parseAnswer): NAME: and FOLDER:, or without those labels
+ * its first two lines; a reply that labels only its folder has its other line as the name. The folder is its number
+ * in the prompt's list (or the label it names), the name lower-cased with its spaces closed up.
+ */
+const FOLDER_LINE = /^[\s*_`#>-]*(?:folder|destination|dest)\s*[*_`]*\s*[:：]\s*(.+)$/im;
+function readAnswer(text: string): { labelled: boolean; name: string | null; folder: number | null } {
+  let name = /^[\s*_`#>-]*name\s*[*_`]*\s*[:：]\s*(.+)$/im.exec(text)?.[1] ?? null;
+  let folder = FOLDER_LINE.exec(text)?.[1] ?? null;
+  const labelled = name !== null;
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (name === null && folder !== null && lines.length === 2) name = lines.find((l) => !FOLDER_LINE.test(l)) ?? null;
+  else if (name === null && folder === null) [name, folder] = [lines[0] ?? null, lines[1] ?? null];
+  const n = folder ? /^\s*(\d)\b/.exec(folder)?.[1] : undefined;
+  const byLabel = folder ? FOLDERS.findIndex(([label]) => folder!.toLowerCase().includes(label.toLowerCase())) : -1;
+  return { labelled, name: name ? name.trim().toLowerCase().replace(/\s+/g, ' ') : null, folder: n ? Number(n) : byLabel >= 0 ? byLabel + 1 : null };
+}
+
+/**
+ * Each route's answers against the processor's for the same model (the reference) and against its own base: word for
+ * word, and as the Warrener reads them (readAnswer): the name, the folder, and how many carry the NAME: label.
+ */
+function compareAnswers(by: Record<string, Record<string, string[]>>): Record<string, unknown> {
+  const compare: Record<string, unknown> = {};
+  for (const [where, r] of Object.entries(by))
+    for (const k of Object.keys(r)) {
+      const ref = by.cpu?.[k];
+      const read = r[k].map(readAnswer);
+      const base = r.base.map(readAnswer);
+      const refRead = ref?.map(readAnswer);
+      const count = (f: (i: number) => boolean) => read.filter((_, i) => f(i)).length;
+      compare[`${where} ${k}`] = {
+        of: r[k].length,
+        labelled: count((i) => read[i].labelled),
+        changedFromBase: k === 'base' ? null : count((i) => r[k][i] !== r.base[i]),
+        nameChangedFromBase: k === 'base' ? null : count((i) => read[i].name !== base[i].name),
+        folderChangedFromBase: k === 'base' ? null : count((i) => read[i].folder !== base[i].folder),
+        sameAsProcessor: ref ? count((i) => r[k][i] === ref[i]) : null,
+        sameNameAsProcessor: refRead ? count((i) => read[i].name === refRead[i].name) : null,
+        sameFolderAsProcessor: refRead ? count((i) => read[i].folder === refRead[i].folder) : null,
+        meanSharedNameStartWithProcessor: refRead
+          ? read.map((a, i) => commonPrefix(a.name ?? '', refRead[i].name ?? '') / Math.max(1, (a.name ?? '').length, (refRead[i].name ?? '').length)).reduce((x, y) => x + y, 0) / read.length
+          : null,
+      };
+    }
+  return compare;
+}
+
 async function answersPhase(o: Options, f: Scratch, results: any): Promise<void> {
   const all = async (s: Server, variants: Variant[]) => {
     const r: Record<string, string[]> = {};
@@ -435,19 +483,20 @@ async function answersPhase(o: Options, f: Scratch, results: any): Promise<void>
   by['npu-kit'] = await inNpuTurn('add-on test (AMD): answers, kit sampling', () => withFlm(o, f, 'answers-npu-kit', (s) => all(s, flmVariants(o).map((v) => ({ ...v, kitSampling: true })))));
   if (o.llama && o.gguf) by.cpu = await withLlama(o, 'cpu', 'answers-cpu', (s) => all(s, llamaVariants(o)));
   if (o.vulkan && o.gguf) by.gpu = await withLlama(o, 'gpu', 'answers-gpu', (s) => all(s, llamaVariants(o)));
-  const compare: Record<string, unknown> = {};
-  for (const [where, r] of Object.entries(by))
-    for (const k of Object.keys(r)) {
-      const ref = by.cpu?.[k];
-      compare[`${where} ${k}`] = {
-        changedFromBase: k === 'base' ? null : r[k].filter((a, i) => a !== r.base[i]).length,
-        sameAsProcessor: ref ? r[k].filter((a, i) => a === ref[i]).length : null,
-        meanSharedStartWithProcessor: ref ? r[k].map((a, i) => commonPrefix(a, ref[i]) / Math.max(1, a.length, ref[i].length)).reduce((x, y) => x + y, 0) / r[k].length : null,
-        of: r[k].length,
-      };
-    }
-  results.answers = { docs: DOCS.map((d) => d.file), ...by, compare };
+  results.answers = { docs: DOCS.map((d) => d.file), ...by, compare: compareAnswers(by) };
+  sayCompare(results.answers.compare);
+}
+
+const sayCompare = (compare: Record<string, unknown>) => {
   for (const [k, c] of Object.entries(compare)) say(`answers ${k}: ${JSON.stringify(c)}`);
+};
+
+/** No servers: the answers' comparison again, from the answers a run before left in results.json. */
+async function comparePhase(_o: Options, _f: Scratch, results: any): Promise<void> {
+  if (!results.answers) throw new Error('compare: results.json has no answers (run the answers phase)');
+  const { docs: _docs, compare: _old, ...by } = results.answers;
+  results.answers.compare = compareAnswers(by);
+  sayCompare(results.answers.compare);
 }
 
 // ------------------------------------------------------------------------------------------------ quality
@@ -485,21 +534,56 @@ type Odds = Record<string, number>;
  * FastFlowLM 1.0.11 and later: a chat request with the answer's start given ("NAME:", continue_final_message) and
  * logprobs on, one token. null when the server returns no log-probabilities (1.0.10).
  */
-async function flmOdds(s: Server, v: Variant, d: (typeof DOCS)[number]): Promise<Odds | null> {
-  const r = await post(`${s.base}/v1/chat/completions`, { model: v.tag, messages: [...namePrompt(d.file, d.how, d.text), { role: 'assistant', content: 'NAME:' }], continue_final_message: true, add_generation_prompt: false, max_tokens: 1, temperature: 0, top_k: 1, think: false, ...NEUTRAL, logprobs: true, top_logprobs: ODDS_TOP, stream: false });
+async function flmOdds(s: Server, v: Variant, d: (typeof DOCS)[number], given = 'NAME:'): Promise<Odds | null> {
+  const messages = given ? [...namePrompt(d.file, d.how, d.text), { role: 'assistant', content: given }] : namePrompt(d.file, d.how, d.text);
+  const r = await post(`${s.base}/v1/chat/completions`, { model: v.tag, messages, ...(given ? { continue_final_message: true, add_generation_prompt: false } : {}), max_tokens: 1, temperature: 0, top_k: 1, think: false, ...NEUTRAL, logprobs: true, top_logprobs: ODDS_TOP, stream: false });
   if (r.status !== 200 || r.json?.error) throw new Error(`${s.name} ${v.name}: ${r.status} ${r.text.slice(0, 300)}`);
   const top: { token: string; logprob: number }[] | undefined = r.json.choices?.[0]?.logprobs?.content?.[0]?.top_logprobs;
   return top ? Object.fromEntries(top.map((x) => [x.token, x.logprob])) : null;
 }
 
 /** llama-server: the chat template applied with thinking off (as FastFlowLM does), the answer's start given. */
-async function llamaOdds(s: Server, v: Variant, d: (typeof DOCS)[number]): Promise<Odds> {
+async function llamaOdds(s: Server, v: Variant, d: (typeof DOCS)[number], given = 'NAME:'): Promise<Odds> {
   const t = await post(`${s.base}/apply-template`, { messages: namePrompt(d.file, d.how, d.text), chat_template_kwargs: { enable_thinking: false } });
   if (t.status !== 200) throw new Error(`${s.name}: apply-template ${t.status} ${t.text.slice(0, 200)}`);
-  const r = await post(`${s.base}/completion`, { prompt: `${t.json.prompt}NAME:`, n_predict: 1, temperature: 0, top_k: 1, n_probs: ODDS_TOP, cache_prompt: false, ...(v.lora ? { lora: v.lora } : {}) });
+  const r = await post(`${s.base}/completion`, { prompt: `${t.json.prompt}${given}`, n_predict: 1, temperature: 0, top_k: 1, n_probs: ODDS_TOP, cache_prompt: false, ...(v.lora ? { lora: v.lora } : {}) });
   if (r.status !== 200) throw new Error(`${s.name}: ${r.status} ${r.text.slice(0, 200)}`);
   const top: { token: string; logprob: number }[] = r.json.completion_probabilities?.[0]?.top_logprobs ?? [];
   return Object.fromEntries(top.map((x) => [x.token, x.logprob]));
+}
+
+/**
+ * The base model's first answer token with nothing given, on the NPU and the processor: does the NPU start the way the
+ * processor does ("NAME")? Each side's top token, and both sides' log-probability for the processor's.
+ */
+async function startOdds(o: Options, f: Scratch): Promise<unknown> {
+  const base: Variant = { name: 'base', tag: tagOf(null) };
+  const npu = await inNpuTurn('add-on test (AMD): first token', () =>
+    withFlm(o, f, 'start-npu', async (s) => {
+      const rows: Odds[] = [];
+      for (const d of DOCS) {
+        const x = await flmOdds(s, base, d, '');
+        if (!x) return null;
+        rows.push(x);
+      }
+      return rows;
+    }),
+  );
+  if (!npu || !o.llama || !o.gguf) return npu ? { npu } : { error: 'FastFlowLM returned no log-probabilities' };
+  const off: Variant = { name: 'base', lora: o.loras.map((_, j) => ({ id: j, scale: 0 })) };
+  const cpu = await withLlama(o, 'cpu', 'start-cpu', async (s) => {
+    const rows: Odds[] = [];
+    for (const d of DOCS) rows.push(await llamaOdds(s, off, d, ''));
+    return rows;
+  });
+  const top = (x: Odds) => Object.entries(x).sort((a, b) => b[1] - a[1])[0];
+  const rows = DOCS.map((d, i) => {
+    const [cTok, cLp] = top(cpu[i]);
+    const [nTok, nLp] = top(npu[i]);
+    return { doc: d.file, processorTop: cTok, processorTopLogprob: cLp, npuTop: nTok, npuTopLogprob: nLp, npuLogprobOfProcessorTop: npu[i][cTok] ?? null };
+  });
+  say(`odds, first token: ${JSON.stringify(rows.map((r) => [r.processorTop, r.npuTop, r.npuLogprobOfProcessorTop === null ? null : +r.npuLogprobOfProcessorTop.toFixed(2)]))}`);
+  return { rows, npu, cpu };
 }
 
 /**
@@ -509,7 +593,7 @@ async function llamaOdds(s: Server, v: Variant, d: (typeof DOCS)[number]): Promi
  * quantization); `offAgain` the largest move between off before and off after an on (FastFlowLM: back to the base model).
  */
 async function oddsPhase(o: Options, f: Scratch, results: any): Promise<void> {
-  results.odds = {};
+  results.odds = { start: await startOdds(o, f) };
   for (const m of o.merged) {
     const l = o.loras.find((x) => x.name === m.name);
     const base: Variant = { name: 'base', tag: tagOf(null) };
@@ -588,12 +672,16 @@ async function main(): Promise<void> {
   mkdirSync(o.out, { recursive: true });
   const file = path.join(o.out, 'results.json');
   const results: any = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
-  results.pc = { cpu: os.cpus()[0]?.model, cores: os.cpus().length, memoryGb: os.totalmem() / 2 ** 30, at: new Date().toISOString() };
-  results.options = { ...o, phases: [...o.phases] };
-  results.models = { base: { file: path.join(o.modelDir, 'model.q4nx'), bytes: statSync(path.join(o.modelDir, 'model.q4nx')).size }, ...Object.fromEntries(o.merged.map((m) => [m.name, { file: m.file, bytes: statSync(m.file).size }])) };
+  // compare alone starts no server: the run's own record (its PC, options and models) stays as that run left it.
+  const servers = [...o.phases].some((p) => p !== 'compare');
+  if (servers) {
+    results.pc = { cpu: os.cpus()[0]?.model, cores: os.cpus().length, memoryGb: os.totalmem() / 2 ** 30, at: new Date().toISOString() };
+    results.options = { ...o, phases: [...o.phases] };
+    results.models = { base: { file: path.join(o.modelDir, 'model.q4nx'), bytes: statSync(path.join(o.modelDir, 'model.q4nx')).size }, ...Object.fromEntries(o.merged.map((m) => [m.name, { file: m.file, bytes: statSync(m.file).size }])) };
+  }
   const save = () => writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
-  const f = scratchFlm(o);
-  const phases: [string, (o: Options, f: Scratch, r: any) => Promise<void>][] = [['load', loadPhase], ['speed', speedPhase], ['switch', switchPhase], ['answers', answersPhase], ['quality', qualityPhase], ['odds', oddsPhase]];
+  const f: Scratch = servers ? scratchFlm(o) : { exe: '', env: {} };
+  const phases: [string, (o: Options, f: Scratch, r: any) => Promise<void>][] = [['load', loadPhase], ['speed', speedPhase], ['switch', switchPhase], ['answers', answersPhase], ['quality', qualityPhase], ['odds', oddsPhase], ['compare', comparePhase]];
   try {
     for (const [name, fn] of phases) {
       if (!o.phases.has(name)) continue;
