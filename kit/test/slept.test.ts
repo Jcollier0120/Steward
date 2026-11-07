@@ -365,7 +365,29 @@ test("this PC's own log reads, when it's Windows", { skip: process.platform !== 
   const { execFileSync } = await import('node:child_process');
   const q = "*[System[((Provider[@Name='Microsoft-Windows-Kernel-Power'] and (EventID=506 or EventID=507)) or (Provider[@Name='Microsoft-Windows-Kernel-General'] and (EventID=12 or EventID=13))) and TimeCreated[timediff(@SystemTime) <= 1209600000]]]";
   const xml = execFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'wevtutil.exe'), ['qe', 'System', `/q:${q}`, '/f:xml', '/rd:true', '/c:2000'], { encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
-  const s = S.sleepsOf(xml);
-  for (const x of s.spans) assert.ok(x.to > x.from && x.to <= Date.now() + MIN, JSON.stringify(x));
-  assert.equal(s.standbySince, null, 'this test runs awake, outside any standby session');
+  const now = Date.now();
+  // The log's events, oldest first (/rd:true gives the newest first; written in the same instant, by record number).
+  const events = (xml.match(/<Event[\s>][\s\S]*?<\/Event>/g) ?? [])
+    .map((raw) => ({
+      raw,
+      provider: /<Provider\s+Name=['"]([^'"]+)['"]/.exec(raw)?.[1],
+      id: Number(/<EventID[^>]*>(\d+)<\/EventID>/.exec(raw)?.[1]),
+      at: Date.parse(/<TimeCreated\s+SystemTime=['"]([^'"]+)['"]/.exec(raw)?.[1] ?? ''),
+      record: Number(/<EventRecordID>(\d+)<\/EventRecordID>/.exec(raw)?.[1]),
+    }))
+    .sort((a, b) => a.at - b.at || a.record - b.record);
+  // The checks may run with the PC in standby, screen off and still at work: the log says whether it is, not the test.
+  // In a session since the newest 506 when neither a 507 nor a start (Kernel-General 12) came after it.
+  const agrees = (evs: typeof events, as: string) => {
+    const s = S.sleepsOf(evs.map((e) => e.raw).join(''));
+    for (const x of s.spans) assert.ok(x.to > x.from && x.to <= now + MIN, `${as}: ${JSON.stringify(x)}`);
+    const last = evs.findLastIndex((e) => e.provider === KP && (e.id === 506 || e.id === 507));
+    const open = last >= 0 && evs[last].id === 506 && !evs.slice(last + 1).some((e) => e.provider === KG && e.id === 12);
+    assert.equal(s.standbySince, open ? evs[last].at : null, `${as}: in standby since its newest 506 when no 507 or start came after it`);
+    if (s.standbySince !== null) assert.ok(s.standbySince <= now + MIN, `${as}: in standby since ${new Date(s.standbySince).toISOString()}, not yet come`);
+  };
+  agrees(events, 'the log as it is');
+  // As it stood at its newest 506, before whatever ended that session: in standby since then, awake as the PC is now.
+  const lastStandby = events.findLastIndex((e) => e.provider === KP && e.id === 506);
+  if (lastStandby >= 0) agrees(events.slice(0, lastStandby + 1), 'the log at its newest 506');
 });

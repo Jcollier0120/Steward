@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.306
+
+**The Steward's own checks pass while the PC is in Modern Standby, screen off and still at work.**
+
+### What changed
+
+- The kit's test that reads this PC's own event log no longer demands that the PC be awake. With a standby session still open (a 506 with no 507 after it), it checks that the session the Steward reads agrees with the log: begun at the newest of its Kernel-Power 506 and 507 events, and not in the future. It also reads the log as it stood at its newest 506, so the standby case is checked on every run, awake or not. On 2026-11-06 the old test failed every vouch of the Steward's own pull requests from 21:04, when the PC went into standby with work still running, until it woke.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.304
 
 **The kit's accelerators spec says where a LoRA add-on runs on a Snapdragon X2's NPU, and what it costs.**
