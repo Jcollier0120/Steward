@@ -251,7 +251,8 @@ An add-on is a LoRA adapter: a few megabytes of weights trained for one staff me
 | Accelerator | The add-on on it | What it costs | The route |
 |---|---|---|---|
 | Snapdragon X2's NPU (Hexagon v81) | All of it on the NPU, its answers as on the processor | The Warrener's `warrener-r1-qv` (F16, on q and v): reads 9% slower and writes 13% slower while it's on, and 14 MB more on the NPU. A throwaway rank 32 on q, k, v and o: 15% and 22% slower, 26 MB | llama-server on the Hexagon, `--lora <file> --lora-init-without-apply`, each request's own `lora` (kit 2.152.2, below). Not GenieX, which takes none |
-| Intel's and AMD's NPUs | None yet: their servers (OpenVINO Model Server, FastFlowLM) take no add-on | | A request with a job runs on the NPU without it |
+| Intel's NPU | None yet: its server (OpenVINO Model Server) takes no add-on | | A request with a job runs on the NPU without it |
+| AMD's NPU (XDNA 2) | None: FastFlowLM takes no add-on. Folded into a copy of the model it runs all on the NPU, but its 4-bit weights carry it poorly | A merged model reads and writes at the model's own speed in the same NPU memory, at any rank. But each is 1.34 GB on disk, a switch is a model load (5–17 s each way), and requantizing its weights moves the model's odds as much as the add-on does | A request with a job runs on the NPU without it (below) |
 | A graphics card or the processor | Only on a PC with no NPU | | llama-server, as on the Hexagon. Setup doesn't load add-ons there yet |
 
 The other accelerators get their row when they're measured.
@@ -423,6 +424,88 @@ With the Warrener's add-on applied, it read 2,747 tokens a second and wrote 62.5
 - A request that finds llama-server's idle connection closed (after its 5 s keep-alive) fails once, as on a card or the processor today (`AcceleratorDown`). A retry on a fresh connection would spare it.
 - The NPU's embedding server could take `--poll 0` too.
 - The X Elite's Hexagon v73 isn't measured.
+
+### AMD's NPU (XDNA 2)
+
+Measured 2026-11-07 on an AMD Ryzen AI 7 350 (8 cores, 16 GB) with its XDNA 2 NPU (driver 32.0.20102.4480) and its Radeon 860M, by the Steward's `tools/addon-npu` (`amd.ts`; its README says how). Every NPU run was in the NPU's turn, one server at a time on a private port. The processor's runs used 4 threads.
+
+- **The kit's route:** FastFlowLM 1.0.10 with `qwen3.5:2b`, AMD's own Qwen3.5-2B-NPU2 (npu-vendors.json). The odds were measured on FastFlowLM 1.0.12, because only 1.0.11 and later return them.
+- **The reference:** llama.cpp b11734's processor and Vulkan builds, with unsloth/Qwen3.5-2B-GGUF's Q4_K_M (`f6d5376b`). The add-on was applied per request in F16, as on the Snapdragon.
+- **The add-ons:** throwaways as on the Snapdragon (each change 5% of its weight), made on Qwen3.5-2B, at rank 32 (20 MB) and rank 64 (40 MB). They adapt 60 weights:
+  - the 6 full-attention layers' q (its output gate with it), k, v and o;
+  - the 18 linear-attention layers' qkv and out projections.
+
+**FastFlowLM takes no add-on.**
+
+- 1.0.10 to 1.0.12 have no request field, option or model file for one. Its NPU work is AMD's prebuilt libraries.
+- Its makers have adapters "on the roadmap but no eta yet" (FastFlowLM#219, 2025-10). A later question about fine-tunes was pointed to AMD's q4nx converter (#828, 2026-10).
+
+So the one way onto the NPU is the add-on folded into the weights: a model of its own (a merged model), which a job's request would name.
+
+**The merged model** (the steps are in tools/addon-npu/README.md):
+
+- The add-on is folded into the BF16 GGUF, quantized to Q4_K and converted by AMD's converter (ROCm/FLM_Q4NX_Converter `93b8398`). On the processor, the folded BF16 model answers as the model with the add-on applied per request: its odds are within 0.03–0.11 of each other, against 0.24–1.03 for the model alone.
+- The converter's model loads, but it isn't AMD's:
+  - from the same BF16, only 57–66% of a projection's bytes match AMD's;
+  - AMD's model keeps a `.bf16` copy of each linear layer's alpha and beta, which the converter doesn't write;
+  - AMD's lm_head is int8.
+
+  So only the 60 adapted weights go into a copy of AMD's own `model.q4nx`, and every other tensor stays AMD's.
+- **The control** is the same 60 weights requantized without the add-on. It shows what the requantizing alone does.
+- Each merged model is registered as a size of its own in a copy of FastFlowLM's model list (`qwen3.5:2b-r32`). Its folder is hard links to the model's files, apart from `model.q4nx`.
+
+**Where it runs: all on the NPU.** FastFlowLM 1.0.10 and 1.0.12 load each merged model on the NPU and answer from it. The processor spends 75–76 ms per written token, the same as for the model, so none of the work falls back.
+
+**What it costs.** The mean of 3 interleaved runs, with their range. Each run reads a 1,500-token prompt, writes 128 tokens and asks for a Warrener name:
+
+| Device and route | | Reads, tokens a second | Writes, tokens a second | A name |
+|---|---|---|---|---|
+| XDNA 2 NPU, FastFlowLM 1.0.10 | The model | 1,150 (924–1,267) | 22.7 (22.5–22.9) | 1,551 ms |
+| | The control | 1,097 (1,029–1,186) | 22.6 (22.3–22.7) | 1,537 ms |
+| | Rank 32, merged | 1,074 (1,065–1,081) | 22.6 (22.5–22.7) | 1,670 ms |
+| | Rank 64, merged | 1,075 (1,056–1,085) | 22.7 (22.7–22.8) | 1,547 ms |
+| Ryzen AI 7 350 processor, llama-server, 4 threads | No add-on | 278 (266–284) | 26.3 (25.9–26.4) | 2,764 ms |
+| | Rank 32, on | 265 (259–270) | 25.0 (24.3–25.5) | 3,391 ms |
+| | Rank 64, on | 251 (226–264) | 24.5 (23.9–25.6) | 3,000 ms |
+| Radeon 860M, llama-server (Vulkan) | No add-on | 687 (632–716) | 25.4 (25.3–25.4) | 1,850 ms |
+| | Rank 32, on | 650 (650–651) | 24.7 (24.6–24.8) | 1,803 ms |
+| | Rank 64, on | 628 (593–646) | 24.3 (24.3–24.3) | 1,738 ms |
+
+- **On the NPU**, a merged model does the model's own work at any rank: its weights are the same size and type. Its reads are within the model's range, and its writes are the same.
+- **Memory:** 2,715 MB on the NPU for each model, with 3.85 GB private on 1.0.10 and 2.84 GB on 1.0.12. One model is loaded at a time.
+- **Disk:** each add-on is a whole `model.q4nx` of 1.34 GB, against the add-on's own 20–40 MB.
+- **On the Ryzen AI 7 350's processor and the Radeon 860M**, the add-on applied per request costs 5–10% of reading and 3–7% of writing.
+
+**Switching: a model load.** In one `flm serve`, a request for another model makes FastFlowLM release the one it has and load the other, including a fixed 500 ms wait of its own:
+
+- on 1.0.10, over 5 rounds: on 9.2–17.0 s (its load 8.1–15.7 s), back to the model 9.4–17.0 s, against 0.9–1.3 s for the same model again;
+- on 1.0.12, the merged models loaded in 5.4–11.4 s.
+
+Every other NPU request waits meanwhile. A Warrener name between other staff members' requests would pay two loads (18–34 s on 1.0.10) for a name of 1.5 s. A batch of documents would pay them once.
+
+**Its answers: the add-on is mostly lost.**
+
+- **The NPU's model isn't the processor's, even without an add-on.** With AMD's own quantization of Qwen3.5-2B, every Warrener answer starts with the date. On FastFlowLM 1.0.12, "NAME" gets 5–34% for the first token on the NPU, against 50–66% on the processor.
+  - So none of its 8 answers (on 1.0.10, greedy) carries the NAME: and FOLDER: labels, and the Warrener reads their first two lines (its parseAnswer).
+  - 1 of its 8 names and 6 of its 8 folders were the processor's.
+  - The prompt is the same on both. FastFlowLM reads all of it except the empty think block's 4 tokens at once, then feeds those 4, which is where the template ends.
+- **The model's odds for the name's first token**, with "NAME:" given (FastFlowLM 1.0.12's `continue_final_message`), for every document with the add-on off and then on:
+  - rank 32 moved the NPU's odds by 75% of the processor's change, and rank 64 by 46%. The two changes go together only loosely (correlation 0.41 and 0.29). They differ by 0.48 and 0.52 on average, against 0.74 for the model alone;
+  - **the control alone, with no add-on, moved the odds by 0.37 on average: as much as the add-on moves the processor's (0.35).** Measured from the control instead of the model, rank 32 moved them by 95% of the processor's change and rank 64 by 57%, still loosely (correlation 0.40 and 0.34);
+  - the top token was the processor's in all 8 documents with the add-on off; with it on, in 8 of 8 at rank 32 and 7 of 8 at rank 64;
+  - going back to the model left nothing behind: the odds were the same as before.
+- **In the weights:** the merged model's change from the control points only partly the add-on's way (cosine 0.46) and is 2.15 times the add-on's size. Each Q4_K rounding is about 6.7% of a weight, more than the add-on's 5% change, so requantizing replaces much of the change with rounding.
+- **The names:** the control alone changed 6 of the 8; the add-ons changed 7 (rank 32) and 8 (rank 64). On the processor the add-ons changed 4 and 6.
+- **The kit's NPU benchmark, as the kit asks it:** 22 of 24 quality items for the model, the control and rank 32, and 21 for rank 64. Each got 3 of the 4 pictures, all missing the same one (the number). The misses move between json-list and time, and apples is missed by all.
+
+**FastFlowLM's own sampling.** The kit's requests send `temperature: 0` and nothing else. So they get FastFlowLM's settings for Qwen3.5 at its load: top_k 20, top_p 0.8, a presence penalty of 1.5 and a frequency penalty of 1.0. FastFlowLM keeps a request's settings for the next one. Against greedy with no penalty, these settings gave the same speed (writes 23.0 against 22.9 tokens a second, 3 interleaved runs) and the same answer for 7 of the 8 documents. So nothing in the kit needs changing for them.
+
+**So: no add-on on AMD's NPU until FastFlowLM takes one.**
+
+- The merged route runs on the NPU at the model's own speed. But a 4-bit requantization swamps an add-on of this size, each add-on is another 1.34 GB, and switching is a model load.
+- Off the NPU, llama-server takes the add-on as it does on the Snapdragon (5–10% of reading on the Radeon 860M). That isn't open under the owner's rule.
+- A request with a job runs on the NPU without its add-on (the contract above).
+- FastFlowLM's makers are to be asked whether adapters are planned, once the owner OKs the question.
 
 ## Games
 

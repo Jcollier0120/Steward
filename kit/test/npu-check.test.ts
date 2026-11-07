@@ -918,6 +918,32 @@ test('a server already on the route\'s port: on the NPU the check refuses, in a 
   assert.equal(((await C.routeOnFreePorts(route, true, async () => true)) as any).route, route);
 });
 
+test("a block of ports Windows keeps over all 100 above a route's: the free ones past it are taken (kit 2.152.3)", async () => {
+  // Found on WEASELDEV03 (2026-11-07): Windows reserved 62149-62248 at that boot (netsh's excludedportrange), and a
+  // benchmark on 62050 gave up with "no 2 free ports from 62150 to 62249".
+  const reserved = (p: number) => p >= 62149 && p <= 62248;
+  const free = async (p: number) => !reserved(p);
+  assert.deepEqual(await C.freePortsFrom(62150, 2, free), [62249, 62250]);
+  // A server already there is passed too, and so is a port the caller has taken.
+  assert.deepEqual(await C.freePortsFrom(62150, 2, async (p) => !reserved(p) && p !== 62249, new Set([62250])), [62251, 62252]);
+  // routeOnFreePorts moves its servers past the block the same way.
+  const route = { ...V.NPU_CATALOG.routes.intel, port: 62050, embedServer: { ...V.NPU_CATALOG.routes.intel.embedServer!, port: 62051 } };
+  const r = await C.routeOnFreePorts(route, false, async (p) => p !== 62050 && p !== 62051 && !reserved(p));
+  assert.ok('route' in r);
+  assert.deepEqual([r.route.port, r.route.embedServer!.port], [62249, 62250]);
+  assert.deepEqual(r.moved, ['62050 to 62249', '62051 to 62250']);
+
+  // It looks PORT_LOOK ports up and no further, and never past 65535.
+  const looked: number[] = [];
+  const none = async (p: number) => (looked.push(p), false);
+  await assert.rejects(C.freePortsFrom(40000, 2, none), { message: `no 2 free ports from 40000 to ${40000 + C.PORT_LOOK - 1}` });
+  assert.equal(looked.length, C.PORT_LOOK);
+  looked.length = 0;
+  await assert.rejects(C.freePortsFrom(65400, 1, none), { message: 'no free port from 65400 to 65535' });
+  assert.equal(Math.max(...looked), 65535);
+  await assert.rejects(C.routeOnFreePorts({ ...route, port: 65000 }, false, async () => false), { message: 'no free port from 65100 to 65535' });
+});
+
 test("a server that exits before it answers fails the start at once, with its exit and its log's last lines (kit 2.104.0)", async () => {
   // Found on LAPTOP-AMD (2026-10-23): FastFlowLM exited at once under Smart App Control (0xC0E90002), its log empty,
   // and the benchmark waited out its 20 minutes for an answer all the same.
