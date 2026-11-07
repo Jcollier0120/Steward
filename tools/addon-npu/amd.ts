@@ -32,7 +32,9 @@
  *   node tools/addon-npu/amd.ts --flm <the kit's fastflowlm-1.0.10 folder> --model-dir <%USERPROFILE%\.flm\models\Qwen3.5-2B-NPU2>
  *     --merged r32=<merged model.q4nx> [--merged name=<model.q4nx> ...] --out <folder>
  *     [--llama <llama.cpp processor folder> --gguf <Qwen3.5-2B GGUF> --lora r32=<add-on GGUF>] [--vulkan <llama.cpp Vulkan folder>]
- *     [--phases load,speed,switch,answers,quality,odds] [--runs 3] [--threads 4] [--port 28621] [--clean]
+ *     [--phases load,speed,switch,answers,quality,odds | compare] [--runs 3] [--threads 4] [--port 28621] [--clean]
+ *
+ * compare starts no server: it reads the answers a run left in --out's results.json again.
  *
  * A --lora's name pairs it with the --merged of the same name: the add-on the merged model was made from.
  */

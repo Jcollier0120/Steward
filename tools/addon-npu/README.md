@@ -112,13 +112,25 @@ model's files but for its `model.q4nx`:
 node tools/addon-npu/amd.ts --flm <the kit's fastflowlm-1.0.10> --model-dir %USERPROFILE%\.flm\models\Qwen3.5-2B-NPU2
     --merged ctl=<work>/base-r32.q4nx --merged r32=<work>/merged-r32.q4nx --out <results folder>
     --llama <processor build's copy> --vulkan <Vulkan build's copy> --gguf <Qwen3.5-2B-Q4_K_M.gguf> --lora r32=<work>/r32-f16.gguf
-    [--phases load,speed,switch,answers,quality,odds] [--threads 4] [--clean]
+    [--phases load,speed,switch,answers,quality,odds | compare] [--threads 4] [--clean]
 ```
 
-- `--flm` can be another FastFlowLM's folder: the odds phase needs 1.0.11 or later, which return log-probabilities and
-  continue a partial answer (`continue_final_message`); on 1.0.10 it says so and moves on.
-- The add-on itself runs only in the references (llama-server, per request, F16); FastFlowLM gets the merged models.
+- `--flm` can be another FastFlowLM's folder. The odds phase needs 1.0.11 or later, which return log-probabilities and
+  continue a partial answer (`continue_final_message`). On 1.0.10 it says so and moves on.
+- The add-on itself runs only in the references (llama-server, per request, F16). FastFlowLM gets the merged models.
+- The NPU's speed block adds `kit`: the model with FastFlowLM's own settings for it, which the kit's requests get, sent
+  outright (FastFlowLM keeps a request's settings for the next).
+- `--phases compare` starts no server. It reads a results folder's answers again (below).
 - `--clean` deletes the scratch FastFlowLM and its model folders at the end.
+
+Its results, beside the ones below:
+
+- **answers**: each route's 8 names word for word, and as the Warrener reads them (its parseAnswer). `labelled` counts
+  the answers with `NAME:`. `sameNameAsProcessor` and `sameFolderAsProcessor` compare each answer with the processor's
+  for the same add-on. `nameChangedFromBase` and `folderChangedFromBase` compare it with the route's own model.
+- **odds**: `start` is the model's first answer token with nothing given, on the NPU and the processor. Each add-on's
+  `summary` is as below, with the NPU's change from its own model. The control's row (no `--lora` of its name) has the
+  NPU's odds only: compare an add-on's NPU odds with the control's to take the requantizing out.
 
 ## Reading the results
 
