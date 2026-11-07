@@ -211,6 +211,22 @@ export async function portFree(port: number): Promise<boolean> {
 }
 
 /**
+ * How many ports up from a start a free one is looked for. Windows keeps blocks of 100 ports or more that nothing may
+ * listen on (Hyper-V's and WinNAT's, `netsh interface ipv4 show excludedportrange protocol=tcp`), chosen again at each
+ * boot, and one can cover all 100 ports above a route's (kit 2.152.3).
+ */
+export const PORT_LOOK = 1000;
+
+/** `n` ports nothing holds and `taken` hasn't, from `from` up, PORT_LOOK of them at most and none past 65535. */
+export async function freePortsFrom(from: number, n: number, free: (port: number) => Promise<boolean>, taken: ReadonlySet<number> = new Set()): Promise<number[]> {
+  const last = Math.min(from + PORT_LOOK - 1, 65535);
+  const out: number[] = [];
+  for (let p = from; p <= last && out.length < n; p++) if (!taken.has(p) && (await free(p))) out.push(p);
+  if (out.length < n) throw new Error(`no ${n === 1 ? 'free port' : `${n} free ports`} from ${from} to ${last}`);
+  return out;
+}
+
+/**
  * The route on ports nothing else holds. A server already on one (the manor's own local AI, most likely) is never
  * measured in the check's place: on the NPU the check refuses, as two servers on one NPU would skew every number; off
  * it (a rehearsal) its servers move to free ports beside it.
@@ -225,8 +241,8 @@ export async function routeOnFreePorts(route: NpuRoute, onNpu: boolean, free: (p
   const moved: string[] = [];
   const pick = async (p: number) => {
     if (!held.includes(p)) return p;
-    for (let q = p + 100; q < p + 200; q++) if (!taken.has(q) && (await free(q))) return (taken.add(q), moved.push(`${p} to ${q}`), q);
-    throw new Error(`no free port from ${p + 100} to ${p + 199}`);
+    const [q] = await freePortsFrom(p + 100, 1, free, taken);
+    return (taken.add(q), moved.push(`${p} to ${q}`), q);
   };
   const port = await pick(route.port);
   const es = route.embedServer;

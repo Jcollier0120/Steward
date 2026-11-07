@@ -8,7 +8,7 @@ import { type Accelerator, type AcceleratorEntry, type Quirk, readAccelerator, t
 import { type Detection, detect, type GpuCard, runPowerShell } from './detect.ts';
 import { checkSchema } from './json-schema.ts';
 import { lockDirsOf } from './accelerators.ts';
-import { portFree, routeOnDevice, routeOnFreePorts } from './npu-check.ts';
+import { freePortsFrom, portFree, routeOnDevice, routeOnFreePorts } from './npu-check.ts';
 import { LockTimeout, QueueFull, withAcceleratorTurn } from './npu-queue.ts';
 import { patchTarget } from './npu-patch.ts';
 import { exitedSay, logLength, longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
@@ -786,13 +786,6 @@ export async function setUpOffNpu(p: OffNpuPlan, o: { ports: { chat: number; emb
   return { entry };
 }
 
-/** `n` ports nothing holds, from `from` up (to 99 past it). */
-async function freePorts(from: number, n: number, free: (port: number) => Promise<boolean>): Promise<number[]> {
-  const out: number[] = [];
-  for (let p = from; p < from + 100 && out.length < n; p++) if (await free(p)) out.push(p);
-  if (out.length < n) throw new Error(`no ${n} free ports from ${from} to ${from + 99}`);
-  return out;
-}
 
 // ------------------------------------------------------------------------------------------------
 // The server's plugin as the kit runs it (kit 2.99.0)
@@ -1127,7 +1120,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   if (held.length) report.conditions.beside = held;
   let offPorts: number[] = [];
   try {
-    if (off) offPorts = await freePorts(route.port + 100, 2, free);
+    if (off) offPorts = await freePortsFrom(route.port + 100, 2, free);
     else if (held.length) {
       const moved = await routeOnFreePorts(route, false, free);
       if ('route' in moved) {

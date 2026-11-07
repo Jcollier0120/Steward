@@ -74,18 +74,21 @@ const RIGHT: Record<string, string> = {
 };
 
 /**
- * A port free now, with room above it: the benchmark puts a server off the NPU 100 to 199 ports above its route's
- * (npu-bench.ts' freePorts). Windows' ephemeral ports go up to 65535, and one above 65435 failed a test now and then
- * ("Port should be >= 0 and < 65536. Received type number (65539)").
+ * A port free now, with room above it: the benchmark puts a server off the NPU 100 or more ports above its route's
+ * (npu-check.ts' freePortsFrom), and the tests expect the first two there, so those are free now too. Windows keeps
+ * blocks of ports nothing may listen on, chosen again at each boot, and one at 62149-62248 failed a run on 62050 ("no 2
+ * free ports from 62150 to 62249", kit 2.152.3). Windows' ephemeral ports go up to 65535, and one above 65435 failed a
+ * test now and then ("Port should be >= 0 and < 65536. Received type number (65539)").
  */
 async function freePort(): Promise<number> {
-  for (;;) {
+  for (let i = 0; i < 200; i++) {
     const s = createServer();
     await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
     const port = (s.address() as AddressInfo).port;
     await new Promise((r) => s.close(r));
-    if (port + 200 < 65536) return port;
+    if (port + 200 < 65536 && (await portFree(port + 100)) && (await portFree(port + 101))) return port;
   }
+  throw new Error('no free port with the two 100 above it free, after 200 tries');
 }
 
 /**

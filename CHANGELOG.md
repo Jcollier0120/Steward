@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.308
+
+**The kit's accelerators spec says why an add-on can't run on AMD's NPU yet, and the Steward hands kit 2.152.3 out: the NPU benchmark finds free ports past a block Windows keeps.**
+
+### What's new
+
+- **Add-ons**, in the kit's accelerators spec, gets AMD's row and section, measured on a Ryzen AI 7 350 (XDNA 2). FastFlowLM, which runs AMD's NPU, takes no add-on. Folded into a copy of the model instead, an add-on runs all on the NPU at the model's own speed. But each one is a 1.34 GB model of its own, switching to it is a model load (5–17 s each way), and turning its weights back into FastFlowLM's 4-bit form moves the model's answers as much as the add-on does. So no add-on runs on AMD's NPU until FastFlowLM takes one, and a request with a job runs there without it, as now.
+- The Steward's `tools/addon-npu` holds the AMD test (`amd.ts`) beside the Snapdragon's.
+
+### What changed
+
+- **Kit 2.152.3** ([kit/CHANGELOG.md](kit/CHANGELOG.md)): a server the NPU benchmark or check moves off a held port looks for a free one up to 1,099 ports above it, past a block of ports Windows keeps, instead of giving up at 199.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.307
 
 **The Steward hands kit 2.152.2 out: on a Snapdragon X2, the NPU's chat now runs on the server that can carry add-ons, with the same answers and speed.**
