@@ -426,6 +426,25 @@ export class Npu {
     return Math.max(...(list.length ? list : serving).map((a) => core.capFor(a, work))) - maxTokens;
   }
 
+  /**
+   * What a request for `job` would get now, sending nothing (kit 2.152.2): addons.ts' addonFor on the accelerator that
+   * would take it, the first of the candidates as budget() orders them (all of them, when none could take it now). For
+   * a caller that looks its answers up before asking (the Warrener's cache): it keys the lookup by this, and stores each
+   * answer by the answer's own `addon`, which says what did happen, so a wrong guess costs one ask, never a wrong
+   * answer. `promptTokens`, where known, leaves out an accelerator too small for the prompt. Null without a job, or
+   * with nothing that serves the work.
+   */
+  addonFor(job: string | undefined, work: 'chat' | 'vision' = 'chat', promptTokens = 0): AddonUse | null {
+    if (!job) return null;
+    const serving = this.accelerators.filter((a) => serves(a, work));
+    if (!serving.length) return null;
+    const games = readGames();
+    const workOrder = 'error' in this.cfg ? null : this.cfg.workOrder;
+    const { list } = candidates(serving, { work, tokens: promptTokens, lane: 'background' }, { failure: readFailure, games: gamesStale(games) ? null : games, call: npuCallNow(), driver: driverHoldsNow(serving), deferredMs, workOrder });
+    const acc = (list.length ? list : serving)[0];
+    return this.addonOn(acc, acc[work]!, job)?.use ?? null;
+  }
+
   /** Whether any chat server is running (ready, or busy loading or answering), without starting one. */
   async reachable(): Promise<boolean> {
     for (const a of this.accelerators) if (serves(a, 'chat') && (await probe(a.chat!.baseUrl)) !== 'down') return true;

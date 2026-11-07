@@ -292,7 +292,7 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   const refusedTries = own && embedOffer?.server === own ? embedOffer.tries : 0;
   const mayOffer = !hadEmbed && !!own && npuMemoryFit(generation, detected.ramBytes).embed && refusedTries < NPU_REFRESH_TRIES;
   const planFor = (noEmbed: boolean) =>
-    planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed, cards, small, serverVersion: version, fallback });
+    planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed, cards, small, serverVersion: version, fallback, addons: wanted });
   let plan = planFor(!hadEmbed && !mayOffer);
   // Their server or model not here yet: left for setup (Set up local AI), and the rest goes on without them.
   if (mayOffer && plan && plan.downloadBytes > 0) plan = planFor(true);

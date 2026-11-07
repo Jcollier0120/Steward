@@ -1511,6 +1511,8 @@ export function planNpu(o: {
   ownServer?: boolean;
   /** A file's size, or null where there's none (the add-ons' check; statSync's by default). */
   size?: (p: string) => number | null;
+  /** The add-ons wanted here, by id (the refresh's own look, so its record and its plan agree): left out, addons.ts' wantedAddons'. */
+  addons?: readonly string[];
 }): NpuPlan | null {
   if (!o.support.supported || !o.support.vendor) return null;
   const exists = o.exists ?? existsSync;
@@ -1563,7 +1565,9 @@ export function planNpu(o: {
   }
   const size = o.size ?? ((p: string) => statSync(p, { throwIfNoEntry: false })?.size ?? null);
   const addons: NpuPlan['addons'] = chat
-    ? wantedAddons({ tools: o.tools, env: o.env, exists, size }).map((w) => ({ ...w, download: w.have ? null : { what: w.pin.file, url: w.pin.url, size: w.pin.size, sha256: w.pin.sha256, dest: w.file, have: false } }))
+    ? wantedAddons({ tools: o.tools, env: o.env, exists, size })
+        .filter((w) => !o.addons || o.addons.includes(w.pin.id))
+        .map((w) => ({ ...w, download: w.have ? null : { what: w.pin.file, url: w.pin.url, size: w.pin.size, sha256: w.pin.sha256, dest: w.file, have: false } }))
     : [];
   const downloadBytes =
     (download ? download.size : 0) +

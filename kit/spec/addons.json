@@ -11,7 +11,7 @@
       "size": 12853088,
       "sha256": "4ef01ba2cddc2cc0f9d06309e2bceb810fa52b6ee3b01e5adbc7567e84773553",
       "url": "https://github.com/Jcollier0120/Manor-releases/releases/download/addon-warrener-r1/warrener-r1-qv-f16.gguf",
-      "published": false,
+      "published": true,
       "type": "f16",
       "rank": 32,
       "targets": ["q", "v"],

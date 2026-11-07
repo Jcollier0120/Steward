@@ -72,6 +72,8 @@ function fakePc(entry: Record<string, any> | null, o: { record?: object; workOrd
     now: () => Date.parse('2026-10-14T12:00:00Z'),
     detect: async () => (did.push('detect'), { npu: o.support ?? support, ...(o.cards ? { cards: o.cards } : {}) } as any),
     exists: o.exists ?? (() => true),
+    // Nobody hired here, so no add-on is wanted (addons.ts' wantedAddons: its `exists` would take every staff member's app for there).
+    wantedAddons: () => [],
     validate: () => [],
     idle: () => o.idle ?? true,
     withTurn: async (fn) => {
@@ -959,10 +961,13 @@ test("an X2's add-ons (kit 2.152.2): one wanted here and in place, its SHA-256 t
     pc.deps.serverVersion = async () => GENIEX_PIN;
     pc.deps.overlay = () => 0;
     pc.deps.hash = async () => pin.sha256;
+    // The kit's own: the Warrener hired (exists says its app is there), its add-on wanted.
+    pc.deps.wantedAddons = undefined;
     return pc;
   };
-  // None in place (unpublished, nobody put one there): as set up.
-  assert.deepEqual(await refreshNpu(x2Pc().deps), { did: 'current' });
+  // Published and not here yet: setup downloads it (the keeper's set-up-again, gently), so the look leaves it to setup.
+  assert.equal(pin.published, true);
+  assert.deepEqual(await refreshNpu(x2Pc().deps), { did: 'needs-setup' });
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, Buffer.alloc(pin.size));
   try {

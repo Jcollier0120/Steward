@@ -23,7 +23,11 @@
  *   (GenieX's `prefix-leak`): the Warrener's names and the quality items asked in a row with the prompt cache on, again
  *   in the other order, and each alone with it off, compared word for word;
  * - cpu: the processor the chat server keeps busy, idle, writing, reading and naming, with llama-server's own threads
- *   and with fewer, not polling: GenieX keeps it near idle.
+ *   and with fewer, not polling: GenieX keeps it near idle;
+ * - kit: the route as this kit runs it (kit 2.152.2), from the kit's own code: the X2's chatServer command and
+ *   environment (routeFor, npuEntry) with the add-ons loaded, its working set trimmed once loaded, and every request
+ *   the kit's (chatBody, visionBody, fitPicture, addonFor): the NPU benchmark's 24 quality items and 4 pictures with
+ *   the add-ons held at 0, the speed, the Warrener's names with its add-on applied, and the memory.
  *
  * Each block runs in the NPU's turn (the kit's NPU line, background lane), so the staff's own requests wait for it
  * rather than run beside it. It starts only servers of its own, on its own ports, and stops each one; the installed
@@ -31,7 +35,7 @@
  *
  *   node tools/addon-npu/addon-test.ts --hex <llama.cpp Hexagon folder> --model <2B GGUF> --mmproj <projector GGUF>
  *     --lora r32-f16=<file> [--lora name=<file> ...] --out <folder>
- *     [--phases placement,speed,switch,answers,odds,geniex,memory,leak,cpu,defaults,footprint] [--geniex <geniex.exe>] [--port 28601]
+ *     [--phases placement,speed,switch,answers,odds,geniex,memory,leak,cpu,defaults,footprint,crash,kit] [--geniex <geniex.exe>] [--port 28601]
  *     [--threads 8] [--runs 3] [--hex-env NAME=value ...] [--mmproj-alt name=<projector GGUF> ...] [--lora-style init|scaled0]
  *
  * README.md beside this file says how to make the throwaway add-ons (make_lora.py) and run it.
@@ -44,6 +48,9 @@ import { grade, picturePng, promptOf, SUITE } from '../../src/kit/npu-bench.ts';
 import { npuLockDir } from '../../src/kit/lock.ts';
 import { withNpuTurn } from '../../src/kit/npu-queue.ts';
 import { trimWorkingSet } from '../../src/kit/working-set.ts';
+import { chatBody, fitPicture, visionBody } from '../../src/kit/accelerators.ts';
+import { addonFor } from '../../src/kit/addons.ts';
+import { NPU_CATALOG, npuEntry, pinnedRoute, routeFor } from '../../src/kit/npu-vendors.ts';
 
 // ------------------------------------------------------------------------------------------------ options
 
@@ -852,7 +859,7 @@ async function qualityAndPictures(base: string, model: string | undefined, pictu
   return { quality, pictures };
 }
 
-async function routeSpeed(base: string, model: string | undefined, nonce: boolean, runs: number): Promise<{ readTps: number; genTps: number; nameWallMs: number; nameFirstTokenMs: number; raw: string[] }> {
+async function routeSpeed(base: string, model: string | undefined, nonce: boolean, runs: number, extra: Record<string, unknown> = {}): Promise<{ readTps: number; genTps: number; nameWallMs: number; nameFirstTokenMs: number; raw: string[] }> {
   const reads: number[] = [];
   const gens: number[] = [];
   const walls: number[] = [];
@@ -861,15 +868,15 @@ async function routeSpeed(base: string, model: string | undefined, nonce: boolea
   for (let r = 0; r < runs; r++) {
     const tag = `${Date.now().toString(36)}-${r}`;
     const sys = (content: string) => ({ role: 'system', content: nonce ? `${tag} ${content}` : content });
-    const read = await streamed(base, { ...(model ? { model } : {}), messages: [sys('You count lines.'), { role: 'user', content: readPromptOf(1500, tag) }], max_tokens: 8, temperature: 0 });
+    const read = await streamed(base, { ...(model ? { model } : {}), messages: [sys('You count lines.'), { role: 'user', content: readPromptOf(1500, tag) }], max_tokens: 8, temperature: 0, ...extra });
     reads.push(tps(read.promptTokens, read.firstTokenMs ?? read.wallMs));
-    const gen = await streamed(base, { ...(model ? { model } : {}), messages: [sys('You write stories.'), { role: 'user', content: `[${tag}] Write a long story, at least 400 words, about a steward who keeps a manor's cellar.` }], max_tokens: 128, temperature: 0 });
+    const gen = await streamed(base, { ...(model ? { model } : {}), messages: [sys('You write stories.'), { role: 'user', content: `[${tag}] Write a long story, at least 400 words, about a steward who keeps a manor's cellar.` }], max_tokens: 128, temperature: 0, ...extra });
     gens.push(tps(Math.max(0, gen.genTokens - 1), gen.genMs));
     raw = gen.raw;
     for (const d of DOCS.slice(0, 3)) {
       const msgs = namePrompt(d.file, d.how, d.text);
       msgs[0].content = `${tag} ${msgs[0].content}`;
-      const t = await streamed(base, { ...(model ? { model } : {}), messages: msgs, max_tokens: 60, temperature: 0 });
+      const t = await streamed(base, { ...(model ? { model } : {}), messages: msgs, max_tokens: 60, temperature: 0, ...extra });
       walls.push(t.wallMs);
       firsts.push(t.firstTokenMs ?? t.wallMs);
     }
@@ -1239,6 +1246,74 @@ async function footprintPhase(o: Options, results: any): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------------------------------------------ kit
+
+/**
+ * The route as this kit runs it: the X2's chatServer command from the kit's own routeFor and npuEntry, its program and
+ * libraries swapped for --hex's (the same build with the same GenieX libraries over it, as setup lays them out) and its
+ * port for --port, with --lora's add-ons loaded. Every request is the kit's own body, so the add-ons it doesn't apply
+ * go at 0, and no nonce (its quirks are none).
+ */
+async function kitPhase(o: Options, results: any): Promise<void> {
+  const dir = path.join(o.out, 'pictures');
+  mkdirSync(dir, { recursive: true });
+  const route = routeFor(pinnedRoute(NPU_CATALOG.routes.qualcomm, 'snapdragon-x2'), 'snapdragon-x2');
+  if (!route.chatServer) throw new Error("this kit's X2 route has no chatServer");
+  const tools = path.join(os.tmpdir(), 'addon-test-tools');
+  const e = npuEntry(route, { tools, exe: 'geniex.exe', port: o.port, addons: o.loras.map((l) => l.file) });
+  const cmd = [...e.chat!.startCommand!];
+  const own = path.join(tools, 'servers', 'llama.cpp', 'b11645-hexagon');
+  if (path.dirname(cmd[0]) !== own) throw new Error(`the kit's chat server isn't the embedding server's build: ${cmd[0]}`);
+  cmd[0] = path.join(o.hex, 'llama-server.exe');
+  const env = Object.fromEntries(Object.entries(e.chat!.env ?? {}).map(([k, v]) => [k, v === own ? o.hex : v]));
+  const acc = { id: 'npu', kind: 'npu', quirks: e.quirks ?? [], vision: e.vision } as any;
+  const ep = { baseUrl: `http://127.0.0.1:${o.port}`, model: e.chat!.model, startCommand: cmd } as any;
+  const zeros = (chatBody(acc, ep, [{ role: 'user', content: 'Hi' }], 1) as any).lora ?? [];
+  const r = await inNpuTurn('add-on test: the kit route', async () => {
+    const before = await availableNow();
+    const inside = await withServer('kit-route', cmd[0], cmd.slice(1), env, o, '/health', async (s) => {
+      const url = `${s.base}/v1/chat/completions`;
+      // The kit's warm-up, then its trim once loaded (accelerators.ts' trimmedOnceLoaded).
+      await post(url, chatBody(acc, ep, [{ role: 'user', content: 'Hi' }], 1));
+      const loaded = mb(memoryOf(s.pid));
+      const trim = await trimmed(s.pid);
+      const speed = await routeSpeed(s.base, undefined, false, o.runs, { lora: zeros });
+      const chatted = { available: await availableNow(), ...mb(memoryOf(s.pid)) };
+      const quality: { id: string; pass: boolean; mustPass: boolean; ms: number; answer: string }[] = [];
+      for (const q of SUITE.quality) {
+        const a = await post(url, chatBody(acc, ep, [{ role: 'user', content: promptOf(SUITE, q) }], q.maxTokens));
+        const answer = a.json?.choices?.[0]?.message?.content ?? `(${a.status}) ${a.text.slice(0, 200)}`;
+        quality.push({ id: q.id, pass: grade(q.grade, answer), mustPass: !!q.mustPass, ms: Math.round(a.ms), answer: answer.slice(0, 200) });
+      }
+      const pictures: { id: string; pass: boolean; ms: number; answer: string }[] = [];
+      for (const v of SUITE.vision) {
+        const file = path.join(dir, `${v.id}.png`);
+        writeFileSync(file, picturePng(v.image));
+        const a = await post(url, visionBody(acc, ep, await fitPicture(acc, file), v.prompt, v.maxTokens));
+        const answer = a.json?.choices?.[0]?.message?.content ?? `(${a.status}) ${a.text.slice(0, 200)}`;
+        pictures.push({ id: v.id, pass: grade(v.grade, answer), ms: Math.round(a.ms), answer: answer.slice(0, 120) });
+      }
+      const pictured = { available: await availableNow(), ...mb(memoryOf(s.pid)) };
+      // The Warrener's names with its add-on applied, as the kit applies it for its job.
+      const job = addonFor('warrener.name', { startCommand: cmd, onNpu: true, pcHasNpu: true });
+      const names: { ms: number; text: string }[] = [];
+      if (job?.lora) {
+        for (const d of DOCS) {
+          const a = await post(url, { ...chatBody(acc, ep, namePrompt(d.file, d.how, d.text) as any, 60), lora: job.lora });
+          names.push({ ms: Math.round(a.ms), text: a.json?.choices?.[0]?.message?.content ?? '' });
+        }
+      }
+      const speedOn = job?.lora ? await routeSpeed(s.base, undefined, false, o.runs, { lora: job.lora }) : null;
+      return { readyMs: s.readyMs, command: cmd, env, loaded, trim, speed, speedOn, chatted, quality, pictures, pictured, addon: job?.use ?? null, names };
+    });
+    return { before, ...inside, after: await availableNow() };
+  });
+  results.kit = r;
+  const sp = (x: { readTps: number; genTps: number; nameWallMs: number } | null) => (x ? `reads ${x.readTps.toFixed(0)} t/s, writes ${x.genTps.toFixed(1)} t/s, a name ${x.nameWallMs.toFixed(0)} ms` : 'not run');
+  say(`kit route: ready ${r.readyMs} ms; ${sp(r.speed)}; with the add-on ${sp(r.speedOn)}; quality ${r.quality.filter((x) => x.pass).length}/${r.quality.length} (wrong: ${r.quality.filter((x) => !x.pass).map((x) => x.id).join(', ') || 'none'}), pictures ${r.pictures.filter((x) => x.pass).length}/${r.pictures.length} (${r.pictures.map((x) => x.ms).join('/')} ms)`);
+  say(`kit route memory: WS loaded ${r.loaded.workingSetMb} -> trimmed ${r.trim.after.workingSetMb}; after chat WS ${r.chatted.workingSetMb}, NPU ${r.chatted.npuMb}, ${r.before - r.chatted.available} MB less available; after pictures WS ${r.pictured.workingSetMb}, NPU ${r.pictured.npuMb}, ${r.before - r.pictured.available} MB less available; ${r.before - r.after} MB once stopped; add-on ${JSON.stringify(r.addon)}, names ${r.names.map((n) => n.text).join(' | ')}`);
+}
+
 // ------------------------------------------------------------------------------------------------ crash
 
 /**
@@ -1335,7 +1410,7 @@ async function main(): Promise<void> {
   results.pc = { cpu: os.cpus()[0]?.model, cores: os.cpus().length, memoryGb: os.totalmem() / 2 ** 30, at: new Date().toISOString() };
   results.options = { ...o, phases: [...o.phases] };
   const save = () => writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
-  const phases: [string, (o: Options, r: any) => Promise<void>][] = [['placement', placement], ['speed', speed], ['switch', switching], ['answers', answersPhase], ['odds', oddsPhase], ['geniex', geniexPhase], ['memory', memoryPhase], ['leak', leakPhase], ['defaults', defaultsPhase], ['footprint', footprintPhase], ['cpu', cpuPhase], ['crash', crashPhase]];
+  const phases: [string, (o: Options, r: any) => Promise<void>][] = [['placement', placement], ['speed', speed], ['switch', switching], ['answers', answersPhase], ['odds', oddsPhase], ['geniex', geniexPhase], ['memory', memoryPhase], ['leak', leakPhase], ['defaults', defaultsPhase], ['footprint', footprintPhase], ['cpu', cpuPhase], ['crash', crashPhase], ['kit', kitPhase]];
   for (const [name, fn] of phases) {
     if (!o.phases.has(name)) continue;
     say(`-- ${name}`);

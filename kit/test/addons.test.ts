@@ -18,14 +18,15 @@ const other = { ...pin, id: 'reeve-r1-qv', staff: 'reeve', jobs: ['reeve.summary
 const catalog = { version: 1, addons: [pin, other] };
 const server = ['C:\\tools\\llama-server.exe', '--port', '18181', '-m', 'C:\\m.gguf', ...A.addonArgs([`C:\\tools\\models\\addons\\${other.file}`, `C:\\tools\\models\\addons\\${pin.file}`])];
 
-test("the Warrener's pin: F16 (a Q8_0 add-on gives NaN on the Hexagon), its job, size and SHA-256; unpublished until the owner says", () => {
+test("the Warrener's pin: F16 (a Q8_0 add-on gives NaN on the Hexagon), its job, size and SHA-256; published in Manor-releases (the owner's OK, 2026-11-06)", () => {
   assert.equal(pin.id, 'warrener-r1-qv');
   assert.equal(pin.type, 'f16');
   assert.deepEqual(pin.jobs, ['warrener.name']);
   assert.equal(pin.size, 12_853_088);
   assert.match(pin.sha256, /^[0-9a-f]{64}$/);
   assert.match(pin.url, /^https:\/\/github\.com\/[^/]+\/Manor-releases\/releases\/download\//);
-  assert.equal(pin.published, false);
+  assert.equal(pin.published, true);
+  assert.equal(pin.url, 'https://github.com/Jcollier0120/Manor-releases/releases/download/addon-warrener-r1/warrener-r1-qv-f16.gguf');
   assert.equal(A.addonForJob('warrener.name')?.id, pin.id);
   assert.equal(A.addonForJob('warrener.folder'), null);
   assert.equal(A.addonForJob(undefined), null);
@@ -67,7 +68,7 @@ test('the add-ons wanted on a PC: F16 ones whose staff member is hired, publishe
   const hiredApp = path.join(env.WARRENER_HOME, 'app');
   const on = (o: { hired?: boolean; have?: boolean; size?: number; published?: boolean; type?: string }) =>
     A.wantedAddons({ tools, env, exists: (p) => (p === hiredApp ? o.hired !== false : p === file ? o.have === true : false), size: () => o.size ?? pin.size, catalog: { version: 1, addons: [{ ...pin, published: o.published ?? false, type: o.type ?? 'f16' }] } });
-  assert.deepEqual(on({ have: true }), [{ pin, file, have: true }], 'put in place by hand');
+  assert.deepEqual(on({ have: true }).map((w) => [w.pin.id, w.file, w.have]), [[pin.id, file, true]], 'put in place by hand');
   assert.deepEqual(on({}), [], 'unpublished and not here: nothing to download');
   assert.deepEqual(on({ published: true }).map((w) => w.have), [false], 'published: setup downloads it');
   assert.deepEqual(on({ have: true, size: 5 }), [], 'not its size: not in place');

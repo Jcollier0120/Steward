@@ -785,6 +785,12 @@ test("a request's job (kit 2.152.2): its add-on applied on the NPU that carries 
         { id: 'npu', kind: 'npu', chat: { baseUrl: npu.baseUrl, model: 'm', startCommand: carries(npu.port) }, quirks: [] },
       ],
     }, { npu: true, npuName: 'Snapdragon X2 Elite NPU', cards: [{ name: 'NVIDIA GeForce RTX 4090', memoryGb: 24 }] }));
+    // What a request would get, said before anything is sent (a cache looked up first): as it then gets.
+    assert.deepEqual(model.addonFor(job), { job, id: 'warrener-r1-qv', applied: true });
+    assert.equal(model.addonFor(undefined), null);
+    assert.deepEqual(model.addonFor(job, 'chat', 9000)?.applied, false, 'too big for the NPU: the card, which never applies it here');
+    assert.deepEqual(model.addonFor('warrener.folder'), { job: 'warrener.folder', id: null, applied: false, why: 'no add-on is pinned for this job' });
+    assert.equal(npu.seen.length + card.seen.length, 0, 'nothing sent');
     const a = await model.chat(withAddon, { maxTokens: 10, job, withoutAddon: without });
     assert.equal(a.text, 'from the NPU');
     assert.deepEqual(a.addon, { job, id: 'warrener-r1-qv', applied: true });
@@ -812,6 +818,7 @@ test("a request's job (kit 2.152.2): its add-on applied on the NPU that carries 
   const geniex = await fakeServer(() => ({ text: 'from GenieX' }));
   try {
     const model = new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', chat: { baseUrl: geniex.baseUrl, model: 'm', startCommand: ['C:\\GenieX\\geniex.exe', 'serve'] }, quirks: [] }] }, { npu: true, npuName: 'Snapdragon X2 Elite NPU', cards: [] }));
+    assert.deepEqual(model.addonFor(job), { job, id: 'warrener-r1-qv', applied: false, why: "the NPU's server doesn't carry it" });
     const e = await model.chat(withAddon, { maxTokens: 10, job, withoutAddon: without });
     assert.deepEqual(e.addon, { job, id: 'warrener-r1-qv', applied: false, why: "the NPU's server doesn't carry it" });
     assert.deepEqual(asked(geniex)[0].messages, without);

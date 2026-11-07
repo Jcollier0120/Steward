@@ -9,7 +9,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What's new
 
 - On a Snapdragon X2, the NPU's chat and pictures run on llama.cpp's server on the NPU instead of GenieX. It answers as GenieX did, at the same speed, and reads pictures as well.
-- That server can carry a staff member's add-on: a small file that tunes the shared model for one job. On a PC with an NPU, an add-on is only ever used on the NPU. The Warrener's naming add-on is the first. It arrives with a later update, once it's published, and Setup downloads it only where the Warrener is hired.
+- That server can carry a staff member's add-on: a small file that tunes the shared model for one job. On a PC with an NPU, an add-on is only ever used on the NPU. The Warrener's naming add-on is the first. The manor downloads it (13 MB) only where the Warrener is hired, and the Warrener uses it once its own update asks for it.
 
 ### What changed
 
@@ -19,7 +19,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### Before you update
 
-- Nothing: it updates itself as usual. The NPU's chat pauses briefly while a PC moves over.
+- Nothing: it updates itself as usual. The NPU's chat pauses briefly while a PC moves over. On a Snapdragon X2 where the Warrener is hired, the manor then downloads its 13 MB add-on by itself.
 
 ## 0.36.304
 
