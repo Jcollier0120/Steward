@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { checkAddon, wantedAddons } from './addons.ts';
 import { type AcceleratorEntry, readConfigFile, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { expandEnv, type WorkOrder } from './accelerators.ts';
 import type { Detection } from './detect.ts';
@@ -26,6 +27,12 @@ import { mergeEntries, type NpuEmbedOffer, type NpuRefreshRecord, overlayFiles, 
  * downloaded. They're tested after the chat, in the same turn, and taken up only when they answer; refused, the chat's
  * new command (if any) is written without them, and the record says so (embedOffer): a later kit offers them again,
  * NPU_REFRESH_TRIES kits in all, then not until the route's embedding server changes.
+ *
+ * Since kit 2.152.2 a Snapdragon X2's chat and pictures move from GenieX to llama-server on the Hexagon (the route's
+ * chatServer), the server that can carry the model's add-ons, the same way: once its program is here (the NPU's
+ * embedding server's, the same build) and the route's server's libraries are copied over it, its test answers, or GenieX
+ * keeps its command. The add-ons it loads are those wanted here (addons.ts' wantedAddons) whose files pass their pinned
+ * SHA-256; the look is made again within a kit when that set changes (a staff member hired, an add-on put in place).
  */
 
 /** The tests one kit makes of a new command whose server keeps failing it, the first included. */
@@ -95,8 +102,15 @@ export interface NpuRefreshDeps {
   testChat: (e: AcceleratorEntry) => Promise<string[]>;
   /** A test embedding, the same way. */
   testEmbed: (e: AcceleratorEntry, dims?: number) => Promise<string[]>;
-  /** Copies the route's server's files over its embedding server's (setup's overlayFiles), before embeddings offered to the NPU are tested. */
+  /**
+   * Copies the route's server's files over its embedding server's or its chat server's (setup's overlayFiles), before
+   * embeddings offered to the NPU, or the chat server's command, are tested.
+   */
   overlay?: (from: string, into: string, files: string[]) => number;
+  /** A file's SHA-256 (the add-ons' check; addons.ts' sha256File by default). */
+  hash?: (file: string) => Promise<string>;
+  /** The add-ons wanted here, by id (addons.ts' wantedAddons by default): a set unlike the last look's looks again. */
+  wantedAddons?: () => string[];
   /** The version of the route's server installed here (npu-vendors.ts' installedVersion by default): a later one the Smith's Use it left is run as that version runs. */
   serverVersion?: (route: NpuRoute) => Promise<string | null>;
   /** Where the test's servers print, named in the log when a test fails. */
@@ -223,14 +237,20 @@ function orderNow(d: NpuRefreshDeps, order: WorkOrder | null): void {
 /** One look (refreshNpu above). Never throws for a PC that can't be looked at: the outcome says why. */
 export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> {
   const had = readNpuRefresh(d.configFile);
+  // The add-ons wanted here now: another set than the last look's (a staff member hired since) is looked at again.
+  let wanted: string[] = [];
+  try {
+    wanted = d.wantedAddons ? d.wantedAddons() : wantedAddons({ tools: d.tools, env: d.env, exists: d.exists }).map((w) => w.pin.id);
+  } catch {}
+  const addonsMoved = stable(had?.addons ?? []) !== stable(wanted);
   // This kit's test that failed for its server is made again once its time comes; anything else this kit found stands.
   const again = had?.kit === d.kit && had.did === 'failed' && typeof had.retryAt === 'string';
-  if (had?.kit === d.kit && !(again && d.now() >= Date.parse(had.retryAt!))) return { did: 'looked' };
+  if (had?.kit === d.kit && !addonsMoved && !(again && d.now() >= Date.parse(had.retryAt!))) return { did: 'looked' };
   if (had?.kit && compareVersions(had.kit, d.kit) > 0) return { did: 'newer-kit' };
   // The NPU's own embeddings, refused at an earlier look: carried in every record until they're taken up.
   let embedOffer: NpuEmbedOffer | undefined = had?.embedOffer;
   const done = (did: NpuRefreshRecord['did'], more: Omit<NpuRefreshOutcome, 'did'> = {}, tries?: number): NpuRefreshOutcome => {
-    rememberNpuRefresh(d.configFile, { kit: d.kit, at: new Date(d.now()).toISOString(), did, ...(more.problems?.length ? { problems: more.problems } : {}), ...(tries ? { tries } : {}), ...(more.retryAt ? { retryAt: more.retryAt } : {}), ...(embedOffer ? { embedOffer } : {}) });
+    rememberNpuRefresh(d.configFile, { kit: d.kit, at: new Date(d.now()).toISOString(), did, ...(more.problems?.length ? { problems: more.problems } : {}), ...(tries ? { tries } : {}), ...(more.retryAt ? { retryAt: more.retryAt } : {}), ...(embedOffer ? { embedOffer } : {}), ...(wanted.length ? { addons: wanted } : {}) });
     return { did, ...more };
   };
 
@@ -281,7 +301,15 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   const offered = !hadEmbed && !!plan.embed;
   // The graphics' turn its embeddings take (embedTurn); a detection that listed no cards keeps the entry's.
   const turn = plan.embed?.turn ?? (cards.length || typeof entry.embed?.turn !== 'string' ? undefined : entry.embed.turn);
-  const fresh = npuEntry(plan.route, { tools: d.tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, d.home), embed: plan.embed ? { exe: plan.embed.exe, model: plan.embed.model, ...(turn ? { turn } : {}) } : undefined, rerank: rerankOf(entry.rerank) });
+  // The add-ons its chat server loads (llama-server on the Hexagon): those here whose files pass their pinned SHA-256.
+  const addons: string[] = [];
+  for (const a of plan.addons) {
+    if (a.download) continue;
+    const bad = await checkAddon(a, d.hash).catch((e: any) => String(e?.message ?? e).split(/\r?\n/)[0]);
+    if (bad) d.log(`the add-on ${a.pin.id} isn't loaded: ${bad}`);
+    else addons.push(a.file);
+  }
+  const fresh = npuEntry(plan.route, { tools: d.tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, d.home), embed: plan.embed ? { exe: plan.embed.exe, model: plan.embed.model, ...(turn ? { turn } : {}) } : undefined, rerank: rerankOf(entry.rerank), addons });
   // Its slots, timeouts (measured on this PC, or a person's) and switch stay as they are; its reranker too, unless it's
   // setup's, made again on the embedding server written now.
   const { chat: _chat, vision: _vision, embed: _embed, ...kept } = entry;
@@ -306,6 +334,17 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   // Embeddings offered whose test failed: the rest is written without them.
   let refused: string[] = [];
   // The route's server's files copied over the embedding server's, as setup does, once its servers are stopped (a loaded DLL can't be replaced).
+  // The same for its chat server's folder (llama-server on the Hexagon), before its command is tested.
+  const chatOverlaid = (): string[] => {
+    const o = plan.chat?.overlay;
+    if (!o) return [];
+    try {
+      (d.overlay ?? overlayFiles)(o.from, plan.chat!.folder, o.files);
+      return [];
+    } catch (e: any) {
+      return [`llama-server's files for the NPU's chat couldn't be copied from ${o.from}: ${String(e?.message ?? e).split(/\r?\n/)[0]}`];
+    }
+  };
   const overlaid = (): string[] => {
     const o = plan.embed?.server.overlay;
     if (!o) return [];
@@ -323,6 +362,9 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
       // An old server that outlived its stop would answer the test itself, and the new command would be written untested.
       const stayed = await stillAnswering(d, servers(next).map((s) => s.base));
       if (stayed.length) return stayed;
+      // Only for a chat whose command changes (GenieX's moved to llama-server): one already on it has its files.
+      const copied = stable(entry.chat) !== stable(next.chat) ? chatOverlaid() : [];
+      if (copied.length) return copied;
       const p = await d.testChat(next);
       if (!p.length && next.embed?.startCommand?.length) {
         const e = offered ? overlaid() : [];

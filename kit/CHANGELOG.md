@@ -2,6 +2,28 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.152.2
+
+**A Snapdragon X2's NPU chats and reads pictures on llama-server on the Hexagon, which carries the model's add-ons, and a request can name its job to have its add-on applied there.**
+
+### What's new
+
+- **node/addons.ts** and **spec/addons.json** (new): the model's add-ons (LoRA). `ADDONS` pins each one: its staff member, the jobs it serves, its file, size, SHA-256, where it's downloaded from, its type (F16 only: a Q8_0 add-on gives NaN on the Hexagon) and whether it's published. The Warrener's `warrener-r1-qv` (12.9 MB, job `warrener.name`) is the first, unpublished until the owner says. Also `addonForJob`, `addonFile` (`<tools>\models\addons\<file>`), `hired`, `wantedAddons` (each F16 pin whose staff member is hired here, published or put in place at its size), `checkAddon` (its size and SHA-256), `addonArgs` (`--lora <file> --lora-init-without-apply` for each), `loadedAddons`, `addonsOff`, and `addonFor(job, …)`. addonFor holds the owner's rule: on a PC with an NPU, an add-on is applied only on the NPU, and a request the NPU's route can't apply it to (Intel's and AMD's for now) runs there without it; on a PC with no NPU, on any server that loaded it.
+- **node/npu.ts**: `AskOptions.job`, and for chat `withoutAddon`, the messages to send where the job's add-on isn't applied (the Warrener's prompt differs with and without it). `NpuAnswer.addon` (`{ job, id, applied, why? }`) says whether it was applied, and which, so a caller can key its cache by it. A request without a job runs exactly as before.
+- **node/accelerators.ts**: every request to a server that loaded add-ons sends `lora` with each one it doesn't apply at scale 0, chat and vision alike. llama.cpp b11645 runs a request that names none at each add-on's load scale, 1, whatever `--lora-init-without-apply` says. Add-ons are never switched through `POST /lora-adapters`, which would change every slot's.
+
+### What changed
+
+- **spec/npu-vendors.json**, **node/npu-vendors.ts**: Qualcomm's GenieX 0.9.3 entry has a `chatServer` (`NpuChatServer`, with `generations`). On the Snapdragon X2, Qwen3-VL-2B's chat and pictures run on the embedding server's llama.cpp b11645 build with GenieX 0.9.3's libraries over it: `--device HTP0 -ngl 99 --mmproj … -c 2560 --parallel 1 -t 4 -tb 4 --poll 0`, with `ADSP_LIBRARY_PATH`. It has no quirks: llama-server leaks no shared prefix (44 asks, none differed), so it gets no per-request nonce, and its prompt cache is reused. `routeFor` applies it only at that exact GenieX version on a measured generation, so a later GenieX that the Smith's Use it put there, and the first-generation X Elite, keep GenieX's own chat. `ownServer: true` gives GenieX's own. `--poll 0` keeps its threads from spinning: 0.04 of a core idle, against 4.3 at llama.cpp's default, at the same speed. The NPU's queue, its turn and its gentle pace are as they were.
+- **node/setup.ts**: a new X2 sets its chat up on llama-server, downloading the build once for both its servers and copying GenieX's libraries over it, and tests it with its picture seen red. If the test fails, llama-server is stopped, and GenieX's own chat is set up and tested in its place (`ownServer`). Add-ons wanted here are downloaded like a model, their hash checked, and loaded by the chat server's command. `describePlan` says so.
+- **node/npu-refresh.ts**: the keeper's look moves an X2 already set up on GenieX's chat, as it does when the NPU's pins change. GenieX is stopped, GenieX's libraries are copied over llama-server's folder, the same test runs, and then the new command is written. If the test fails, the PC keeps GenieX. A PC without the build yet is left for setup (`needs-setup`). The look runs again within a kit when the add-ons wanted change (a staff member hired since), and its record keeps them (`addons`). An add-on whose file isn't the pinned one isn't loaded, and the look logs why.
+- **node/accelerators.ts**: llama-server on the Hexagon (chat, not embeddings or reranking) has its working set trimmed once it has loaded, as FastFlowLM's is: from 2,574 MB to 91 MB after a chat, leaving 232 MB more of the PC's memory available.
+- **spec/ACCELERATORS.md**, **spec/NPU-VENDORS.md**: say so, with the switch time and the memory.
+
+### What an agent must do
+
+- Nothing for its requests as they are. To use an add-on, pass `job` (and, for chat, `withoutAddon` where its prompt differs without the add-on), and key any cache of answers by `answer.addon`.
+
 ## 2.152.1
 
 **A lock's holder and a starting model server are judged by the time the PC was awake, so a sleep no longer evicts a live holder or fails a server's start.**

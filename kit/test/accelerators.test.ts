@@ -766,6 +766,61 @@ test('every answer says where it ran, and a background request goes around a car
   }
 });
 
+test("a request's job (kit 2.152.2): its add-on applied on the NPU that carries it, the others held at 0; its withoutAddon messages sent wherever it isn't, a card on a PC with an NPU among them; the answer says which", async () => {
+  fresh();
+  noGames();
+  const card = await fakeServer(() => ({ text: 'from the card' }));
+  const npu = await fakeServer(() => ({ text: 'from the NPU' }));
+  const file = 'C:\\tools\\models\\addons\\warrener-r1-qv-f16.gguf';
+  const carries = (port: number) => ['C:\\tools\\llama-server.exe', '--port', String(port), '-m', 'C:\\m.gguf', '--lora', file, '--lora-init-without-apply'];
+  const job = 'warrener.name';
+  // Each request but the NPU's warm-up ('Hi', at a turn's start).
+  const asked = (s: { seen: any[] }) => s.seen.filter((b) => b.messages?.at(-1)?.content !== 'Hi');
+  const withAddon = [{ role: 'user' as const, content: 'Name it.' }];
+  const without = [{ role: 'system' as const, content: 'The longer rules.' }, { role: 'user' as const, content: 'Name it.' }];
+  try {
+    const model = new Npu(config({
+      accelerators: [
+        gpu('gpu-nvidia-geforce-rtx-4090', { memoryGb: 24, chat: { baseUrl: card.baseUrl, model: 'm', startCommand: carries(card.port) } } as any),
+        { id: 'npu', kind: 'npu', chat: { baseUrl: npu.baseUrl, model: 'm', startCommand: carries(npu.port) }, quirks: [] },
+      ],
+    }, { npu: true, npuName: 'Snapdragon X2 Elite NPU', cards: [{ name: 'NVIDIA GeForce RTX 4090', memoryGb: 24 }] }));
+    const a = await model.chat(withAddon, { maxTokens: 10, job, withoutAddon: without });
+    assert.equal(a.text, 'from the NPU');
+    assert.deepEqual(a.addon, { job, id: 'warrener-r1-qv', applied: true });
+    assert.deepEqual(asked(npu)[0].lora, [{ id: 0, scale: 1 }]);
+    assert.deepEqual(asked(npu)[0].messages, withAddon, 'the messages for the add-on');
+    // No job: exactly as before, the add-on held at 0 (b11645 would apply it at its load scale otherwise), no addon said.
+    const b = await model.chat(withAddon, { maxTokens: 10 });
+    assert.equal('addon' in b, false);
+    assert.deepEqual(asked(npu)[1].lora, [{ id: 0, scale: 0 }]);
+    // Too big for the NPU: the card answers, and never applies it on a PC with an NPU; withoutAddon's messages sent.
+    const big = [{ role: 'user' as const, content: 'x'.repeat(9000) }];
+    const c = await model.chat(big, { maxTokens: 10, job, withoutAddon: big });
+    assert.equal(c.text, 'from the card');
+    assert.deepEqual(c.addon, { job, id: 'warrener-r1-qv', applied: false, why: 'on a PC with an NPU, add-ons run only on the NPU' });
+    assert.deepEqual(card.seen[0].lora, [{ id: 0, scale: 0 }]);
+    // The larger of the two decides where it goes: withoutAddon too big for the NPU sends it to the card.
+    const d = await model.chat(withAddon, { maxTokens: 10, job, withoutAddon: big });
+    assert.equal(d.text, 'from the card');
+    assert.deepEqual(card.seen[1].messages, big);
+  } finally {
+    await card.close();
+    await npu.close();
+  }
+  // An NPU whose server can't carry one (GenieX): the request runs there without it.
+  const geniex = await fakeServer(() => ({ text: 'from GenieX' }));
+  try {
+    const model = new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', chat: { baseUrl: geniex.baseUrl, model: 'm', startCommand: ['C:\\GenieX\\geniex.exe', 'serve'] }, quirks: [] }] }, { npu: true, npuName: 'Snapdragon X2 Elite NPU', cards: [] }));
+    const e = await model.chat(withAddon, { maxTokens: 10, job, withoutAddon: without });
+    assert.deepEqual(e.addon, { job, id: 'warrener-r1-qv', applied: false, why: "the NPU's server doesn't carry it" });
+    assert.deepEqual(asked(geniex)[0].messages, without);
+    assert.equal('lora' in asked(geniex)[0], false);
+  } finally {
+    await geniex.close();
+  }
+});
+
 test('fallback: a refused connection, a 5xx or a timeout marks the accelerator failed, and the request goes once to the next', async () => {
   fresh();
   noGames();

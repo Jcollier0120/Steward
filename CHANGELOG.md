@@ -2,6 +2,25 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.305
+
+**The Steward hands kit 2.152.2 out: on a Snapdragon X2, the NPU's chat now runs on the server that can carry add-ons, with the same answers and speed.**
+
+### What's new
+
+- On a Snapdragon X2, the NPU's chat and pictures run on llama.cpp's server on the NPU instead of GenieX. It answers as GenieX did, at the same speed, and reads pictures as well.
+- That server can carry a staff member's add-on: a small file that tunes the shared model for one job. On a PC with an NPU, an add-on is only ever used on the NPU. The Warrener's naming add-on is the first. It arrives with a later update, once it's published, and Setup downloads it only where the Warrener is hired.
+
+### What changed
+
+- A Snapdragon X2 that chats on GenieX moves over by itself, at the keeper's next look, after the same test Setup runs. If its NPU fails the test, it keeps GenieX.
+- Memory: after a chat, the NPU's server holds about 2.4 GB of the PC's memory, against GenieX's 1.6 GB, because it keeps its picture reader loaded. After reading pictures, the two are about the same (2.55 GB against 2.66 GB).
+- GenieX stays installed: the new server uses its NPU libraries.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The NPU's chat pauses briefly while a PC moves over.
+
 ## 0.36.304
 
 **The kit's accelerators spec says where a LoRA add-on runs on a Snapdragon X2's NPU, and what it costs.**
