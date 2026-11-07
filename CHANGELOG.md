@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.309
+
+**The kit's accelerators spec says how an add-on runs on Intel's NPU, and what it costs: OpenVINO Model Server takes none, but OpenVINO GenAI runs it all on the NPU.**
+
+### What's new
+
+- **Add-ons**, in the kit's accelerators spec, gets Intel's row and section, measured on a Core Ultra 5 225U (NPU 3720). The kit's server, OpenVINO Model Server, takes no add-on for chat. OpenVINO GenAI, the pipeline it runs on the NPU, takes one, and the Warrener's names come back word for word as on the processor.
+- The cost that matters: with an add-on loaded but off, every other request writes 27% slower. The section measures three ways out for the owner to pick: swapping pipelines for a batch of add-on jobs, pairing them, and a larger maximum rank. It also lists what shipping would take.
+- The Steward's `tools/addon-npu` holds the Intel test (`intel.ts`, with `addon_ov.py`) beside the Snapdragon's and AMD's.
+
+### Before you update
+
+- Nothing: it updates itself as usual. No kit change.
+
 ## 0.36.308
 
 **The kit's accelerators spec says why an add-on can't run on AMD's NPU yet, and the Steward hands kit 2.152.3 out: the NPU benchmark finds free ports past a block Windows keeps.**
