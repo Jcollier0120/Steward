@@ -16,7 +16,9 @@
  * - memory: the process's working set and private bytes and what it holds on the NPU (Windows' GPU Process Memory
  *   counters, addon-test's memoryOf), with each model loaded;
  * - answers: the Warrener's names for the 8 made-up documents (addon-test.ts), greedy: base and merged on the NPU,
- *   the add-on off and on on the processor (and the Radeon), word for word;
+ *   the add-on off and on on the processor (and the Radeon), word for word; and on the NPU again with FastFlowLM's own
+ *   sampling for the model, which the kit's requests get (a presence and a frequency penalty: Variant);
+ * - quality: the kit's NPU benchmark (its 24 quality items and 4 pictures) on each model, as the kit asks it;
  * - odds: the model's own log-probabilities for the name's first token, base and merged on the NPU (FastFlowLM 1.0.11
  *   and later return them; 1.0.10 doesn't, and the phase says so), off, on and off again on the processor, as
  *   addon-test's odds phase: how much of the processor's change the NPU's merged model makes.
@@ -30,7 +32,7 @@
  *   node tools/addon-npu/amd.ts --flm <the kit's fastflowlm-1.0.10 folder> --model-dir <%USERPROFILE%\.flm\models\Qwen3.5-2B-NPU2>
  *     --merged r32=<merged model.q4nx> [--merged name=<model.q4nx> ...] --out <folder>
  *     [--llama <llama.cpp processor folder> --gguf <Qwen3.5-2B GGUF> --lora r32=<add-on GGUF>] [--vulkan <llama.cpp Vulkan folder>]
- *     [--phases load,speed,switch,answers,odds] [--runs 3] [--threads 4] [--port 28621] [--clean]
+ *     [--phases load,speed,switch,answers,quality,odds] [--runs 3] [--threads 4] [--port 28621] [--clean]
  *
  * A --lora's name pairs it with the --merged of the same name: the add-on the merged model was made from.
  */
@@ -41,7 +43,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { npuLockDir } from '../../src/kit/lock.ts';
 import { withNpuTurn } from '../../src/kit/npu-queue.ts';
-import { answers as answersAt, DOCS, median, memoryOf, namePrompt, post, readPromptOf, tps, until, type Memory } from './addon-test.ts';
+import { answers as answersAt, DOCS, median, memoryOf, namePrompt, post, qualityAndPictures, readPromptOf, tps, until, type Memory } from './addon-test.ts';
 
 // ------------------------------------------------------------------------------------------------ options
 
@@ -67,7 +69,7 @@ interface Options {
 }
 
 function parseArgs(argv: string[]): Options {
-  const o: Options = { flm: '', modelDir: '', merged: [], llama: null, vulkan: null, gguf: null, loras: [], out: '', phases: new Set(['load', 'speed', 'switch', 'answers', 'odds']), runs: 3, threads: 4, port: 28621, clean: false };
+  const o: Options = { flm: '', modelDir: '', merged: [], llama: null, vulkan: null, gguf: null, loras: [], out: '', phases: new Set(['load', 'speed', 'switch', 'answers', 'quality', 'odds']), runs: 3, threads: 4, port: 28621, clean: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => {
@@ -219,12 +221,22 @@ const inNpuTurn = <T>(doing: string, fn: () => Promise<T>) =>
 
 // ------------------------------------------------------------------------------------------------ requests
 
-/** Which model a request is for: FastFlowLM's tag, or llama-server's add-on scales (all named, the one on at 1). */
+/**
+ * Which model a request is for: FastFlowLM's tag, or llama-server's add-on scales (all named, the one on at 1).
+ * `kitSampling`: FastFlowLM's own sampling for the model, as the kit's requests get it (they send no penalty), rather
+ * than greedy with no penalty, as llama-server's defaults are. FastFlowLM's Qwen3.5 engine sets a presence penalty of
+ * 1.5 and a frequency penalty of 1.0 at each load (modeling_qwen3_5vl.cpp), and they reach the prompt's last tokens:
+ * a Warrener answer then avoids "NAME:" and "FOLDER:", which the prompt ends with.
+ */
 interface Variant {
   name: string;
   tag?: string;
   lora?: { id: number; scale: number }[];
+  kitSampling?: boolean;
 }
+
+/** Greedy with no penalty, as llama-server's defaults are. FastFlowLM keeps a request's settings for the next. */
+const NEUTRAL = { presence_penalty: 0, frequency_penalty: 0, repetition_penalty: 1 };
 
 interface Answer {
   text: string;
@@ -242,7 +254,9 @@ interface Answer {
 async function ask(s: Server, v: Variant, messages: unknown[], maxTokens: number, extra: Record<string, unknown> = {}): Promise<Answer> {
   const body: Record<string, unknown> =
     s.kind === 'flm'
-      ? { model: v.tag, messages, max_tokens: maxTokens, temperature: 0, top_k: 1, stream: false, think: false, ...extra }
+      ? v.kitSampling
+        ? { model: v.tag, messages, max_tokens: maxTokens, temperature: 0, stream: false, ...extra }
+        : { model: v.tag, messages, max_tokens: maxTokens, temperature: 0, top_k: 1, stream: false, think: false, ...NEUTRAL, ...extra }
       : { messages, max_tokens: maxTokens, temperature: 0, top_k: 1, seed: 1, stream: false, chat_template_kwargs: { enable_thinking: false }, cache_prompt: false, ...(v.lora ? { lora: v.lora } : {}), ...extra };
   const r = await post(`${s.base}/v1/chat/completions`, body);
   if (r.status !== 200 || r.json?.error) throw new Error(`${s.name} ${v.name}: ${r.status} ${r.text.slice(0, 300)}`);
@@ -263,6 +277,9 @@ const llamaVariants = (o: Options): Variant[] => [
 ];
 
 const say = (line: string) => console.log(line);
+const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
+/** The runs' range, "(12.2–16.3)". */
+const spread = (xs: number[], digits: number) => `(${Math.min(...xs).toFixed(digits)}–${Math.max(...xs).toFixed(digits)})`;
 const mb = (m: Memory) => ({ workingSetMb: Math.round(m.workingSetMb), privateMb: Math.round(m.privateMb), npuMb: m.npuMb === null ? null : Math.round(m.npuMb), availableMb: Math.round(m.availableMb) });
 
 /** The lines of a FastFlowLM log that say what it loaded and where, and anything that looks like a failure. */
@@ -324,7 +341,7 @@ async function speedRun(s: Server, v: Variant, tag: string, acc: { reads: number
 }
 
 /**
- * Each variant's runs interleaved (base, merged, base, merged...), the switch between them outside the measured
+ * Each variant's runs interleaved, in turn first, the switch between them outside the measured
  * requests (a short request first): FastFlowLM's in one server in the NPU's turn; llama-server's on the processor and
  * the Radeon, the add-on on and off per request.
  */
@@ -332,8 +349,10 @@ async function speedPhase(o: Options, f: Scratch, results: any): Promise<void> {
   results.speed = [];
   const block = async (s: Server, where: string, variants: Variant[]) => {
     const acc = Object.fromEntries(variants.map((v) => [v.name, { reads: [] as number[], gens: [] as number[], names: [] as number[], genTokens: 0, cpu: 0, memory: null as Memory | null }]));
+    // Each run starts one variant later (base, merged; merged, base...): a speed that drifts over the block (the NPU's
+    // and the processor's did, by a fifth from the first run to the third) falls on every variant alike.
     for (let r = 0; r < o.runs; r++)
-      for (const v of variants) {
+      for (const v of [...variants.slice(r % variants.length), ...variants.slice(0, r % variants.length)]) {
         await ask(s, v, [{ role: 'user', content: `[${r}] Reply with OK.` }], 1);
         const a = acc[v.name];
         const cpu0 = memoryOf(s.pid).cpuSeconds;
@@ -344,9 +363,9 @@ async function speedPhase(o: Options, f: Scratch, results: any): Promise<void> {
       }
     for (const v of variants) {
       const a = acc[v.name];
-      const row: SpeedRow = { where, variant: v.name, readTps: median(a.reads), genTps: median(a.gens), nameWallMs: median(a.names), cpuSecondsPerGenToken: a.cpu / Math.max(1, a.genTokens), memory: mb(a.memory!) };
-      results.speed.push({ ...row, reads: a.reads, gens: a.gens, names: a.names });
-      say(`speed ${where} ${v.name}: reads ${row.readTps.toFixed(0)} t/s, writes ${row.genTps.toFixed(1)} t/s, a name ${row.nameWallMs.toFixed(0)} ms, ${(row.cpuSecondsPerGenToken * 1000).toFixed(1)} ms processor a token written, ${JSON.stringify(row.memory)}`);
+      const row: SpeedRow = { where, variant: v.name, readTps: mean(a.reads), genTps: mean(a.gens), nameWallMs: mean(a.names), cpuSecondsPerGenToken: a.cpu / Math.max(1, a.genTokens), memory: mb(a.memory!) };
+      results.speed.push({ ...row, medians: { readTps: median(a.reads), genTps: median(a.gens), nameWallMs: median(a.names) }, reads: a.reads, gens: a.gens, names: a.names });
+      say(`speed ${where} ${v.name}: reads ${row.readTps.toFixed(0)} t/s ${spread(a.reads, 0)}, writes ${row.genTps.toFixed(1)} t/s ${spread(a.gens, 1)}, a name ${row.nameWallMs.toFixed(0)} ms ${spread(a.names, 0)}, ${(row.cpuSecondsPerGenToken * 1000).toFixed(1)} ms processor a token written, ${JSON.stringify(row.memory)}`);
     }
   };
   await inNpuTurn('add-on test (AMD): speed', () => withFlm(o, f, 'speed-npu', (s) => block(s, 'npu (XDNA 2)', flmVariants(o))));
@@ -412,6 +431,8 @@ async function answersPhase(o: Options, f: Scratch, results: any): Promise<void>
   };
   const by: Record<string, Record<string, string[]>> = {};
   by.npu = await inNpuTurn('add-on test (AMD): answers', () => withFlm(o, f, 'answers-npu', (s) => all(s, flmVariants(o))));
+  // The same with FastFlowLM's own sampling, as the kit's requests get it.
+  by['npu-kit'] = await inNpuTurn('add-on test (AMD): answers, kit sampling', () => withFlm(o, f, 'answers-npu-kit', (s) => all(s, flmVariants(o).map((v) => ({ ...v, kitSampling: true })))));
   if (o.llama && o.gguf) by.cpu = await withLlama(o, 'cpu', 'answers-cpu', (s) => all(s, llamaVariants(o)));
   if (o.vulkan && o.gguf) by.gpu = await withLlama(o, 'gpu', 'answers-gpu', (s) => all(s, llamaVariants(o)));
   const compare: Record<string, unknown> = {};
@@ -429,6 +450,32 @@ async function answersPhase(o: Options, f: Scratch, results: any): Promise<void>
   for (const [k, c] of Object.entries(compare)) say(`answers ${k}: ${JSON.stringify(c)}`);
 }
 
+// ------------------------------------------------------------------------------------------------ quality
+
+/**
+ * The kit's NPU benchmark on each model, as the kit asks it (addon-test's qualityAndPictures: its 24 quality items and
+ * 4 pictures, FastFlowLM's own sampling): does a merged model, the control included, still answer as the model does?
+ */
+async function qualityPhase(o: Options, f: Scratch, results: any): Promise<void> {
+  const dir = path.join(o.out, 'pictures');
+  mkdirSync(dir, { recursive: true });
+  results.quality = await inNpuTurn('add-on test (AMD): quality', () =>
+    withFlm(o, f, 'quality', async (s) => {
+      const r: Record<string, Awaited<ReturnType<typeof qualityAndPictures>>> = {};
+      for (const v of flmVariants(o)) r[v.name] = await qualityAndPictures(s.base, v.tag, false, true, dir);
+      return r;
+    }),
+  );
+  rmSync(dir, { recursive: true, force: true });
+  const base = results.quality.base;
+  for (const [k, q] of Object.entries(results.quality as Record<string, Awaited<ReturnType<typeof qualityAndPictures>>>)) {
+    const passed = q.quality.filter((x) => x.pass).length;
+    const mustFailed = q.quality.filter((x) => x.mustPass && !x.pass).map((x) => x.id);
+    const differ = k === 'base' ? [] : q.quality.filter((x, i) => x.pass !== base.quality[i].pass).map((x) => `${x.id} ${x.pass ? '+' : '-'}`);
+    say(`quality ${k}: ${passed} of ${q.quality.length}${mustFailed.length ? `, must-pass failed: ${mustFailed.join(', ')}` : ''}; pictures ${q.pictures.filter((x) => x.pass).length} of ${q.pictures.length}${differ.length ? `; against the base: ${differ.join(', ')}` : ''}`);
+  }
+}
+
 // ------------------------------------------------------------------------------------------------ odds
 
 const ODDS_TOP = 8;
@@ -439,7 +486,7 @@ type Odds = Record<string, number>;
  * logprobs on, one token. null when the server returns no log-probabilities (1.0.10).
  */
 async function flmOdds(s: Server, v: Variant, d: (typeof DOCS)[number]): Promise<Odds | null> {
-  const r = await post(`${s.base}/v1/chat/completions`, { model: v.tag, messages: [...namePrompt(d.file, d.how, d.text), { role: 'assistant', content: 'NAME:' }], continue_final_message: true, add_generation_prompt: false, max_tokens: 1, temperature: 0, top_k: 1, think: false, logprobs: true, top_logprobs: ODDS_TOP, stream: false });
+  const r = await post(`${s.base}/v1/chat/completions`, { model: v.tag, messages: [...namePrompt(d.file, d.how, d.text), { role: 'assistant', content: 'NAME:' }], continue_final_message: true, add_generation_prompt: false, max_tokens: 1, temperature: 0, top_k: 1, think: false, ...NEUTRAL, logprobs: true, top_logprobs: ODDS_TOP, stream: false });
   if (r.status !== 200 || r.json?.error) throw new Error(`${s.name} ${v.name}: ${r.status} ${r.text.slice(0, 300)}`);
   const top: { token: string; logprob: number }[] | undefined = r.json.choices?.[0]?.logprobs?.content?.[0]?.top_logprobs;
   return top ? Object.fromEntries(top.map((x) => [x.token, x.logprob])) : null;
@@ -546,7 +593,7 @@ async function main(): Promise<void> {
   results.models = { base: { file: path.join(o.modelDir, 'model.q4nx'), bytes: statSync(path.join(o.modelDir, 'model.q4nx')).size }, ...Object.fromEntries(o.merged.map((m) => [m.name, { file: m.file, bytes: statSync(m.file).size }])) };
   const save = () => writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
   const f = scratchFlm(o);
-  const phases: [string, (o: Options, f: Scratch, r: any) => Promise<void>][] = [['load', loadPhase], ['speed', speedPhase], ['switch', switchPhase], ['answers', answersPhase], ['odds', oddsPhase]];
+  const phases: [string, (o: Options, f: Scratch, r: any) => Promise<void>][] = [['load', loadPhase], ['speed', speedPhase], ['switch', switchPhase], ['answers', answersPhase], ['quality', qualityPhase], ['odds', oddsPhase]];
   try {
     for (const [name, fn] of phases) {
       if (!o.phases.has(name)) continue;

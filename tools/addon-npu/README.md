@@ -112,7 +112,7 @@ model's files but for its `model.q4nx`:
 node tools/addon-npu/amd.ts --flm <the kit's fastflowlm-1.0.10> --model-dir %USERPROFILE%\.flm\models\Qwen3.5-2B-NPU2
     --merged ctl=<work>/base-r32.q4nx --merged r32=<work>/merged-r32.q4nx --out <results folder>
     --llama <processor build's copy> --vulkan <Vulkan build's copy> --gguf <Qwen3.5-2B-Q4_K_M.gguf> --lora r32=<work>/r32-f16.gguf
-    [--phases load,speed,switch,answers,odds] [--threads 4] [--clean]
+    [--phases load,speed,switch,answers,quality,odds] [--threads 4] [--clean]
 ```
 
 - `--flm` can be another FastFlowLM's folder: the odds phase needs 1.0.11 or later, which return log-probabilities and
