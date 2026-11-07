@@ -21,6 +21,10 @@ One JSON object a line in; each answer is a line starting "@@" (OpenVINO's own o
         -> {"odds": {token: logprob}, "wallMs"}: the first token's raw log-probabilities, gathered by sampling at a
            high temperature among the top_k: GenAI returns each sampled token's raw log-probability (logprobs=1),
            whatever the temperature; greedy decoding returns only the top one's.
+    {"op": "open", "id": "addon", "lora": ["name=<file>"], "prop": ["KEY=VALUE"]}
+        -> {"opened", "loadMs"}: another pipeline in the same process (the command's own properties, then these), which
+           a request names as "pipe": a pipeline with an add-on beside one without, or in its place (swap).
+    {"op": "close", "id": "main"} -> {"closed", "ms"}
     {"op": "quit"}
 """
 
@@ -57,27 +61,32 @@ def main() -> None:
 
     import openvino_genai as g
 
-    props = {}
-    for p in a.prop:
-        k, v = p.split('=', 1)
-        props[k] = value(v)
-    adapters: dict[str, object] = {}
-    t0 = time.perf_counter()
-    if a.lora:
-        config = g.AdapterConfig()
-        for spec in a.lora:
-            name, file = spec.split('=', 1)
-            adapters[name] = g.Adapter(file)
-            config.add(adapters[name], 0.0)
-        props['adapters'] = config
-    try:
+    def make(loras: list[str], prop: list[str]):
+        props = {}
+        for p in prop:
+            k, v = p.split('=', 1)
+            props[k] = value(v)
+        adapters: dict[str, object] = {}
+        if loras:
+            config = g.AdapterConfig()
+            for spec in loras:
+                name, file = spec.split('=', 1)
+                adapters[name] = g.Adapter(file)
+                config.add(adapters[name], 0.0)
+            props['adapters'] = config
         pipe = g.VLMPipeline(a.model, a.device, **props)
+        return pipe, adapters, pipe.get_tokenizer()
+
+    # Each pipeline by its name, with its add-ons by theirs: a request's add-on must be the one its pipeline was made with.
+    pipes: dict[str, tuple[object, dict[str, object], object]] = {}
+    t0 = time.perf_counter()
+    try:
+        pipes['main'] = make(a.lora, a.prop)
     except Exception as e:  # noqa: BLE001: the reason is the result
         say({'ready': False, 'error': str(e), 'loadMs': (time.perf_counter() - t0) * 1000})
         return
-    tok = pipe.get_tokenizer()
     say({'ready': True, 'pid': os.getpid(), 'loadMs': (time.perf_counter() - t0) * 1000,
-         'versions': {'genai': g.__version__}, 'adapters': list(adapters)})
+         'versions': {'genai': g.__version__}, 'adapters': list(pipes['main'][1])})
 
     def picture(file: str):
         import numpy as np
@@ -87,10 +96,10 @@ def main() -> None:
         with Image.open(file) as im:
             return ov.Tensor(np.ascontiguousarray(np.asarray(im.convert('RGB'), dtype=np.uint8)[None]))
 
-    def prompt_of(m: dict) -> str:
+    def prompt_of(tok, m: dict) -> str:
         return tok.apply_chat_template(m['messages'], add_generation_prompt=True) + m.get('prefix', '')
 
-    def config_of(m: dict):
+    def config_of(pipe, adapters: dict, m: dict):
         gc = pipe.get_generation_config()
         gc.apply_chat_template = False
         gc.max_new_tokens = int(m.get('max_new_tokens', 32))
@@ -109,23 +118,37 @@ def main() -> None:
             if m['op'] == 'quit':
                 say({'bye': True})
                 return
+            if m['op'] == 'open':
+                t = time.perf_counter()
+                pipes[m['id']] = make(m.get('lora', []), [*a.prop, *m.get('prop', [])])
+                say({'opened': m['id'], 'loadMs': (time.perf_counter() - t) * 1000})
+                continue
+            if m['op'] == 'close':
+                import gc as collector
+
+                t = time.perf_counter()
+                del pipes[m['id']]
+                collector.collect()
+                say({'closed': m['id'], 'ms': (time.perf_counter() - t) * 1000})
+                continue
+            pipe, adapters, tok = pipes[m.get('pipe', 'main')]
             if m['op'] == 'generate':
-                gc = config_of(m)
+                gc = config_of(pipe, adapters, m)
                 extra = {'images': [picture(p) for p in m['images']]} if m.get('images') else {}
                 t = time.perf_counter()
-                r = pipe.generate(prompt_of(m), generation_config=gc, **extra)
+                r = pipe.generate(prompt_of(tok, m), generation_config=gc, **extra)
                 pm = r.perf_metrics
                 say({'text': r.texts[0], 'inputTokens': pm.get_num_input_tokens(), 'outputTokens': pm.get_num_generated_tokens(),
                      'ttftMs': pm.get_ttft().mean, 'tpotMs': pm.get_tpot().mean, 'wallMs': (time.perf_counter() - t) * 1000})
             elif m['op'] == 'odds':
-                gc = config_of(m)
+                gc = config_of(pipe, adapters, m)
                 gc.max_new_tokens = 1
                 gc.do_sample = True
                 gc.temperature = float(m.get('temperature', 50.0))
                 gc.top_k = int(m.get('top_k', 8))
                 gc.top_p = 1.0
                 gc.logprobs = 1
-                prompt = prompt_of(m)
+                prompt = prompt_of(tok, m)
                 odds: dict[str, float] = {}
                 t = time.perf_counter()
                 for s in range(int(m.get('samples', 24))):

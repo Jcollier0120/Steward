@@ -13,6 +13,10 @@
  *   one loaded but off, and on; the processor's seconds for each token written (the add-on's work, were it on the
  *   processor, would show there: NPUW compiles every part of the language model for the NPU alone);
  * - switch: a request's time when its add-on differs from the one before, against the same add-on again;
+ * - swap: the base's pipeline alone, as today, and the add-on's in its place only for a batch of add-on jobs: each swap's
+ *   time from a full cache, a chat arriving mid-batch, and the base's answers after it, byte for byte;
+ * - bank: the base's pipeline and the add-on's side by side in one process, each with its own NPUW weights bank, then
+ *   with one bank named for both: memory, and the base's speed and answers beside the other;
  * - cold: making the pipeline with an empty compile cache and with a full one, and its first answer, with and without
  *   an add-on (the kit stops an idle server, and its next request starts it again);
  * - memory: the process's working set and private bytes and what it holds on the NPU (Windows' GPU Process Memory
@@ -27,7 +31,7 @@
  *
  *   node tools/addon-npu/intel.ts --python <venv>\Scripts\python.exe --model <Castellan-AI\Qwen3-VL-2B-Instruct-int8-sym-ov>
  *     --lora warrener=<adapter_model.safetensors>@2 [--lora name=<file>@alpha ...] --out <folder>
- *     [--phases answers,odds,speed,switch,cold,memory,ovms] [--devices NPU,CPU,GPU] [--ovms <ovms.exe>]
+ *     [--phases answers,odds,speed,switch,swap,bank,cold,memory,ovms] [--devices NPU,CPU,GPU] [--ovms <ovms.exe>]
  *     [--generation meteor-lake] [--runs 3] [--samples 12] [--top-k 5] [--port 28611] [--prop KEY=VALUE ...]
  *
  * An add-on's alpha (after @) is the whole scale GenAI puts on B @ A: lora_alpha / r for PEFT's own (addon_ov.py).
@@ -71,7 +75,7 @@ interface Options {
 }
 
 function parseArgs(argv: string[]): Options {
-  const o: Options = { python: '', model: '', loras: [], out: '', phases: new Set(['answers', 'odds', 'speed', 'switch', 'cold', 'memory', 'ovms']), devices: ['NPU', 'CPU', 'GPU'], ovms: null, generation: 'meteor-lake', runs: 3, samples: 12, topK: 5, port: 28611, props: [] };
+  const o: Options = { python: '', model: '', loras: [], out: '', phases: new Set(['answers', 'odds', 'speed', 'switch', 'swap', 'bank', 'cold', 'memory', 'ovms']), devices: ['NPU', 'CPU', 'GPU'], ovms: null, generation: 'meteor-lake', runs: 3, samples: 12, topK: 5, port: 28611, props: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => {
@@ -223,13 +227,17 @@ async function withPipeline<T>(o: Options, name: string, device: string, loras: 
 const gen = (p: Pipeline, messages: unknown[], maxNewTokens: number, lora: Lora | null, extra: Record<string, unknown> = {}) =>
   p.ask({ op: 'generate', messages, max_new_tokens: maxNewTokens, adapter: lora?.name ?? null, alpha: lora?.alpha ?? 0, ...extra });
 
+/** Another pipeline in the pipeline's process (addon_ov.py's open), which a request names as its `pipe`. */
+const openIn = async (p: Pipeline, id: string, loras: Lora[], props: string[] = []) => (await p.ask({ op: 'open', id, lora: loras.map((l) => `${l.name}=${l.file}`), prop: props })).loadMs as number;
+const closeIn = async (p: Pipeline, id: string) => (await p.ask({ op: 'close', id })).ms as number;
+
 const mb = (m: Memory) => ({ workingSetMb: Math.round(m.workingSetMb), privateMb: Math.round(m.privateMb), npuMb: m.npuMb === null ? null : Math.round(m.npuMb), availableMb: Math.round(m.availableMb) });
 
 // ------------------------------------------------------------------------------------------------ answers and odds
 
-async function names(p: Pipeline, lora: Lora | null): Promise<string[]> {
+async function names(p: Pipeline, lora: Lora | null, pipe?: string): Promise<string[]> {
   const out: string[] = [];
-  for (const d of DOCS) out.push((await gen(p, namePrompt(d.file, d.how, d.text), 60, lora)).text);
+  for (const d of DOCS) out.push((await gen(p, namePrompt(d.file, d.how, d.text), 60, lora, { pipe })).text);
   return out;
 }
 
@@ -417,6 +425,127 @@ async function switchPhase(o: Options, results: any): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------------------------------------------ swapping and pairing pipelines
+
+/**
+ * A pipeline with an add-on loaded makes every request slower, the add-on on or off (NPUW compiles the add-on's branch in).
+ * One way out: the base's pipeline alone, as today, and the add-on's in its place only while the line runs a batch of
+ * add-on jobs, then the base's again. In one process, as a server of the kit's own would, from a full compile cache: a
+ * batch of the 8 names, with a chat arriving after the fourth (the base's pipeline back for it, then the add-on's again).
+ * A swap's time runs from closing the one pipeline to the other's first token.
+ */
+async function swapPhase(o: Options, results: any): Promise<void> {
+  results.swap = {};
+  for (const l of o.loras) {
+    try {
+      results.swap[l.name] = await withPipeline(o, `swap-${l.name}`, 'NPU', [], async (p) => {
+        // Both pipelines in the cache first: the add-on's once, made and closed.
+        const warmOpenMs = await openIn(p, 'addon', [l]);
+        await closeIn(p, 'addon');
+        const memory: Record<string, ReturnType<typeof mb>> = { base: mb(memoryOf(p.pid)) };
+        const baseBefore = await names(p, null);
+        const swaps: { way: string; closeMs: number; openMs: number; firstTokenMs: number; toFirstTokenMs: number }[] = [];
+        const swap = async (way: string, from: string, to: string, loras: Lora[], first: () => Promise<{ ttftMs: number }>) => {
+          const t = performance.now();
+          const closeMs = await closeIn(p, from);
+          const openMs = await openIn(p, to, loras);
+          const r = await first();
+          swaps.push({ way, closeMs: round(closeMs), openMs: round(openMs), firstTokenMs: round(r.ttftMs), toFirstTokenMs: round(closeMs + openMs + r.ttftMs) });
+        };
+        const jobs: { doc: string; wallMs: number; text: string }[] = [];
+        const job = async (d: (typeof DOCS)[number]) => {
+          const t = await gen(p, namePrompt(d.file, d.how, d.text), 60, l, { pipe: 'addon' });
+          jobs.push({ doc: d.file, wallMs: round(t.wallMs), text: t.text });
+          return t;
+        };
+        await swap('to the add-on', 'main', 'addon', [l], () => job(DOCS[0]));
+        memory.addon = mb(memoryOf(p.pid));
+        for (const d of DOCS.slice(1, 4)) await job(d);
+        let chat: any = null;
+        await swap('to the base, for a chat', 'addon', 'main', [], async () => (chat = await gen(p, [{ role: 'user', content: 'Hello! In one sentence, what can you help me with?' }], 32, null)));
+        await swap('to the add-on, again', 'main', 'addon', [l], () => job(DOCS[4]));
+        for (const d of DOCS.slice(5)) await job(d);
+        const after: string[] = [];
+        await swap('to the base', 'addon', 'main', [], async () => {
+          const t = await gen(p, namePrompt(DOCS[0].file, DOCS[0].how, DOCS[0].text), 60, null);
+          after.push(t.text);
+          return t;
+        });
+        for (const d of DOCS.slice(1)) after.push((await gen(p, namePrompt(d.file, d.how, d.text), 60, null)).text);
+        memory.baseAgain = mb(memoryOf(p.pid));
+        const jobMs = median(jobs.map((j) => j.wallMs));
+        const backMs = median(swaps.filter((s) => s.way.startsWith('to the base')).map((s) => s.toFirstTokenMs));
+        return {
+          warmOpenMs: round(warmOpenMs),
+          swaps,
+          toAddonMs: round(median(swaps.filter((s) => s.way.startsWith('to the add-on')).map((s) => s.toFirstTokenMs))),
+          toBaseMs: round(backMs),
+          jobMs: round(jobMs),
+          // A chat arriving mid-batch waits for the job under way (none of it to all of it), then the base's pipeline back.
+          chatWaitMs: { jobEnding: round(backMs), jobStarting: round(backMs + jobMs), measured: swaps[1].toFirstTokenMs, chatText: chat?.text ?? null },
+          baseSameAfter: `${after.filter((x, i) => x === baseBefore[i]).length} of ${DOCS.length}`,
+          memory,
+          jobs,
+          baseBefore,
+          baseAfter: after,
+        };
+      });
+      const r = results.swap[l.name];
+      say(`swap ${l.name}: to the add-on ${r.toAddonMs} ms, to the base ${r.toBaseMs} ms (to the first token, from the cache); a job ${r.jobMs} ms; a chat mid-batch waits ${r.chatWaitMs.jobEnding}-${r.chatWaitMs.jobStarting} ms; the base the same after: ${r.baseSameAfter}; NPU ${r.memory.base.npuMb} / ${r.memory.addon.npuMb} / ${r.memory.baseAgain.npuMb} MB`);
+    } catch (e) {
+      results.swap[l.name] = { error: String(e) };
+      say(`swap ${l.name}: ${String(e)}`);
+    }
+  }
+}
+
+/**
+ * The other way out: the base's pipeline and the add-on's side by side in one process, the add-on's requests to its own.
+ * NPUW keeps a model's weights in a bank and shares a tensor between models whose bank has the same name
+ * (NPUW_WEIGHTS_BANK; each model gets a name of its own otherwise), so the pair runs twice: own banks, then one shared.
+ */
+async function bankPhase(o: Options, results: any): Promise<void> {
+  results.bank = {};
+  const l = o.loras[0];
+  for (const shared of [false, true]) {
+    const key = shared ? 'shared bank' : 'own banks';
+    const props = shared ? ['NPUW_WEIGHTS_BANK=castellan-addon-test'] : [];
+    try {
+      results.bank[key] = await withPipeline(o, `bank-${shared ? 'shared' : 'own'}`, 'NPU', [], async (p) => {
+        const warmOpenMs = await openIn(p, 'addon', [l], props);
+        await closeIn(p, 'addon');
+        const alone = mb(memoryOf(p.pid));
+        const baseAlone = await names(p, null);
+        const speedAlone = await speedOf(p, o, 'the base alone', null);
+        const openMs = await openIn(p, 'addon', [l], props);
+        const paired = mb(memoryOf(p.pid));
+        const addonNames = await names(p, l, 'addon');
+        const baseBeside = await names(p, null);
+        const speedBeside = await speedOf(p, o, 'the base beside the add-on', null);
+        return {
+          props,
+          baseLoadMs: round(p.loadMs),
+          warmOpenMs: round(warmOpenMs),
+          openMs: round(openMs),
+          memory: { alone, paired, afterUse: mb(memoryOf(p.pid)) },
+          addedNpuMb: paired.npuMb !== null && alone.npuMb !== null ? paired.npuMb - alone.npuMb : null,
+          addedWorkingSetMb: paired.workingSetMb - alone.workingSetMb,
+          baseSameBeside: `${baseBeside.filter((x, i) => x === baseAlone[i]).length} of ${DOCS.length}`,
+          speedAlone,
+          speedBeside,
+          addonNames,
+          baseAlone,
+        };
+      }, { props });
+      const r = results.bank[key];
+      say(`bank, ${key}: the add-on's pipeline beside the base adds NPU ${r.addedNpuMb} MB, WS ${r.addedWorkingSetMb} MB (open ${r.openMs} ms); the base writes ${r.speedAlone.genTps} -> ${r.speedBeside.genTps} t/s beside it, reads ${r.speedAlone.readTps} -> ${r.speedBeside.readTps}; the base's names the same: ${r.baseSameBeside}`);
+    } catch (e) {
+      results.bank[key] = { error: String(e) };
+      say(`bank, ${key}: ${String(e)}`);
+    }
+  }
+}
+
 // ------------------------------------------------------------------------------------------------ cold starts and memory
 
 /** Making the pipeline with an empty compile cache, then again with it full, and each one's first answer: with no add-on, and with each. */
@@ -588,7 +717,7 @@ async function main(): Promise<void> {
   results.options = { ...o, phases: [...o.phases] };
   results.npuProps = propsFor(o, 'NPU', path.join(o.out, 'ov-cache'));
   const save = () => writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
-  const phases: [string, (o: Options, r: any) => Promise<void>][] = [['answers', answersPhase], ['odds', oddsPhase], ['speed', speedPhase], ['switch', switchPhase], ['cold', coldPhase], ['memory', memoryPhase], ['ovms', ovmsPhase]];
+  const phases: [string, (o: Options, r: any) => Promise<void>][] = [['answers', answersPhase], ['odds', oddsPhase], ['speed', speedPhase], ['switch', switchPhase], ['swap', swapPhase], ['bank', bankPhase], ['cold', coldPhase], ['memory', memoryPhase], ['ovms', ovmsPhase]];
   for (const [name, fn] of phases) {
     if (!o.phases.has(name)) continue;
     say(`-- ${name}`);
