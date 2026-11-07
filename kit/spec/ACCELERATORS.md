@@ -498,6 +498,8 @@ Every other NPU request waits meanwhile. A Warrener name between other staff mem
 - **The names:** the control alone changed 6 of the 8; the add-ons changed 7 (rank 32) and 8 (rank 64). On the processor the add-ons changed 4 and 6.
 - **The kit's NPU benchmark, as the kit asks it:** 22 of 24 quality items for the model, the control and rank 32, and 21 for rank 64. Each got 3 of the 4 pictures, all missing the same one (the number). The misses move between json-list and time, and apples is missed by all.
 
+**FastFlowLM's own sampling.** The kit's requests send `temperature: 0` and nothing else. So they get FastFlowLM's settings for Qwen3.5 at its load: top_k 20, top_p 0.8, a presence penalty of 1.5 and a frequency penalty of 1.0. FastFlowLM keeps a request's settings for the next one. Against greedy with no penalty, these settings gave the same speed (writes 23.0 against 22.9 tokens a second, 3 interleaved runs) and the same answer for 7 of the 8 documents. So nothing in the kit needs changing for them.
+
 **So: no add-on on AMD's NPU until FastFlowLM takes one.**
 
 - The merged route runs on the NPU at the model's own speed. But a 4-bit requantization swamps an add-on of this size, each add-on is another 1.34 GB, and switching is a model load.
