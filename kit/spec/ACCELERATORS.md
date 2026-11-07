@@ -251,7 +251,7 @@ An add-on is a LoRA adapter: a few megabytes of weights trained for one staff me
 | Accelerator | The add-on on it | What it costs | The route |
 |---|---|---|---|
 | Snapdragon X2's NPU (Hexagon v81) | All of it on the NPU, its answers as on the processor | The Warrener's `warrener-r1-qv` (F16, on q and v): reads 9% slower and writes 13% slower while it's on, and 14 MB more on the NPU. A throwaway rank 32 on q, k, v and o: 15% and 22% slower, 26 MB | llama-server on the Hexagon, `--lora <file> --lora-init-without-apply`, each request's own `lora` (kit 2.152.2, below). Not GenieX, which takes none |
-| Intel's NPU | None yet: its server (OpenVINO Model Server) takes no add-on | | A request with a job runs on the NPU without it |
+| Intel's NPU (NPU 3720) | All of it on the NPU through OpenVINO GenAI, the Warrener's names word for word as on the processor. Not through the kit's server, OpenVINO Model Server, which takes none | **Loaded and off, every other request writes 27% slower** (reads 7%; 11% slower with NPUW's maximum rank at 64). The Warrener's `warrener-r1-qv` on: reads 8% slower, writes 29% slower, 27–53 MB more on the NPU. Switching: 20–50 ms | None yet: a request with a job runs on the NPU without it. What shipping takes is below (Intel's NPU) |
 | AMD's NPU (XDNA 2) | None: FastFlowLM takes no add-on. Folded into a copy of the model it runs all on the NPU, but its 4-bit weights carry it poorly | A merged model reads and writes at the model's own speed in the same NPU memory, at any rank. But each is 1.34 GB on disk, a switch is a model load (5–17 s each way), and requantizing its weights moves the model's odds as much as the add-on does | A request with a job runs on the NPU without it (below) |
 | A graphics card or the processor | Only on a PC with no NPU | | llama-server, as on the Hexagon. Setup doesn't load add-ons there yet |
 
@@ -424,6 +424,176 @@ With the Warrener's add-on applied, it read 2,747 tokens a second and wrote 62.5
 - A request that finds llama-server's idle connection closed (after its 5 s keep-alive) fails once, as on a card or the processor today (`AcceleratorDown`). A retry on a fresh connection would spare it.
 - The NPU's embedding server could take `--poll 0` too.
 - The X Elite's Hexagon v73 isn't measured.
+
+### Intel's NPU
+
+**The cost that matters most: a loaded add-on slows every request, even while it's off.** With the Warrener's add-on loaded in the pipeline and switched off, every other staff member's requests write 27% slower (18.1 → 13.2 tokens a second) and read 7% slower (546 → 508), on the NPU 3720.
+
+- The cause is NPUW, the NPU plugin's LLM pipeline. It compiles each add-on's branch into the model, padded to `NPUW_LLM_MAX_LORA_RANK` (32 by default).
+- An add-on switched off only sets its alpha to 0. The branch still runs.
+- So the Snapdragon's way, one server with the add-on loaded and every other request at 0, would cost every staff member a quarter of the NPU's writing speed here.
+- The ways out are below: swapping pipelines, pairing them, or a larger maximum rank.
+
+Measured 2026-11-07 on a Core Ultra 5 225U (14 cores, 16 GB) and its NPU 3720 by the Steward's `tools/addon-npu` (`intel.ts`; its README says how). Every NPU run was in the NPU's turn, one block at a time, and the installed manor's servers were left alone. The setup:
+
+- The kit's Intel model, Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov, with the kit's NPU settings for the NPU 3720: `MAX_PROMPT_LEN` 2048, `NPUW_LLM_PREFILL_CHUNK_SIZE` 256 and `GENERATE_HINT` BEST_PERF (routeFor).
+- OpenVINO GenAI 2026.4.1's `VLMPipeline`, from pip's Python bindings, with the kit's own GenAI build (below).
+- The add-ons, in PEFT's layout (GenAI reads it directly, with no GGUF step):
+  - the Warrener's trained `warrener-r1-qv`: F32, q and v, rank 32, lora_alpha 64;
+  - a throwaway rank 32 on q, k, v and o (make_lora.py).
+
+**The gap is OpenVINO Model Server's. GenAI takes add-ons on the NPU.**
+
+- OVMS 2026.4.1's LLM graphs have no adapter field (`llm_calculator.proto`), and its main branch is the same (2026-11-07).
+- Its `--source_loras` is for image generation only.
+- Its `--plugin_config` can't carry GenAI's `AdapterConfig`.
+- GenAI's `VLMPipeline`, the pipeline OVMS runs on the NPU, takes add-ons when it's made (`adapters`) and applies one for each request (`GenerationConfig.adapters`). Its default mode is dynamic on the NPU, the graphics card and the processor.
+- So the add-on reaches the NPU without OVMS, and without a merged model (the add-on folded into the model).
+
+**Two traps.**
+
+- **alpha = lora_alpha / r.**
+  - GenAI ignores the file's lora_alpha: a request's alpha is the whole scale on B·A.
+  - PEFT's own scale, which is llama.cpp's scale 1, is lora_alpha / r. For the Warrener that is 64 / 32 = 2. At alpha 1, an add-on does half of what it was trained to do.
+  - Checked against llama.cpp b11734's processor build, running Q4_0 with the published GGUF add-on at scale 1. At alpha 2, GenAI's processor named 7 of 8 documents with the same name and folder (one company name differed), against 2 of 8 without the add-on.
+- **The kit's GenAI build is required.**
+  - pip's openvino-genai 2026.4.1 fails on the NPU with a text-only prompt at the kit's `MAX_PROMPT_LEN` 2048 (`roi_end <= max_dim`, openvino.genai#4709).
+  - The pipeline then fails every request after (`prompt_ids.get_size() >= tokenized_history.size()`, #4708).
+  - The kit's castellan.1 `openvino_genai.dll` (2026.4.1.0-1-ab01d1771e4, OVMS's own in the kit) fixes both, and pip's bindings load it.
+
+**Where it runs: on the NPU.**
+
+- NPUW compiles the whole language model for the NPU alone, the add-on's branch included: its LLM pipelines' `NPUW_DEVICES` is NPU only.
+- The processor's time for each written token was 4–10 ms in every run, with the add-on on or off and at every maximum rank. On the processor device it is 330–400 ms.
+- So none of the add-on's work falls back.
+
+**What it costs.** The median of 3 rounds: reading a 1,500-token prompt, writing 128 tokens, and a Warrener name (its prompt about 450 tokens). The memory was read after them:
+
+| On the NPU 3720 | Reads, tokens a second | Writes, tokens a second | A name (its first token) | On the NPU | Working set |
+|---|---|---|---|---|---|
+| No add-on | 546 | 18.1 | 2,173 ms (967 ms) | 2,100 MB | 3,306 MB |
+| The Warrener's, loaded and off | 508 | 13.2 | 2,463 ms (953 ms) | 2,178 MB | 3,274 MB |
+| The Warrener's, on | 501 | 12.9 | 3,131 ms (986 ms) | 2,153 MB | 3,275 MB |
+| Rank 32 on q, k, v and o, loaded and off | 492 | 13.0 | 2,631 ms (999 ms) | 2,254 MB | 3,376 MB |
+| Rank 32 on q, k, v and o, on | 494 | 11.9 | 3,014 ms (1,007 ms) | 2,204 MB | 3,377 MB |
+
+- A name with the Warrener's add-on on is longer, in its own form (`NAME:` and `FOLDER:`). So that column is not only speed.
+- For reference, the processor (8 threads): reads 204 tokens a second, writes 21.4 and names in 2,870 ms without an add-on; with the Warrener's on, 210, 19.0 and 3,561 ms.
+- The graphics card: 621, 22.6 and 1,731 ms without an add-on. With the Warrener's loaded, every request failed in the GPU plugin (`The allocated input memory is necessary to set kernel arguments`, ocl_stream.cpp). The rank-32 throwaway on q, k, v and o ran there, its names 6 of 8 as on the processor.
+  - The GPU plugin runs an add-on only when it covers all four of q, k, v and o. q and v failed, and so did q, k and v.
+  - The Warrener's add-on with zero tensors added for k and o, which changes nothing in what it does, ran.
+  - This is a reference only: on a PC with an NPU, the add-on stays on the NPU.
+
+**The rank, and NPUW's maximum.** NPUW pads every add-on to `NPUW_LLM_MAX_LORA_RANK`. It refuses a larger one when a request applies it: "LoRA tensor low-rank size: 64 is larger than the maximum LoRA low-rank size 32".
+
+- **The add-on's own rank** doesn't change the cost. At the default 32, a rank-16 throwaway wrote 13.3–13.7 tokens a second, rank 32 wrote 12.9–13.0, and the same run without an add-on 17.6.
+- **The maximum does, and not in order.** The table is writing speed with a rank-32 throwaway loaded and off, against the same run without one, with the runs in the order shown:
+
+| `NPUW_LLM_MAX_LORA_RANK` | Writes without an add-on | Rank 32, loaded and off | Its cost | On the NPU, loaded and off |
+|---|---|---|---|---|
+| 32 (the default) | 17.2 | 12.5 | −27% | 2,254 MB |
+| 64 | 18.9 | 16.9 | −11% | 2,402 MB |
+| 128 | 18.8 | 12.3 | −35% | 2,696 MB |
+| 32 again | 18.4 | 12.7 | −31% | 2,254 MB |
+
+- At 64, a rank-64 throwaway cost the same as rank 32 (16.9 tokens a second). An earlier run at 64 gave −14% for rank 32 and −22% for rank 64.
+- Reads were 5–7% slower at every maximum. Without an add-on the NPU holds 2,100 MB.
+- The branch's own arithmetic is small: rank 32 on q and v is about 6.4 million multiply-adds for each token over the 28 layers, against about 1.7 billion for the model. So the cost lies in how NPUW runs the branch, not in the work it does.
+- A maximum of 64 roughly halves the cost of an add-on loaded and off, for about 150 MB more on the NPU. It doesn't end the cost.
+
+**Its answers: the Warrener's as on the processor.** Its naming prompt on 8 made-up documents, named greedily on the NPU and on the processor with the same add-on (the reference):
+
+- **The Warrener's add-on:**
+  - on the NPU it named 8 of 8 word for word as the processor did;
+  - without the add-on, 2 of 8 match (the NPU's own rounding of the model);
+  - the add-on changed all 8 names, now in its own form.
+- **The model's odds for the name's first token:**
+  - the NPU moved them by 80% of the processor's change;
+  - the top token was the same as the processor's for 8 of 8 with the add-on on;
+  - switched off, it left nothing behind: the odds were the same as before it was on.
+- **The rank-32 throwaway on q, k, v and o** follows less:
+  - the same name for 5 of 8 and the same folder for 6, and its odds moved by about the processor's change (108%);
+  - its change is small, though: 0.28 against the Warrener's 9.4, under the NPU's own rounding of the model (1.64 apart);
+  - it changed 2 of 8 names on the NPU, where it changed all 8 on the processor.
+
+**Switching it on and off.**
+
+- Per request, in `GenerationConfig.adapters`. NPUW copies the add-on into the NPU's inputs when the request starts.
+- A name's first token took 20–50 ms longer when its add-on differed from the request before's: 1,044 ms switched on against 1,021 ms on again, and 1,023 ms switched off against 1,011 ms off again.
+- Switched off, the names were the same before and after, 4 of 4.
+
+**A cold start** (making the pipeline, then its first name):
+
+| | Empty compile cache: made / first answer | Full cache: made / first answer | The cache |
+|---|---|---|---|
+| No add-on | 7.3 s / 10.9 s | 2.7 s / 6.0 s | 743 MB |
+| The Warrener's loaded | 6.9 s / 11.5 s | 2.9 s / 7.5 s | 747 MB |
+| Rank 32 loaded | 7.0 s / 11.3 s | 3.0 s / 7.1 s | 753 MB |
+
+An add-on adds nothing to the time to make the pipeline. Its first answer is slower only because the name is longer.
+
+**Memory.** On the NPU: loaded / after the names / after an 1,800-token prompt:
+
+- no add-on: 1,932 / 2,088 / 2,100 MB;
+- the Warrener's: 1,957 / 2,115 / 2,153 MB;
+- the rank-32 throwaway: 1,981 / 2,141 / 2,204 MB.
+
+So the Warrener's adds 25–53 MB on the NPU. The working set is 2.9–3.4 GB either way.
+
+**GenAI directly against the kit's server.** Each was measured without an add-on: OpenVINO Model Server as the kit starts it for the NPU 3720 (npuEntry, on a private port), and GenAI's pipeline at the same settings:
+
+| | OpenVINO Model Server 2026.4.1 | GenAI 2026.4.1 directly |
+|---|---|---|
+| Reads, tokens a second | 459 | 492 |
+| Writes, tokens a second | 18.9 | 18.9 |
+| A name | 2,195 ms | 2,076 ms |
+| The NPU benchmark's 24 quality items | 22 (time and apples wrong) | 22, missing the same two |
+| Its 4 pictures | 4, in 0.94–1.09 s | 4, in 1.02–1.25 s |
+| Its first answer | 6.3 s from its compile cache (46.7 s with it empty), answering on its port in 1.1 s | 4.6–7.3 s from the cache |
+| On the NPU, after chat / after pictures | 2,100 / 2,100 MB | 2,100 / 2,100 MB |
+| Working set, after chat / after pictures | 3,287 / 3,784 MB | 3,200 / 4,087 MB |
+
+A second run, both from their caches, gave the same: reads 447 against 499 tokens a second, writes 18.6 against 18.8, a name 2,410 against 2,189 ms, 22 quality items and 4 pictures each, and 2,100 MB on the NPU each. So GenAI directly is as fast as the kit's server, answers the same, and holds the same on the NPU.
+
+**The ways out of the loaded-and-off cost.** Measured with the Warrener's add-on, in one process (as a server of the kit's own would run them), from a full compile cache:
+
+- **Swap pipelines.** The base's pipeline runs alone, as today. The add-on's pipeline takes its place only for a batch of add-on jobs, then the base's comes back.
+  - **A swap:** 5.1–5.7 s to the add-on's first token, and 4.4–4.6 s back to the base's. Closing a pipeline takes 10–25 ms, making the other from the cache 3.3–4.4 s, and its first token 0.7–1.3 s.
+  - **The batch:** a name took 3.1 s (the median of 8), the add-on's names word for word as above.
+  - **A chat arriving mid-batch,** with the line letting it go next, waits for the job under way and then a swap back: 4.5 s (the job just ending) to 7.6 s (just starting) to its first token, 4.6 s measured. Today it waits for the job under way only.
+  - **After the swap back,** the base's names were the same byte for byte, 8 of 8, and the NPU held what it held before (2,088 MB after the names).
+  - **Memory** stays as today: one pipeline at a time, 1,932–2,115 MB on the NPU.
+  - So a batch of the Warrener's 8 names costs about 10 s of swaps on top of 25 s of names, and every other request runs at the model's own speed.
+- **Pair pipelines.** The base's pipeline and the add-on's run side by side, each request to its own.
+  - **Memory:** the add-on's pipeline adds 2,125 MB on the NPU and 1,931 MB of working set. On this 16 GB PC, available memory fell to 1.6–1.8 GB.
+  - **The base beside it** read 25% slower (542 → 406 tokens a second) and wrote 3% slower (17.9 → 17.3). Its names were the same, 8 of 8.
+  - **Making the add-on's pipeline** beside it took 4.0 s from the cache.
+- **One NPUW weights bank for both doesn't help.** `NPUW_WEIGHTS_BANK` was set to the same name for both pipelines.
+  - NPUW shares a tensor only when it's the same one in memory (its data pointer), and each pipeline reads the model's weights itself. So the add-on's pipeline still added 2,016 MB on the NPU.
+  - Worse, a closed pipeline's weights stay in the bank until the last pipeline using it goes. After the add-on's pipeline was made and closed, the base alone held 3,578 MB on the NPU, against 1,932 MB with its own bank.
+- **Keep the add-on loaded, with a maximum rank of 64** (`NPUW_LLM_MAX_LORA_RANK=64`, above). Every other request then writes 11–14% slower instead of 27–31%, for about 150 MB more on the NPU. It's cheaper, but not free.
+
+So:
+
+- **Swapping** keeps today's memory and every other request's speed. It costs about 10 s for each batch. A chat that arrives during one waits a swap back more than today, 4.5–7.6 s in all to its first token.
+- **Pairing** costs 2.1 GB, which a 16 GB PC doesn't have to spare, and it still slows the base's reading.
+- **A maximum of 64** costs every request a little, all the time.
+
+The owner picks.
+
+**What shipping would take.** Nothing below is built. Either way, the kit side is as on the Snapdragon: the route loads the pinned add-ons, a request with a job applies its add-on, and the answer says so. The NPU's line groups add-on jobs, so one swap serves a batch.
+
+1. **An OpenVINO Model Server patch.** The kit keeps its server and carries a patched build, as it already carries the castellan.1 GenAI dll:
+   - in OVMS's LLM servable for the VLM pipeline (the NPU's path), a graph option listing add-ons (a name and a file each), loaded as GenAI `Adapter`s into the `AdapterConfig` the pipeline is made with;
+   - a request field naming the add-on (llama-server's `lora`, say), read into `GenerationConfig.adapters`;
+   - and the swap (or pair) below inside the servable, or the loaded-and-off cost stays.
+   - It's a Bazel build of OVMS for Windows, to be signed like the GenAI dll and pinned in the kit, in place of the upstream ovms.exe. Upstream might take it (an issue, then a PR, posted only with the owner's OK).
+2. **A server of the kit's own, on GenAI.** It replaces OVMS for the Intel NPU's chat:
+   - a small OpenAI-style server over `VLMPipeline`: chat with streaming, pictures, the kit's NPU settings and compile cache, a readiness answer, and the swap (or pair) itself;
+   - in C++ against the kit's `openvino_genai.dll`, or in Python with pip's packages. GenAI's C API (`openvino_genai_c.dll`) has the VLM pipeline but no adapter calls, and OVMS's bundled Python has no GenAI bindings.
+   - The Python way ships its own Python (about 300 MB: openvino is 248 MB, GenAI 17 MB, the tokenizers 4 MB, numpy and Pillow 50 MB), with the castellan.1 dll copied over pip's, as this test did. The kit's OVMS folder is 375 MB.
+   - Measured above: GenAI directly is as fast as OVMS, gives the same answers and pictures, and holds the same on the NPU.
+3. **A merged model** (the add-on folded into a copy of the model) isn't needed: the NPU takes the add-on as it is. Held beside the base, it would cost what the pair costs, with nothing to switch.
 
 ### AMD's NPU (XDNA 2)
 

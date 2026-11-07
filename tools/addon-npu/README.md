@@ -1,8 +1,9 @@
-# The add-on test: a LoRA on the Snapdragon's NPU
+# The add-on test: a LoRA on the NPU
 
 Can a LoRA add-on for Qwen3-VL-2B-Instruct (the NPU's chat and vision model) run on a Snapdragon X2's Hexagon NPU,
 and at what cost? This folder holds the test behind the answer, in [kit/spec/ACCELERATORS.md](../../kit/spec/ACCELERATORS.md)
-(Add-ons). Nothing here ships.
+(Add-ons). Intel's NPU has a test of its own, `intel.ts` with `addon_ov.py`, at the end ([Intel's NPU](#intels-npu-openvino-genai)).
+Nothing here ships.
 
 - `make_lora.py` makes a throwaway add-on: Hugging Face PEFT's layout, rank r on the language model's q, k, v and o
   projections, seeded random numbers, each change sized against its own weight in the base GGUF (`--strength`, 5% by
@@ -145,3 +146,75 @@ Its results, beside the ones below:
 - **odds**: `follows` is how much of the processor's change to the name's first token the NPU makes (1 is all of it),
   `apart` against `baseApart` the gap the add-on adds over the NPU's own rounding, and `offAgain` what an add-on
   switched off leaves behind (0 is nothing).
+
+## Intel's NPU (OpenVINO GenAI)
+
+The kit's Intel NPU chat is OpenVINO Model Server, whose LLM graphs take no add-on (only its image generation does), so
+`intel.ts` runs the pipeline the server runs on the NPU, OpenVINO GenAI's `VLMPipeline`, directly: `addon_ov.py`, one
+Python process holding the pipeline (or two, for the swap and bank phases), driven over its standard input. It uses
+the kit's model (Castellan-AI/Qwen3-VL-2B-Instruct-int8-sym-ov) and the kit's NPU settings for the PC's generation
+(`routeFor`), and runs the kit's own server beside it to compare. Each block of NPU work waits for the NPU's turn in
+the kit's line, as on the Snapdragon.
+
+### What it needs
+
+- An Intel NPU PC with the kit's Intel route set up: OpenVINO Model Server 2026.4.1 and the int8 model, in the manor's
+  accelerators folder (setup does both).
+- The kit filled into `src/kit` (`npm run kit`).
+- Python 3.13 (x64) in a virtual environment at a short path, such as `C:\worktrees\_addon-venv`. PyTorch's install
+  passes Windows' 260-character path limit in a deeper folder; leave the system's long-path setting alone. Install:
+  - `openvino==2026.4.1`, `openvino-genai==2026.4.1.0`, `openvino-tokenizers==2026.4.1.0`, `pillow` and `numpy`;
+  - for `make_lora.py`, also `safetensors`, `gguf` and PyTorch's CPU build from PyTorch's own index.
+- The kit's own GenAI build over pip's: copy `openvino_genai.dll` from the kit's server folder
+  (`servers\ovms-2026.4.1`, version 2026.4.1.0-1-ab01d1771e4) over the one in the venv's
+  `Lib\site-packages\openvino_genai`, keeping pip's beside it.
+  - Pip's own fails on the NPU with a text-only prompt at the kit's 2048-token prompt size (`roi_end <= max_dim`,
+    openvino.genai#4709). The pipeline then fails every request after (`prompt_ids.get_size() >=
+    tokenized_history.size()`, #4708).
+  - The kit's build fixes both, and pip's Python bindings load it.
+- An add-on in PEFT's layout (`adapter_model.safetensors`). GenAI reads it directly, with no GGUF step. Use
+  `make_lora.py`'s throwaway, or the Warrener's trained `warrener-r1-qv` (q and v, rank 32, lora_alpha 64).
+
+### Running it
+
+```
+node tools/addon-npu/intel.ts --python <venv>\Scripts\python.exe
+    --model %USERPROFILE%\.manor\accelerators\models\openvino\Castellan-AI\Qwen3-VL-2B-Instruct-int8-sym-ov
+    --lora warrener=<warrener-r1-qv>\adapter_model.safetensors@2 [--lora r32=<work>\r32-peft\adapter_model.safetensors@2]
+    --out <results folder> [--phases answers,odds,speed,switch,swap,bank,cold,memory,ovms] [--devices NPU,CPU,GPU]
+    [--ovms %USERPROFILE%\.manor\accelerators\servers\ovms-2026.4.1\ovms.exe] [--runs 3] [--prop KEY=VALUE]
+```
+
+- The number after `@` is the add-on's alpha, and GenAI's alpha is the whole scale on B·A. GenAI ignores the file's
+  own `lora_alpha`, so PEFT's scale (llama.cpp's scale 1) is **alpha = lora_alpha / r**: 64 / 32 = 2 for the Warrener.
+  At alpha 1 an add-on does half of what it was trained to do.
+- NPUW pads every add-on to `NPUW_LLM_MAX_LORA_RANK` (32 by default), and refuses a larger one when a request applies
+  it. So a rank-64 add-on needs `--prop NPUW_LLM_MAX_LORA_RANK=64`, and the maximum is what changes the cost (the
+  spec has the figures).
+- The processor (`CPU`) is the reference for the answers and the odds, at 8 threads.
+- The kit's server runs on a private port (`--port`, 28611 by default). It runs from a copy of the model's folder made
+  of hard links, without its `graph.pbtxt`, and with a compile cache of its own.
+- Everything goes into `<results folder>/results.json`, with each pipeline's log beside it.
+
+### Reading the results
+
+- **answers**: `againstProcessor` counts each device's names that match the processor's word for word, off and on
+  (`onSameName` and `onSameFolder` count the name and the folder apart). `changedByAddon` counts the names the add-on
+  changed.
+- **odds**: as on the Snapdragon.
+- **speed**: reads, writes and a Warrener name on each device:
+  - with no add-on in the pipeline, with one loaded but off, and on;
+  - `cpuSecondsPerGenToken` is the processor's time for each written token. On the NPU it stays a few milliseconds
+    with the add-on on, so the add-on's work is the NPU's.
+- **switch**: a request's first token when its add-on differs from the request before's, against the same again.
+- **swap**: the base's pipeline alone, and the add-on's in its place only for a batch of the 8 names:
+  - each swap's time, from closing one pipeline to the other's first token, from the cache;
+  - what a chat arriving mid-batch waits (`chatWaitMs`);
+  - `baseSameAfter`, whether the base answers the same after.
+- **bank**: the base's pipeline and the add-on's side by side in one process, each with its own NPUW weights bank,
+  then with one bank named for both (`NPUW_WEIGHTS_BANK`). It records what the second pipeline adds on the NPU and of
+  the PC, and the base's speed beside it.
+- **cold**: the pipeline made with an empty compile cache, then a full one, to its first answer.
+- **memory**: the process's working set and what it holds on the NPU (`npuMb`).
+- **routes**: GenAI directly against the kit's server: speed, the NPU benchmark's 24 quality items and 4 pictures, the
+  first answer, and memory.
