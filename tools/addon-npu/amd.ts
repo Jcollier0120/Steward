@@ -225,8 +225,7 @@ const inNpuTurn = <T>(doing: string, fn: () => Promise<T>) =>
  * Which model a request is for: FastFlowLM's tag, or llama-server's add-on scales (all named, the one on at 1).
  * `kitSampling`: FastFlowLM's own sampling for the model, as the kit's requests get it (they send no penalty), rather
  * than greedy with no penalty, as llama-server's defaults are. FastFlowLM's Qwen3.5 engine sets a presence penalty of
- * 1.5 and a frequency penalty of 1.0 at each load (modeling_qwen3_5vl.cpp), and they reach the prompt's last tokens:
- * a Warrener answer then avoids "NAME:" and "FOLDER:", which the prompt ends with.
+ * 1.5 and a frequency penalty of 1.0 at each load (modeling_qwen3_5vl.cpp: FLM_QWEN35_AT_LOAD).
  */
 interface Variant {
   name: string;
@@ -237,6 +236,13 @@ interface Variant {
 
 /** Greedy with no penalty, as llama-server's defaults are. FastFlowLM keeps a request's settings for the next. */
 const NEUTRAL = { presence_penalty: 0, frequency_penalty: 0, repetition_penalty: 1 };
+
+/**
+ * What a kit request gets from FastFlowLM 1.0.10 for Qwen3.5: the model's settings at its load (modeling_qwen3_5vl.cpp),
+ * as the kit's chatBody sends temperature 0 and none of these. Sent outright, so a request before it (FastFlowLM keeps
+ * them) can't change them.
+ */
+const FLM_QWEN35_AT_LOAD = { top_k: 20, top_p: 0.8, repetition_penalty: 1, frequency_penalty: 1, presence_penalty: 1.5 };
 
 interface Answer {
   text: string;
@@ -255,7 +261,7 @@ async function ask(s: Server, v: Variant, messages: unknown[], maxTokens: number
   const body: Record<string, unknown> =
     s.kind === 'flm'
       ? v.kitSampling
-        ? { model: v.tag, messages, max_tokens: maxTokens, temperature: 0, stream: false, ...extra }
+        ? { model: v.tag, messages, max_tokens: maxTokens, temperature: 0, stream: false, ...FLM_QWEN35_AT_LOAD, ...extra }
         : { model: v.tag, messages, max_tokens: maxTokens, temperature: 0, top_k: 1, stream: false, think: false, ...NEUTRAL, ...extra }
       : { messages, max_tokens: maxTokens, temperature: 0, top_k: 1, seed: 1, stream: false, chat_template_kwargs: { enable_thinking: false }, cache_prompt: false, ...(v.lora ? { lora: v.lora } : {}), ...extra };
   const r = await post(`${s.base}/v1/chat/completions`, body);
@@ -368,7 +374,8 @@ async function speedPhase(o: Options, f: Scratch, results: any): Promise<void> {
       say(`speed ${where} ${v.name}: reads ${row.readTps.toFixed(0)} t/s ${spread(a.reads, 0)}, writes ${row.genTps.toFixed(1)} t/s ${spread(a.gens, 1)}, a name ${row.nameWallMs.toFixed(0)} ms ${spread(a.names, 0)}, ${(row.cpuSecondsPerGenToken * 1000).toFixed(1)} ms processor a token written, ${JSON.stringify(row.memory)}`);
     }
   };
-  await inNpuTurn('add-on test (AMD): speed', () => withFlm(o, f, 'speed-npu', (s) => block(s, 'npu (XDNA 2)', flmVariants(o))));
+  // `kit`: the model as the kit's requests get it (FLM_QWEN35_AT_LOAD), beside the same model greedy with no penalty.
+  await inNpuTurn('add-on test (AMD): speed', () => withFlm(o, f, 'speed-npu', (s) => block(s, 'npu (XDNA 2)', [...flmVariants(o), { name: 'kit', tag: tagOf(null), kitSampling: true }])));
   if (o.llama && o.gguf) await withLlama(o, 'cpu', 'speed-cpu', (s) => block(s, 'processor (Ryzen AI 7 350)', llamaVariants(o)));
   if (o.vulkan && o.gguf) await withLlama(o, 'gpu', 'speed-gpu', (s) => block(s, 'graphics (Radeon 860M)', llamaVariants(o)));
 }
