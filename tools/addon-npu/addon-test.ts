@@ -128,7 +128,7 @@ interface Server {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Waits for `ok()` to say true, looking every `everyMs`, until `deadlineMs` has passed: then throws `why`. */
-async function until(ok: () => Promise<boolean>, deadlineMs: number, why: string, everyMs = 250): Promise<void> {
+export async function until(ok: () => Promise<boolean>, deadlineMs: number, why: string, everyMs = 250): Promise<void> {
   const end = Date.now() + deadlineMs;
   for (;;) {
     if (await ok()) return;
@@ -137,7 +137,7 @@ async function until(ok: () => Promise<boolean>, deadlineMs: number, why: string
   }
 }
 
-async function answers(url: string, ms = 2000): Promise<number | null> {
+export async function answers(url: string, ms = 2000): Promise<number | null> {
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(ms) });
     return r.status;
@@ -215,7 +215,7 @@ const loraArgs = (files: string[]) =>
 
 // ------------------------------------------------------------------------------------------------ memory
 
-interface Memory {
+export interface Memory {
   workingSetMb: number;
   privateMb: number;
   cpuSeconds: number;
@@ -237,7 +237,7 @@ function dxgiAdapters(): Record<string, string> {
   return dxgi;
 }
 
-function memoryOf(pid: number): Memory {
+export function memoryOf(pid: number): Memory {
   const script = `
 $ErrorActionPreference = 'SilentlyContinue'
 $p = Get-Process -Id ${pid}
@@ -279,7 +279,7 @@ interface Timings {
   text: string;
 }
 
-const tps = (n: number, ms: number) => (ms > 0 ? (n * 1000) / ms : 0);
+export const tps = (n: number, ms: number) => (ms > 0 ? (n * 1000) / ms : 0);
 
 /**
  * A turn of the event loop before each request, so a keep-alive socket the server closed meanwhile is seen closed first.
@@ -289,7 +289,7 @@ const tps = (n: number, ms: number) => (ms > 0 ? (n * 1000) / ms : 0);
  */
 const settled = () => new Promise<void>((r) => setTimeout(r, 20));
 
-async function post(url: string, body: unknown, timeoutMs = 300_000): Promise<{ status: number; json: any; text: string; ms: number }> {
+export async function post(url: string, body: unknown, timeoutMs = 300_000): Promise<{ status: number; json: any; text: string; ms: number }> {
   await settled();
   const t0 = performance.now();
   const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
@@ -323,7 +323,7 @@ async function complete(s: Server, prompt: string, n: number, lora: Lora): Promi
 }
 
 /** A streamed OpenAI chat request (any server): the time to its first token and to its last, by the clock here. */
-async function streamed(base: string, body: Record<string, unknown>): Promise<Timings & { usage: any; raw: string[] }> {
+export async function streamed(base: string, body: Record<string, unknown>): Promise<Timings & { usage: any; raw: string[] }> {
   await settled();
   const t0 = performance.now();
   const r = await fetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, stream: true, stream_options: { include_usage: true } }), signal: AbortSignal.timeout(300_000) });
@@ -386,8 +386,8 @@ async function streamed(base: string, body: Record<string, unknown>): Promise<Ti
 // ------------------------------------------------------------------------------------------------ the Warrener's prompt
 
 /** Warrener src/namer.ts (PROMPT_VERSION v3), the English defaults' folders (settings.ts). */
-const NAME_SYSTEM = 'You name files and choose a folder for each. Reply with exactly two lines and nothing else.';
-const FOLDERS: [string, string][] = [
+export const NAME_SYSTEM = 'You name files and choose a folder for each. Reply with exactly two lines and nothing else.';
+export const FOLDERS: [string, string][] = [
   ['Documents\\Receipts', 'proof of something bought or paid for: receipts, paid invoices, order confirmations'],
   ['Documents\\Insurance', 'insurance policies, renewals, ID cards and claims'],
   ['Documents\\Manuals', 'instructions and guides for products, appliances and software'],
@@ -397,7 +397,7 @@ const FOLDERS: [string, string][] = [
   ['Documents\\Other', 'anything that fits none of the folders above'],
 ];
 
-function namePrompt(fileName: string, how: string, text: string): { role: string; content: string }[] {
+export function namePrompt(fileName: string, how: string, text: string): { role: string; content: string }[] {
   const question = [
     'Folders:',
     ...FOLDERS.map(([label, about], i) => `${i + 1}. ${label}: ${about}`),
@@ -415,7 +415,7 @@ function namePrompt(fileName: string, how: string, text: string): { role: string
 }
 
 /** Made-up documents of the kinds the Warrener files: no real company, person or account. */
-const DOCS: { file: string; how: string; text: string }[] = [
+export const DOCS: { file: string; how: string; text: string }[] = [
   { file: 'scan0042.pdf', how: 'first page, OCR', text: `GREENFIELD HARDWARE CO.\n14 Mill Lane, Ashbury\nReceipt #A-778213\nDate: 2026-08-14 10:42\nCordless drill 18V ........ 89.99\nDrill bit set (24) ........ 14.50\nWood screws 4x40 (200) .... 6.25\nSubtotal 110.74\nVAT 20% 22.15\nTOTAL 132.89\nPaid: VISA ****4471\nThank you for shopping with us. Returns within 30 days with receipt.` },
   { file: 'Renewal_Notice.pdf', how: 'first page', text: `Northgate Mutual Insurance\nPolicy number: HM-5520193\nDear policyholder,\nYour home and contents policy renews on 1 October 2026. Your new annual premium is 412.60, payable in 12 monthly instalments of 34.38. Buildings sum insured: 285,000. Contents sum insured: 45,000. Excess: 250.\nPlease review the enclosed schedule and statement of fact. If anything has changed, call us before the renewal date.\nRenewal date: 2026-10-01` },
   { file: 'statement_09.pdf', how: 'first page', text: `Harbour Savings Bank\nCurrent Account Statement\nStatement period: 1 September 2026 to 30 September 2026\nAccount: 40-11-92 61839027\nOpening balance 2,431.18\n02 Sep  Direct debit  Ashbury Water        -38.20\n05 Sep  Card payment  Greenfield Hardware  -132.89\n15 Sep  Salary        Lindqvist Ltd       +2,850.00\n21 Sep  Standing order Rent               -950.00\nClosing balance 4,160.09` },
@@ -568,13 +568,13 @@ async function placement(o: Options, results: any): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ speed and memory
 
-const median = (xs: number[]) => {
+export const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);
   return s.length ? (s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : NaN;
 };
 
 /** A prompt of about `tokens` tokens that no request before it started the same way. */
-function readPromptOf(tokens: number, tag: string): string {
+export function readPromptOf(tokens: number, tag: string): string {
   const lines: string[] = [`[${tag}]`];
   for (let i = 1, chars = 0; chars < tokens * 4; i++) {
     const line = `Line ${i}: the steward counts the barrels in the cellar and writes the number down.`;
@@ -837,7 +837,7 @@ async function oddsPhase(o: Options, results: any): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ GenieX against llama-server
 
-async function qualityAndPictures(base: string, model: string | undefined, pictureAsPath: boolean, nonce: boolean, dir: string): Promise<{ quality: { id: string; pass: boolean; mustPass: boolean; answer: string }[]; pictures: { id: string; pass: boolean; ms: number; answer: string }[] }> {
+export async function qualityAndPictures(base: string, model: string | undefined, pictureAsPath: boolean, nonce: boolean, dir: string): Promise<{ quality: { id: string; pass: boolean; mustPass: boolean; answer: string }[]; pictures: { id: string; pass: boolean; ms: number; answer: string }[] }> {
   const quality: { id: string; pass: boolean; mustPass: boolean; answer: string }[] = [];
   for (const q of SUITE.quality) {
     const sys = nonce ? [{ role: 'system', content: `${Math.random().toString(36).slice(2, 10)}` }] : [];
@@ -859,7 +859,7 @@ async function qualityAndPictures(base: string, model: string | undefined, pictu
   return { quality, pictures };
 }
 
-async function routeSpeed(base: string, model: string | undefined, nonce: boolean, runs: number, extra: Record<string, unknown> = {}): Promise<{ readTps: number; genTps: number; nameWallMs: number; nameFirstTokenMs: number; raw: string[] }> {
+export async function routeSpeed(base: string, model: string | undefined, nonce: boolean, runs: number, extra: Record<string, unknown> = {}): Promise<{ readTps: number; genTps: number; nameWallMs: number; nameFirstTokenMs: number; raw: string[] }> {
   const reads: number[] = [];
   const gens: number[] = [];
   const walls: number[] = [];
@@ -1421,4 +1421,5 @@ async function main(): Promise<void> {
   say(`results: ${file}`);
 }
 
-await main();
+// Its main runs when it's the script run, not when intel.ts takes the Warrener's prompt and the helpers from it.
+if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) await main();
