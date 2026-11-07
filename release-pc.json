@@ -1,0 +1,28 @@
+{
+  "pc": "ca93d894-ce89-4a01-a1cf-2268e60e3d93",
+  "name": "WEASELDEV-01",
+  "until": "2026-11-08T03:39:54.950Z",
+  "since": "2026-10-07T23:03:07.376Z",
+  "pinned": false,
+  "checkout": true,
+  "pipeline": {
+    "times": [
+      "10:00",
+      "13:00",
+      "16:30",
+      "19:00",
+      "21:00"
+    ],
+    "days": [
+      "sun",
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri",
+      "sat"
+    ],
+    "kit": "every",
+    "windowMinutes": 30
+  }
+}
