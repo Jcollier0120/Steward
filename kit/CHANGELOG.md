@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.152.3
+
+**The NPU benchmark and the NPU check look past a block of ports Windows keeps, instead of giving up 100 ports above a route's.**
+
+### What changed
+
+- **node/npu-check.ts**: `freePortsFrom(from, n, free, taken?)` and `PORT_LOOK` (1,000) (new). A server moved off a held port looks for a free one from 100 above it up to 1,099 above, never past 65535, where it looked only to 199 above. Windows keeps blocks of ports that nothing may listen on (Hyper-V's and WinNAT's: `netsh interface ipv4 show excludedportrange protocol=tcp`), chosen again at each boot. On 2026-11-07 one covered 62149–62248, and a benchmark on 62050 stopped with "no 2 free ports from 62150 to 62249". `routeOnFreePorts` uses it.
+- **node/npu-bench.ts**: a run off the NPU (`--device GPU` or `CPU`) takes its two servers' ports the same way.
+- **spec/NPU-BENCHMARK.md**: says so.
+
+### What an agent must do
+
+- Nothing.
+
 ## 2.152.2
 
 **A Snapdragon X2's NPU chats and reads pictures on llama-server on the Hexagon, which carries the model's add-ons, and a request can name its job to have its add-on applied there.**
